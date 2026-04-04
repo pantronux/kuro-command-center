@@ -1,0 +1,14 @@
+# File Sensitif
+.env
+*.log
+*.json
+!requirements.txt
+
+# Virtual Environment
+venv/
+__pycache__/
+*.pyc
+
+# Security Keys
+*.pem
+*.key

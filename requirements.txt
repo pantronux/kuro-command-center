@@ -1,0 +1,7 @@
+fastapi
+python-telegram-bot
+google-genai
+proxmoxer
+moviepy>=2.0.0
+python-dotenv
+uvicorn
