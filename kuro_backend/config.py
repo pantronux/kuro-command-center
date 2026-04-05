@@ -8,7 +8,8 @@ class Settings:
     """
     Loads environment variables from the .env file.
     """
-    PVE_HOST: str = os.getenv("PVE_HOST")
+    PVE_HOST: str = os.getenv("PVE_HOST", "192.168.18.216")
+    PVE_PORT: int = int(os.getenv("PVE_PORT", "8006"))
     PVE_TOKEN_ID: str = os.getenv("PVE_TOKEN_ID")
     PVE_TOKEN_SECRET: str = os.getenv("PVE_TOKEN_SECRET")
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY")

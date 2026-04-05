@@ -1,7 +1,6 @@
-fastapi
 python-telegram-bot
 google-genai
-proxmoxer
+requests
 moviepy>=2.0.0
 python-dotenv
-uvicorn
+psutil
