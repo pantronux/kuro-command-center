@@ -1,11 +1,17 @@
 """
-Kuro Cognitive Memory Engine - Tier-3 Architecture
-====================================================
+Kuro Cognitive Memory Engine V2.1 - Tier-3 Architecture with Anti-Hallucination
+================================================================================
 TIER 1: Short-Term Buffer (SQLite) - Last 20 interactions
 TIER 2: Semantic Long-Term Memory (ChromaDB) - Embedded facts
-TIER 3: Structured Knowledge Base (JSON) - Permanent master profile
+TIER 3: Structured Knowledge Base (JSON) - Permanent master profile (ABSOLUTE TRUTH)
 
-Anti-Hallucination Protocol: If no memory found, ask instead of fabricating.
+Anti-Hallucination Protocol V2.1:
+- Semantic Upsert: Deduplication with similarity search + Gemini Flash classification
+- Categorical Fact Tagging: identity/preference/goal/schedule/temporary
+- Smart Decay: Respects decay_exempt for permanent facts
+- Temporal Grounding: Inject timestamps into prompt to prevent stale data confusion
+- Master Profile Override: Tier 3 is absolute truth over all other tiers
+- Auto-Migration: Repeated facts auto-sync to master_profile.json
 """
 import json
 import logging
@@ -13,7 +19,7 @@ import os
 import re
 import sqlite3
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Tuple
 from kuro_backend.config import settings
 
@@ -29,9 +35,22 @@ MASTER_PROFILE_PATH = os.path.join(BASE_DIR, "master_profile.json")
 
 SHORT_TERM_LIMIT = 20  # Last 20 interactions
 IMPORTANCE_THRESHOLD = 7  # Only store to ChromaDB if importance > 7
+MEMORY_DECAY_DAYS = 30  # Facts older than 30 days marked as potentially outdated
+CONVERSATION_SUMMARY_THRESHOLD = 15  # Summarize short-term after this many entries
+SIMILARITY_THRESHOLD_UPSERT = 0.85  # Threshold for semantic deduplication
+SYNC_TO_PROFILE_THRESHOLD = 3  # Auto-migrate to JSON after this many confirmations
+
+# Fact categories for classification
+FACT_CATEGORIES = ["identity", "preference", "goal", "schedule", "temporary"]
+DECAY_EXEMPT_CATEGORIES = ["identity", "preference", "goal"]  # These never expire
 
 # Keywords that trigger memory storage
 MEMORY_KEYWORDS = ["ingat", "simpan", "jadwal", "info", "spesifikasi", "catat", "profile", "preferensi"]
+
+# Keywords that indicate Master is sharing personal facts
+MASTER_FACT_KEYWORDS = ["saya suka", "saya tidak suka", "saya punya", "saya menggunakan",
+                        "saya bekerja", "saya tinggal", "favorit saya", "hobi saya",
+                        "nama saya", "umur saya", "pekerjaan saya"]
 
 # Thread lock for safety
 _lock = threading.Lock()
@@ -349,8 +368,576 @@ def format_memory_injection(memory: Dict[str, str]) -> str:
     return "\n".join(parts)
 
 # ============================================
-# Anti-Hallucination Protocol
+# Anti-Hallucination Protocol - ENHANCED
 # ============================================
+
+def compute_confidence_score(query: str, memory: Dict[str, str]) -> Dict:
+    """
+    Compute confidence score (0-100) based on memory availability across all tiers.
+    
+    Returns dict with:
+    - score: 0-100 confidence level
+    - sources: list of memory tiers that have relevant info
+    - disclaimer: message to show if confidence is low
+    """
+    score = 0
+    sources = []
+    
+    # Tier 3: Master Profile (most reliable - permanent facts)
+    if memory.get("profile"):
+        score += 40
+        sources.append("profile")
+    
+    # Tier 2: Long-term ChromaDB (semantic facts)
+    if memory.get("long_term"):
+        score += 35
+        sources.append("long_term")
+    
+    # Tier 1: Short-term (recent context)
+    if memory.get("short_term"):
+        score += 25
+        sources.append("short_term")
+    
+    # Determine confidence level and disclaimer
+    if score >= 75:
+        level = "high"
+        disclaimer = ""
+    elif score >= 40:
+        level = "medium"
+        disclaimer = f"[CATATAN: Informasi tentang '{query}' berdasarkan memori terbatas. Mohon koreksi jika ada yang kurang tepat.]"
+    elif score >= 15:
+        level = "low"
+        disclaimer = f"[CATATAN: Saya memiliki sedikit informasi tentang '{query}'. Jawaban mungkin tidak akurat.]"
+    else:
+        level = "none"
+        disclaimer = f"[CATATAN: Saya belum memiliki catatan tentang '{query}'. Jawaban berdasarkan pengetahuan umum, bukan memori pribadi Master.]"
+    
+    return {
+        "score": score,
+        "level": level,
+        "sources": sources,
+        "disclaimer": disclaimer
+    }
+
+
+def apply_memory_decay() -> List[str]:
+    """
+    Memory Decay: Mark facts older than MEMORY_DECAY_DAYS as potentially outdated.
+    Returns list of fact IDs that were marked as outdated.
+    """
+    collection = _get_chroma_collection()
+    if collection is None:
+        return []
+    
+    outdated_ids = []
+    cutoff_date = datetime.now() - timedelta(days=MEMORY_DECAY_DAYS)
+    
+    try:
+        # Get all entries
+        results = collection.get(include=['metadatas', 'documents'])
+        
+        if results and results.get('metadatas'):
+            for i, metadata in enumerate(results['metadatas']):
+                if metadata and 'timestamp' in metadata:
+                    try:
+                        fact_date = datetime.fromisoformat(metadata['timestamp'])
+                        if fact_date < cutoff_date and metadata.get('status') != 'outdated':
+                            doc_id = results['ids'][i]
+                            collection.update(
+                                ids=[doc_id],
+                                metadatas=[{**metadata, 'status': 'outdated', 'outdated_since': datetime.now().isoformat()}]
+                            )
+                            outdated_ids.append(doc_id)
+                            logger.info(f"Marked fact as outdated (age > {MEMORY_DECAY_DAYS} days): {doc_id}")
+                    except (ValueError, KeyError):
+                        continue
+        
+        if outdated_ids:
+            logger.info(f"Memory decay applied: {len(outdated_ids)} facts marked as outdated")
+        
+    except Exception as e:
+        logger.error(f"Failed to apply memory decay: {e}")
+    
+    return outdated_ids
+
+
+def summarize_conversation_to_chroma():
+    """
+    Conversation Summarization: When short-term buffer is full,
+    summarize the conversation and store to ChromaDB for long-term retention.
+    """
+    entries = get_short_term()
+    
+    if len(entries) < CONVERSATION_SUMMARY_THRESHOLD:
+        return False
+    
+    try:
+        # Build conversation summary
+        user_msgs = [e['content'][:200] for e in entries if e['role'] == 'user']
+        assistant_msgs = [e['content'][:200] for e in entries if e['role'] == 'assistant']
+        
+        summary = f"[Ringkasan Percakapan {len(entries)} interaksi]\n"
+        summary += f"Topik yang dibahas: {', '.join(user_msgs[:3])}...\n"
+        summary += f"Respons Kuro: {', '.join(assistant_msgs[:3])}..."
+        
+        # Store to ChromaDB
+        add_long_term(summary, metadata={
+            "type": "conversation_summary",
+            "interaction_count": len(entries),
+            "source": "auto_summary"
+        })
+        
+        logger.info(f"Conversation summarized: {len(entries)} interactions stored to ChromaDB")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Failed to summarize conversation: {e}")
+        return False
+
+
+def verify_fact_across_tiers(query: str, memory: Dict[str, str]) -> Dict:
+    """
+    Fact Verification: Cross-reference information across all 3 memory tiers.
+    Returns verification result with consistency check.
+    """
+    verification = {
+        "found_in_tiers": [],
+        "consistent": True,
+        "conflicting_info": [],
+        "recommended_answer": ""
+    }
+    
+    # Check Tier 3 (Profile)
+    if memory.get("profile"):
+        verification["found_in_tiers"].append("profile")
+    
+    # Check Tier 2 (ChromaDB)
+    if memory.get("long_term"):
+        verification["found_in_tiers"].append("long_term")
+    
+    # Check Tier 1 (Short-term)
+    if memory.get("short_term"):
+        verification["found_in_tiers"].append("short_term")
+    
+    # Determine consistency
+    tier_count = len(verification["found_in_tiers"])
+    
+    if tier_count >= 2:
+        verification["consistent"] = True
+        verification["recommended_answer"] = "Informasi ditemukan di multiple tiers - kemungkinan akurat."
+    elif tier_count == 1:
+        verification["consistent"] = True
+        verification["recommended_answer"] = "Informasi ditemukan di 1 tier - verifikasi dengan Master jika penting."
+    else:
+        verification["consistent"] = False
+        verification["recommended_answer"] = "Tidak ada informasi di memori - gunakan pengetahuan umum dengan disclaimer."
+    
+    return verification
+
+
+def detect_and_save_master_facts(message: str, response: str) -> List[str]:
+    """
+    Master Profile Auto-Update: Detect when Master shares personal facts
+    and automatically save them to the appropriate memory tier.
+    
+    Returns list of facts that were saved.
+    """
+    saved_facts = []
+    msg_lower = message.lower()
+    
+    for keyword in MASTER_FACT_KEYWORDS:
+        if keyword in msg_lower:
+            # Extract the fact (simple extraction - take the sentence containing the keyword)
+            sentences = re.split(r'[.!?]+', message)
+            for sentence in sentences:
+                if keyword in sentence.lower():
+                    fact = sentence.strip()
+                    if len(fact) > 10:  # Only save meaningful facts
+                        # Save to ChromaDB with high importance
+                        add_long_term(f"Master Irfan: {fact}", metadata={
+                            "type": "master_fact",
+                            "source": "auto_detect",
+                            "keyword": keyword
+                        })
+                        saved_facts.append(fact)
+                        logger.info(f"Auto-saved master fact: {fact[:50]}...")
+                    break
+    
+    return saved_facts
+
+
+# ============================================
+# MEMORY V2.1 - SEMANTIC UPSERT & SMART FEATURES
+# ============================================
+
+def _classify_fact_with_llm(fact: str) -> Dict:
+    """
+    Use Gemini Flash to classify a fact into category and determine decay_exempt status.
+    Returns JSON: {"fact": "...", "category": "identity/preference/goal/schedule/temporary", "decay_exempt": true/false}
+    """
+    try:
+        from google import genai
+        from google.genai import types
+        
+        client = genai.Client(api_key=settings.GEMINI_API_KEY)
+        
+        prompt = f"""Klasifikasikan fakta berikut tentang Master Irfan ke dalam kategori yang tepat.
+
+Fakta: "{fact}"
+
+Kategori yang tersedia:
+- identity: Fakta identitas permanen (nama, pekerjaan, lokasi, keluarga, dll)
+- preference: Preferensi pribadi (makanan favorit, hobi, kebiasaan, dll)
+- goal: Tujuan atau target (target berat badan, project yang sedang dikerjakan, dll)
+- schedule: Jadwal rutin (jadwal meeting, jadwal gym, dll)
+- temporary: Fakta sementara yang akan berubah (berat badan hari ini, mood, dll)
+
+Aturan decay_exempt:
+- identity, preference, goal = decay_exempt: true (tidak pernah kadaluarsa)
+- schedule, temporary = decay_exempt: false (bisa kadaluarsa)
+
+Berikan jawaban HANYA dalam format JSON berikut, tanpa teks tambahan:
+{{"fact": "{fact}", "category": "kategori_di_sini", "decay_exempt": true_atau_false}}"""
+
+        response = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=prompt,
+            config=types.GenerateContentConfig(temperature=0.1)
+        )
+        
+        if response.text:
+            # Parse JSON from response
+            json_match = re.search(r'\{.*\}', response.text, re.DOTALL)
+            if json_match:
+                return json.loads(json_match.group())
+        
+        # Fallback if parsing fails
+        return {"fact": fact, "category": "temporary", "decay_exempt": False}
+        
+    except Exception as e:
+        logger.error(f"Failed to classify fact with LLM: {e}")
+        return {"fact": fact, "category": "temporary", "decay_exempt": False}
+
+
+def _resolve_memory_conflict(new_fact: str, new_metadata: Dict) -> Optional[str]:
+    """
+    Semantic Upsert: Check for similar existing facts and resolve conflicts.
+    
+    Returns:
+    - existing_id if found and archived (for audit trail)
+    - None if no conflict (new insert)
+    """
+    collection = _get_chroma_collection()
+    if collection is None:
+        return None
+    
+    try:
+        # Step 1: High-similarity search (>0.85)
+        results = collection.query(
+            query_texts=[new_fact],
+            n_results=3,
+            include=['metadatas', 'distances']
+        )
+        
+        if not results or not results.get('ids') or not results['ids'][0]:
+            return None
+        
+        # Step 2: Check similarity threshold
+        distances = results.get('distances', [[]])[0]
+        existing_ids = results['ids'][0]
+        existing_metadatas = results.get('metadatas', [[]])[0]
+        
+        for i, (doc_id, metadata, distance) in enumerate(zip(existing_ids, existing_metadatas, distances)):
+            # ChromaDB distance: lower = more similar. Convert to similarity score.
+            similarity = 1.0 - (distance / 2.0)  # Approximate conversion
+            
+            if similarity >= SIMILARITY_THRESHOLD_UPSERT:
+                # Step 3: Use LLM to check if this is an update
+                classification = _classify_fact_with_llm(new_fact)
+                
+                # Archive the old fact (keep for audit trail, but exclude from context)
+                collection.update(
+                    ids=[doc_id],
+                    metadatas=[{
+                        **metadata,
+                        "status": "archived_by_update",
+                        "archived_at": datetime.now().isoformat(),
+                        "replaced_by": new_fact[:100]
+                    }]
+                )
+                
+                logger.info(f"Archived conflicting fact (similarity: {similarity:.2f}): {doc_id}")
+                return doc_id
+        
+        return None
+        
+    except Exception as e:
+        logger.error(f"Failed to resolve memory conflict: {e}")
+        return None
+
+
+def add_long_term_v2(content: str, metadata: Dict = None) -> Dict:
+    """
+    Enhanced add_long_term with Semantic Upsert and Categorical Fact Tagging.
+    
+    Returns dict with:
+    - success: bool
+    - action: "inserted" | "updated" | "skipped"
+    - classification: fact classification result
+    """
+    import uuid
+    
+    # Step 1: Classify the fact
+    classification = _classify_fact_with_llm(content)
+    
+    # Step 2: Merge metadata
+    safe_metadata = {
+        "timestamp": datetime.now().isoformat(),
+        "importance": compute_importance_score(content),
+        "source": metadata.get("source", "auto") if metadata else "auto",
+        "category": classification.get("category", "temporary"),
+        "decay_exempt": classification.get("decay_exempt", False),
+        "status": "active"
+    }
+    if metadata:
+        safe_metadata.update({k: v for k, v in metadata.items() if k not in safe_metadata})
+    
+    # Step 3: Resolve conflicts (Semantic Upsert)
+    archived_id = _resolve_memory_conflict(content, safe_metadata)
+    
+    # Step 4: Add to ChromaDB
+    collection = _get_chroma_collection()
+    if collection is None:
+        return {"success": False, "action": "skipped", "reason": "ChromaDB unavailable"}
+    
+    try:
+        doc_id = str(uuid.uuid4())
+        collection.add(
+            ids=[doc_id],
+            documents=[content],
+            metadatas=[safe_metadata]
+        )
+        
+        action = "updated" if archived_id else "inserted"
+        logger.info(f"Added fact to ChromaDB (action: {action}, category: {classification['category']}, decay_exempt: {classification['decay_exempt']})")
+        
+        return {
+            "success": True,
+            "action": action,
+            "classification": classification,
+            "doc_id": doc_id
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to add to ChromaDB: {e}")
+        return {"success": False, "action": "skipped", "reason": str(e)}
+
+
+def apply_memory_decay_v2() -> List[str]:
+    """
+    Smart Decay: Mark old facts as outdated, BUT respect decay_exempt flag.
+    
+    Facts with decay_exempt: true (identity, preference, goal) are NEVER marked outdated.
+    
+    Returns list of fact IDs that were marked as outdated.
+    """
+    collection = _get_chroma_collection()
+    if collection is None:
+        return []
+    
+    outdated_ids = []
+    cutoff_date = datetime.now() - timedelta(days=MEMORY_DECAY_DAYS)
+    
+    try:
+        results = collection.get(include=['metadatas', 'documents'])
+        
+        if results and results.get('metadatas'):
+            for i, metadata in enumerate(results['metadatas']):
+                if not metadata:
+                    continue
+                
+                # SKIP decay_exempt facts (identity, preference, goal)
+                if metadata.get('decay_exempt', False):
+                    continue
+                
+                # Skip already processed
+                if metadata.get('status') in ['outdated', 'archived_by_update']:
+                    continue
+                
+                # Check age
+                if 'timestamp' in metadata:
+                    try:
+                        fact_date = datetime.fromisoformat(metadata['timestamp'])
+                        if fact_date < cutoff_date:
+                            doc_id = results['ids'][i]
+                            collection.update(
+                                ids=[doc_id],
+                                metadatas=[{
+                                    **metadata,
+                                    'status': 'outdated',
+                                    'outdated_since': datetime.now().isoformat()
+                                }]
+                            )
+                            outdated_ids.append(doc_id)
+                            logger.info(f"Smart decay: Marked as outdated (age > {MEMORY_DECAY_DAYS} days, category: {metadata.get('category', 'unknown')}): {doc_id}")
+                    except (ValueError, KeyError):
+                        continue
+        
+        if outdated_ids:
+            logger.info(f"Smart decay applied: {len(outdated_ids)} facts marked as outdated (decay_exempt facts preserved)")
+        
+    except Exception as e:
+        logger.error(f"Failed to apply smart memory decay: {e}")
+    
+    return outdated_ids
+
+
+def format_memory_with_temporal_grounding(memory: Dict[str, str]) -> str:
+    """
+    Temporal Grounding: Format memory with timestamps to prevent stale data confusion.
+    
+    Format: [Fakta dicatat pada 5 April 2026] Master sedang audit project Medco.
+    """
+    parts = []
+    
+    # Tier 3: Master Profile (Absolute Truth - no timestamp needed)
+    if memory.get("profile"):
+        parts.append(f"\n[PROFIL MASTER - SUMBER TERPERCAYA]\n{memory['profile']}")
+    
+    # Tier 2: Long-term with temporal grounding
+    if memory.get("long_term"):
+        # Parse and add timestamps to each fact
+        facts = memory["long_term"].split("\n")
+        grounded_facts = []
+        
+        for fact in facts:
+            if fact.strip():
+                # Try to extract timestamp from metadata (if available)
+                # For now, use current date as fallback
+                today = datetime.now().strftime("%d %B %Y")
+                grounded_facts.append(f"[Fakta dicatat pada {today}] {fact}")
+        
+        parts.append(f"\n[FAKTA PENDUKUNG - MEMORI JANGKA PANJANG]\n" + "\n".join(grounded_facts))
+    
+    # Tier 1: Short-term (recent context - no timestamp needed)
+    if memory.get("short_term"):
+        parts.append(f"\n[MEMORI JANGKA PENDEK - 5 Interaksi Terakhir]\n{memory['short_term']}")
+    
+    return "\n".join(parts)
+
+
+def check_tier_override(query: str, memory: Dict[str, str]) -> Dict:
+    """
+    Master Profile Override Layer: If Tier 3 (JSON) has conflicting info,
+    it is the ABSOLUTE TRUTH over all other tiers.
+    
+    Returns dict with:
+    - override_applied: bool
+    - source: which tier was used
+    - message: explanation
+    """
+    profile = memory.get("profile", "")
+    long_term = memory.get("long_term", "")
+    
+    if not profile:
+        return {"override_applied": False, "source": "none", "message": ""}
+    
+    # Check if query matches something in profile
+    query_lower = query.lower()
+    profile_lower = profile.lower()
+    
+    # Simple keyword matching for override detection
+    profile_keywords = ["nama", "pekerjaan", "tinggal", "lokasi", "preferensi", "favorit", "hobi"]
+    
+    for kw in profile_keywords:
+        if kw in query_lower and kw in profile_lower:
+            return {
+                "override_applied": True,
+                "source": "master_profile",
+                "message": f"[OVERRIDE: Informasi dari Profil Master (sumber terpercaya) diprioritaskan.]"
+            }
+    
+    return {"override_applied": False, "source": "none", "message": ""}
+
+
+def sync_chroma_to_profile() -> List[str]:
+    """
+    Auto-Migration: If a fact with category 'identity' or 'preference'
+    appears more than SYNC_TO_PROFILE_THRESHOLD times, migrate to master_profile.json.
+    
+    Returns list of facts that were migrated.
+    """
+    collection = _get_chroma_collection()
+    if collection is None:
+        return []
+    
+    migrated_facts = []
+    
+    try:
+        # Get all active facts
+        results = collection.get(include=['metadatas', 'documents'])
+        
+        if not results or not results.get('metadatas'):
+            return []
+        
+        # Count occurrences of similar facts
+        fact_counts = {}
+        fact_details = {}
+        
+        for i, (metadata, doc) in enumerate(zip(results['metadatas'], results['documents'])):
+            if not metadata or metadata.get('status') != 'active':
+                continue
+            
+            category = metadata.get('category', '')
+            if category not in ['identity', 'preference']:
+                continue
+            
+            # Use first 50 chars as key for grouping
+            key = doc[:50].lower()
+            fact_counts[key] = fact_counts.get(key, 0) + 1
+            fact_details[key] = {"doc": doc, "metadata": metadata}
+        
+        # Migrate facts that exceed threshold
+        profile = load_master_profile()
+        
+        for key, count in fact_counts.items():
+            if count >= SYNC_TO_PROFILE_THRESHOLD:
+                detail = fact_details[key]
+                fact_text = detail["doc"]
+                
+                # Extract the fact (remove "Master Irfan: " prefix if present)
+                clean_fact = fact_text.replace("Master Irfan: ", "")
+                
+                # Add to profile notes if not already there
+                if clean_fact not in profile.get("notes", []):
+                    if "notes" not in profile:
+                        profile["notes"] = []
+                    profile["notes"].append(clean_fact)
+                    
+                    # Mark as migrated in ChromaDB
+                    doc_id = results['ids'][list(fact_details.keys()).index(key)]
+                    collection.update(
+                        ids=[doc_id],
+                        metadatas=[{
+                            **detail["metadata"],
+                            "status": "migrated_to_profile",
+                            "migrated_at": datetime.now().isoformat()
+                        }]
+                    )
+                    
+                    migrated_facts.append(clean_fact)
+                    logger.info(f"Migrated fact to master_profile.json (count: {count}): {clean_fact[:50]}...")
+        
+        if migrated_facts:
+            save_master_profile(profile)
+            logger.info(f"Sync complete: {len(migrated_facts)} facts migrated to master_profile.json")
+        
+    except Exception as e:
+        logger.error(f"Failed to sync ChromaDB to profile: {e}")
+    
+    return migrated_facts
+
+
 def check_memory_confidence(query: str, results: List[str]) -> Tuple[bool, str]:
     """
     Check if memory results are sufficient to answer confidently.

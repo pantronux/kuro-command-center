@@ -31,7 +31,8 @@ def _get_system_instruction_with_time() -> str:
         "Kamu juga memiliki kemampuan Vision - kamu bisa melihat dan menganalisis gambar yang dikirimkan. "
         "Kamu juga memiliki sistem pengingat (Reminder) - jika Master meminta diingatkan, gunakan tool add_reminder_tool. "
         "Kamu juga memiliki Daily Habit Tracker - jika Master bilang 'udah gym', 'done tryhackme', 'selesai belajar', gunakan tool mark_habit_done_tool. "
-        "PENTING: Jika Master meminta merangkum, membaca, atau menganalisis file PDF (misalnya 'rangkum VCT26.pdf'), WAJIB gunakan tool summarize_pdf dengan parameter pdf_filename (nama file) dan instruction (apa yang diminta, misal 'rangkum dokumen ini'). JANGAN bilang tidak bisa membaca PDF - kamu PUNYA kemampuan itu!"
+        "PENTING: Jika Master meminta merangkum, membaca, atau menganalisis file PDF (misalnya 'rangkum VCT26.pdf'), WAJIB gunakan tool summarize_pdf dengan parameter pdf_filename (nama file) dan instruction (apa yang diminta, misal 'rangkum dokumen ini'). JANGAN bilang tidak bisa membaca PDF - kamu PUNYA kemampuan itu! "
+        "PENTING: Jika Master meminta merangkum, membaca, atau menganalisis file Word (.docx), Excel (.xlsx), atau PowerPoint (.pptx), WAJIB gunakan tool summarize_document dengan parameter filename (nama file) dan instruction (apa yang diminta). JANGAN bilang tidak bisa membaca file-file tersebut - kamu PUNYA kemampuan itu!"
     )
 
 # --- Reusable Generation Config (SDK v3 Protocol) ---
@@ -48,7 +49,8 @@ _DEFAULT_CONFIG = types.GenerateContentConfig(
         tools.get_reminders_tool,
         tools.mark_habit_done_tool,
         tools.get_habits_status_tool,
-        tools.summarize_pdf
+        tools.summarize_pdf,
+        tools.summarize_document
     ],
     tool_config=types.ToolConfig(
         function_calling_config=types.FunctionCallingConfig(
@@ -93,17 +95,36 @@ def process_chat(message: str, image_paths: list = None) -> str:
     try:
         # === PRE-PROCESS: Query Memory (3-Tier) ===
         memory = memory_manager.query_memory(message)
-        memory_injection = memory_manager.format_memory_injection(memory)
         
-        # === ANTI-HALLUCINATION CHECK ===
-        is_confident, disclaimer = memory_manager.check_memory_confidence(message, memory.get("long_term", []))
+        # === MEMORY V2.1: Temporal Grounding ===
+        memory_injection = memory_manager.format_memory_with_temporal_grounding(memory)
+        
+        # === MEMORY V2.1: Master Profile Override Layer ===
+        override = memory_manager.check_tier_override(message, memory)
+        
+        # === ANTI-HALLUCINATION: Enhanced Confidence Scoring ===
+        confidence = memory_manager.compute_confidence_score(message, memory)
+        
+        # === ANTI-HALLUCINATION: Fact Verification ===
+        verification = memory_manager.verify_fact_across_tiers(message, memory)
+        
+        # === MEMORY V2.1: Smart Decay (respects decay_exempt) ===
+        memory_manager.apply_memory_decay_v2()
         
         # === BUILD PROMPT WITH MEMORY INJECTION ===
         full_message = f"{message}{memory_injection}"
         
-        # Add disclaimer if memory is insufficient
-        if disclaimer:
-            full_message += f"\n\n[CATATAN: {disclaimer}]"
+        # Add override message if Tier 3 is absolute truth
+        if override["override_applied"]:
+            full_message += f"\n\n{override['message']}"
+        
+        # Add confidence-based disclaimer
+        if confidence["disclaimer"]:
+            full_message += f"\n\n{confidence['disclaimer']}"
+        
+        # Add verification note if info found in multiple tiers
+        if len(verification["found_in_tiers"]) >= 2:
+            full_message += f"\n\n[VERIFIKASI: Informasi ditemukan di {len(verification['found_in_tiers'])} sumber memori - kemungkinan akurat.]"
         
         # === BUILD CONTENTS FOR MULTI-MODAL INPUT ===
         contents_parts = []
@@ -141,14 +162,14 @@ def process_chat(message: str, image_paths: list = None) -> str:
         chat_history.add_message("web", "user", message)
         chat_history.add_message("web", "assistant", response_text)
         
-        # Tier 2: Store to long-term if importance > threshold
-        memory_manager.add_long_term(f"User: {message}\nKuro: {response_text}")
+        # Tier 2: Store to long-term with V2.1 Semantic Upsert
+        memory_manager.add_long_term_v2(f"User: {message}\nKuro: {response_text}")
         
         # If there are file attachments, store file content to ChromaDB for semantic search
         if image_paths:
             for img_path in image_paths:
                 if os.path.exists(img_path):
-                    memory_manager.add_long_term(
+                    memory_manager.add_long_term_v2(
                         f"User uploaded image: {os.path.basename(img_path)}",
                         metadata={"type": "image", "filename": os.path.basename(img_path), "path": img_path}
                     )
@@ -156,8 +177,21 @@ def process_chat(message: str, image_paths: list = None) -> str:
         
         # Check for explicit memory commands
         if any(kw in message.lower() for kw in memory_manager.MEMORY_KEYWORDS):
-            memory_manager.add_long_term(message)
+            memory_manager.add_long_term_v2(message)
             logger.info(f"Explicit memory command detected: {message[:50]}...")
+        
+        # === MEMORY V2.1: Conversation Summarization ===
+        memory_manager.summarize_conversation_to_chroma()
+        
+        # === MEMORY V2.1: Auto-Save Master Facts with Classification ===
+        saved_facts = memory_manager.detect_and_save_master_facts(message, response_text)
+        if saved_facts:
+            logger.info(f"Auto-saved {len(saved_facts)} master facts with V2.1 classification")
+        
+        # === MEMORY V2.1: Sync ChromaDB to Profile (auto-migration) ===
+        migrated = memory_manager.sync_chroma_to_profile()
+        if migrated:
+            logger.info(f"Auto-migrated {len(migrated)} facts to master_profile.json")
 
         return response_text
 

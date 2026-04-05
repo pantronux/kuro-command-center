@@ -12,3 +12,6 @@ chromadb
 pdfplumber
 apscheduler
 pytz
+python-docx
+openpyxl
+python-pptx

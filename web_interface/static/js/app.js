@@ -423,17 +423,23 @@ async function loadChatHistory() {
         const response = await fetch(`${CONFIG.API_BASE}/history?limit=50`);
         const data = await response.json();
         
+        // CRITICAL FIX: Always clear container first to prevent duplicate messages on refresh
+        elements.chatContainer.innerHTML = '';
+        
         if (data.status === 'success' && data.history.length > 0) {
-            // Clear welcome message
-            elements.chatContainer.innerHTML = '';
-            
             data.history.forEach(msg => {
                 const role = msg.role === 'user' ? 'user' : 'ai';
                 addMessageToChat(role, msg.content);
             });
+        } else {
+            // Show welcome message if no history
+            addMessageToChat('ai', 'Halo Master Irfan! Saya Kuro, AI Butler setia Anda. Ada yang bisa saya bantu hari ini?');
         }
     } catch (error) {
         console.error('Failed to load chat history:', error);
+        // Show welcome message on error
+        elements.chatContainer.innerHTML = '';
+        addMessageToChat('ai', 'Halo Master Irfan! Saya Kuro, AI Butler setia Anda. Ada yang bisa saya bantu hari ini?');
     }
 }
 
