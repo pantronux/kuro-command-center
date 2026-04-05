@@ -1,6 +1,6 @@
 /**
- * Kuro AI Web Dashboard - Main Application V2
- * Full functionality with chat history, vision, system status, and settings
+ * Kuro AI Web Dashboard - Main Application V2.1
+ * Full functionality with chat history, vision, system status, settings, and JWT authentication
  */
 
 // ============================================
@@ -20,6 +20,47 @@ const CONFIG = {
     },
     ALLOWED_EXTENSIONS: ['.txt', '.md', '.py', '.csv'],
 };
+
+// ============================================
+// Authentication Helper Functions (Cookie-Based)
+// ============================================
+// Cookies are HttpOnly, so browser automatically sends them with requests.
+// No need to manually handle tokens in JavaScript.
+
+/**
+ * Get the current username from storage (for display purposes only)
+ */
+function getUsername() {
+    return localStorage.getItem('kuro_username') || sessionStorage.getItem('kuro_username') || 'Master';
+}
+
+/**
+ * Logout the current user and redirect to login
+ */
+function logout() {
+    console.log('Logging out...');
+    // Call logout endpoint to clear cookie
+    fetch('/api/auth/logout', { method: 'POST' })
+        .then(() => { window.location.href = '/login'; })
+        .catch(() => { window.location.href = '/login'; });
+}
+
+/**
+ * Simple fetch wrapper - cookies are sent automatically by browser
+ */
+async function authFetch(url, options = {}) {
+    // credentials: 'include' ensures cookies are sent with requests
+    options.credentials = options.credentials || 'include';
+    const response = await fetch(url, options);
+    
+    if (response.status === 401) {
+        // Server will handle redirect via middleware
+        window.location.href = '/login';
+        throw new Error('Authentication required');
+    }
+    
+    return response;
+}
 
 // ============================================
 // State
@@ -70,12 +111,16 @@ const elements = {
     // Files Modal
     filesModal: null,
     filesContent: null,
+    // User Info & Logout
+    userInfo: document.getElementById('userInfo'),
+    logoutBtn: document.getElementById('logoutBtn'),
 };
 
 // ============================================
 // Initialize
 // ============================================
 document.addEventListener('DOMContentLoaded', () => {
+    // Backend handles auth redirect via cookie, no client-side check needed
     lucide.createIcons();
     
     marked.setOptions({
@@ -93,6 +138,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setupEventListeners();
     setupAutoResize();
     loadChatHistory();
+    updateUserInfo();
 });
 
 // ============================================
@@ -357,7 +403,7 @@ async function sendMessage() {
         formData.append('message', message);
         filesToSend.forEach(file => formData.append('files', file));
         
-        const response = await fetch(`${CONFIG.API_BASE}/chat`, {
+        const response = await authFetch(`${CONFIG.API_BASE}/chat`, {
             method: 'POST',
             body: formData,
         });
@@ -460,7 +506,7 @@ function removeTypingIndicator() {
 // ============================================
 async function loadChatHistory() {
     try {
-        const response = await fetch(`${CONFIG.API_BASE}/history?limit=50`);
+        const response = await authFetch(`${CONFIG.API_BASE}/history?limit=50`);
         const data = await response.json();
         
         // CRITICAL FIX: Always clear container first to prevent duplicate messages on refresh
@@ -486,7 +532,7 @@ async function loadChatHistory() {
 async function clearChatHistory() {
     if (confirm('Are you sure you want to clear all chat history?')) {
         try {
-            await fetch(`${CONFIG.API_BASE}/history`, { method: 'DELETE' });
+            await authFetch(`${CONFIG.API_BASE}/history`, { method: 'DELETE' });
             elements.chatContainer.innerHTML = '';
             showNotification('Chat history cleared', 'success');
             closeSettings();
@@ -506,8 +552,8 @@ async function openSystemStatus() {
     try {
         // Fetch both system status and log storage
         const [sysResponse, logResponse] = await Promise.all([
-            fetch(`${CONFIG.API_BASE}/system-status`),
-            fetch(`${CONFIG.API_BASE}/log-storage`)
+            authFetch(`${CONFIG.API_BASE}/system-status`),
+            authFetch(`${CONFIG.API_BASE}/log-storage`)
         ]);
         
         const sysData = await sysResponse.json();
@@ -611,7 +657,7 @@ async function openFilesModal() {
     elements.filesContent.innerHTML = '<div class="flex items-center justify-center py-8"><div class="spinner"></div></div>';
     
     try {
-        const response = await fetch(`${CONFIG.API_BASE}/list-files`);
+        const response = await authFetch(`${CONFIG.API_BASE}/list-files`);
         const data = await response.json();
         
         if (data.status === 'success' && data.data) {
@@ -721,7 +767,7 @@ function updatePersonaLabel() {
 
 async function applyPersona() {
     try {
-        const response = await fetch(`${CONFIG.API_BASE}/persona`, {
+        const response = await authFetch(`${CONFIG.API_BASE}/persona`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ persona: selectedPersona })
@@ -760,4 +806,23 @@ async function loadPersona() {
             option.classList.add('bg-emerald-50', 'dark:bg-emerald-900/30');
         }
     });
+}
+
+// ============================================
+// User Info & Logout
+// ============================================
+
+/**
+ * Update the user info display in the header
+ */
+function updateUserInfo() {
+    const username = getUsername();
+    if (elements.userInfo && username) {
+        elements.userInfo.textContent = username;
+    }
+    
+    // Setup logout button
+    if (elements.logoutBtn) {
+        elements.logoutBtn.addEventListener('click', logout);
+    }
 }

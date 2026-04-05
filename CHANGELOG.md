@@ -1,3 +1,126 @@
+# Kuro AI V2.1.1 Official - Changelog
+
+**Release Date:** 2026-04-05
+**Version:** 2.1.1
+**Codename:** "Cookie-Based Auth & Telegram Bot Rescue"
+
+---
+
+## V2.1.1 - Critical Refactor: Cookie-Based JWT & Telegram Bot Fix (2026-04-05)
+
+### Critical Fixes
+
+#### Cookie-Based JWT Authentication (Replaced localStorage)
+- **PROBLEM**: localStorage-based auth caused redirect loops because browser navigation doesn't send Authorization headers
+- **SOLUTION**: Switched to HttpOnly cookies for JWT token storage
+- **Implementation**:
+  - `response.set_cookie(key="kuro_access_token", value=f"Bearer {token}", httponly=True, secure=True, samesite="lax")`
+  - Browser automatically sends cookies with every request
+  - No JavaScript token handling needed
+  - More secure: JavaScript cannot access HttpOnly cookies (XSS protection)
+
+#### Middleware Refactor (No More Redirect Loops)
+- **PROBLEM**: Middleware was checking Authorization header on HTML page requests, causing infinite redirect loops
+- **SOLUTION**: Simplified middleware to only protect `/api/*` endpoints
+- **New Architecture**:
+  - HTML pages (`/`, `/login`, `/compliance`, etc.) are served directly
+  - Backend middleware checks cookie for auth status
+  - If no valid cookie → redirect to `/login`
+  - If valid cookie → serve dashboard
+  - API endpoints require valid cookie token
+
+#### Telegram Bot Rescue (Main Thread Requirement)
+- **PROBLEM**: `set_wakeup_fd only works in main thread of the main interpreter`
+- **ROOT CAUSE**: `python-telegram-bot` v20+ requires main thread for asyncio event loop
+- **SOLUTION**: Swapped thread assignment:
+  - **Before**: Bot in daemon thread, FastAPI in main thread → bot crashed
+  - **After**: FastAPI in daemon thread, Bot in main thread → both work
+- **Verification**: Bot polling returns HTTP 200 OK consistently
+
+#### Frontend Cleanup
+- Removed all localStorage token handling from `app.js`
+- Removed client-side auth check script from `index.html`
+- Removed `checkExistingSession()` from `login.html`
+- Simplified `authFetch()` to use `credentials: 'include'` for automatic cookie sending
+- Backend now handles all redirect logic
+
+#### SSL/mkcert Setup
+- Installed `libnss3-tools` and `mkcert v1.4.4`
+- Generated trusted certificate for `192.168.18.84`, `localhost`, `127.0.0.1`
+- Certificates stored in `/home/kuro/projects/kuro/certs/`
+- FastAPI configured for HTTPS on port 8443
+
+#### Dependency Fixes
+- Downgraded `bcrypt` from 5.0.0 to 4.0.1 (passlib compatibility)
+- Installed `python-jose[cryptography]` and `passlib[bcrypt]` in venv
+
+### Files Changed
+- **MODIFIED**: `main.py` - Cookie-based JWT, simplified middleware, thread swap for bot
+- **MODIFIED**: `web_interface/templates/login.html` - Removed localStorage, cookie auto-handled
+- **MODIFIED**: `web_interface/templates/index.html` - Removed client-side auth check
+- **MODIFIED**: `web_interface/static/js/app.js` - Simplified auth helpers, no token handling
+- **NEW**: `certs/cert.pem` - SSL certificate
+- **NEW**: `certs/key.pem` - SSL private key
+- **MODIFIED**: `requirements.txt` - Added `python-jose[cryptography]`, `passlib[bcrypt]`
+
+### Security Improvements
+- **HttpOnly Cookies**: JavaScript cannot access tokens (XSS protection)
+- **Secure Flag**: Cookies only sent over HTTPS
+- **SameSite=Lax**: CSRF protection
+- **No Client-Side Token Storage**: Eliminates localStorage XSS attack vector
+
+---
+
+## V2.1.0 - Secure Authentication & Brute Force Protection (2026-04-05)
+
+### New Features
+
+#### Secure Authentication System
+- **JWT Token Authentication**: Implemented OAuth2PasswordBearer with JWT tokens
+- **Token Duration**: 12-hour session validity (configurable via `JWT_EXPIRATION_HOURS`)
+- **Password Hashing**: Using `passlib[bcrypt]` for secure password storage
+- **No Plain-Text Passwords**: Password stored as bcrypt hash in `.env`
+
+#### Brute Force Protection (The Gatekeeper)
+- **Failed Attempt Tracking**: SQLite-based login attempt tracker
+- **Lockout Rule**: 3 failed attempts → 15-minute account lockout
+- **Clear Error Messages**: "Terlalu banyak percobaan login. Akun dikunci selama 15 menit untuk keamanan."
+- **Countdown Timer**: Real-time lockout countdown on login page
+
+#### Login Page (Glassmorphism Design)
+- **New Route**: `/login` - Beautiful glassmorphic login form
+- **Show/Hide Password**: Toggle password visibility
+- **Remember Me**: Persistent session via HttpOnly cookie
+- **Animated Background**: Gradient animation with floating particles
+- **Security Badge**: ISO 27001 compliant authentication indicator
+
+#### Protected Routes
+- **Middleware**: HTTP middleware checks JWT cookie for all routes
+- **Auto-Redirect**: Unauthenticated users redirected to `/login`
+- **Cookie-Based Auth**: Browser automatically sends cookies with requests
+- **Logout Button**: Added to header with user info display
+
+### Files Changed
+- **NEW**: `kuro_backend/auth_db.py` - Authentication database for failed attempts tracking
+- **NEW**: `web_interface/templates/login.html` - Login page with glassmorphism design
+- **MODIFIED**: `main.py` - Added JWT auth, login endpoint, middleware, logout
+- **MODIFIED**: `web_interface/static/js/app.js` - Simplified auth helpers for cookie-based auth
+- **MODIFIED**: `web_interface/templates/index.html` - Added user info & logout button
+- **MODIFIED**: `.env` - Added `ADMIN_USERNAME`, `ADMIN_PASSWORD_HASH`, `JWT_SECRET_KEY`
+- **MODIFIED**: `requirements.txt` - Added `python-jose[cryptography]`, `passlib[bcrypt]`
+
+### Security Compliance (ISO 27001)
+- **A.9.4.2**: Secure log-on procedures implemented
+- **A.9.5.1**: Information access restriction via JWT
+- **A.10.1.1**: Cryptographic controls (bcrypt + JWT)
+- **A.12.4.1**: Event logging (login attempts recorded)
+
+### Default Credentials
+- **Username**: `Pantronux`
+- **Password**: `Noobcry17!` (stored as bcrypt hash)
+
+---
+
 # Kuro AI V2.0.1 Official - Changelog
 
 **Release Date:** 2026-04-05

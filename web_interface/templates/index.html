@@ -223,6 +223,16 @@
                         <i data-lucide="sun" class="w-5 h-5 text-gray-600 dark:hidden"></i>
                         <i data-lucide="moon" class="w-5 h-5 text-gray-300 hidden dark:block"></i>
                     </button>
+                    <!-- User Info & Logout -->
+                    <div class="flex items-center gap-2 ml-2 pl-2 border-l border-gray-300 dark:border-gray-600">
+                        <div class="flex items-center gap-2 px-2 py-1 rounded-lg bg-emerald-100 dark:bg-emerald-900/30">
+                            <i data-lucide="user-check" class="w-4 h-4 text-emerald-600 dark:text-emerald-400"></i>
+                            <span id="userInfo" class="text-sm font-medium text-emerald-700 dark:text-emerald-300 max-w-[100px] truncate"></span>
+                        </div>
+                        <button id="logoutBtn" class="p-2 rounded-xl bg-red-100 dark:bg-red-900/30 hover:bg-red-200 dark:hover:bg-red-900/50 transition-all duration-300" title="Logout">
+                            <i data-lucide="log-out" class="w-4 h-4 text-red-600 dark:text-red-400"></i>
+                        </button>
+                    </div>
                 </div>
             </header>
             

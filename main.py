@@ -7,12 +7,15 @@ import threading
 import time
 import psutil
 import uvicorn
-from typing import Dict
+from typing import Dict, Optional
 from datetime import datetime, timedelta
-from fastapi import FastAPI, UploadFile, File, Form, Request
+from fastapi import FastAPI, UploadFile, File, Form, Request, Depends, HTTPException, status
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, RedirectResponse
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from jose import JWTError, jwt
+from passlib.context import CryptContext
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 from telegram.error import NetworkError, TimedOut
@@ -25,6 +28,7 @@ from kuro_backend import tools
 from kuro_backend import compliance_db
 from kuro_backend import reminder_db
 from kuro_backend import daily_habits_db
+from kuro_backend import auth_db
 
 # --- Logging Setup with TimedRotatingFileHandler ---
 LOG_FILE = "kuro_butler.log"
@@ -54,8 +58,187 @@ root_logger.addHandler(console_handler)
 logger = logging.getLogger(__name__)
 logger.info(f"Log rotation configured: {LOG_BACKUP_COUNT} days retention, rotating at midnight")
 
+# --- JWT Authentication Configuration (Cookie-Based) ---
+# Password hashing context (bcrypt)
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+# JWT Configuration
+SECRET_KEY = os.getenv("JWT_SECRET_KEY", "kuro-ai-secret-key-2026-irfan-proxmox-secure-auth")
+ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
+ACCESS_TOKEN_EXPIRE_HOURS = int(os.getenv("JWT_EXPIRATION_HOURS", "12"))
+
+# Admin credentials from .env
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "Pantronux")
+ADMIN_PASSWORD_HASH = os.getenv("ADMIN_PASSWORD_HASH", "")
+
+# Cookie name for JWT token
+COOKIE_NAME = "kuro_access_token"
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """Verify a plain password against a bcrypt hash."""
+    try:
+        from passlib.hash import bcrypt
+        return bcrypt.verify(plain_password, hashed_password)
+    except Exception as e:
+        logger.error(f"Password verification error: {e}")
+        return False
+
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
+    """Create a JWT access token."""
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(hours=ACCESS_TOKEN_EXPIRE_HOURS)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
+
+def get_token_from_cookie(request: Request) -> Optional[str]:
+    """Extract JWT token from HttpOnly cookie."""
+    cookie_value = request.cookies.get(COOKIE_NAME)
+    if cookie_value and cookie_value.startswith("Bearer "):
+        return cookie_value[7:]
+    return None
+
+def validate_token(token: str) -> Optional[Dict]:
+    """Validate JWT token and return user info."""
+    if not token:
+        return None
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username = payload.get("sub")
+        if username:
+            return {"username": username}
+    except JWTError:
+        pass
+    return None
+
 # --- FastAPI App ---
 app = FastAPI(title="Kuro AI Web Dashboard")
+
+# --- Auth Routes ---
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    """Serve the login page. Redirect to / if already authenticated."""
+    token = get_token_from_cookie(request)
+    if validate_token(token):
+        return RedirectResponse(url="/", status_code=302)
+    return FileResponse(os.path.join(WEB_DIR, "templates", "login.html"))
+
+@app.post("/api/login")
+async def login_endpoint(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    remember_me: str = Form("false")
+):
+    """Authenticate user and set JWT token in HttpOnly cookie with brute force protection."""
+    client_ip = request.client.host
+    user_agent = request.headers.get("user-agent", "")
+    
+    # Check if account is locked
+    lockout_status = auth_db.is_account_locked(username)
+    if lockout_status.get("locked"):
+        return JSONResponse(
+            status_code=429,
+            content={
+                "success": False,
+                "error": f"Terlalu banyak percobaan login. Akun dikunci selama {lockout_status['remaining_minutes']} menit {lockout_status['remaining_seconds']} detik untuk keamanan.",
+                "locked": True,
+                "remaining_seconds": lockout_status['remaining_minutes'] * 60 + lockout_status['remaining_seconds']
+            }
+        )
+    
+    # Validate username
+    if username != ADMIN_USERNAME:
+        failed_count = auth_db.record_failed_attempt(username, client_ip, user_agent)
+        if failed_count >= auth_db.MAX_FAILED_ATTEMPTS:
+            auth_db.lock_account(username)
+        return JSONResponse(
+            status_code=401,
+            content={"success": False, "error": "Username atau password salah."}
+        )
+    
+    # Verify password
+    if not verify_password(password, ADMIN_PASSWORD_HASH):
+        failed_count = auth_db.record_failed_attempt(username, client_ip, user_agent)
+        logger.warning(f"Failed login attempt {failed_count} for user: {username} from {client_ip}")
+        
+        if failed_count >= auth_db.MAX_FAILED_ATTEMPTS:
+            auth_db.lock_account(username)
+            logger.warning(f"ACCOUNT LOCKED: {username} - Too many failed attempts ({failed_count})")
+            return JSONResponse(
+                status_code=429,
+                content={
+                    "success": False,
+                    "error": "Terlalu banyak percobaan login. Akun dikunci selama 15 menit untuk keamanan.",
+                    "locked": True,
+                    "remaining_seconds": auth_db.LOCKOUT_DURATION_MINUTES * 60
+                }
+            )
+        
+        return JSONResponse(
+            status_code=401,
+            content={
+                "success": False,
+                "error": f"Username atau password salah. ({auth_db.MAX_FAILED_ATTEMPTS - failed_count} percobaan tersisa)",
+                "attempts_remaining": auth_db.MAX_FAILED_ATTEMPTS - failed_count
+            }
+        )
+    
+    # Successful login
+    auth_db.clear_failed_attempts(username)
+    auth_db.record_successful_login(username, client_ip, user_agent)
+    
+    # Create access token
+    access_token_expires = timedelta(hours=ACCESS_TOKEN_EXPIRE_HOURS)
+    access_token = create_access_token(
+        data={"sub": username},
+        expires_delta=access_token_expires
+    )
+    
+    logger.info(f"Successful login: {username} from {client_ip}")
+    
+    # Set token in HttpOnly cookie
+    response = JSONResponse(content={
+        "success": True,
+        "username": username
+    })
+    response.set_cookie(
+        key=COOKIE_NAME,
+        value=f"Bearer {access_token}",
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        max_age=ACCESS_TOKEN_EXPIRE_HOURS * 3600,
+        path="/"
+    )
+    return response
+
+@app.get("/api/auth/verify")
+async def verify_token_endpoint(request: Request):
+    """Verify if the current cookie token is valid."""
+    token = get_token_from_cookie(request)
+    user = validate_token(token)
+    if user:
+        return {"success": True, "username": user.get("username")}
+    return JSONResponse(
+        status_code=401,
+        content={"success": False, "error": "Invalid or expired token"}
+    )
+
+@app.get("/api/auth/stats")
+async def auth_stats():
+    """Get authentication statistics for dashboard."""
+    return {"status": "success", "data": auth_db.get_login_stats()}
+
+@app.post("/api/auth/logout")
+async def logout_endpoint():
+    """Logout endpoint - clear the cookie."""
+    response = JSONResponse(content={"success": True, "message": "Logged out successfully"})
+    response.delete_cookie(key=COOKIE_NAME, path="/")
+    return response
 
 # CORS Middleware
 app.add_middleware(
@@ -76,9 +259,59 @@ UPLOAD_DIR = tools.UPLOAD_DIR
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 # --- Routes ---
+# Public API routes (no auth required)
+PUBLIC_API_ROUTES = ["/api/login", "/api/auth/verify", "/api/auth/stats", "/api/auth/logout"]
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    """
+    Cookie-based authentication middleware.
+    
+    ARCHITECTURE:
+    - HTML pages: Backend handles redirect based on cookie
+    - API routes: Require valid JWT in cookie
+    """
+    path = request.url.path
+    
+    # Allow static files without auth check
+    if path.startswith("/static"):
+        return await call_next(request)
+    
+    # Get token from cookie
+    token = get_token_from_cookie(request)
+    is_authenticated = validate_token(token) is not None
+    
+    # For HTML pages, handle redirect based on auth status
+    if path == "/login":
+        # Already handled in login_page endpoint, just pass through
+        return await call_next(request)
+    
+    if path == "/" or path in ["/compliance", "/reminders", "/habits"]:
+        if not is_authenticated:
+            logger.info(f"Unauthenticated access to {path} from {request.client.host}, redirecting to /login")
+            return RedirectResponse(url="/login", status_code=302)
+        return await call_next(request)
+    
+    # For API routes
+    if path.startswith("/api/"):
+        if path in PUBLIC_API_ROUTES:
+            return await call_next(request)
+        
+        if not is_authenticated:
+            logger.info(f"API auth failed for {request.client.host} on {path}")
+            return JSONResponse(
+                status_code=401,
+                content={"success": False, "error": "Authentication required. Please log in."}
+            )
+    
+    return await call_next(request)
+
 @app.get("/", response_class=HTMLResponse)
-async def index():
-    """Serve the main web dashboard."""
+async def index(request: Request):
+    """Serve the main web dashboard. Redirect to /login if not authenticated."""
+    token = get_token_from_cookie(request)
+    if not validate_token(token):
+        return RedirectResponse(url="/login", status_code=302)
     return FileResponse(os.path.join(WEB_DIR, "templates", "index.html"))
 
 @app.get("/api/history")
@@ -798,8 +1031,36 @@ def run_bot_with_recovery():
 
 
 def run_uvicorn():
-    """Runs FastAPI server."""
-    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
+    """Runs FastAPI server with HTTPS support via mkcert."""
+    import ssl
+    
+    # SSL Certificate paths
+    CERT_FILE = os.path.join(BASE_DIR, "certs", "cert.pem")
+    KEY_FILE = os.path.join(BASE_DIR, "certs", "key.pem")
+    
+    # Check if SSL certificates exist
+    if os.path.exists(CERT_FILE) and os.path.exists(KEY_FILE):
+        # Create SSL context
+        ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ssl_context.load_cert_chain(CERT_FILE, KEY_FILE)
+        
+        logger.info("HTTPS enabled with mkcert certificates")
+        logger.info(f"Secure Web Dashboard: https://0.0.0.0:8443")
+        logger.info(f"Secure Login Page: https://0.0.0.0:8443/login")
+        
+        uvicorn.run(
+            app,
+            host="0.0.0.0",
+            port=8443,
+            log_level="info",
+            ssl_keyfile=KEY_FILE,
+            ssl_certfile=CERT_FILE
+        )
+    else:
+        logger.warning("SSL certificates not found. Running on HTTP only.")
+        logger.info(f"Web Dashboard: http://0.0.0.0:8000 (Authentication Required)")
+        logger.info(f"Login Page: http://0.0.0.0:8000/login")
+        uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
 
 
 if __name__ == "__main__":
@@ -812,9 +1073,14 @@ if __name__ == "__main__":
 
     logger.info("Kuro AI Reborn is starting...")
     logger.info(f"Memory stats: {memory_manager.get_memory_stats()}")
-    logger.info(f"Web Dashboard: http://0.0.0.0:8000")
+    logger.info(f"Web Dashboard: http://0.0.0.0:8000 (Authentication Required)")
+    logger.info(f"Login Page: http://0.0.0.0:8000/login")
     logger.info(f"Reminder Dashboard: http://0.0.0.0:8000/reminders")
     logger.info(f"Habits Dashboard: http://0.0.0.0:8000/habits")
+    
+    # Initialize auth database
+    auth_db.init_auth_db()
+    logger.info("Auth database initialized for brute force protection")
 
     def signal_handler(sig, frame):
         logger.info("Received interrupt signal. Shutting down gracefully...")
@@ -833,12 +1099,20 @@ if __name__ == "__main__":
     # Start hardware sentinel scheduler
     start_hardware_sentinel()
 
-    # Start FastAPI in a daemon thread
+    # CRITICAL: python-telegram-bot v20+ requires main thread for asyncio event loop.
+    # Error: "set_wakeup_fd only works in main thread of the main interpreter"
+    # Solution: Run Telegram bot in main thread, FastAPI in daemon thread.
+    
+    # Start FastAPI in daemon thread (non-blocking)
     uvicorn_thread = threading.Thread(target=run_uvicorn, daemon=True)
     uvicorn_thread.start()
-    logger.info("FastAPI server started on port 8000")
+    logger.info("FastAPI server started in background thread on port 8443")
+    
+    # Give FastAPI a moment to start
+    time.sleep(2)
 
-    # Run the bot with recovery (blocking)
+    # Run Telegram bot in main thread (blocking)
+    logger.info("Starting Telegram bot in main thread...")
     run_bot_with_recovery()
 
     logger.info("Kuro AI Reborn has shut down.")

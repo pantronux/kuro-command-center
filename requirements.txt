@@ -15,3 +15,5 @@ pytz
 python-docx
 openpyxl
 python-pptx
+python-jose[cryptography]
+passlib[bcrypt]
