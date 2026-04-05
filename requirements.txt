@@ -4,3 +4,7 @@ requests
 moviepy>=2.0.0
 python-dotenv
 psutil
+fastapi
+uvicorn
+jinja2
+python-multipart
