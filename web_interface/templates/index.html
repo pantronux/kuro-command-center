@@ -103,19 +103,50 @@
                 </div>
                 
                 <!-- Navigation -->
-                <nav class="flex-1 p-4 space-y-2 overflow-y-auto">
+                <nav class="flex-1 p-4 space-y-1 overflow-y-auto">
+                    <!-- Main Chat -->
                     <a href="#" id="navChat" class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-medium transition-all hover:bg-emerald-500/20">
                         <i data-lucide="message-square" class="w-5 h-5"></i>
                         <span>Chat</span>
                     </a>
-                    <a href="#" id="navUpload" class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-all">
-                        <i data-lucide="upload" class="w-5 h-5"></i>
-                        <span>Upload Files</span>
+                    
+                    <!-- Tools Section -->
+                    <div class="pt-4 pb-2">
+                        <p class="px-4 text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Tools</p>
+                    </div>
+                    
+                    <a href="/habits" class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-all">
+                        <i data-lucide="target" class="w-5 h-5"></i>
+                        <span>Daily Habits</span>
                     </a>
+                    <a href="/reminders" class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-all">
+                        <i data-lucide="clock" class="w-5 h-5"></i>
+                        <span>Reminders</span>
+                    </a>
+                    <a href="/compliance" class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-all">
+                        <i data-lucide="shield-check" class="w-5 h-5"></i>
+                        <span>Compliance</span>
+                    </a>
+                    
+                    <!-- System Section -->
+                    <div class="pt-4 pb-2">
+                        <p class="px-4 text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">System</p>
+                    </div>
+                    
                     <a href="#" id="navSystemStatus" class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-all">
                         <i data-lucide="server" class="w-5 h-5"></i>
                         <span>System Status</span>
                     </a>
+                    <a href="#" id="navFiles" class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-all">
+                        <i data-lucide="folder-open" class="w-5 h-5"></i>
+                        <span>Uploaded Files</span>
+                    </a>
+                    
+                    <!-- Settings -->
+                    <div class="pt-4 pb-2">
+                        <p class="px-4 text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Preferences</p>
+                    </div>
+                    
                     <a href="#" id="navSettings" class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-all">
                         <i data-lucide="settings" class="w-5 h-5"></i>
                         <span>Settings</span>

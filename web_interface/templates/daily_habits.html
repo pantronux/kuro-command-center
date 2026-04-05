@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kuro AI - Daily Habit Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%);
+            min-height: 100vh;
+        }
+        
+        .glass {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+        }
+        
+        .glass-card {
+            background: rgba(255, 255, 255, 0.08);
+            backdrop-filter: blur(15px);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 12px;
+            transition: all 0.3s ease;
+        }
+        
+        .glass-card:hover {
+            background: rgba(255, 255, 255, 0.12);
+            transform: translateY(-2px);
+        }
+        
+        .habit-done {
+            animation: celebratePulse 0.6s ease-out;
+            border-left: 4px solid #10b981;
+        }
+        
+        @keyframes celebratePulse {
+            0% { transform: scale(0.95); opacity: 0.5; }
+            50% { transform: scale(1.02); }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        
+        .habit-pending {
+            border-left: 4px solid #6366f1;
+        }
+        
+        .check-animation {
+            display: inline-block;
+            animation: checkBounce 0.5s ease-out;
+        }
+        
+        @keyframes checkBounce {
+            0% { transform: scale(0); }
+            50% { transform: scale(1.3); }
+            100% { transform: scale(1); }
+        }
+        
+        .progress-ring {
+            transition: stroke-dashoffset 0.5s ease;
+        }
+        
+        .category-badge {
+            font-size: 0.7rem;
+            padding: 2px 8px;
+            border-radius: 9999px;
+        }
+        
+        .cat-gym { background: linear-gradient(135deg, #ef4444, #dc2626); }
+        .cat-study { background: linear-gradient(135deg, #3b82f6, #2563eb); }
+        .cat-game { background: linear-gradient(135deg, #8b5cf6, #7c3aed); }
+        .cat-work { background: linear-gradient(135deg, #f59e0b, #d97706); }
+        .cat-general { background: linear-gradient(135deg, #6366f1, #4f46e5); }
+    </style>
+</head>
+<body class="text-white">
+    <div class="min-h-screen p-6">
+        <!-- Header -->
+        <div class="max-w-5xl mx-auto mb-8">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h1 class="text-4xl font-bold bg-gradient-to-r from-green-400 to-emerald-400 bg-clip-text text-transparent">
+                        🎯 Daily Habit Dashboard
+                    </h1>
+                    <p class="text-gray-400 mt-1">Track your daily routines, Master Irfan</p>
+                </div>
+                <a href="/" class="glass px-4 py-2 rounded-lg hover:bg-white/10 transition">
+                    ← Back to Chat
+                </a>
+            </div>
+        </div>
+
+        <!-- Progress Overview -->
+        <div class="max-w-5xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-4 mb-8" id="stats-container">
+            <div class="glass-card p-4 text-center">
+                <div class="text-3xl font-bold text-green-400" id="stat-percentage">0%</div>
+                <div class="text-sm text-gray-400">Today's Progress</div>
+            </div>
+            <div class="glass-card p-4 text-center">
+                <div class="text-3xl font-bold text-indigo-400" id="stat-total">0</div>
+                <div class="text-sm text-gray-400">Total Habits</div>
+            </div>
+            <div class="glass-card p-4 text-center">
+                <div class="text-3xl font-bold text-emerald-400" id="stat-done">0</div>
+                <div class="text-sm text-gray-400">Completed</div>
+            </div>
+            <div class="glass-card p-4 text-center">
+                <div class="text-3xl font-bold text-yellow-400" id="stat-pending">0</div>
+                <div class="text-sm text-gray-400">Remaining</div>
+            </div>
+        </div>
+
+        <div class="max-w-5xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- Add Habit Form -->
+            <div class="glass p-6">
+                <h2 class="text-xl font-semibold mb-4 flex items-center">
+                    <span class="mr-2">➕</span> Add New Habit
+                </h2>
+                <form id="add-habit-form" class="space-y-4">
+                    <div>
+                        <label class="block text-sm text-gray-400 mb-1">Habit Title</label>
+                        <input type="text" id="habit-title" placeholder="e.g., Gym, TryHackMe, HSR Login" 
+                               class="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-green-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm text-gray-400 mb-1">Scheduled Time</label>
+                        <input type="time" id="habit-time" value="08:00"
+                               class="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-green-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm text-gray-400 mb-1">Category</label>
+                        <select id="habit-category" class="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-green-500">
+                            <option value="General" class="bg-gray-800">🎯 General</option>
+                            <option value="Gym" class="bg-gray-800">💪 Gym</option>
+                            <option value="Study" class="bg-gray-800">📚 Study</option>
+                            <option value="Game" class="bg-gray-800">🎮 Game</option>
+                            <option value="Work" class="bg-gray-800">💼 Work</option>
+                        </select>
+                    </div>
+                    <button type="submit" 
+                            class="w-full bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 px-4 py-2 rounded-lg font-medium transition">
+                        Add Habit
+                    </button>
+                </form>
+                <div id="form-response" class="mt-4 hidden"></div>
+            </div>
+
+            <!-- Habits List -->
+            <div class="lg:col-span-2 glass p-6">
+                <h2 class="text-xl font-semibold mb-4 flex items-center">
+                    <span class="mr-2">📋</span> Today's Habits
+                </h2>
+                <div id="habits-list" class="space-y-3 max-h-[500px] overflow-y-auto pr-2">
+                    <div class="text-center text-gray-500 py-8">Loading habits...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div id="toast-container" class="fixed top-4 right-4 z-50 space-y-2"></div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            loadHabits();
+            setInterval(loadHabits, 30000);
+        });
+
+        document.getElementById('add-habit-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const title = document.getElementById('habit-title').value.trim();
+            const time = document.getElementById('habit-time').value;
+            const category = document.getElementById('habit-category').value;
+            
+            if (!title) {
+                showFormResponse('Please enter a habit title.', 'error');
+                return;
+            }
+            
+            try {
+                const formData = new FormData();
+                formData.append('title', title);
+                formData.append('scheduled_time', time);
+                formData.append('category', category);
+                
+                const response = await fetch('/api/habits/add', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    showFormResponse('Habit added successfully!', 'success');
+                    document.getElementById('add-habit-form').reset();
+                    loadHabits();
+                } else {
+                    showFormResponse(data.error || 'Failed to add habit.', 'error');
+                }
+            } catch (err) {
+                showFormResponse('Error: ' + err.message, 'error');
+            }
+        });
+
+        function showFormResponse(message, type) {
+            const el = document.getElementById('form-response');
+            el.classList.remove('hidden');
+            el.className = `mt-4 p-3 rounded-lg ${type === 'success' ? 'bg-green-500/20 text-green-300' : 'bg-red-500/20 text-red-300'}`;
+            el.textContent = message;
+            setTimeout(() => el.classList.add('hidden'), 5000);
+        }
+
+        async function loadHabits() {
+            try {
+                const response = await fetch('/api/habits');
+                const data = await response.json();
+                
+                const statsResponse = await fetch('/api/habits/stats');
+                const statsData = await statsResponse.json();
+                
+                // Update stats
+                if (statsData.stats) {
+                    document.getElementById('stat-percentage').textContent = statsData.stats.percentage + '%';
+                    document.getElementById('stat-total').textContent = statsData.stats.total;
+                    document.getElementById('stat-done').textContent = statsData.stats.done;
+                    document.getElementById('stat-pending').textContent = statsData.stats.pending;
+                }
+                
+                const container = document.getElementById('habits-list');
+                
+                if (!data.habits || data.habits.length === 0) {
+                    container.innerHTML = '<div class="text-center text-gray-500 py-8">No habits yet, Master Irfan. Add your first daily routine!</div>';
+                    return;
+                }
+                
+                container.innerHTML = data.habits.map(h => {
+                    const isDone = h.is_done === 1;
+                    const statusClass = isDone ? 'habit-done' : 'habit-pending';
+                    const catClass = `cat-${h.category.toLowerCase()}`;
+                    
+                    return `
+                        <div class="glass-card p-4 ${statusClass}">
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-3 flex-1">
+                                    ${isDone 
+                                        ? '<span class="check-animation text-2xl">✅</span>' 
+                                        : '<span class="text-2xl">⏳</span>'
+                                    }
+                                    <div>
+                                        <h3 class="font-semibold ${isDone ? 'line-through text-gray-400' : 'text-white'}">${escapeHtml(h.title)}</h3>
+                                        <div class="flex items-center gap-2 mt-1">
+                                            <span class="category-badge ${catClass}">${h.category}</span>
+                                            <span class="text-xs text-gray-500">🕐 ${h.scheduled_time}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    ${isDone 
+                                        ? `<button onclick="undoHabit(${h.id})" class="text-xs bg-yellow-500/20 text-yellow-300 px-3 py-1 rounded hover:bg-yellow-500/30 transition">Undo</button>`
+                                        : `<button onclick="markDone(${h.id})" class="text-xs bg-green-500/20 text-green-300 px-3 py-1 rounded hover:bg-green-500/30 transition">Mark Done</button>`
+                                    }
+                                    <button onclick="deleteHabit(${h.id})" class="text-xs bg-red-500/20 text-red-300 px-3 py-1 rounded hover:bg-red-500/30 transition">✕</button>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            } catch (err) {
+                console.error('Failed to load habits:', err);
+            }
+        }
+
+        async function markDone(habitId) {
+            try {
+                const response = await fetch(`/api/habits/${habitId}/done`, { method: 'POST' });
+                const data = await response.json();
+                if (data.success) {
+                    showToast('Habit marked as done! 🎉', 'success');
+                    loadHabits();
+                }
+            } catch (err) {
+                showToast('Error: ' + err.message, 'error');
+            }
+        }
+
+        async function undoHabit(habitId) {
+            try {
+                const response = await fetch(`/api/habits/${habitId}/undo`, { method: 'POST' });
+                const data = await response.json();
+                if (data.success) {
+                    loadHabits();
+                }
+            } catch (err) {
+                showToast('Error: ' + err.message, 'error');
+            }
+        }
+
+        async function deleteHabit(habitId) {
+            if (!confirm('Delete this habit?')) return;
+            try {
+                const response = await fetch(`/api/habits/${habitId}`, { method: 'DELETE' });
+                const data = await response.json();
+                if (data.success) {
+                    showToast('Habit deleted.', 'info');
+                    loadHabits();
+                }
+            } catch (err) {
+                showToast('Error: ' + err.message, 'error');
+            }
+        }
+
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            
+            const colors = {
+                success: 'from-green-600 to-emerald-600',
+                error: 'from-red-600 to-pink-600',
+                info: 'from-indigo-600 to-purple-600'
+            };
+            
+            toast.className = `glass p-4 rounded-lg bg-gradient-to-r ${colors[type] || colors.info} max-w-sm`;
+            toast.innerHTML = `
+                <div class="flex items-center gap-3">
+                    <span class="text-xl">${type === 'success' ? '🎉' : type === 'error' ? '❌' : 'ℹ️'}</span>
+                    <p class="text-sm font-medium">${escapeHtml(message)}</p>
+                </div>
+            `;
+            
+            container.appendChild(toast);
+            setTimeout(() => toast.remove(), 5000);
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    </script>
+</body>
+</html>

@@ -8,3 +8,7 @@ fastapi
 uvicorn
 jinja2
 python-multipart
+chromadb
+pdfplumber
+apscheduler
+pytz

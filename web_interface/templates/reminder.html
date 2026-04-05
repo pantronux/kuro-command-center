@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kuro AI - Cognitive Calendar</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%);
+            min-height: 100vh;
+        }
+        
+        .glass {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+        }
+        
+        .glass-card {
+            background: rgba(255, 255, 255, 0.08);
+            backdrop-filter: blur(15px);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 12px;
+            transition: all 0.3s ease;
+        }
+        
+        .glass-card:hover {
+            background: rgba(255, 255, 255, 0.12);
+            transform: translateY(-2px);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }
+        
+        .notification-toast {
+            animation: slideIn 0.5s ease-out, pulse 2s infinite;
+        }
+        
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        
+        @keyframes pulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.4); }
+            50% { box-shadow: 0 0 0 10px rgba(99, 102, 241, 0); }
+        }
+        
+        .countdown {
+            font-variant-numeric: tabular-nums;
+        }
+        
+        .status-pending { background: linear-gradient(135deg, #6366f1, #8b5cf6); }
+        .status-notified_10m { background: linear-gradient(135deg, #f59e0b, #f97316); }
+        .status-notified_event { background: linear-gradient(135deg, #ef4444, #dc2626); }
+        .status-completed { background: linear-gradient(135deg, #10b981, #059669); }
+        
+        .mesh-gradient {
+            background: 
+                radial-gradient(at 40% 20%, rgba(99, 102, 241, 0.3) 0px, transparent 50%),
+                radial-gradient(at 80% 0%, rgba(139, 92, 246, 0.2) 0px, transparent 50%),
+                radial-gradient(at 0% 50%, rgba(59, 130, 246, 0.2) 0px, transparent 50%);
+        }
+    </style>
+</head>
+<body class="text-white">
+    <div class="min-h-screen mesh-gradient p-6">
+        <!-- Header -->
+        <div class="max-w-7xl mx-auto mb-8">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h1 class="text-4xl font-bold bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">
+                        🕐 Cognitive Calendar
+                    </h1>
+                    <p class="text-gray-400 mt-1">Kuro Time-Sentinel - Never miss an event, Master Irfan</p>
+                </div>
+                <a href="/" class="glass px-4 py-2 rounded-lg hover:bg-white/10 transition">
+                    ← Back to Chat
+                </a>
+            </div>
+        </div>
+
+        <!-- Stats Cards -->
+        <div class="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-4 mb-8" id="stats-container">
+            <div class="glass-card p-4">
+                <div class="text-2xl font-bold text-indigo-400" id="stat-total">0</div>
+                <div class="text-sm text-gray-400">Total Reminders</div>
+            </div>
+            <div class="glass-card p-4">
+                <div class="text-2xl font-bold text-yellow-400" id="stat-pending">0</div>
+                <div class="text-sm text-gray-400">Pending</div>
+            </div>
+            <div class="glass-card p-4">
+                <div class="text-2xl font-bold text-orange-400" id="stat-notified">0</div>
+                <div class="text-sm text-gray-400">Notified</div>
+            </div>
+            <div class="glass-card p-4">
+                <div class="text-2xl font-bold text-green-400" id="stat-completed">0</div>
+                <div class="text-sm text-gray-400">Completed</div>
+            </div>
+        </div>
+
+        <div class="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- Add Reminder Form -->
+            <div class="glass p-6">
+                <h2 class="text-xl font-semibold mb-4 flex items-center">
+                    <span class="mr-2">➕</span> Add New Reminder
+                </h2>
+                <form id="add-reminder-form" class="space-y-4">
+                    <div>
+                        <label class="block text-sm text-gray-400 mb-1">Event Name</label>
+                        <input type="text" id="event-name" placeholder="e.g., Audit Medco" 
+                               class="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm text-gray-400 mb-1">Date & Time</label>
+                        <input type="datetime-local" id="event-time" 
+                               class="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-indigo-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm text-gray-400 mb-1">Description (Optional)</label>
+                        <textarea id="event-desc" rows="3" placeholder="Additional details..."
+                                  class="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500 resize-none"></textarea>
+                    </div>
+                    <button type="submit" 
+                            class="w-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 px-4 py-2 rounded-lg font-medium transition">
+                        Set Reminder
+                    </button>
+                </form>
+                <div id="form-response" class="mt-4 hidden"></div>
+            </div>
+
+            <!-- Upcoming Reminders -->
+            <div class="lg:col-span-2 glass p-6">
+                <h2 class="text-xl font-semibold mb-4 flex items-center">
+                    <span class="mr-2">📅</span> Upcoming Reminders
+                </h2>
+                <div id="upcoming-list" class="space-y-3 max-h-[500px] overflow-y-auto pr-2">
+                    <div class="text-center text-gray-500 py-8">Loading reminders...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- History Section -->
+        <div class="max-w-7xl mx-auto glass p-6 mt-6">
+            <h2 class="text-xl font-semibold mb-4 flex items-center">
+                <span class="mr-2">📜</span> Reminder History
+            </h2>
+            <div id="history-list" class="space-y-2 max-h-[300px] overflow-y-auto pr-2">
+                <div class="text-center text-gray-500 py-8">Loading history...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notification Toast Container -->
+    <div id="toast-container" class="fixed top-4 right-4 z-50 space-y-2"></div>
+
+    <script>
+        // Load reminders on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            loadStats();
+            loadUpcoming();
+            loadHistory();
+            
+            // Refresh every 30 seconds
+            setInterval(() => {
+                loadStats();
+                loadUpcoming();
+            }, 30000);
+        });
+
+        // Add reminder form
+        document.getElementById('add-reminder-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const eventName = document.getElementById('event-name').value.trim();
+            const eventTime = document.getElementById('event-time').value;
+            const eventDesc = document.getElementById('event-desc').value.trim();
+            
+            if (!eventName || !eventTime) {
+                showFormResponse('Please fill in event name and time.', 'error');
+                return;
+            }
+            
+            try {
+                const formData = new FormData();
+                formData.append('event_name', eventName);
+                formData.append('event_time', eventTime);
+                formData.append('description', eventDesc);
+                formData.append('source', 'web');
+                
+                const response = await fetch('/api/reminders/add', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    showFormResponse(data.confirmation || 'Reminder added successfully!', 'success');
+                    document.getElementById('add-reminder-form').reset();
+                    loadStats();
+                    loadUpcoming();
+                } else {
+                    showFormResponse(data.error || 'Failed to add reminder.', 'error');
+                }
+            } catch (err) {
+                showFormResponse('Error: ' + err.message, 'error');
+            }
+        });
+
+        function showFormResponse(message, type) {
+            const el = document.getElementById('form-response');
+            el.classList.remove('hidden');
+            el.className = `mt-4 p-3 rounded-lg ${type === 'success' ? 'bg-green-500/20 text-green-300' : 'bg-red-500/20 text-red-300'}`;
+            el.textContent = message;
+            setTimeout(() => el.classList.add('hidden'), 5000);
+        }
+
+        async function loadStats() {
+            try {
+                const response = await fetch('/api/reminders/stats');
+                const data = await response.json();
+                
+                if (data.stats) {
+                    document.getElementById('stat-total').textContent = data.stats.total || 0;
+                    document.getElementById('stat-pending').textContent = data.stats.pending || 0;
+                    document.getElementById('stat-notified').textContent = (data.stats.notified_10m || 0) + (data.stats.notified_event || 0);
+                    document.getElementById('stat-completed').textContent = data.stats.completed || 0;
+                }
+            } catch (err) {
+                console.error('Failed to load stats:', err);
+            }
+        }
+
+        async function loadUpcoming() {
+            try {
+                const response = await fetch('/api/reminders/upcoming');
+                const data = await response.json();
+                
+                const container = document.getElementById('upcoming-list');
+                
+                if (!data.reminders || data.reminders.length === 0) {
+                    container.innerHTML = '<div class="text-center text-gray-500 py-8">No upcoming reminders, Master Irfan.</div>';
+                    return;
+                }
+                
+                container.innerHTML = data.reminders.map(r => {
+                    const eventTime = new Date(r.event_time);
+                    const now = new Date();
+                    const diff = eventTime - now;
+                    const countdown = formatCountdown(diff);
+                    const statusClass = getStatusClass(r.status);
+                    const hasContext = r.context && r.context.length > 0;
+                    
+                    return `
+                        <div class="glass-card p-4 ${statusClass}">
+                            <div class="flex items-start justify-between">
+                                <div class="flex-1">
+                                    <div class="flex items-center gap-2">
+                                        <h3 class="font-semibold text-white">${escapeHtml(r.event_name)}</h3>
+                                        ${hasContext ? '<span class="text-xs bg-indigo-500/30 px-2 py-0.5 rounded">📎 Context</span>' : ''}
+                                    </div>
+                                    <p class="text-sm text-gray-400 mt-1">${eventTime.toLocaleString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
+                                    ${r.description ? `<p class="text-sm text-gray-500 mt-1 line-clamp-2">${escapeHtml(r.description.substring(0, 150))}</p>` : ''}
+                                </div>
+                                <div class="text-right ml-4">
+                                    <div class="countdown text-lg font-mono text-indigo-400">${countdown}</div>
+                                    <span class="text-xs text-gray-500">${r.status.replace('_', ' ')}</span>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            } catch (err) {
+                console.error('Failed to load upcoming:', err);
+            }
+        }
+
+        async function loadHistory() {
+            try {
+                const response = await fetch('/api/reminders/history');
+                const data = await response.json();
+                
+                const container = document.getElementById('history-list');
+                
+                if (!data.reminders || data.reminders.length === 0) {
+                    container.innerHTML = '<div class="text-center text-gray-500 py-8">No history yet.</div>';
+                    return;
+                }
+                
+                container.innerHTML = data.reminders.map(r => {
+                    const eventTime = new Date(r.event_time);
+                    return `
+                        <div class="flex items-center justify-between py-2 border-b border-white/10">
+                            <div>
+                                <span class="text-white">${escapeHtml(r.event_name)}</span>
+                                <span class="text-xs text-gray-500 ml-2">${eventTime.toLocaleDateString()}</span>
+                            </div>
+                            <span class="text-xs px-2 py-1 rounded ${r.status === 'completed' ? 'bg-green-500/20 text-green-400' : 'bg-gray-500/20 text-gray-400'}">${r.status}</span>
+                        </div>
+                    `;
+                }).join('');
+            } catch (err) {
+                console.error('Failed to load history:', err);
+            }
+        }
+
+        function formatCountdown(diffMs) {
+            if (diffMs <= 0) return 'NOW';
+            
+            const days = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+            const hours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+            const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+            const seconds = Math.floor((diffMs % (1000 * 60)) / 1000);
+            
+            if (days > 0) return `${days}d ${hours}h`;
+            if (hours > 0) return `${hours}h ${minutes}m`;
+            if (minutes > 0) return `${minutes}m ${seconds}s`;
+            return `${seconds}s`;
+        }
+
+        function getStatusClass(status) {
+            switch (status) {
+                case 'pending': return 'border-l-4 border-indigo-500';
+                case 'notified_10m': return 'border-l-4 border-yellow-500';
+                case 'notified_event': return 'border-l-4 border-red-500';
+                case 'completed': return 'border-l-4 border-green-500 opacity-60';
+                default: return '';
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Check for notifications every 10 seconds
+        async function checkNotifications() {
+            try {
+                const response = await fetch('/api/reminders/notifications');
+                const data = await response.json();
+                
+                if (data.notifications && data.notifications.length > 0) {
+                    data.notifications.forEach(n => {
+                        showToast(n.message, n.type);
+                    });
+                }
+            } catch (err) {
+                console.error('Failed to check notifications:', err);
+            }
+        }
+
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            
+            const colors = {
+                info: 'from-indigo-600 to-purple-600',
+                warning: 'from-yellow-600 to-orange-600',
+                urgent: 'from-red-600 to-pink-600'
+            };
+            
+            toast.className = `notification-toast glass p-4 rounded-lg bg-gradient-to-r ${colors[type] || colors.info} max-w-sm`;
+            toast.innerHTML = `
+                <div class="flex items-start gap-3">
+                    <span class="text-xl">${type === 'urgent' ? '🔔' : type === 'warning' ? '⏰' : '📅'}</span>
+                    <div class="flex-1">
+                        <p class="text-sm font-medium">${escapeHtml(message)}</p>
+                    </div>
+                    <button onclick="this.parentElement.parentElement.remove()" class="text-white/60 hover:text-white">×</button>
+                </div>
+            `;
+            
+            container.appendChild(toast);
+            
+            // Auto-remove after 10 seconds
+            setTimeout(() => {
+                if (toast.parentElement) {
+                    toast.style.animation = 'slideIn 0.3s ease-in reverse';
+                    setTimeout(() => toast.remove(), 300);
+                }
+            }, 10000);
+        }
+
+        // Start notification polling
+        setInterval(checkNotifications, 10000);
+    </script>
+</body>
+</html>

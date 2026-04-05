@@ -1,4 +1,5 @@
 import os
+import pytz
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -17,6 +18,22 @@ class Settings:
     TELEGRAM_TOKEN: str = os.getenv("TELEGRAM_TOKEN")
     TELEGRAM_CHAT_ID: str = os.getenv("TELEGRAM_CHAT_ID")
     WORKING_DIR: str = os.getenv("WORKING_DIR")
+    TIMEZONE: str = os.getenv("TIMEZONE", "Asia/Jakarta")
+    
+    @property
+    def tz(self):
+        """Get pytz timezone object for the configured timezone."""
+        return pytz.timezone(self.TIMEZONE)
+    
+    def get_current_time(self):
+        """Get current time in the configured timezone."""
+        from datetime import datetime
+        return datetime.now(self.tz)
+    
+    def get_current_time_formatted(self):
+        """Get current time formatted for display."""
+        ct = self.get_current_time()
+        return ct.strftime("%A, %Y-%m-%d %H:%M") + " WIB"
 
 # Initialize settings object
 settings = Settings()

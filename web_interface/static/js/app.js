@@ -58,9 +58,12 @@ const elements = {
     clearHistoryBtn: document.getElementById('clearHistoryBtn'),
     // Navigation
     navChat: document.getElementById('navChat'),
-    navUpload: document.getElementById('navUpload'),
     navSystemStatus: document.getElementById('navSystemStatus'),
     navSettings: document.getElementById('navSettings'),
+    navFiles: document.getElementById('navFiles'),
+    // Files Modal
+    filesModal: null,
+    filesContent: null,
 };
 
 // ============================================
@@ -125,6 +128,14 @@ function setupEventListeners() {
     });
     elements.closeSystemStatus.addEventListener('click', closeSystemStatus);
     elements.systemStatusBackdrop.addEventListener('click', closeSystemStatus);
+    
+    // Files Modal
+    if (elements.navFiles) {
+        elements.navFiles.addEventListener('click', (e) => {
+            e.preventDefault();
+            openFilesModal();
+        });
+    }
     
     // Settings Modal
     elements.navSettings.addEventListener('click', (e) => {
@@ -479,6 +490,120 @@ function openSettings() {
 
 function closeSettings() {
     elements.settingsModal.classList.add('hidden');
+}
+
+// ============================================
+// Uploaded Files Modal
+// ============================================
+async function openFilesModal() {
+    // Create modal if it doesn't exist
+    if (!elements.filesModal) {
+        const modalHtml = `
+            <div id="filesModal" class="fixed inset-0 z-[60] hidden">
+                <div class="absolute inset-0 bg-black/50 backdrop-blur-sm" id="filesBackdrop"></div>
+                <div class="absolute right-0 top-0 h-full w-full max-w-md bg-white dark:bg-gray-800 shadow-2xl animate-slide-right overflow-y-auto">
+                    <div class="p-6">
+                        <div class="flex items-center justify-between mb-6">
+                            <h3 class="text-xl font-bold text-gray-800 dark:text-white">Uploaded Files</h3>
+                            <button id="closeFiles" class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                                <i data-lucide="x" class="w-5 h-5 text-gray-600 dark:text-gray-300"></i>
+                            </button>
+                        </div>
+                        <div id="filesContent" class="space-y-3">
+                            <div class="flex items-center justify-center py-8">
+                                <div class="spinner"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+        elements.filesModal = document.getElementById('filesModal');
+        elements.filesContent = document.getElementById('filesContent');
+        
+        document.getElementById('closeFiles').addEventListener('click', closeFilesModal);
+        document.getElementById('filesBackdrop').addEventListener('click', closeFilesModal);
+    }
+    
+    elements.filesModal.classList.remove('hidden');
+    elements.filesContent.innerHTML = '<div class="flex items-center justify-center py-8"><div class="spinner"></div></div>';
+    
+    try {
+        const response = await fetch(`${CONFIG.API_BASE}/list-files`);
+        const data = await response.json();
+        
+        if (data.status === 'success' && data.data) {
+            // Parse the text response
+            const lines = data.data.split('\n').filter(l => l.trim());
+            
+            if (lines.length === 0 || data.data.includes('empty') || data.data.includes('does not exist')) {
+                elements.filesContent.innerHTML = `
+                    <div class="text-center py-8 text-gray-500">
+                        <i data-lucide="folder-open" class="w-12 h-12 mx-auto mb-3 opacity-50"></i>
+                        <p>No files uploaded yet</p>
+                    </div>
+                `;
+            } else {
+                let html = '';
+                let currentFile = null;
+                
+                for (const line of lines) {
+                    if (line.startsWith('📁')) {
+                        continue; // Skip header
+                    } else if (line.startsWith('📕') || line.startsWith('📄') || line.startsWith('🖼️') || line.startsWith('💻')) {
+                        if (currentFile) {
+                            html += renderFileCard(currentFile);
+                        }
+                        currentFile = { icon: line.substring(0, 2), name: line.substring(2).trim(), path: '', size: '', modified: '' };
+                    } else if (line.startsWith('Path:') && currentFile) {
+                        currentFile.path = line.replace('Path:', '').trim();
+                    } else if (line.startsWith('Size:') && currentFile) {
+                        const parts = line.replace('Size:', '').trim().split('|');
+                        currentFile.size = parts[0]?.trim() || '';
+                        currentFile.modified = parts[1]?.replace('Modified:', '').trim() || '';
+                    }
+                }
+                if (currentFile) {
+                    html += renderFileCard(currentFile);
+                }
+                
+                elements.filesContent.innerHTML = html || '<p class="text-center text-gray-500 py-8">No files found</p>';
+            }
+        } else {
+            elements.filesContent.innerHTML = '<p class="text-red-500 text-center py-8">Failed to load files</p>';
+        }
+    } catch (error) {
+        elements.filesContent.innerHTML = `<p class="text-red-500 text-center py-8">Error: ${error.message}</p>`;
+    }
+    
+    lucide.createIcons();
+}
+
+function renderFileCard(file) {
+    const ext = file.name.split('.').pop().toLowerCase();
+    let colorClass = 'text-gray-400';
+    if (['pdf'].includes(ext)) colorClass = 'text-red-400';
+    else if (['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext)) colorClass = 'text-blue-400';
+    else if (['py', 'js', 'json'].includes(ext)) colorClass = 'text-yellow-400';
+    
+    return `
+        <div class="bg-gray-50 dark:bg-gray-700 rounded-xl p-4 hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors">
+            <div class="flex items-center gap-3">
+                <i data-lucide="file" class="w-5 h-5 ${colorClass}"></i>
+                <div class="flex-1 min-w-0">
+                    <p class="text-sm font-medium text-gray-800 dark:text-white truncate">${escapeHtml(file.name)}</p>
+                    <p class="text-xs text-gray-500">${file.size} • ${file.modified}</p>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function closeFilesModal() {
+    if (elements.filesModal) {
+        elements.filesModal.classList.add('hidden');
+    }
 }
 
 // ============================================
