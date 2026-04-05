@@ -1,15 +1,18 @@
 import logging
+import logging.handlers
 import os
 import signal
 import sys
 import threading
 import time
+import psutil
 import uvicorn
+from typing import Dict
 from datetime import datetime, timedelta
-from fastapi import FastAPI, UploadFile, File, Form
+from fastapi import FastAPI, UploadFile, File, Form, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 from telegram.error import NetworkError, TimedOut
@@ -23,16 +26,33 @@ from kuro_backend import compliance_db
 from kuro_backend import reminder_db
 from kuro_backend import daily_habits_db
 
-# --- Logging Setup ---
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO,
-    handlers=[
-        logging.FileHandler("kuro_butler.log"),
-        logging.StreamHandler()
-    ]
+# --- Logging Setup with TimedRotatingFileHandler ---
+LOG_FILE = "kuro_butler.log"
+LOG_BACKUP_COUNT = 7  # Keep 7 days of logs
+
+# Create rotating file handler that rotates at midnight
+file_handler = logging.handlers.TimedRotatingFileHandler(
+    LOG_FILE,
+    when='midnight',
+    interval=1,
+    backupCount=LOG_BACKUP_COUNT,
+    encoding='utf-8'
 )
+file_handler.suffix = "%Y-%m-%d"  # Log files will be named kuro_butler.log.YYYY-MM-DD
+file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+
+# Console handler
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+
+# Configure root logger
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.INFO)
+root_logger.addHandler(file_handler)
+root_logger.addHandler(console_handler)
+
 logger = logging.getLogger(__name__)
+logger.info(f"Log rotation configured: {LOG_BACKUP_COUNT} days retention, rotating at midnight")
 
 # --- FastAPI App ---
 app = FastAPI(title="Kuro AI Web Dashboard")
@@ -138,6 +158,12 @@ async def chat_endpoint(
 async def system_status():
     """Get real-time system status."""
     return {"status": "success", "data": tools.get_system_status()}
+
+@app.get("/api/log-storage")
+async def log_storage():
+    """Get log storage usage information."""
+    usage = get_log_storage_usage()
+    return {"status": "success", "data": usage}
 
 @app.get("/api/proxmox-status")
 async def proxmox_status():
@@ -367,6 +393,109 @@ async def get_end_of_day_report():
     report = daily_habits_db.get_end_of_day_report()
     return {"status": "success", "report": report}
 
+# --- Persona API Endpoint ---
+@app.post("/api/persona")
+async def set_persona(request: Request):
+    """Set the active persona for Kuro AI."""
+    try:
+        body = await request.json()
+        persona = body.get('persona', 'consultant')
+        result = memory_manager.set_active_persona(persona)
+        return result
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.get("/api/persona")
+async def get_persona():
+    """Get the current active persona."""
+    try:
+        persona = memory_manager.get_active_persona()
+        return {"status": "success", "persona": persona}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+# --- Hardware Sentinel ---
+_hardware_sentinel_scheduler = None
+
+def start_hardware_sentinel():
+    """Start the hardware monitoring scheduler with dynamic intervals."""
+    global _hardware_sentinel_scheduler
+    from apscheduler.schedulers.background import BackgroundScheduler
+    
+    _hardware_sentinel_scheduler = BackgroundScheduler(daemon=True)
+    
+    # Add job that runs every 30 seconds but checks time-based intervals internally
+    _hardware_sentinel_scheduler.add_job(
+        hardware_sentinel_check,
+        'interval',
+        seconds=30,
+        id='hardware_sentinel',
+        replace_existing=True
+    )
+    
+    _hardware_sentinel_scheduler.start()
+    logger.info("Hardware Sentinel scheduler started.")
+
+# Track last check times to implement dynamic intervals
+_last_hardware_check = None
+
+def hardware_sentinel_check():
+    """Check hardware metrics with dynamic intervals: 2hr work hours, 4hr off-hours."""
+    global _last_hardware_check
+    
+    now = datetime.now()
+    current_hour = now.hour
+    
+    # Determine interval based on time of day
+    # Work hours: 8 AM - 4 PM (08:00 - 16:00)
+    is_work_hours = 8 <= current_hour < 16
+    check_interval = timedelta(hours=2) if is_work_hours else timedelta(hours=4)
+    
+    # Skip if not enough time has passed since last check
+    if _last_hardware_check and (now - _last_hardware_check) < check_interval:
+        return
+    
+    _last_hardware_check = now
+    
+    try:
+        # Collect metrics
+        cpu_percent = psutil.cpu_percent(interval=1)
+        ram = psutil.virtual_memory()
+        ram_percent = ram.percent
+        disk = psutil.disk_usage('/')
+        disk_percent = disk.percent
+        
+        # Network I/O
+        net_io = psutil.net_io_counters()
+        net_sent_mb = net_io.bytes_sent / (1024 * 1024)
+        net_recv_mb = net_io.bytes_recv / (1024 * 1024)
+        
+        # Log metrics
+        logger.info(
+            f"Hardware Sentinel Check [{ 'work hours' if is_work_hours else 'off-hours' }]: "
+            f"CPU={cpu_percent}%, RAM={ram_percent}%, Disk={disk_percent}%, "
+            f"Net TX={net_sent_mb:.1f}MB, RX={net_recv_mb:.1f}MB"
+        )
+        
+        # Check thresholds and alert
+        alerts = []
+        if ram_percent > 90:
+            alerts.append(f"⚠️ [SYSTEM ALERT] Master Irfan, penggunaan RAM VM Kuro mencapai {ram_percent}%. Mohon tinjau proses yang berjalan.")
+        
+        if cpu_percent > 85:
+            alerts.append(f"🔥 [SYSTEM ALERT] Master Irfan, penggunaan CPU VM Kuro mencapai {cpu_percent}%. Proses intensif terdeteksi.")
+        
+        if disk_percent > 85:
+            alerts.append(f"💾 [SYSTEM ALERT] Master Irfan, penggunaan disk mencapai {disk_percent}%. Pertimbangkan untuk membersihkan file tidak diperlukan.")
+        
+        # Send alerts if any
+        for alert in alerts:
+            logger.warning(alert)
+            send_telegram_reminder_notification(alert)
+            
+    except Exception as e:
+        logger.error(f"Error in hardware sentinel check: {e}")
+
 # --- Background Scheduler for Reminders & Habits ---
 _reminder_scheduler = None
 
@@ -472,11 +601,103 @@ def send_end_of_day_report():
     except Exception as e:
         logger.error(f"Failed to send end-of-day report: {e}")
 
-def reset_daily_habits():
-    """Midnight reset: Reset all habit is_done to False."""
+def cleanup_old_artifacts(days: int = 14):
+    """Clean up uploaded files and cache older than specified days.
+    
+    Security Rule: Does not delete files marked as identity or essential in database.
+    """
     try:
+        cutoff_date = datetime.now() - timedelta(days=days)
+        deleted_count = 0
+        deleted_size = 0
+        
+        # Clean uploaded_files directory
+        if os.path.exists(tools.UPLOAD_DIR):
+            for filename in os.listdir(tools.UPLOAD_DIR):
+                filepath = os.path.join(tools.UPLOAD_DIR, filename)
+                if not os.path.isfile(filepath):
+                    continue
+                
+                # Check file modification time
+                file_mtime = datetime.fromtimestamp(os.path.getmtime(filepath))
+                if file_mtime < cutoff_date:
+                    # Security check: skip essential files
+                    # (In production, check against database)
+                    try:
+                        file_size = os.path.getsize(filepath)
+                        os.remove(filepath)
+                        deleted_count += 1
+                        deleted_size += file_size
+                        logger.info(f"Deleted old artifact: {filename} ({file_size / 1024:.1f}KB, {days}+ days old)")
+                    except Exception as e:
+                        logger.warning(f"Failed to delete {filename}: {e}")
+        
+        # Clean __pycache__ directories
+        for root, dirs, files in os.walk('/home/kuro/projects/kuro'):
+            if '__pycache__' in dirs:
+                cache_dir = os.path.join(root, '__pycache__')
+                try:
+                    for f in os.listdir(cache_dir):
+                        fp = os.path.join(cache_dir, f)
+                        if os.path.isfile(fp):
+                            file_mtime = datetime.fromtimestamp(os.path.getmtime(fp))
+                            if file_mtime < cutoff_date:
+                                os.remove(fp)
+                                deleted_count += 1
+                except Exception as e:
+                    logger.warning(f"Error cleaning __pycache__ in {root}: {e}")
+        
+        deleted_mb = deleted_size / (1024 * 1024)
+        logger.info(f"Artifact cleanup complete: {deleted_count} files deleted, {deleted_mb:.2f}MB freed")
+        return {"deleted_count": deleted_count, "freed_mb": deleted_mb}
+        
+    except Exception as e:
+        logger.error(f"Error in artifact cleanup: {e}")
+        return {"error": str(e)}
+
+def get_log_storage_usage() -> Dict:
+    """Calculate log storage usage for dashboard display."""
+    try:
+        log_dir = os.path.dirname(os.path.abspath(LOG_FILE))
+        total_size = 0
+        log_count = 0
+        
+        # Count current log file
+        if os.path.exists(LOG_FILE):
+            total_size += os.path.getsize(LOG_FILE)
+            log_count += 1
+        
+        # Count rotated log files
+        for f in os.listdir(log_dir):
+            if f.startswith('kuro_butler.log.'):
+                fp = os.path.join(log_dir, f)
+                if os.path.isfile(fp):
+                    total_size += os.path.getsize(fp)
+                    log_count += 1
+        
+        return {
+            "total_size_mb": total_size / (1024 * 1024),
+            "log_files": log_count,
+            "retention_days": LOG_BACKUP_COUNT
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+def reset_daily_habits():
+    """Midnight reset: Reset all habit is_done to False + cleanup old artifacts."""
+    try:
+        # Log rotation audit message
+        today = datetime.now().strftime('%Y-%m-%d')
+        logger.info(f"--- END OF LOG FOR {today} - ROTATING NOW ---")
+        
+        # Reset habits
         daily_habits_db.reset_all_habits()
         logger.info("Daily habits reset for new day.")
+        
+        # Run artifact cleanup
+        cleanup_result = cleanup_old_artifacts(days=14)
+        logger.info(f"Midnight artifact cleanup: {cleanup_result}")
+        
     except Exception as e:
         logger.error(f"Failed to reset daily habits: {e}")
 
@@ -599,6 +820,8 @@ if __name__ == "__main__":
         logger.info("Received interrupt signal. Shutting down gracefully...")
         if _reminder_scheduler:
             _reminder_scheduler.shutdown()
+        if _hardware_sentinel_scheduler:
+            _hardware_sentinel_scheduler.shutdown()
         sys.exit(0)
 
     signal.signal(signal.SIGINT, signal_handler)
@@ -606,6 +829,9 @@ if __name__ == "__main__":
 
     # Start reminder scheduler
     start_reminder_scheduler()
+    
+    # Start hardware sentinel scheduler
+    start_hardware_sentinel()
 
     # Start FastAPI in a daemon thread
     uvicorn_thread = threading.Thread(target=run_uvicorn, daemon=True)

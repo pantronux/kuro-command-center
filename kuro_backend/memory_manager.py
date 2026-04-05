@@ -1,6 +1,7 @@
 """
-Kuro Cognitive Memory Engine V2.1 - Tier-3 Architecture with Anti-Hallucination
+Kuro AI V2.0 Official - Memory Manager [2026-04-05]
 ================================================================================
+Kuro Cognitive Memory Engine V2.1 - Tier-3 Architecture with Anti-Hallucination
 TIER 1: Short-Term Buffer (SQLite) - Last 20 interactions
 TIER 2: Semantic Long-Term Memory (ChromaDB) - Embedded facts
 TIER 3: Structured Knowledge Base (JSON) - Permanent master profile (ABSOLUTE TRUTH)
@@ -12,6 +13,10 @@ Anti-Hallucination Protocol V2.1:
 - Temporal Grounding: Inject timestamps into prompt to prevent stale data confusion
 - Master Profile Override: Tier 3 is absolute truth over all other tiers
 - Auto-Migration: Repeated facts auto-sync to master_profile.json
+
+PHASE 2 Fixes [2026-04-05]:
+- Context Ranking: Relevance threshold filtering for ChromaDB results
+- Anti-VCT Bias: VCT data only returned for VCT-specific queries
 """
 import json
 import logging
@@ -112,6 +117,25 @@ def update_master_profile(key: str, value: str):
     
     save_master_profile(profile)
     logger.info(f"Updated master profile: {key} = {value}")
+
+def get_active_persona() -> str:
+    """Get the currently active persona."""
+    profile = load_master_profile()
+    return profile.get('preferences', {}).get('persona_mode', 'consultant')
+
+def set_active_persona(persona: str) -> Dict:
+    """Set the active persona and save to master profile."""
+    valid_personas = ['casual', 'consultant', 'support']
+    if persona not in valid_personas:
+        return {"status": "error", "message": f"Invalid persona. Must be one of: {valid_personas}"}
+    
+    profile = load_master_profile()
+    if 'preferences' not in profile:
+        profile['preferences'] = {}
+    profile['preferences']['persona_mode'] = persona
+    save_master_profile(profile)
+    logger.info(f"Active persona changed to: {persona}")
+    return {"status": "success", "persona": persona}
 
 # ============================================
 # TIER 1: Short-Term Buffer (SQLite)
@@ -293,15 +317,52 @@ def add_long_term(content: str, metadata: Dict = None):
         logger.error(f"Failed to add to ChromaDB: {e}")
         return False
 
+# Relevance threshold for memory injection - facts below this are excluded
+RELEVANCE_DISTANCE_THRESHOLD = 0.5  # Lower distance = more relevant (0 = perfect match)
+
 def search_long_term(query: str, top_k: int = 5) -> List[str]:
-    """Search ChromaDB for relevant facts."""
+    """Search ChromaDB for relevant facts with context ranking.
+    
+    PHASE 2 FIX:
+    - Only returns facts with relevance score above threshold
+    - Anti-VCT bias: VCT data only returned if query contains VCT keywords
+    """
     collection = _get_chroma_collection()
     if collection is None:
         return []
     
     try:
-        results = collection.query(query_texts=[query], n_results=top_k)
-        return results.get('documents', [[]])[0]
+        results = collection.query(query_texts=[query], n_results=top_k, include=['documents', 'distances'])
+        documents = results.get('documents', [[]])[0]
+        distances = results.get('distances', [[]])[0]
+        
+        # PHASE 2: Context Ranking - filter by relevance threshold
+        relevant_facts = []
+        for doc, distance in zip(documents, distances):
+            if distance <= RELEVANCE_DISTANCE_THRESHOLD:
+                relevant_facts.append(doc)
+            else:
+                logger.debug(f"Filtered out low-relevance fact (distance={distance:.3f}): {doc[:50]}...")
+        
+        # PHASE 2: Anti-VCT Bias - only return VCT data if query is VCT-related
+        vct_keywords = ['vct', 'valorant', 'tournament', 'competition ruleset', 'vct26']
+        query_lower = query.lower()
+        is_vct_query = any(kw in query_lower for kw in vct_keywords)
+        
+        if not is_vct_query:
+            # Filter out VCT-related facts unless specifically asked
+            vct_filtered = []
+            for fact in relevant_facts:
+                fact_lower = fact.lower()
+                if any(kw in fact_lower for kw in vct_keywords):
+                    logger.debug(f"Filtered out VCT fact (not VCT query): {fact[:50]}...")
+                else:
+                    vct_filtered.append(fact)
+            relevant_facts = vct_filtered
+        
+        logger.info(f"Memory search: {len(documents)} results -> {len(relevant_facts)} relevant (threshold={RELEVANCE_DISTANCE_THRESHOLD})")
+        return relevant_facts
+        
     except Exception as e:
         logger.error(f"Failed to search ChromaDB: {e}")
         return []
@@ -578,6 +639,7 @@ def _classify_fact_with_llm(fact: str) -> Dict:
     try:
         from google import genai
         from google.genai import types
+        from kuro_backend.config import CLASSIFIER_MODEL
         
         client = genai.Client(api_key=settings.GEMINI_API_KEY)
         
@@ -600,22 +662,34 @@ Berikan jawaban HANYA dalam format JSON berikut, tanpa teks tambahan:
 {{"fact": "{fact}", "category": "kategori_di_sini", "decay_exempt": true_atau_false}}"""
 
         response = client.models.generate_content(
-            model="gemini-2.0-flash",
+            model=CLASSIFIER_MODEL,
             contents=prompt,
             config=types.GenerateContentConfig(temperature=0.1)
         )
         
-        if response.text:
-            # Parse JSON from response
-            json_match = re.search(r'\{.*\}', response.text, re.DOTALL)
-            if json_match:
-                return json.loads(json_match.group())
+        # PHASE 2: Error handling for API responses
+        if not response.text or not response.text.strip():
+            logger.error("Critical: Classifier Model Failed - Empty response. Falling back to safe mode.")
+            return {"fact": fact, "category": "temporary", "decay_exempt": False}
+        
+        # Parse JSON from response
+        json_match = re.search(r'\{.*\}', response.text, re.DOTALL)
+        if json_match:
+            try:
+                result = json.loads(json_match.group())
+                # Validate required fields
+                if "category" in result and "decay_exempt" in result:
+                    return result
+                else:
+                    logger.error(f"Critical: Classifier Model Failed - Invalid JSON structure. Falling back to safe mode.")
+            except json.JSONDecodeError:
+                logger.error("Critical: Classifier Model Failed - JSON parse error. Falling back to safe mode.")
         
         # Fallback if parsing fails
         return {"fact": fact, "category": "temporary", "decay_exempt": False}
         
     except Exception as e:
-        logger.error(f"Failed to classify fact with LLM: {e}")
+        logger.error(f"Critical: Classifier Model Failed - {e}. Falling back to safe mode.")
         return {"fact": fact, "category": "temporary", "decay_exempt": False}
 
 

@@ -1,10 +1,16 @@
+"""
+Kuro AI V2.0 Official - Core [2026-04-05]
+================================================================================
+AI Core with 3-Tier Memory Injection and Dynamic Persona System
+SDK: google-genai v3 Protocol (client.models.generate_content)
+"""
 import logging
 import base64
 import os
 from google import genai
 from google.genai import types
 from google.genai.errors import APIError, ClientError
-from kuro_backend.config import settings
+from kuro_backend.config import settings, PRIMARY_MODEL
 from kuro_backend import tools
 from kuro_backend import memory_manager
 from kuro_backend import chat_history
@@ -14,26 +20,92 @@ logger = logging.getLogger(__name__)
 # Initialize the Generative AI client (SDK v3) - single instance for memory efficiency
 client = genai.Client(api_key=settings.GEMINI_API_KEY)
 
-# --- Persona & System Instructions ---
+# --- Persona System Instructions ---
+_PERSONA_INSTRUCTIONS = {
+    'casual': (
+        "Kamu adalah Kuro, AI Butler setia Master Irfan dengan kepribadian santai dan friendly. "
+        "Gunakan bahasa yang ringan, humoris, dan hindari istilah teknis/ISO kecuali diminta. "
+        "Kamu tetap cerdas dan membantu, tapi dengan pendekatan yang lebih kasual. "
+        "Panggil 'Master Irfan' dengan sopan tapi tidak terlalu formal."
+    ),
+    'consultant': (
+        "Kamu adalah Kuro, seorang Elite AI Butler dan Senior IT Security, GRC, & Enterprise Architecture Consultant. Tuanmu adalah Master Irfan.\n\n"
+        "CORE KNOWLEDGE BASE (PREDEFINED EXPERTISE):\n"
+        "Kamu memiliki pemahaman mendalam dan setara dengan Lead Auditor untuk:\n"
+        "- ISO Frameworks: ISO 27001:2022 (ISMS), ISO 27701 (PIMS), dan ISO/IEC 42001 (AI Management System).\n"
+        "- NIST: NIST Cybersecurity Framework (CSF 2.0) & NIST SP 800-53.\n"
+        "- Enterprise Architecture: TOGAF Standard.\n"
+        "- Regulasi privasi & IT: UU Pelindungan Data Pribadi (UU PDP No. 27 Tahun 2022 - Indonesia) dan GDPR.\n\n"
+        "MINDSET & METODOLOGI BERPIKIR (THE CONSULTANT WAY):\n"
+        "1. Kritis & Skeptis: Jangan pernah menerima premis mentah-mentah. Selalu cari hidden risks, single points of failure, dan kelemahan compliance.\n"
+        "2. Struktur Eksplisit: Saat menganalisis masalah IT/Bisnis, gunakan struktur: (1) Analisis Celah (Gap Analysis), (2) Pemetaan Regulasi (Mapping to ISO/NIST), (3) Evaluasi Risiko, (4) Rekomendasi Mitigasi yang actionable.\n"
+        "3. Citation Rule: Setiap memberikan rekomendasi keamanan, WAJIB menyertakan referensi klausul/kontrol yang relevan (Misal: 'Sesuai dengan ISO 27001:2022 Klausul 8.1...').\n\n"
+        "TONE & STYLE:\n"
+        "Setia, elegan, namun sangat tajam secara intelektual. Tidak kaku, gunakan bahasa Indonesia yang profesional namun mengalir (boleh menggunakan analogi cerdas). "
+        "Selalu memposisikan diri sebagai partner strategis (bukan sekadar penjawab pertanyaan) untuk memastikan Master Irfan selalu unggul di setiap proyek auditnya."
+    ),
+    'support': (
+        "Kamu adalah Kuro, Senior DevOps/IT Support Engineer Master Irfan. "
+        "Fokus pada efisiensi kode, diagnosa sistem, dan pembacaan log. "
+        "Kamu memiliki izin penuh untuk menganalisis file di /home/kuro/projects/kuro/ menggunakan smart_read. "
+        "Beri solusi yang praktis, langsung ke inti, dan sertakan contoh kode jika relevan. "
+        "Jika mendeteksi error di log, WAJIB sarankan perbaikan kodingan secara spesifik."
+    )
+}
+
 def _get_system_instruction_with_time() -> str:
-    """Get system instruction with current time injected."""
+    """Get system instruction with current time injected and active persona."""
     current_time = settings.get_current_time_formatted()
-    return (
-        f"[CURRENT_TIME: {current_time}] "
-        "Kamu adalah Kuro, AI Butler setia Master Irfan. Kamu adalah pakar IT Security dan Audit dengan daya ingat fotografis. "
-        "Gunakan waktu saat ini sebagai referensi untuk menghitung 'besok', 'nanti malam', '10 menit lagi', dll. "
+    current_date = settings.get_current_time().strftime("%Y-%m-%d")
+    active_persona = memory_manager.get_active_persona()
+    
+    persona_instruction = _PERSONA_INSTRUCTIONS.get(active_persona, _PERSONA_INSTRUCTIONS['consultant'])
+    
+    common_instruction = (
+        f"\n\n[CURRENT_TIME: {current_time}] "
+        f"[CURRENT_DATE: {current_date}] "
+        f"[KURO_VERSION: V2.0.1 Official - {current_date}] "
+        "Gunakan waktu saat ini sebagai referensi untuk menghitung 'besok', 'nanti malam', '10 menit lagi', dll.\n\n"
+        
+        "CHAIN OF THOUGHT (HIDDEN THOUGHT PROCESS):\n"
+        "Sebelum memberikan jawaban, gunakan langkah berpikir eksplisit (Hidden Thought):\n"
+        "1. Analisis niat Master - apa yang sebenarnya ditanyakan?\n"
+        "2. Cek [ACTIVE_CONVERSATION_CONTEXT] untuk kata ganti ('ini', 'itu', 'dia', 'tadi')\n"
+        "3. Cek data fisik di OS menggunakan os.path.exists() jika terkait file\n"
+        "4. Cek memori (Tier 1 > Tier 2 > Tier 3)\n"
+        "5. Verifikasi silang antara SQLite dan ChromaDB untuk konsistensi\n"
+        "6. Baru berikan jawaban yang akurat dan terverifikasi.\n\n"
+        
+        "ANAPHORA RESOLUTION (KATA GANTI):\n"
+        "Jika Master menggunakan kata ganti seperti 'ini', 'itu', 'dia', 'tadi', 'tersebut':\n"
+        "- WAJIB merujuk pada objek/topik yang dibahas dalam 2-3 pesan terakhir di [ACTIVE_CONVERSATION_CONTEXT]\n"
+        "- JANGAN melakukan pencarian memori jangka panjang untuk kata ganti jika konteksnya sudah jelas di chat terbaru\n"
+        "- PRIORITAS: Context First, Memory Second\n\n"
+        
+        "NEGATIVE CONSTRAINTS & HALLUCINATION CHECK:\n"
+        "- DILARANG berasumsi file ada jika os.path.exists() mengembalikan False\n"
+        "- Jika tidak tahu, katakan tidak tahu dan tawarkan untuk mencari di folder lain\n"
+        "- JANGAN mengarang fakta, data, atau referensi klausul\n"
+        "- Selalu verifikasi silang antara Memori Tier-1 (SQLite) dan Tier-2 (ChromaDB)\n\n"
+        
+        "MEMORY & ANTI-HALLUCINATION:\n"
         "Gunakan memori yang disuntikkan ke dalam prompt sebagai sumber kebenaran utamamu. "
         "[PROFIL MASTER] berisi identitas permanen Master Irfan. "
-        "[MEMORI JANGKA PENDEK] berisi 5 interaksi terakhir untuk konteks percakapan. "
+        "[ACTIVE_CONVERSATION_CONTEXT] berisi 5 interaksi terakhir - PRIORITAS TERTINGGI untuk konteks. "
         "[FAKTA PENDUKUNG] berisi memori jangka panjang dari ChromaDB. "
         "ANTI-HALLUCINATION: Jika informasi tidak ada di memori, JANGAN mengarang. Tanyakan kepada Master atau akui ketidaktahuanmu. "
-        "Jika memori memberikan data yang bertentangan dengan pengetahuan umum, prioritaskan memori tapi berikan disclaimer. "
-        "Kamu juga memiliki kemampuan Vision - kamu bisa melihat dan menganalisis gambar yang dikirimkan. "
+        "Jika memori memberikan data yang bertentangan dengan pengetahuan umum, prioritaskan memori tapi berikan disclaimer.\n\n"
+        
+        "CAPABILITIES:\n"
+        "Kamu memiliki kemampuan Vision - kamu bisa melihat dan menganalisis gambar yang dikirimkan. "
         "Kamu juga memiliki sistem pengingat (Reminder) - jika Master meminta diingatkan, gunakan tool add_reminder_tool. "
-        "Kamu juga memiliki Daily Habit Tracker - jika Master bilang 'udah gym', 'done tryhackme', 'selesai belajar', gunakan tool mark_habit_done_tool. "
+        "Kamu juga memiliki Daily Habit Tracker - jika Master bilang 'udah gym', 'done tryhackme', 'selesai belajar', gunakan tool mark_habit_done_tool.\n\n"
+        
         "PENTING: Jika Master meminta merangkum, membaca, atau menganalisis file PDF (misalnya 'rangkum VCT26.pdf'), WAJIB gunakan tool summarize_pdf dengan parameter pdf_filename (nama file) dan instruction (apa yang diminta, misal 'rangkum dokumen ini'). JANGAN bilang tidak bisa membaca PDF - kamu PUNYA kemampuan itu! "
         "PENTING: Jika Master meminta merangkum, membaca, atau menganalisis file Word (.docx), Excel (.xlsx), atau PowerPoint (.pptx), WAJIB gunakan tool summarize_document dengan parameter filename (nama file) dan instruction (apa yang diminta). JANGAN bilang tidak bisa membaca file-file tersebut - kamu PUNYA kemampuan itu!"
     )
+    
+    return persona_instruction + common_instruction
 
 # --- Reusable Generation Config (SDK v3 Protocol) ---
 # Note: system_instruction is now dynamic with time injection
@@ -45,6 +117,7 @@ _DEFAULT_CONFIG = types.GenerateContentConfig(
         tools.get_system_status,
         tools.check_proxmox_infrastructure,
         tools.list_my_files,
+        tools.list_project_files,
         tools.add_reminder_tool,
         tools.get_reminders_tool,
         tools.mark_habit_done_tool,
@@ -79,12 +152,35 @@ def _get_mime_type(image_path: str) -> str:
     return mime_map.get(ext, "image/jpeg")
 
 
+def get_last_topic() -> str:
+    """Extract the subject/topic from the last 3 messages for anaphora resolution.
+    
+    Returns a short summary of what was being discussed.
+    """
+    try:
+        history = chat_history.get_history(limit=6)  # Get last 3 exchanges (user + assistant)
+        if len(history) < 2:
+            return ""
+        
+        # Get last 3 user messages
+        user_messages = [h['content'] for h in history if h['role'] == 'user'][-3:]
+        
+        if not user_messages:
+            return ""
+        
+        # Simple topic extraction: combine last messages
+        topic = " | ".join(user_messages)
+        return topic[:200]  # Limit length
+    except Exception as e:
+        logger.error(f"Failed to get last topic: {e}")
+        return ""
+
 def process_chat(message: str, image_paths: list = None) -> str:
     """Processes a chat message with 3-tier memory injection.
     
     MEMORY FLOW:
     1. Pre-process: Query all 3 tiers (SQLite, ChromaDB, JSON)
-    2. Inject: Format memory into prompt
+    2. Inject: Format memory into prompt with [ACTIVE_CONVERSATION_CONTEXT]
     3. Generate: Send to Gemini with full context
     4. Post-process: Store to appropriate memory tiers
     
@@ -111,8 +207,18 @@ def process_chat(message: str, image_paths: list = None) -> str:
         # === MEMORY V2.1: Smart Decay (respects decay_exempt) ===
         memory_manager.apply_memory_decay_v2()
         
+        # === ACTIVE CONVERSATION CONTEXT (Priority 1 for Anaphora Resolution) ===
+        short_term = memory.get("short_term", "")
+        last_topic = get_last_topic()
+        
+        active_context = ""
+        if short_term:
+            active_context = f"\n\n[ACTIVE_CONVERSATION_CONTEXT - PRIORITY 1]\n{short_term}"
+        if last_topic:
+            active_context += f"\n\n[LAST_TOPIC: {last_topic}]"
+        
         # === BUILD PROMPT WITH MEMORY INJECTION ===
-        full_message = f"{message}{memory_injection}"
+        full_message = f"{message}{active_context}{memory_injection}"
         
         # Add override message if Tier 3 is absolute truth
         if override["override_applied"]:
@@ -146,7 +252,7 @@ def process_chat(message: str, image_paths: list = None) -> str:
 
         # === GENERATE CONTENT WITH STRICT V3 PROTOCOL ===
         response = client.models.generate_content(
-            model=settings.MODEL_NAME,
+            model=PRIMARY_MODEL,
             contents=contents_parts,
             config=_DEFAULT_CONFIG
         )

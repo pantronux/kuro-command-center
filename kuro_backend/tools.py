@@ -1,8 +1,13 @@
 """
-Kuro OS Sentinel - Universal File Parser & System Analyzer
+Kuro AI V2.0 Official - Tools [2026-04-05]
 ============================================================
+Kuro OS Sentinel - Universal File Parser & System Analyzer
 Butler + System Administrator capabilities.
 Supports: Text, Code, PDF, Images (Vision), Logs, and recursive crawling.
+
+PHASE 1 Fixes [2026-04-05]:
+- Path Integrity: All file interactions use os.path.abspath(PROJECT_ROOT)
+- Physical Validation: os.path.exists() checks before file operations
 """
 import logging
 import os
@@ -110,6 +115,98 @@ def list_my_files(directory: str = None) -> str:
         return f"Master, akses ke folder {target_dir} ditolak. Mohon periksa izin folder."
     except Exception as e:
         return f"Master, error saat membaca folder {target_dir}: {e}"
+
+def list_project_files(directory: str = "/home/kuro/projects/kuro") -> str:
+    """
+    List all project files in the Kuro project directory.
+    Designed for IT Support persona to analyze code structure and detect issues.
+    
+    Returns:
+        Formatted string with file listing organized by type
+    """
+    target_dir = directory
+    
+    if not os.path.exists(target_dir):
+        return f"Master, project folder {target_dir} does not exist."
+    
+    if not os.path.isdir(target_dir):
+        return f"Master, {target_dir} is not a directory."
+    
+    try:
+        files_by_type = {}
+        total_files = 0
+        total_size = 0
+        
+        for root, dirs, filenames in os.walk(target_dir):
+            # Skip hidden directories and common non-project folders
+            dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ['venv', '__pycache__', 'node_modules', '.git']]
+            
+            for filename in filenames:
+                if filename.startswith('.'):
+                    continue
+                    
+                filepath = os.path.join(root, filename)
+                try:
+                    stat = os.stat(filepath)
+                    size_bytes = stat.st_size
+                    total_size += size_bytes
+                    total_files += 1
+                    
+                    ext = os.path.splitext(filename)[1].lower()
+                    file_type = ext if ext else 'no-extension'
+                    
+                    if file_type not in files_by_type:
+                        files_by_type[file_type] = []
+                    
+                    files_by_type[file_type].append({
+                        "name": filename,
+                        "path": filepath,
+                        "size": size_bytes
+                    })
+                except (PermissionError, OSError):
+                    continue
+        
+        if total_files == 0:
+            return f"Master, project folder {target_dir} is empty."
+        
+        # Format output
+        result = [f"📁 Kuro Project Files ({total_files} files, {total_size / (1024*1024):.2f} MB):", ""]
+        
+        # Sort by file type and show
+        for file_type in sorted(files_by_type.keys()):
+            files = files_by_type[file_type]
+            icon = "📄"
+            if file_type == '.py':
+                icon = "🐍"
+            elif file_type in ['.js', '.ts']:
+                icon = "⚡"
+            elif file_type in ['.html', '.htm']:
+                icon = "🌐"
+            elif file_type == '.css':
+                icon = "🎨"
+            elif file_type == '.json':
+                icon = "📋"
+            elif file_type == '.md':
+                icon = "📝"
+            elif file_type == '.log':
+                icon = "📜"
+            elif file_type in ['.db', '.sqlite']:
+                icon = "🗄️"
+            
+            result.append(f"{icon} {file_type or 'no-ext'} ({len(files)} files)")
+            for f in files[:10]:  # Limit per type to avoid overwhelming output
+                size_str = f"{f['size'] / 1024:.1f}KB" if f['size'] < 1024*1024 else f"{f['size'] / (1024*1024):.2f}MB"
+                result.append(f"   - {f['name']} ({size_str})")
+            if len(files) > 10:
+                result.append(f"   ... and {len(files) - 10} more")
+            result.append("")
+        
+        return "\n".join(result)
+        
+    except PermissionError:
+        return f"Master, akses ke project folder ditolak. Mohon periksa izin folder."
+    except Exception as e:
+        return f"Master, error saat membaca project folder: {e}"
 
 # --- Proxmox API Helper ---
 def _get_proxmox_headers():
@@ -477,11 +574,7 @@ def get_system_status():
         disk_usage = f"{disk.used / (1024**3):.2f}GB / {disk.total / (1024**3):.2f}GB ({disk.percent}%)"
         uptime = subprocess.check_output(['uptime', '-p'], timeout=5).decode('utf-8').strip()
 
-        return f"""Kuro System Health Report:
-- CPU Usage: {cpu_usage}%
-- RAM Usage: {ram_usage}
-- Disk Space (/home/kuro/): {disk_usage}
-- System Uptime: {uptime}"""
+        return f"Kuro System Health Report:\n- CPU Usage: {cpu_usage}%\n- RAM Usage: {ram_usage}\n- Disk Space (/home/kuro/): {disk_usage}\n- System Uptime: {uptime}"
     except subprocess.TimeoutExpired:
         return "Kuro System Health Report:\n- Uptime: Unable to retrieve (timeout)"
     except Exception as e:

@@ -1,9 +1,21 @@
+"""
+Kuro AI V2.0.1 Official - Config [2026-04-05]
+================================================================================
+Centralized configuration for Kuro AI Butler System.
+"""
 import os
 import pytz
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
 load_dotenv()
+
+# ============================================
+# PRIMARY MODEL CONFIGURATION
+# ============================================
+# CRITICAL: gemini-2.0-flash is DEPRECATED. Use gemini-2.5-flash.
+PRIMARY_MODEL = "gemini-2.5-flash"
+CLASSIFIER_MODEL = "gemini-2.5-flash"  # For fact classification
 
 class Settings:
     """
@@ -14,7 +26,7 @@ class Settings:
     PVE_TOKEN_ID: str = os.getenv("PVE_TOKEN_ID")
     PVE_TOKEN_SECRET: str = os.getenv("PVE_TOKEN_SECRET")
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY")
-    MODEL_NAME: str = os.getenv("MODEL_NAME")
+    MODEL_NAME: str = os.getenv("MODEL_NAME", PRIMARY_MODEL)
     TELEGRAM_TOKEN: str = os.getenv("TELEGRAM_TOKEN")
     TELEGRAM_CHAT_ID: str = os.getenv("TELEGRAM_CHAT_ID")
     WORKING_DIR: str = os.getenv("WORKING_DIR")

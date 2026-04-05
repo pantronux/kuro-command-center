@@ -27,6 +27,7 @@ const CONFIG = {
 let selectedFiles = [];
 let isProcessing = false;
 let chatHistory = [];
+let selectedPersona = 'consultant'; // Default persona
 
 // ============================================
 // DOM Elements
@@ -56,6 +57,11 @@ const elements = {
     temperatureSlider: document.getElementById('temperatureSlider'),
     temperatureValue: document.getElementById('temperatureValue'),
     clearHistoryBtn: document.getElementById('clearHistoryBtn'),
+    // Persona Toggle
+    personaToggle: document.getElementById('personaToggle'),
+    personaDropdown: document.getElementById('personaDropdown'),
+    currentPersonaLabel: document.getElementById('currentPersonaLabel'),
+    applyPersonaBtn: document.getElementById('applyPersona'),
     // Navigation
     navChat: document.getElementById('navChat'),
     navSystemStatus: document.getElementById('navSystemStatus'),
@@ -150,6 +156,40 @@ function setupEventListeners() {
     });
     
     elements.clearHistoryBtn.addEventListener('click', clearChatHistory);
+    
+    // Persona Toggle
+    if (elements.personaToggle && elements.personaDropdown) {
+        elements.personaToggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            elements.personaDropdown.classList.toggle('hidden');
+        });
+        
+        // Close dropdown when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!elements.personaDropdown.contains(e.target) && !elements.personaToggle.contains(e.target)) {
+                elements.personaDropdown.classList.add('hidden');
+            }
+        });
+        
+        // Handle persona selection
+        document.querySelectorAll('.persona-option').forEach(option => {
+            option.addEventListener('click', () => {
+                selectedPersona = option.dataset.persona;
+                updatePersonaLabel();
+                // Highlight selected option
+                document.querySelectorAll('.persona-option').forEach(o => o.classList.remove('bg-emerald-50', 'dark:bg-emerald-900/30'));
+                option.classList.add('bg-emerald-50', 'dark:bg-emerald-900/30');
+            });
+        });
+        
+        // Apply persona button
+        if (elements.applyPersonaBtn) {
+            elements.applyPersonaBtn.addEventListener('click', applyPersona);
+        }
+        
+        // Load saved persona on init
+        loadPersona();
+    }
 }
 
 function closeSidebar() {
@@ -464,17 +504,52 @@ async function openSystemStatus() {
     elements.systemStatusContent.innerHTML = '<div class="flex items-center justify-center py-8"><div class="spinner"></div></div>';
     
     try {
-        const response = await fetch(`${CONFIG.API_BASE}/system-status`);
-        const data = await response.json();
+        // Fetch both system status and log storage
+        const [sysResponse, logResponse] = await Promise.all([
+            fetch(`${CONFIG.API_BASE}/system-status`),
+            fetch(`${CONFIG.API_BASE}/log-storage`)
+        ]);
         
-        if (data.status === 'success') {
-            // Format the status text
-            const statusText = data.data.replace(/\n/g, '<br>');
+        const sysData = await sysResponse.json();
+        const logData = await logResponse.json();
+        
+        if (sysData.status === 'success') {
+            let logStorageHtml = '';
+            if (logData.status === 'success' && logData.data) {
+                const logInfo = logData.data;
+                logStorageHtml = `
+                    <div class="mt-4 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-200 dark:border-blue-800">
+                        <div class="flex items-center gap-2 mb-2">
+                            <i data-lucide="file-text" class="w-4 h-4 text-blue-600 dark:text-blue-400"></i>
+                            <h4 class="font-medium text-blue-800 dark:text-blue-300">Log Storage Usage</h4>
+                        </div>
+                        <div class="grid grid-cols-3 gap-2 text-sm">
+                            <div>
+                                <p class="text-blue-600 dark:text-blue-400">Total Size</p>
+                                <p class="font-medium text-blue-800 dark:text-blue-200">${logInfo.total_size_mb?.toFixed(2) || 'N/A'} MB</p>
+                            </div>
+                            <div>
+                                <p class="text-blue-600 dark:text-blue-400">Log Files</p>
+                                <p class="font-medium text-blue-800 dark:text-blue-200">${logInfo.log_files || 0}</p>
+                            </div>
+                            <div>
+                                <p class="text-blue-600 dark:text-blue-400">Retention</p>
+                                <p class="font-medium text-blue-800 dark:text-blue-200">${logInfo.retention_days || 7} days</p>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+            
             elements.systemStatusContent.innerHTML = `
-                <div class="bg-gray-50 dark:bg-gray-700 rounded-xl p-4 font-mono text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
-                    ${data.data}
+                <div class="space-y-4">
+                    <div class="bg-gray-50 dark:bg-gray-700 rounded-xl p-4 font-mono text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
+                        ${sysData.data}
+                    </div>
+                    ${logStorageHtml}
                 </div>
             `;
+            lucide.createIcons();
         } else {
             elements.systemStatusContent.innerHTML = '<p class="text-red-500">Failed to load system status</p>';
         }
@@ -627,4 +702,62 @@ function getCurrentTime() {
 
 function showNotification(message, type = 'info') {
     console.log(`[${type.toUpperCase()}] ${message}`);
+}
+
+// ============================================
+// Persona Toggle Functions
+// ============================================
+const personaLabels = {
+    casual: '😎 Casual',
+    consultant: '🎯 Consultant',
+    support: '🔧 Support'
+};
+
+function updatePersonaLabel() {
+    if (elements.currentPersonaLabel) {
+        elements.currentPersonaLabel.textContent = personaLabels[selectedPersona] || 'Consultant';
+    }
+}
+
+async function applyPersona() {
+    try {
+        const response = await fetch(`${CONFIG.API_BASE}/persona`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ persona: selectedPersona })
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            // Close dropdown
+            elements.personaDropdown.classList.add('hidden');
+            // Show notification
+            showNotification(`Persona changed to ${personaLabels[selectedPersona]}`, 'success');
+            // Save to localStorage
+            localStorage.setItem('kuro-persona', selectedPersona);
+        } else {
+            showNotification('Failed to change persona: ' + data.message, 'error');
+        }
+    } catch (error) {
+        showNotification('Error changing persona: ' + error.message, 'error');
+    }
+}
+
+async function loadPersona() {
+    // Try localStorage first
+    const savedPersona = localStorage.getItem('kuro-persona');
+    if (savedPersona) {
+        selectedPersona = savedPersona;
+    }
+    
+    // Update UI
+    updatePersonaLabel();
+    
+    // Highlight selected option
+    document.querySelectorAll('.persona-option').forEach(option => {
+        if (option.dataset.persona === selectedPersona) {
+            option.classList.add('bg-emerald-50', 'dark:bg-emerald-900/30');
+        }
+    });
 }
