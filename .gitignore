@@ -12,3 +12,6 @@ __pycache__/
 # Security Keys
 *.pem
 *.key
+
+#Uploaded files
+uploaded_files/
