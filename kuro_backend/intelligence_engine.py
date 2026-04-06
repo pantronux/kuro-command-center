@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Dict, List, Any, Optional
 
 from kuro_backend.config import settings, PRIMARY_MODEL
-from kuro_backend.tools.serper_tool import serper_search, serper_news, RESEARCH_PILLARS
+from kuro_backend.serper_tool import serper_search, serper_news, RESEARCH_PILLARS
 from kuro_backend import intelligence_db
 
 logger = logging.getLogger(__name__)
