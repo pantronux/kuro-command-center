@@ -3,190 +3,906 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Kuro AI - Daily Habit Dashboard</title>
+    <title>Kuro AI - Habit Tracker V2.0</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
     <link rel="stylesheet" href="/static/css/style.css">
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
         
         body {
             font-family: 'Inter', sans-serif;
-            background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%);
+            background: linear-gradient(135deg, #0a0a0f 0%, #1a1a2e 50%, #16213e 100%);
             min-height: 100vh;
         }
         
         .glass {
-            background: rgba(255, 255, 255, 0.05);
+            background: rgba(255, 255, 255, 0.03);
             backdrop-filter: blur(20px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.08);
             border-radius: 16px;
         }
         
         .glass-card {
-            background: rgba(255, 255, 255, 0.08);
+            background: rgba(255, 255, 255, 0.05);
             backdrop-filter: blur(15px);
-            border: 1px solid rgba(255, 255, 255, 0.15);
+            border: 1px solid rgba(255, 255, 255, 0.1);
             border-radius: 12px;
             transition: all 0.3s ease;
         }
         
         .glass-card:hover {
-            background: rgba(255, 255, 255, 0.12);
+            background: rgba(255, 255, 255, 0.08);
             transform: translateY(-2px);
         }
         
-        .habit-done {
-            animation: celebratePulse 0.6s ease-out;
-            border-left: 4px solid #10b981;
+        /* Grid Cell Styles */
+        .grid-cell {
+            width: 28px;
+            height: 28px;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            cursor: pointer;
+            transition: all 0.2s ease;
         }
         
-        @keyframes celebratePulse {
-            0% { transform: scale(0.95); opacity: 0.5; }
-            50% { transform: scale(1.02); }
-            100% { transform: scale(1); opacity: 1; }
+        .grid-cell:hover {
+            border-color: rgba(255, 255, 255, 0.4);
+            transform: scale(1.1);
         }
         
-        .habit-pending {
-            border-left: 4px solid #6366f1;
+        .grid-cell.done {
+            background: linear-gradient(135deg, #10b981, #059669);
+            border-color: #10b981;
         }
         
-        .check-animation {
-            display: inline-block;
-            animation: checkBounce 0.5s ease-out;
+        .grid-cell.missed {
+            background: rgba(239, 68, 68, 0.2);
+            border-color: rgba(239, 68, 68, 0.4);
         }
         
-        @keyframes checkBounce {
-            0% { transform: scale(0); }
-            50% { transform: scale(1.3); }
-            100% { transform: scale(1); }
+        .grid-cell.future {
+            background: rgba(255, 255, 255, 0.02);
+            border-color: rgba(255, 255, 255, 0.05);
+            cursor: default;
         }
         
-        .progress-ring {
-            transition: stroke-dashoffset 0.5s ease;
+        .grid-cell.future:hover {
+            transform: none;
         }
         
-        .category-badge {
-            font-size: 0.7rem;
-            padding: 2px 8px;
-            border-radius: 9999px;
-        }
-        
+        /* Category Colors */
         .cat-gym { background: linear-gradient(135deg, #ef4444, #dc2626); }
         .cat-study { background: linear-gradient(135deg, #3b82f6, #2563eb); }
         .cat-game { background: linear-gradient(135deg, #8b5cf6, #7c3aed); }
         .cat-work { background: linear-gradient(135deg, #f59e0b, #d97706); }
         .cat-general { background: linear-gradient(135deg, #6366f1, #4f46e5); }
+        .cat-health { background: linear-gradient(135deg, #14b8a6, #0d9488); }
+        
+        /* Progress Bar */
+        .progress-bar {
+            height: 8px;
+            border-radius: 4px;
+            background: rgba(255, 255, 255, 0.1);
+            overflow: hidden;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.5s ease;
+        }
+        
+        /* Report Card */
+        .report-card {
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(5, 150, 105, 0.05));
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-radius: 16px;
+            padding: 24px;
+        }
+        
+        .report-card.scolding {
+            background: linear-gradient(135deg, rgba(239, 68, 68, 0.1), rgba(220, 38, 38, 0.05));
+            border-color: rgba(239, 68, 68, 0.3);
+        }
+        
+        .typewriter {
+            overflow: hidden;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        
+        /* Tab Styles */
+        .tab-btn {
+            padding: 8px 20px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+        
+        .tab-btn.active {
+            background: linear-gradient(135deg, #10b981, #059669);
+            color: white;
+        }
+        
+        .tab-btn:not(.active) {
+            background: rgba(255, 255, 255, 0.05);
+            color: rgba(255, 255, 255, 0.6);
+        }
+        
+        .tab-btn:not(.active):hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+        }
+        
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        
+        ::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 3px;
+        }
+        
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 3px;
+        }
+        
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+        
+        /* Animations */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .animate-fade-in {
+            animation: fadeIn 0.5s ease-out;
+        }
+        
+        @keyframes pulse-glow {
+            0%, 100% { box-shadow: 0 0 5px rgba(16, 185, 129, 0.3); }
+            50% { box-shadow: 0 0 20px rgba(16, 185, 129, 0.6); }
+        }
+        
+        .pulse-glow {
+            animation: pulse-glow 2s infinite;
+        }
     </style>
 </head>
 <body class="text-white">
-    <div class="min-h-screen p-6">
+    <div class="min-h-screen p-4 lg:p-6">
         <!-- Header -->
-        <div class="max-w-5xl mx-auto mb-8">
-            <div class="flex items-center justify-between">
+        <div class="max-w-7xl mx-auto mb-6">
+            <div class="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
                 <div>
-                    <h1 class="text-4xl font-bold bg-gradient-to-r from-green-400 to-emerald-400 bg-clip-text text-transparent">
-                        🎯 Daily Habit Dashboard
+                    <h1 class="text-3xl lg:text-4xl font-bold bg-gradient-to-r from-emerald-400 to-teal-400 bg-clip-text text-transparent">
+                        📊 Habit Tracker V2.0
                     </h1>
-                    <p class="text-gray-400 mt-1">Track your daily routines, Master Irfan</p>
+                    <p class="text-gray-400 mt-1">Monthly & Weekly Analytics with AI Evaluation</p>
                 </div>
-                <a href="/" class="glass px-4 py-2 rounded-lg hover:bg-white/10 transition">
-                    ← Back to Chat
-                </a>
+                <div class="flex items-center gap-3">
+                    <a href="/" class="glass px-4 py-2 rounded-lg hover:bg-white/10 transition text-sm">
+                        ← Back to Chat
+                    </a>
+                </div>
             </div>
         </div>
 
-        <!-- Progress Overview -->
-        <div class="max-w-5xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-4 mb-8" id="stats-container">
-            <div class="glass-card p-4 text-center">
-                <div class="text-3xl font-bold text-green-400" id="stat-percentage">0%</div>
-                <div class="text-sm text-gray-400">Today's Progress</div>
-            </div>
-            <div class="glass-card p-4 text-center">
-                <div class="text-3xl font-bold text-indigo-400" id="stat-total">0</div>
-                <div class="text-sm text-gray-400">Total Habits</div>
-            </div>
-            <div class="glass-card p-4 text-center">
-                <div class="text-3xl font-bold text-emerald-400" id="stat-done">0</div>
-                <div class="text-sm text-gray-400">Completed</div>
-            </div>
-            <div class="glass-card p-4 text-center">
-                <div class="text-3xl font-bold text-yellow-400" id="stat-pending">0</div>
-                <div class="text-sm text-gray-400">Remaining</div>
+        <!-- View Toggle & Filters -->
+        <div class="max-w-7xl mx-auto mb-6">
+            <div class="glass p-4">
+                <div class="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+                    <!-- View Tabs -->
+                    <div class="flex items-center gap-2">
+                        <button class="tab-btn active" data-view="monthly" onclick="switchView('monthly')">
+                            📅 Monthly
+                        </button>
+                        <button class="tab-btn" data-view="weekly" onclick="switchView('weekly')">
+                            📆 Weekly
+                        </button>
+                    </div>
+                    
+                    <!-- Date Filters -->
+                    <div class="flex items-center gap-3" id="monthly-filters">
+                        <select id="filter-month" class="bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-emerald-500">
+                            <option value="1" class="bg-gray-800">January</option>
+                            <option value="2" class="bg-gray-800">February</option>
+                            <option value="3" class="bg-gray-800">March</option>
+                            <option value="4" class="bg-gray-800">April</option>
+                            <option value="5" class="bg-gray-800">May</option>
+                            <option value="6" class="bg-gray-800">June</option>
+                            <option value="7" class="bg-gray-800">July</option>
+                            <option value="8" class="bg-gray-800">August</option>
+                            <option value="9" class="bg-gray-800">September</option>
+                            <option value="10" class="bg-gray-800">October</option>
+                            <option value="11" class="bg-gray-800">November</option>
+                            <option value="12" class="bg-gray-800">December</option>
+                        </select>
+                        <select id="filter-year" class="bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-emerald-500">
+                        </select>
+                        <button onclick="loadData()" class="bg-emerald-600 hover:bg-emerald-500 px-4 py-2 rounded-lg text-sm font-medium transition">
+                            Load
+                        </button>
+                    </div>
+                    
+                    <div class="flex items-center gap-3 hidden" id="weekly-filters">
+                        <select id="filter-week-year" class="bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-emerald-500">
+                        </select>
+                        <select id="filter-week" class="bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-emerald-500">
+                        </select>
+                        <button onclick="loadWeeklyData()" class="bg-emerald-600 hover:bg-emerald-500 px-4 py-2 rounded-lg text-sm font-medium transition">
+                            Load
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
 
-        <div class="max-w-5xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <!-- Add Habit Form -->
-            <div class="glass p-6">
-                <h2 class="text-xl font-semibold mb-4 flex items-center">
-                    <span class="mr-2">➕</span> Add New Habit
-                </h2>
+        <!-- Stats Overview -->
+        <div class="max-w-7xl mx-auto grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6" id="stats-container">
+            <div class="glass-card p-4 text-center">
+                <div class="text-2xl lg:text-3xl font-bold text-emerald-400" id="stat-overall">0%</div>
+                <div class="text-xs lg:text-sm text-gray-400">Overall Score</div>
+            </div>
+            <div class="glass-card p-4 text-center">
+                <div class="text-2xl lg:text-3xl font-bold text-blue-400" id="stat-completed">0</div>
+                <div class="text-xs lg:text-sm text-gray-400">Total Completed</div>
+            </div>
+            <div class="glass-card p-4 text-center">
+                <div class="text-2xl lg:text-3xl font-bold text-purple-400" id="stat-habits">0</div>
+                <div class="text-xs lg:text-sm text-gray-400">Active Habits</div>
+            </div>
+            <div class="glass-card p-4 text-center">
+                <div class="text-2xl lg:text-3xl font-bold text-yellow-400" id="stat-streak">0</div>
+                <div class="text-xs lg:text-sm text-gray-400">Best Streak</div>
+            </div>
+        </div>
+
+        <!-- Charts Section -->
+        <div class="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+            <!-- Sparkline Chart -->
+            <div class="glass p-4 lg:col-span-2">
+                <h3 class="text-sm font-semibold text-gray-400 mb-3">📈 Daily Completion Trend</h3>
+                <div id="sparkline-chart"></div>
+            </div>
+            
+            <!-- Donut Charts -->
+            <div class="glass p-4">
+                <h3 class="text-sm font-semibold text-gray-400 mb-3">🎯 Progress Overview</h3>
+                <div id="donut-chart" class="flex justify-center"></div>
+            </div>
+        </div>
+
+        <!-- Monthly/Weekly Grid -->
+        <div class="max-w-7xl mx-auto glass p-4 lg:p-6 mb-6">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg font-semibold" id="grid-title">📅 April 2026 - Habit Grid</h3>
+                <div class="flex items-center gap-3">
+                    <button onclick="openAddHabitModal()" class="bg-emerald-600 hover:bg-emerald-500 px-3 py-1.5 rounded-lg text-sm font-medium transition flex items-center gap-1">
+                        <span>➕</span> Add Habit
+                    </button>
+                </div>
+                <div class="flex items-center gap-4 text-xs text-gray-400">
+                    <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-emerald-500"></span> Done</span>
+                    <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-red-500/30"></span> Missed</span>
+                    <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-white/5"></span> Future</span>
+                </div>
+            </div>
+            <div class="overflow-x-auto">
+                <div id="habit-grid" class="min-w-[800px]">
+                    <div class="text-center text-gray-500 py-8">Loading data...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Per-Habit Progress Bars -->
+        <div class="max-w-7xl mx-auto glass p-4 lg:p-6 mb-6">
+            <h3 class="text-lg font-semibold mb-4">📊 Per-Habit Progress</h3>
+            <div id="habit-progress-bars" class="space-y-3">
+                <div class="text-center text-gray-500 py-4">Loading...</div>
+            </div>
+        </div>
+
+        <!-- AI Report Card -->
+        <div class="max-w-7xl mx-auto mb-6">
+            <div class="glass p-4 lg:p-6">
+                <div class="flex items-center justify-between mb-4">
+                    <h3 class="text-lg font-semibold">🤖 AI Evaluation Report</h3>
+                    <button id="generate-report-btn" onclick="generateAIReport()" 
+                            class="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 px-4 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2">
+                        <span>✨</span> Generate AI Evaluation
+                    </button>
+                </div>
+                <div id="report-card" class="report-card hidden">
+                    <div class="flex items-center gap-3 mb-3">
+                        <span class="text-2xl">📋</span>
+                        <div>
+                            <h4 class="font-semibold" id="report-period">Monthly Report</h4>
+                            <p class="text-xs text-gray-400" id="report-score">Overall Score: 0%</p>
+                        </div>
+                    </div>
+                    <div id="report-content" class="typewriter text-sm text-gray-300 leading-relaxed whitespace-pre-wrap"></div>
+                </div>
+                <div id="report-loading" class="hidden text-center py-8">
+                    <div class="inline-block animate-spin rounded-full h-8 w-8 border-2 border-emerald-500 border-t-transparent"></div>
+                    <p class="text-gray-400 mt-2">Kuro is analyzing your habits...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Add Habit Modal -->
+        <div id="add-habit-modal" class="fixed inset-0 z-50 hidden">
+            <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" onclick="closeAddHabitModal()"></div>
+            <div class="absolute right-0 top-0 h-full w-full max-w-md bg-gray-900 border-l border-white/10 p-6 overflow-y-auto animate-slide-right">
+                <div class="flex items-center justify-between mb-6">
+                    <h3 class="text-xl font-semibold">➕ Add New Habit</h3>
+                    <button onclick="closeAddHabitModal()" class="text-gray-400 hover:text-white">✕</button>
+                </div>
                 <form id="add-habit-form" class="space-y-4">
                     <div>
                         <label class="block text-sm text-gray-400 mb-1">Habit Title</label>
-                        <input type="text" id="habit-title" placeholder="e.g., Gym, TryHackMe, HSR Login" 
-                               class="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-green-500">
-                    </div>
-                    <div>
-                        <label class="block text-sm text-gray-400 mb-1">Scheduled Time</label>
-                        <input type="time" id="habit-time" value="08:00"
-                               class="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-green-500">
+                        <input type="text" id="habit-title" placeholder="e.g., Gym, TryHackMe, Reading" 
+                               class="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500">
                     </div>
                     <div>
                         <label class="block text-sm text-gray-400 mb-1">Category</label>
-                        <select id="habit-category" class="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-green-500">
+                        <select id="habit-category" class="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-emerald-500">
                             <option value="General" class="bg-gray-800">🎯 General</option>
                             <option value="Gym" class="bg-gray-800">💪 Gym</option>
                             <option value="Study" class="bg-gray-800">📚 Study</option>
                             <option value="Game" class="bg-gray-800">🎮 Game</option>
                             <option value="Work" class="bg-gray-800">💼 Work</option>
+                            <option value="Health" class="bg-gray-800">🏥 Health</option>
                         </select>
                     </div>
+                    <div>
+                        <label class="block text-sm text-gray-400 mb-1">Monthly Target (days)</label>
+                        <input type="number" id="habit-target-month" value="30" min="1" max="31"
+                               class="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-emerald-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm text-gray-400 mb-1">Weekly Target (days)</label>
+                        <input type="number" id="habit-target-week" value="7" min="1" max="7"
+                               class="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-emerald-500">
+                    </div>
                     <button type="submit" 
-                            class="w-full bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 px-4 py-2 rounded-lg font-medium transition">
+                            class="w-full bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 px-4 py-2 rounded-lg font-medium transition">
                         Add Habit
                     </button>
                 </form>
-                <div id="form-response" class="mt-4 hidden"></div>
-            </div>
-
-            <!-- Habits List -->
-            <div class="lg:col-span-2 glass p-6">
-                <h2 class="text-xl font-semibold mb-4 flex items-center">
-                    <span class="mr-2">📋</span> Today's Habits
-                </h2>
-                <div id="habits-list" class="space-y-3 max-h-[500px] overflow-y-auto pr-2">
-                    <div class="text-center text-gray-500 py-8">Loading habits...</div>
-                </div>
             </div>
         </div>
+
+        <!-- Toast Container -->
+        <div id="toast-container" class="fixed top-4 right-4 z-50 space-y-2"></div>
     </div>
 
-    <!-- Toast Container -->
-    <div id="toast-container" class="fixed top-4 right-4 z-50 space-y-2"></div>
-
     <script>
+        // State
+        let currentView = 'monthly';
+        let currentData = null;
+        let sparklineChart = null;
+        let donutChart = null;
+        
+        // Initialize
         document.addEventListener('DOMContentLoaded', () => {
-            loadHabits();
-            setInterval(loadHabits, 30000);
+            populateYearFilters();
+            populateWeekFilters();
+            setDefaultFilters();
+            loadData();
         });
-
+        
+        function populateYearFilters() {
+            const currentYear = new Date().getFullYear();
+            const yearSelect = document.getElementById('filter-year');
+            const weekYearSelect = document.getElementById('filter-week-year');
+            
+            for (let y = currentYear; y >= currentYear - 2; y--) {
+                yearSelect.innerHTML += `<option value="${y}" ${y === currentYear ? 'selected' : ''}>${y}</option>`;
+                weekYearSelect.innerHTML += `<option value="${y}" ${y === currentYear ? 'selected' : ''}>${y}</option>`;
+            }
+        }
+        
+        function populateWeekFilters() {
+            const weekSelect = document.getElementById('filter-week');
+            for (let w = 1; w <= 53; w++) {
+                weekSelect.innerHTML += `<option value="${w}">Week ${w}</option>`;
+            }
+        }
+        
+        function setDefaultFilters() {
+            const now = new Date();
+            document.getElementById('filter-month').value = now.getMonth() + 1;
+            document.getElementById('filter-week').value = getISOWeek(now);
+        }
+        
+        function getISOWeek(date) {
+            const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+            const dayNum = d.getUTCDay() || 7;
+            d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+            const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+            return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+        }
+        
+        function switchView(view) {
+            currentView = view;
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.view === view);
+            });
+            document.getElementById('monthly-filters').classList.toggle('hidden', view !== 'monthly');
+            document.getElementById('weekly-filters').classList.toggle('hidden', view !== 'weekly');
+            
+            if (view === 'monthly') {
+                loadData();
+            } else {
+                loadWeeklyData();
+            }
+        }
+        
+        async function loadData() {
+            const year = document.getElementById('filter-year').value;
+            const month = document.getElementById('filter-month').value;
+            
+            try {
+                const response = await fetch(`/api/habits/monthly?year=${year}&month=${month}`);
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    currentData = data.data;
+                    renderMonthlyGrid(data.data);
+                    renderStats(data.data);
+                    renderCharts(data.data);
+                    renderProgressBars(data.data);
+                    updateReportCard(data.data);
+                } else {
+                    showToast('Error loading data: ' + data.message, 'error');
+                }
+            } catch (err) {
+                showToast('Error: ' + err.message, 'error');
+            }
+        }
+        
+        async function loadWeeklyData() {
+            const year = document.getElementById('filter-week-year').value;
+            const week = document.getElementById('filter-week').value;
+            
+            try {
+                const response = await fetch(`/api/habits/weekly?year=${year}&week=${week}`);
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    currentData = data.data;
+                    renderWeeklyGrid(data.data);
+                    renderStats(data.data);
+                    renderCharts(data.data);
+                    renderProgressBars(data.data);
+                    updateReportCard(data.data);
+                } else {
+                    showToast('Error loading data: ' + data.message, 'error');
+                }
+            } catch (err) {
+                showToast('Error: ' + err.message, 'error');
+            }
+        }
+        
+        function renderStats(data) {
+            document.getElementById('stat-overall').textContent = data.overall_stats.overall_percentage + '%';
+            document.getElementById('stat-completed').textContent = data.overall_stats.total_completed;
+            document.getElementById('stat-habits').textContent = data.habits.length;
+            
+            // Calculate best streak
+            let bestStreak = 0;
+            const days = data.days_in_month || 7;
+            for (let d = 1; d <= days; d++) {
+                const dayTotal = data.daily_totals[d] || 0;
+                if (dayTotal === data.habits.length && dayTotal > 0) {
+                    bestStreak++;
+                } else if (bestStreak > 0) {
+                    break;
+                }
+            }
+            document.getElementById('stat-streak').textContent = bestStreak;
+        }
+        
+        function renderMonthlyGrid(data) {
+            const { habits, days_in_month, daily_totals } = data;
+            // FIX: Use UTC date to match backend's date format (YYYY-MM-DD)
+            const now = new Date();
+            const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+            const isCurrentMonth = todayUTC.getUTCFullYear() === data.year && todayUTC.getUTCMonth() + 1 === data.month;
+            const todayDate = todayUTC.getUTCDate();
+            
+            const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 
+                               'July', 'August', 'September', 'October', 'November', 'December'];
+            document.getElementById('grid-title').textContent = `📅 ${monthNames[data.month - 1]} ${data.year} - Habit Grid`;
+            
+            let html = '<table class="w-full text-xs">';
+            
+            // Header row with day numbers
+            html += '<thead><tr><th class="text-left p-2 w-48">Habit</th>';
+            for (let d = 1; d <= days_in_month; d++) {
+                // FIX: Use UTC date for day-of-week calculation
+                const dayOfWeek = new Date(Date.UTC(data.year, data.month - 1, d)).getUTCDay();
+                const dayLabel = ['S', 'M', 'T', 'W', 'T', 'F', 'S'][dayOfWeek];
+                const isToday = isCurrentMonth && d === todayDate;
+                html += `<th class="p-1 text-center ${isToday ? 'text-emerald-400 font-bold' : 'text-gray-500'}">${d}<br><span class="text-[8px]">${dayLabel}</span></th>`;
+            }
+            html += '<th class="p-2 text-center w-32">Progress</th></tr></thead>';
+            
+            // Data rows
+            html += '<tbody>';
+            habits.forEach(habit => {
+                const catClass = `cat-${habit.category.toLowerCase()}`;
+                html += `<tr class="border-t border-white/5">`;
+                html += `<td class="p-2">
+                    <div class="flex items-center gap-2">
+                        <span class="w-2 h-2 rounded-full ${catClass}"></span>
+                        <span class="font-medium truncate flex-1">${escapeHtml(habit.title)}</span>
+                        <button onclick="deleteHabit(${habit.id})" class="text-red-400 hover:text-red-300 transition p-1" title="Delete habit">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                            </svg>
+                        </button>
+                    </div>
+                </td>`;
+                
+                for (let d = 1; d <= days_in_month; d++) {
+                    const status = habit.daily_log[d] || 0;
+                    const isFuture = isCurrentMonth && d > todayDate;
+                    const cellClass = isFuture ? 'future' : (status === 1 ? 'done' : 'missed');
+                    const icon = status === 1 ? '✓' : '';
+                    // FIX: Add click handler for interactive cells (only for non-future dates)
+                    const clickHandler = isFuture ? '' : `onclick="toggleHabitDay(${habit.id}, ${data.year}, ${data.month}, ${d}, this)"`;
+                    html += `<td class="p-1"><div class="grid-cell ${cellClass} mx-auto" ${clickHandler} data-habit="${habit.id}" data-day="${d}">${icon}</div></td>`;
+                }
+                
+                html += `<td class="p-2">
+                    <div class="flex items-center gap-2">
+                        <div class="flex-1 progress-bar">
+                            <div class="progress-fill ${catClass}" style="width: ${habit.percentage}%"></div>
+                        </div>
+                        <span class="text-xs text-gray-400 w-10">${habit.percentage}%</span>
+                    </div>
+                </td>`;
+                html += '</tr>';
+            });
+            html += '</tbody></table>';
+            
+            document.getElementById('habit-grid').innerHTML = html;
+        }
+        
+        function renderWeeklyGrid(data) {
+            const { habits, day_names, daily_totals, week_start } = data;
+            
+            document.getElementById('grid-title').textContent = `📆 Week ${data.week}, ${data.year} - Habit Grid`;
+            
+            // FIX: Use UTC date for week comparison
+            const now = new Date();
+            const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+            const weekStartUTC = new Date(week_start + 'T00:00:00Z');
+            const weekEndUTC = new Date(weekStartUTC);
+            weekEndUTC.setUTCDate(weekEndUTC.getUTCDate() + 6);
+            
+            let html = '<table class="w-full text-xs">';
+            
+            // Header row
+            html += '<thead><tr><th class="text-left p-2 w-48">Habit</th>';
+            day_names.forEach((day, i) => {
+                html += `<th class="p-1 text-center text-gray-500">${day}</th>`;
+            });
+            html += '<th class="p-2 text-center w-32">Progress</th></tr></thead>';
+            
+            // Data rows
+            html += '<tbody>';
+            habits.forEach(habit => {
+                const catClass = `cat-${habit.category.toLowerCase()}`;
+                html += `<tr class="border-t border-white/5">`;
+                html += `<td class="p-2">
+                    <div class="flex items-center gap-2">
+                        <span class="w-2 h-2 rounded-full ${catClass}"></span>
+                        <span class="font-medium truncate flex-1">${escapeHtml(habit.title)}</span>
+                        <button onclick="deleteHabit(${habit.id})" class="text-red-400 hover:text-red-300 transition p-1" title="Delete habit">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                            </svg>
+                        </button>
+                    </div>
+                </td>`;
+                
+                for (let d = 0; d < 7; d++) {
+                    const status = habit.daily_log[d] || 0;
+                    const cellClass = status === 1 ? 'done' : 'missed';
+                    const icon = status === 1 ? '✓' : '';
+                    // FIX: Add click handler for interactive cells
+                    const dayDate = new Date(weekStartUTC);
+                    dayDate.setUTCDate(dayDate.getUTCDate() + d);
+                    const dayDateStr = dayDate.toISOString().split('T')[0];
+                    const isFuture = dayDate > todayUTC;
+                    const clickHandler = isFuture ? '' : `onclick="toggleHabitDay(${habit.id}, ${data.year}, ${data.week}, ${d}, this, true)"`;
+                    html += `<td class="p-1"><div class="grid-cell ${cellClass} mx-auto" ${clickHandler} data-habit="${habit.id}" data-day="${d}">${icon}</div></td>`;
+                }
+                
+                html += `<td class="p-2">
+                    <div class="flex items-center gap-2">
+                        <div class="flex-1 progress-bar">
+                            <div class="progress-fill ${catClass}" style="width: ${habit.percentage}%"></div>
+                        </div>
+                        <span class="text-xs text-gray-400 w-10">${habit.percentage}%</span>
+                    </div>
+                </td>`;
+                html += '</tr>';
+            });
+            html += '</tbody></table>';
+            
+            document.getElementById('habit-grid').innerHTML = html;
+        }
+        
+        function renderCharts(data) {
+            renderSparkline(data);
+            renderDonut(data);
+        }
+        
+        function renderSparkline(data) {
+            const days = data.days_in_month || 7;
+            const series = [];
+            const categories = [];
+            
+            for (let d = 1; d <= days; d++) {
+                series.push(data.daily_totals[d] || 0);
+                categories.push(d.toString());
+            }
+            
+            const options = {
+                series: [{ name: 'Completed', data: series }],
+                chart: {
+                    type: 'area',
+                    height: 150,
+                    toolbar: { show: false },
+                    background: 'transparent',
+                    animations: { enabled: true }
+                },
+                colors: ['#10b981'],
+                fill: {
+                    type: 'gradient',
+                    gradient: {
+                        shadeIntensity: 1,
+                        opacityFrom: 0.7,
+                        opacityTo: 0.1,
+                        stops: [0, 100]
+                    }
+                },
+                stroke: { curve: 'smooth', width: 2 },
+                xaxis: {
+                    categories: categories,
+                    labels: { style: { colors: '#6b7280', fontSize: '10px' } },
+                    axisBorder: { show: false },
+                    axisTicks: { show: false }
+                },
+                yaxis: {
+                    labels: { style: { colors: '#6b7280', fontSize: '10px' } },
+                    max: data.habits.length
+                },
+                grid: {
+                    borderColor: 'rgba(255,255,255,0.05)',
+                    strokeDashArray: 3
+                },
+                tooltip: {
+                    theme: 'dark',
+                    y: { formatter: val => val + ' habits' }
+                }
+            };
+            
+            if (sparklineChart) {
+                sparklineChart.destroy();
+            }
+            sparklineChart = new ApexCharts(document.querySelector("#sparkline-chart"), options);
+            sparklineChart.render();
+        }
+        
+        function renderDonut(data) {
+            const completed = data.overall_stats.total_completed;
+            const possible = data.overall_stats.total_possible;
+            const missed = possible - completed;
+            
+            const options = {
+                series: [completed, missed],
+                chart: {
+                    type: 'donut',
+                    height: 180,
+                    background: 'transparent'
+                },
+                labels: ['Completed', 'Missed'],
+                colors: ['#10b981', '#ef4444'],
+                plotOptions: {
+                    pie: {
+                        donut: {
+                            size: '70%',
+                            labels: {
+                                show: true,
+                                name: { show: true, color: '#9ca3af' },
+                                value: { 
+                                    show: true, 
+                                    color: '#fff',
+                                    fontSize: '20px',
+                                    fontWeight: 600,
+                                    formatter: val => Math.round(val / possible * 100) + '%'
+                                },
+                                total: {
+                                    show: true,
+                                    label: 'Total',
+                                    color: '#9ca3af',
+                                    formatter: () => possible
+                                }
+                            }
+                        }
+                    }
+                },
+                legend: { show: false },
+                dataLabels: { enabled: false },
+                stroke: { width: 0 }
+            };
+            
+            if (donutChart) {
+                donutChart.destroy();
+            }
+            donutChart = new ApexCharts(document.querySelector("#donut-chart"), options);
+            donutChart.render();
+        }
+        
+        function renderProgressBars(data) {
+            const container = document.getElementById('habit-progress-bars');
+            
+            if (!data.habits || data.habits.length === 0) {
+                container.innerHTML = '<div class="text-center text-gray-500 py-4">No habits tracked yet.</div>';
+                return;
+            }
+            
+            let html = '';
+            data.habits.forEach(habit => {
+                const catClass = `cat-${habit.category.toLowerCase()}`;
+                html += `
+                    <div class="flex items-center gap-4">
+                        <div class="flex items-center gap-2 w-32">
+                            <span class="w-2 h-2 rounded-full ${catClass}"></span>
+                            <span class="text-sm truncate">${escapeHtml(habit.title)}</span>
+                        </div>
+                        <div class="flex-1 progress-bar">
+                            <div class="progress-fill ${catClass}" style="width: ${habit.percentage}%"></div>
+                        </div>
+                        <span class="text-sm text-gray-400 w-20 text-right">${habit.completed}/${habit.target} (${habit.percentage}%)</span>
+                    </div>
+                `;
+            });
+            
+            container.innerHTML = html;
+        }
+        
+        function updateReportCard(data) {
+            const period = currentView === 'monthly' 
+                ? `${getMonthName(data.month)} ${data.year}` 
+                : `Week ${data.week}, ${data.year}`;
+            
+            document.getElementById('report-period').textContent = `${currentView === 'monthly' ? 'Monthly' : 'Weekly'} Report - ${period}`;
+            document.getElementById('report-score').textContent = `Overall Score: ${data.overall_stats.overall_percentage}%`;
+            
+            // Hide report content until generated
+            document.getElementById('report-card').classList.add('hidden');
+            document.getElementById('report-content').textContent = '';
+        }
+        
+        async function generateAIReport() {
+            const btn = document.getElementById('generate-report-btn');
+            const loading = document.getElementById('report-loading');
+            const reportCard = document.getElementById('report-card');
+            const reportContent = document.getElementById('report-content');
+            
+            if (!currentData) {
+                showToast('No data loaded. Please load monthly/weekly data first.', 'error');
+                return;
+            }
+            
+            btn.disabled = true;
+            btn.classList.add('opacity-50');
+            loading.classList.remove('hidden');
+            reportCard.classList.add('hidden');
+            
+            try {
+                const year = currentView === 'monthly' 
+                    ? document.getElementById('filter-year').value 
+                    : document.getElementById('filter-week-year').value;
+                const period = currentView === 'monthly' 
+                    ? document.getElementById('filter-month').value 
+                    : document.getElementById('filter-week').value;
+                
+                const response = await fetch('/api/habits/evaluate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        period_type: currentView,
+                        year: parseInt(year),
+                        period: parseInt(period)
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    reportCard.classList.remove('hidden');
+                    if (parseFloat(data.score) < 90) {
+                        reportCard.classList.add('scolding');
+                    } else {
+                        reportCard.classList.remove('scolding');
+                    }
+                    
+                    // Typewriter effect
+                    typewriterEffect(reportContent, data.evaluation, 20);
+                    
+                    if (data.cached) {
+                        showToast('Loaded cached evaluation', 'info');
+                    }
+                } else {
+                    showToast('Error: ' + data.message, 'error');
+                }
+            } catch (err) {
+                showToast('Error: ' + err.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.classList.remove('opacity-50');
+                loading.classList.add('hidden');
+            }
+        }
+        
+        function typewriterEffect(element, text, speed = 20) {
+            element.textContent = '';
+            let i = 0;
+            
+            function type() {
+                if (i < text.length) {
+                    element.textContent += text.charAt(i);
+                    i++;
+                    setTimeout(type, speed);
+                }
+            }
+            
+            type();
+        }
+        
+        function getMonthName(month) {
+            const months = ['January', 'February', 'March', 'April', 'May', 'June', 
+                           'July', 'August', 'September', 'October', 'November', 'December'];
+            return months[month - 1] || 'Unknown';
+        }
+        
+        // Add Habit Modal
         document.getElementById('add-habit-form').addEventListener('submit', async (e) => {
             e.preventDefault();
             
             const title = document.getElementById('habit-title').value.trim();
-            const time = document.getElementById('habit-time').value;
             const category = document.getElementById('habit-category').value;
+            const targetMonth = document.getElementById('habit-target-month').value;
+            const targetWeek = document.getElementById('habit-target-week').value;
             
             if (!title) {
-                showFormResponse('Please enter a habit title.', 'error');
+                showToast('Please enter a habit title.', 'error');
                 return;
             }
             
             try {
                 const formData = new FormData();
                 formData.append('title', title);
-                formData.append('scheduled_time', time);
+                formData.append('scheduled_time', '08:00');
                 formData.append('category', category);
                 
                 const response = await fetch('/api/habits/add', {
@@ -197,135 +913,127 @@
                 const data = await response.json();
                 
                 if (data.success) {
-                    showFormResponse('Habit added successfully!', 'success');
+                    // Update targets
+                    await fetch(`/api/habits/${data.habit_id}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            target_per_month: parseInt(targetMonth),
+                            target_per_week: parseInt(targetWeek)
+                        })
+                    });
+                    
+                    showToast('Habit added successfully!', 'success');
+                    closeAddHabitModal();
                     document.getElementById('add-habit-form').reset();
-                    loadHabits();
+                    loadData();
                 } else {
-                    showFormResponse(data.error || 'Failed to add habit.', 'error');
+                    showToast(data.error || 'Failed to add habit.', 'error');
                 }
             } catch (err) {
-                showFormResponse('Error: ' + err.message, 'error');
+                showToast('Error: ' + err.message, 'error');
             }
         });
-
-        function showFormResponse(message, type) {
-            const el = document.getElementById('form-response');
-            el.classList.remove('hidden');
-            el.className = `mt-4 p-3 rounded-lg ${type === 'success' ? 'bg-green-500/20 text-green-300' : 'bg-red-500/20 text-red-300'}`;
-            el.textContent = message;
-            setTimeout(() => el.classList.add('hidden'), 5000);
+        
+        function openAddHabitModal() {
+            document.getElementById('add-habit-modal').classList.remove('hidden');
         }
-
-        async function loadHabits() {
+        
+        function closeAddHabitModal() {
+            document.getElementById('add-habit-modal').classList.add('hidden');
+        }
+        
+        // FIX 2: Toggle habit day status (interactive grid cells)
+        async function toggleHabitDay(habitId, year, period, day, element, isWeekly = false) {
+            const cell = element.closest ? element : element;
+            const isDone = cell.classList.contains('done');
+            
+            // Calculate the date string for this cell
+            let dateStr;
+            if (isWeekly) {
+                // For weekly view, we need to calculate the actual date
+                const weekStart = new Date(Date.UTC(year, 0, 1));
+                weekStart.setUTCDate(weekStart.getUTCDate() + (period - 1) * 7 - weekStart.getUTCDay() + 1);
+                const cellDate = new Date(weekStart);
+                cellDate.setUTCDate(cellDate.getUTCDate() + day);
+                dateStr = cellDate.toISOString().split('T')[0];
+            } else {
+                dateStr = `${year}-${String(period).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+            }
+            
             try {
-                const response = await fetch('/api/habits');
+                const formData = new FormData();
+                formData.append('habit_id', habitId);
+                formData.append('date', dateStr);
+                formData.append('status', isDone ? '0' : '1');
+                
+                const response = await fetch('/api/habits/toggle', {
+                    method: 'POST',
+                    body: formData
+                });
+                
                 const data = await response.json();
                 
-                const statsResponse = await fetch('/api/habits/stats');
-                const statsData = await statsResponse.json();
-                
-                // Update stats
-                if (statsData.stats) {
-                    document.getElementById('stat-percentage').textContent = statsData.stats.percentage + '%';
-                    document.getElementById('stat-total').textContent = statsData.stats.total;
-                    document.getElementById('stat-done').textContent = statsData.stats.done;
-                    document.getElementById('stat-pending').textContent = statsData.stats.pending;
-                }
-                
-                const container = document.getElementById('habits-list');
-                
-                if (!data.habits || data.habits.length === 0) {
-                    container.innerHTML = '<div class="text-center text-gray-500 py-8">No habits yet, Master Irfan. Add your first daily routine!</div>';
-                    return;
-                }
-                
-                container.innerHTML = data.habits.map(h => {
-                    const isDone = h.is_done === 1;
-                    const statusClass = isDone ? 'habit-done' : 'habit-pending';
-                    const catClass = `cat-${h.category.toLowerCase()}`;
+                if (data.success) {
+                    // Update cell appearance
+                    if (isDone) {
+                        cell.classList.remove('done');
+                        cell.classList.add('missed');
+                        cell.textContent = '';
+                    } else {
+                        cell.classList.remove('missed');
+                        cell.classList.add('done');
+                        cell.textContent = '✓';
+                    }
                     
-                    return `
-                        <div class="glass-card p-4 ${statusClass}">
-                            <div class="flex items-center justify-between">
-                                <div class="flex items-center gap-3 flex-1">
-                                    ${isDone 
-                                        ? '<span class="check-animation text-2xl">✅</span>' 
-                                        : '<span class="text-2xl">⏳</span>'
-                                    }
-                                    <div>
-                                        <h3 class="font-semibold ${isDone ? 'line-through text-gray-400' : 'text-white'}">${escapeHtml(h.title)}</h3>
-                                        <div class="flex items-center gap-2 mt-1">
-                                            <span class="category-badge ${catClass}">${h.category}</span>
-                                            <span class="text-xs text-gray-500">🕐 ${h.scheduled_time}</span>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="flex items-center gap-2">
-                                    ${isDone 
-                                        ? `<button onclick="undoHabit(${h.id})" class="text-xs bg-yellow-500/20 text-yellow-300 px-3 py-1 rounded hover:bg-yellow-500/30 transition">Undo</button>`
-                                        : `<button onclick="markDone(${h.id})" class="text-xs bg-green-500/20 text-green-300 px-3 py-1 rounded hover:bg-green-500/30 transition">Mark Done</button>`
-                                    }
-                                    <button onclick="deleteHabit(${h.id})" class="text-xs bg-red-500/20 text-red-300 px-3 py-1 rounded hover:bg-red-500/30 transition">✕</button>
-                                </div>
-                            </div>
-                        </div>
-                    `;
-                }).join('');
-            } catch (err) {
-                console.error('Failed to load habits:', err);
-            }
-        }
-
-        async function markDone(habitId) {
-            try {
-                const response = await fetch(`/api/habits/${habitId}/done`, { method: 'POST' });
-                const data = await response.json();
-                if (data.success) {
-                    showToast('Habit marked as done! 🎉', 'success');
-                    loadHabits();
+                    // FIX 4: Refresh all data to sync state
+                    if (currentView === 'monthly') {
+                        await loadData();
+                    } else {
+                        await loadWeeklyData();
+                    }
+                    
+                    showToast(isDone ? 'Marked as missed' : 'Marked as done! ✓', 'success');
+                } else {
+                    showToast(data.error || 'Failed to toggle status', 'error');
                 }
             } catch (err) {
                 showToast('Error: ' + err.message, 'error');
             }
         }
-
-        async function undoHabit(habitId) {
-            try {
-                const response = await fetch(`/api/habits/${habitId}/undo`, { method: 'POST' });
-                const data = await response.json();
-                if (data.success) {
-                    loadHabits();
-                }
-            } catch (err) {
-                showToast('Error: ' + err.message, 'error');
-            }
-        }
-
+        
+        // Delete habit function
         async function deleteHabit(habitId) {
-            if (!confirm('Delete this habit?')) return;
+            if (!confirm('Delete this habit and all its history?')) return;
             try {
                 const response = await fetch(`/api/habits/${habitId}`, { method: 'DELETE' });
                 const data = await response.json();
-                if (data.success) {
+                if (data.status === 'success') {
                     showToast('Habit deleted.', 'info');
-                    loadHabits();
+                    if (currentView === 'monthly') {
+                        await loadData();
+                    } else {
+                        await loadWeeklyData();
+                    }
+                } else {
+                    showToast(data.message || 'Failed to delete habit', 'error');
                 }
             } catch (err) {
                 showToast('Error: ' + err.message, 'error');
             }
         }
-
+        
         function showToast(message, type = 'info') {
             const container = document.getElementById('toast-container');
             const toast = document.createElement('div');
             
             const colors = {
-                success: 'from-green-600 to-emerald-600',
+                success: 'from-emerald-600 to-teal-600',
                 error: 'from-red-600 to-pink-600',
                 info: 'from-indigo-600 to-purple-600'
             };
             
-            toast.className = `glass p-4 rounded-lg bg-gradient-to-r ${colors[type] || colors.info} max-w-sm`;
+            toast.className = `glass p-4 rounded-lg bg-gradient-to-r ${colors[type] || colors.info} max-w-sm animate-fade-in`;
             toast.innerHTML = `
                 <div class="flex items-center gap-3">
                     <span class="text-xl">${type === 'success' ? '🎉' : type === 'error' ? '❌' : 'ℹ️'}</span>
@@ -336,7 +1044,7 @@
             container.appendChild(toast);
             setTimeout(() => toast.remove(), 5000);
         }
-
+        
         function escapeHtml(text) {
             const div = document.createElement('div');
             div.textContent = text;

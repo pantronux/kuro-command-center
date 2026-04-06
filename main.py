@@ -756,6 +756,193 @@ async def get_end_of_day_report():
     report = daily_habits_db.get_end_of_day_report()
     return {"status": "success", "report": report}
 
+@app.post("/api/habits/toggle")
+async def toggle_habit_day(
+    habit_id: int = Form(...),
+    date: str = Form(...),
+    status: str = Form("1")
+):
+    """V2.0 FIX: Toggle habit status for a specific date."""
+    import sqlite3
+    try:
+        from datetime import datetime
+        from calendar import monthrange
+        target_date = datetime.fromisoformat(date).date()
+        new_status = int(status)
+        
+        conn = sqlite3.connect(daily_habits_db.HABITS_DB)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            INSERT INTO habit_logs (habit_id, log_date, status)
+            VALUES (?, ?, ?)
+            ON CONFLICT(habit_id, log_date) DO UPDATE SET status = ?
+        """, (habit_id, date, new_status, new_status))
+        
+        if new_status == 1:
+            cursor.execute("""
+                INSERT OR IGNORE INTO completion_history (habit_id, completed_date, completed_at)
+                VALUES (?, ?, ?)
+            """, (habit_id, date, datetime.now().isoformat()))
+        else:
+            cursor.execute("""
+                DELETE FROM completion_history WHERE habit_id = ? AND completed_date = ?
+            """, (habit_id, date))
+        
+        conn.commit()
+        conn.close()
+        
+        # Invalidate AI evaluation cache
+        year = target_date.year
+        month = target_date.month
+        _, days_in_month = monthrange(year, month)
+        period_start = f"{year}-{month:02d}-01"
+        period_end = f"{year}-{month:02d}-{days_in_month:02d}"
+        try:
+            daily_habits_db.save_ai_evaluation(None, 'monthly', period_start, period_end, 0, '')
+        except:
+            pass
+        
+        return {"success": True, "message": f"Habit toggled to {'done' if new_status else 'missed'}"}
+    except Exception as e:
+        logger.error(f"Error toggling habit: {e}")
+        return {"success": False, "error": str(e)}
+
+# --- V2.0: Monthly/Weekly Analytics Endpoints ---
+
+@app.get("/api/habits/monthly")
+async def get_monthly_habits(year: int = None, month: int = None):
+    """V2.0: Get monthly habit grid data."""
+    from datetime import date
+    if year is None or month is None:
+        today = date.today()
+        year = today.year
+        month = today.month
+    
+    try:
+        data = daily_habits_db.get_monthly_data(year, month)
+        return {"status": "success", "data": data}
+    except Exception as e:
+        logger.error(f"Error getting monthly data: {e}")
+        return {"status": "error", "message": str(e)}
+
+@app.get("/api/habits/weekly")
+async def get_weekly_habits(year: int = None, week: int = None):
+    """V2.0: Get weekly habit grid data."""
+    from datetime import date
+    if year is None or week is None:
+        today = date.today()
+        year = today.year
+        week = today.isocalendar()[1]
+    
+    try:
+        data = daily_habits_db.get_weekly_data(year, week)
+        return {"status": "success", "data": data}
+    except Exception as e:
+        logger.error(f"Error getting weekly data: {e}")
+        return {"status": "error", "message": str(e)}
+
+@app.post("/api/habits/evaluate")
+async def generate_habit_evaluation(request: Request):
+    """V2.0: Generate AI evaluation for monthly/weekly habit data using Gemini 3."""
+    from google import genai
+    from google.genai import types
+    from google.genai.errors import APIError, ClientError
+    import json
+    
+    try:
+        body = await request.json()
+        period_type = body.get('period_type', 'monthly')  # 'monthly' or 'weekly'
+        year = body.get('year')
+        period = body.get('period')  # month number or week number
+        
+        if not year or not period:
+            return {"status": "error", "message": "Year and period are required"}
+        
+        # Get report data
+        if period_type == 'monthly':
+            report_data = daily_habits_db.get_monthly_report_data(year, period)
+        else:
+            report_data = daily_habits_db.get_weekly_report_data(year, period)
+        
+        # Check cache first
+        cached = daily_habits_db.get_ai_evaluation(
+            None, period_type, report_data['period_start'], report_data['period_end']
+        )
+        if cached:
+            return {
+                "status": "success",
+                "evaluation": cached['evaluation_text'],
+                "score": cached['overall_score'],
+                "cached": True
+            }
+        
+        # Generate AI evaluation using Gemini 3
+        gemini_client = genai.Client(api_key=settings.GEMINI_API_KEY)
+        
+        prompt = f"""Kamu adalah Kuro, asisten dan mentor kedisiplinan yang sangat logis dan agak perfeksionis. Evaluasi data habit bulan/minggu ini.
+
+DATA HABIT {period_type.upper()}:
+{json.dumps(report_data, indent=2, ensure_ascii=False)}
+
+INSTRUKSI:
+1. Jika overall score atau ada habit di bawah 90%, tegur (scold) dengan tegas namun logis. Jelaskan dampak nyata dari kemalasan tersebut terhadap tujuan jangka panjang (misal: jarang gym merusak progres hipertrofi otot, jarang belajar IT menurunkan daya saing).
+2. Jika di atas 90%, berikan pujian layaknya raport sekolah yang memuaskan.
+3. Format response dengan paragraf pendek dan gunakan gaya bahasa mentor profesional.
+4. Gunakan bahasa Indonesia yang profesional namun mengalir.
+5. Berikan analisis per-habit yang spesifik.
+6. Akhiri dengan motivasi untuk periode berikutnya.
+
+EVALUASI:"""
+        
+        response = gemini_client.models.generate_content(
+            model="gemini-3-flash-preview",
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                temperature=0.7,
+                max_output_tokens=2000
+            )
+        )
+        
+        evaluation_text = response.text
+        
+        # Save to cache
+        overall_score = float(report_data['overall_score'].replace('%', ''))
+        daily_habits_db.save_ai_evaluation(
+            None, period_type,
+            report_data['period_start'], report_data['period_end'],
+            overall_score, evaluation_text
+        )
+        
+        return {
+            "status": "success",
+            "evaluation": evaluation_text,
+            "score": report_data['overall_score'],
+            "cached": False
+        }
+        
+    except Exception as e:
+        logger.error(f"Error generating habit evaluation: {e}")
+        return {"status": "error", "message": str(e)}
+
+@app.put("/api/habits/{habit_id}")
+async def update_habit_endpoint(habit_id: int, request: Request):
+    """V2.0: Update habit settings including targets."""
+    try:
+        body = await request.json()
+        daily_habits_db.update_habit(
+            habit_id,
+            title=body.get('title'),
+            scheduled_time=body.get('scheduled_time'),
+            category=body.get('category'),
+            target_per_month=body.get('target_per_month'),
+            target_per_week=body.get('target_per_week')
+        )
+        return {"status": "success", "message": "Habit updated"}
+    except Exception as e:
+        logger.error(f"Error updating habit: {e}")
+        return {"status": "error", "message": str(e)}
+
 # --- Persona API Endpoint ---
 @app.post("/api/persona")
 async def set_persona(request: Request):

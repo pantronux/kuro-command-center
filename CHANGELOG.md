@@ -1,3 +1,63 @@
+# Kuro AI V3.2 Official - Changelog
+
+**Release Date:** 2026-04-06
+**Version:** 3.2.0
+**Codename:** "Habit Tracker V2.0 - Data Viz & AI Scolding"
+
+---
+
+## V3.2.0 - Habit Tracker V2.0 (2026-04-06)
+
+### Major Upgrade: Monthly/Weekly Analytics Dashboard with AI Evaluation
+
+#### Database Schema Refactor (V2.0)
+- **New Table**: `habit_logs` - Daily log entries with date-based tracking (habit_id, log_date, status, notes)
+- **Updated Table**: `daily_habits` - Added `target_per_month` (default 30) and `target_per_week` (default 7) columns
+- **New Table**: `ai_evaluations` - Cache for Gemini 3 monthly/weekly reports (prevents redundant API calls)
+- **Migration**: Auto-detects and adds missing columns to existing databases
+
+#### Backend API Endpoints
+- **GET `/api/habits/monthly`**: Returns monthly grid data with per-habit daily logs, overall stats
+- **GET `/api/habits/weekly`**: Returns weekly grid data with ISO week calculation
+- **POST `/api/habits/evaluate`**: Generates AI evaluation using Gemini 3 with mentor persona
+  - Checks cache first to avoid redundant API calls
+  - Scolds if score < 90%, praises if >= 90%
+  - Returns typewriter-ready formatted text
+- **PUT `/api/habits/{habit_id}`**: Update habit settings including targets
+
+#### Frontend Visualization (ApexCharts)
+- **Monthly Grid**: 31-column grid showing habit completion per day (✓ = done, red = missed, gray = future)
+- **Weekly Grid**: 7-column grid for ISO week view
+- **Sparkline Chart**: Area chart showing daily completion trend across the month/week
+- **Donut Chart**: Completed vs Missed ratio with percentage display
+- **Progress Bars**: Per-habit progress with category-colored fills
+- **Stats Cards**: Overall score, total completed, active habits, best streak
+
+#### AI Report Card
+- **Generate Button**: Triggers Gemini 3 evaluation for current period
+- **Typewriter Effect**: Streams AI response character by character
+- **Scolding Mode**: Red-tinted card when score < 90%
+- **Praise Mode**: Green-tinted card when score >= 90%
+- **Cache System**: Evaluations cached per period to save API costs
+
+#### Filter System
+- **Monthly View**: Month dropdown (Jan-Dec) + Year dropdown (current - 2 years)
+- **Weekly View**: Year dropdown + Week dropdown (1-53)
+- **AJAX Loading**: Filter changes trigger data reload without page refresh
+
+#### UI/UX Improvements
+- **Dark Mode**: Futuristic dark theme with glass morphism effects
+- **Category Colors**: Gym (red), Study (blue), Game (purple), Work (orange), Health (teal), General (indigo)
+- **Responsive**: Mobile-friendly grid with horizontal scroll
+- **Animations**: Fade-in effects, hover states, pulse animations
+
+### Files Changed
+- `kuro_backend/daily_habits_db.py`: Complete V2.0 refactor with new schema and analytics functions
+- `main.py`: Added 4 new API endpoints for V2.0
+- `web_interface/templates/daily_habits.html`: Complete rewrite with ApexCharts, grid visualization, AI Report Card
+
+---
+
 # Kuro AI V3.1 Official - Changelog
 
 **Release Date:** 2026-04-06
