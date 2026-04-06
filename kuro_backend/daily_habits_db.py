@@ -274,9 +274,9 @@ def get_end_of_day_report() -> str:
     stats = get_completion_stats()
     
     if not habits:
-        return "Master Irfan, tidak ada habit yang tercatat hari ini."
+        return "Pantronux, tidak ada habit yang tercatat hari ini."
     
-    report_parts = [f"Laporan hari ini, Master Irfan:"]
+    report_parts = [f"Laporan hari ini, Pantronux:"]
     
     for h in habits:
         status = "✅ Done" if h['is_done'] else "⏳ Pending"

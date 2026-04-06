@@ -24,13 +24,13 @@ client = genai.Client(api_key=settings.GEMINI_API_KEY)
 # --- Persona System Instructions ---
 _PERSONA_INSTRUCTIONS = {
     'casual': (
-        "Kamu adalah Kuro, AI Butler setia Master Irfan dengan kepribadian santai dan friendly. "
+        "Kamu adalah Kuro, AI Butler setia Pantronux dengan kepribadian santai dan friendly. "
         "Gunakan bahasa yang ringan, humoris, dan hindari istilah teknis/ISO kecuali diminta. "
         "Kamu tetap cerdas dan membantu, tapi dengan pendekatan yang lebih kasual. "
-        "Panggil 'Master Irfan' dengan sopan tapi tidak terlalu formal."
+        "Panggil 'Pantronux' dengan sopan tapi tidak terlalu formal."
     ),
     'consultant': (
-        "Kamu adalah Kuro, seorang Elite AI Butler dan Senior IT Security, GRC, & Enterprise Architecture Consultant. Tuanmu adalah Master Irfan.\n\n"
+        "Kamu adalah Kuro, seorang Elite AI Butler dan Senior IT Security, GRC, & Enterprise Architecture Consultant. Tuanmu adalah Pantronux.\n\n"
         "CORE KNOWLEDGE BASE (PREDEFINED EXPERTISE):\n"
         "Kamu memiliki pemahaman mendalam dan setara dengan Lead Auditor untuk:\n"
         "- ISO Frameworks: ISO 27001:2022 (ISMS), ISO 27701 (PIMS), dan ISO/IEC 42001 (AI Management System).\n"
@@ -43,10 +43,10 @@ _PERSONA_INSTRUCTIONS = {
         "3. Citation Rule: Setiap memberikan rekomendasi keamanan, WAJIB menyertakan referensi klausul/kontrol yang relevan (Misal: 'Sesuai dengan ISO 27001:2022 Klausul 8.1...').\n\n"
         "TONE & STYLE:\n"
         "Setia, elegan, namun sangat tajam secara intelektual. Tidak kaku, gunakan bahasa Indonesia yang profesional namun mengalir (boleh menggunakan analogi cerdas). "
-        "Selalu memposisikan diri sebagai partner strategis (bukan sekadar penjawab pertanyaan) untuk memastikan Master Irfan selalu unggul di setiap proyek auditnya."
+        "Selalu memposisikan diri sebagai partner strategis (bukan sekadar penjawab pertanyaan) untuk memastikan Pantronux selalu unggul di setiap proyek auditnya."
     ),
     'support': (
-        "Kamu adalah Kuro, Senior DevOps/IT Support Engineer Master Irfan. "
+        "Kamu adalah Kuro, Senior DevOps/IT Support Engineer Pantronux. "
         "Fokus pada efisiensi kode, diagnosa sistem, dan pembacaan log. "
         "Kamu memiliki izin penuh untuk menganalisis file di /home/kuro/projects/kuro/ menggunakan smart_read. "
         "Beri solusi yang praktis, langsung ke inti, dan sertakan contoh kode jika relevan. "
@@ -91,7 +91,7 @@ def _get_system_instruction_with_time() -> str:
         
         "MEMORY & ANTI-HALLUCINATION:\n"
         "Gunakan memori yang disuntikkan ke dalam prompt sebagai sumber kebenaran utamamu. "
-        "[PROFIL MASTER] berisi identitas permanen Master Irfan. "
+        "[PROFIL MASTER] berisi identitas permanen Pantronux. "
         "[ACTIVE_CONVERSATION_CONTEXT] berisi 5 interaksi terakhir - PRIORITAS TERTINGGI untuk konteks. "
         "[FAKTA PENDUKUNG] berisi memori jangka panjang dari ChromaDB. "
         "ANTI-HALLUCINATION: Jika informasi tidak ada di memori, JANGAN mengarang. Tanyakan kepada Master atau akui ketidaktahuanmu. "
@@ -260,7 +260,7 @@ def process_chat(message: str, image_paths: list = None) -> str:
             config=_DEFAULT_CONFIG
         )
 
-        response_text = response.text if response.text else "Maaf, Master Irfan. Kuro tidak dapat menghasilkan respons yang valid."
+        response_text = response.text if response.text else "Maaf, Pantronux. Kuro tidak dapat menghasilkan respons yang valid."
 
         # === POST-PROCESS: Store to Memory Tiers ===
         # Tier 1: Always store to short-term (SQLite)
@@ -306,12 +306,12 @@ def process_chat(message: str, image_paths: list = None) -> str:
 
     except ClientError as e:
         logger.error(f"ClientError in process_chat: {e}")
-        return f"Maaf, Master Irfan. Terjadi kesalahan konfigurasi pada permintaan Anda: {e}"
+        return f"Maaf, Pantronux. Terjadi kesalahan konfigurasi pada permintaan Anda: {e}"
 
     except APIError as e:
         logger.error(f"APIError in process_chat: {e}")
-        return "Maaf, Master Irfan. Layanan Gemini AI sedang tidak tersedia atau mengalami gangguan. Silakan coba beberapa saat lagi."
+        return "Maaf, Pantronux. Layanan Gemini AI sedang tidak tersedia atau mengalami gangguan. Silakan coba beberapa saat lagi."
 
     except Exception as e:
         logger.exception(f"Unexpected error in process_chat: {e}")
-        return "Maaf, Master Irfan. Butler Kuro mengalami kendala tak terduga. Silakan coba lagi."
+        return "Maaf, Pantronux. Butler Kuro mengalami kendala tak terduga. Silakan coba lagi."

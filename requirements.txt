@@ -17,3 +17,10 @@ openpyxl
 python-pptx
 python-jose[cryptography]
 passlib[bcrypt]
+langgraph
+langchain-google-genai
+langchain-core
+arize-phoenix
+opentelemetry-sdk
+opentelemetry-exporter-otlp
+opentelemetry-instrumentation-langchain

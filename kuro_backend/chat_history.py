@@ -70,21 +70,21 @@ def add_message(platform: str, role: str, content: str, attachments: List[str] =
         if conn:
             conn.close()
 
-def get_history(limit: int = 50, platform: str = None) -> List[Dict]:
-    """Get recent chat history, optionally filtered by platform."""
+def get_history(limit: int = 50, offset: int = 0, platform: str = None) -> List[Dict]:
+    """Get recent chat history with pagination, optionally filtered by platform."""
     conn = None
     try:
         conn = _get_connection()
         cursor = conn.cursor()
         if platform:
             cursor.execute(
-                "SELECT * FROM chat_history WHERE platform = ? ORDER BY timestamp DESC LIMIT ?",
-                (platform, limit)
+                "SELECT * FROM chat_history WHERE platform = ? ORDER BY timestamp DESC LIMIT ? OFFSET ?",
+                (platform, limit, offset)
             )
         else:
             cursor.execute(
-                "SELECT * FROM chat_history ORDER BY timestamp DESC LIMIT ?",
-                (limit,)
+                "SELECT * FROM chat_history ORDER BY timestamp DESC LIMIT ? OFFSET ?",
+                (limit, offset)
             )
         rows = cursor.fetchall()
         
@@ -103,6 +103,24 @@ def get_history(limit: int = 50, platform: str = None) -> List[Dict]:
     except Exception as e:
         logger.error(f"Failed to get chat history: {e}")
         return []
+    finally:
+        if conn:
+            conn.close()
+
+def get_total_count(platform: str = None) -> int:
+    """Get total count of messages for pagination."""
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        if platform:
+            cursor.execute("SELECT COUNT(*) FROM chat_history WHERE platform = ?", (platform,))
+        else:
+            cursor.execute("SELECT COUNT(*) FROM chat_history")
+        return cursor.fetchone()[0]
+    except Exception as e:
+        logger.error(f"Failed to get chat history count: {e}")
+        return 0
     finally:
         if conn:
             conn.close()

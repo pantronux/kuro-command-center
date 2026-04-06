@@ -1,3 +1,141 @@
+# Kuro AI V4.9 Official - Changelog
+
+**Release Date:** 2026-04-06
+**Version:** 4.9.0
+**Codename:** "Proactive Intelligence Research & Intelligence Hub"
+
+---
+
+## V4.9.0 - Proactive Intelligence Research & Intelligence Hub (2026-04-06)
+
+### Major Upgrade: Autonomous Research System with Serper.dev Integration
+
+#### 1. Serper.dev Search Tool
+- **New Module**: `kuro_backend/tools/serper_tool.py` - Web search integration
+- **Functions**: `serper_search()`, `serper_news()`, `serper_scholar()`
+- **Indonesia Focus**: Parameters `gl: id` and `hl: id` for Indonesian market relevance
+- **API Key**: Uses `SERPER_API_KEY` from `.env`
+
+#### 2. Intelligence Briefings Database
+- **New Module**: `kuro_backend/intelligence_db.py` - SQLite storage for daily briefings
+- **Table**: `intelligence_briefings` with columns: id, date, summary_text, raw_json_data, experimental_signals
+- **Functions**: `save_briefing()`, `get_briefings()`, `search_briefings()`, `get_briefing_by_date()`
+- **Log Storage**: Briefings saved to `logs/briefings/briefing_YYYY-MM-DD.json`
+
+#### 3. Intelligence Research Engine
+- **New Module**: `kuro_backend/intelligence_engine.py` - Complete research pipeline
+- **Research Pillars**:
+  - IT Security & Compliance: UU PDP, ISO 27001, OWASP for LLM
+  - AI Technology: Agentic AI, Autonomous RAG, AI productivity tools
+  - Finance & Business: BEI tech stocks, SaaS AI opportunities, IT passive income
+  - Lifestyle & Fitness: Body recomposition science, nutrition optimization
+- **Synthesis**: Gemini 3.1 Flash analyzes search results and generates structured briefing
+- **Report Format**: 7-section formal report (Status Pagi, Intelijen Sektoral, Wawasan Teknologi, Wawasan Finansial, Rekomendasi Eksperimental, Catatan Kesehatan, Penutup)
+- **Telegram Integration**: Formatted markdown message sent to Pantronux's Telegram
+
+#### 4. APScheduler Integration
+- **Daily Briefing**: Scheduled at 08:00 AM via `send_daily_intelligence_briefing()`
+- **Manual Trigger**: `GET /api/intelligence/run` endpoint for on-demand research
+- **Combined Scheduler**: Reminder, Habits & Intelligence scheduler unified
+
+#### 5. Intelligence Hub Dashboard
+- **New Template**: `web_interface/templates/intelligence.html` - List-Detail layout
+- **Features**:
+  - Left sidebar: Date-based briefing list with search functionality
+  - Right panel: Full briefing content with markdown rendering
+  - Category tags: #Security, #AI, #Finance color-coded labels
+  - Glassmorphism styling consistent with One UI design
+- **API Endpoints**:
+  - `GET /api/intelligence/history` - Paginated briefing history with search
+  - `GET /api/intelligence/latest` - Latest briefing
+  - `GET /api/intelligence/run` - Manual trigger
+  - `GET /intelligence` - Dashboard page
+
+#### Files Changed
+- **NEW**: `kuro_backend/tools/serper_tool.py` - Serper.dev search tool
+- **NEW**: `kuro_backend/intelligence_db.py` - Briefing storage
+- **NEW**: `kuro_backend/intelligence_engine.py` - Research pipeline
+- **NEW**: `web_interface/templates/intelligence.html` - Intelligence Hub dashboard
+- **MODIFIED**: `main.py` - Added scheduler job, API endpoints, intelligence imports
+- **MODIFIED**: `CHANGELOG.md` - Version bump to 4.9.0
+
+---
+
+## V4.8.0 - Proactive Intelligence, Observability & Tool Use (2026-04-06)
+
+### Major Upgrade: Arize Phoenix Observability, LangGraph Tool Use, Web UI Revamp
+
+#### 1. Arize Phoenix Observability (Black Box System)
+- **New Module**: `kuro_backend/observability.py` - Complete observability framework
+- **Phoenix Server**: Auto-starts on port 6006 with simple auth (username: pantronux)
+- **OpenTelemetry Integration**: OTLP exporter sends traces to Phoenix
+- **Node Tracing**: Every LangGraph node (supervisor, compliance, habit, tool, response, memory) traced with duration, input/output
+- **Guardrails Tracking**: Logs validation failures, re-ask loops, original vs corrected responses
+- **Token Usage Monitoring**: Per-session token tracking with 5000 token alert threshold
+- **Client Data Labeling**: Queries related to compliance/clients automatically labeled for filtering
+- **Session Context**: user_id, session_id, thread_id enriched on every trace
+- **New API Endpoints**:
+  - `GET /api/observability/status` - Observability component status
+  - `GET /api/observability/tokens` - Token usage per session
+  - `GET /api/observability/cleanup` - Cleanup old sessions
+  - `GET /observability` - Dashboard page with Phoenix link
+
+#### 2. LangGraph Tool Use ("The Hands")
+- **New Module**: `kuro_backend/tools/system_tools.py` - LangChain @tool decorated system tools
+- **Excel Generator Tool**: `generate_excel_report()` - Creates .xlsx from JSON data using pandas + openpyxl
+- **File Manager Tool**: `manage_files()` - List, read, write, delete, info files in `/home/kuro/exports/`
+- **Report Templater Tool**: `generate_report_template()` - Generates audit/compliance reports (audit_findings, compliance_gap, risk_assessment, executive_summary)
+- **Security Sandbox**: Path validation prevents traversal outside exports directory, file extension whitelist, 50MB size limit
+- **HITL Interrupt**: Write/delete operations require Master approval before execution
+- **LangGraph Integration**: New `tool_node` added to graph, supervisor routes tool-related queries
+- **KuroState Updates**: Added `tool_execution_result` and `requires_approval` fields
+- **Exports Directory**: Created at `/home/kuro/exports/`
+
+#### 3. Web UI Revamp - One UI + Glassmorphism + Infinite Scroll
+- **CSS Redesign**: Complete rewrite with CSS variables for glassmorphism (`--glass-bg`, `--glass-border`, `--glass-blur`)
+- **One UI Shapes**: Border-radius 24px-32px for containers, cards, chat bubbles
+- **Glassmorphism Effects**: Sidebar, header, and cards use backdrop-filter blur with transparency
+- **Floating Chat Bubbles**: Subtle drop-shadows for "mengambang" effect
+- **Enhanced Typography**: Line-height 1.6 for readability, wider padding (24px mobile, 48px desktop)
+- **Infinite Scroll**: Paginated chat history (20 messages/page), scroll anchor retention, loading spinner
+- **Backend Pagination**: `get_history()` now supports `offset` parameter, `get_total_count()` added
+- **API Update**: `/api/history` returns `has_more` flag for infinite scroll
+
+#### 4. Global Identity Rebranding: "Master Irfan" → "Pantronux"
+- **Code Updates**: All system prompts, error messages, persona instructions updated
+- **Database**: `master_profile.json` name changed to "Pantronux"
+- **Web UI**: Profile name, welcome messages, error messages updated
+- **JavaScript**: Error messages, welcome messages, user avatar initial changed to "P"
+- **Perpetual Memory**: User ID changed to "pantronux", memory templates updated
+- **Files Modified**: 11 source files, 2 HTML files, 1 JS file, 1 JSON file
+
+#### 5. Dependencies Added
+- `arize-phoenix` - Phoenix observability server
+- `opentelemetry-sdk` - OpenTelemetry SDK
+- `opentelemetry-exporter-otlp` - OTLP trace exporter
+- `opentelemetry-instrumentation-langchain` - LangChain instrumentation
+
+#### Files Changed
+- **NEW**: `kuro_backend/observability.py` - Observability framework
+- **NEW**: `kuro_backend/tools/system_tools.py` - System tools (Excel, File Manager, Report Templates)
+- **MODIFIED**: `kuro_backend/langgraph_core.py` - Added tool_node, observability tracing, updated state
+- **MODIFIED**: `kuro_backend/chat_history.py` - Added offset pagination, get_total_count()
+- **MODIFIED**: `kuro_backend/core.py` - Updated persona instructions to "Pantronux"
+- **MODIFIED**: `kuro_backend/memory_manager.py` - Updated master profile defaults
+- **MODIFIED**: `kuro_backend/perpetual_memory.py` - Updated user ID and memory templates
+- **MODIFIED**: `kuro_backend/tools.py` - Updated reminder confirmation
+- **MODIFIED**: `kuro_backend/compliance_db.py` - Updated default user field
+- **MODIFIED**: `kuro_backend/daily_habits_db.py` - Updated report messages
+- **MODIFIED**: `main.py` - Added observability endpoints, pagination, observability init
+- **MODIFIED**: `web_interface/templates/index.html` - Glassmorphism classes, scroll loader
+- **MODIFIED**: `web_interface/templates/reminder.html` - Updated messages
+- **MODIFIED**: `web_interface/static/css/style.css` - Complete One UI + Glassmorphism redesign
+- **MODIFIED**: `web_interface/static/js/app.js` - Infinite scroll, pagination, prepend logic
+- **MODIFIED**: `master_profile.json` - Name changed to "Pantronux"
+- **MODIFIED**: `requirements.txt` - Added observability dependencies
+
+---
+
 # Kuro AI V3.2 Official - Changelog
 
 **Release Date:** 2026-04-06

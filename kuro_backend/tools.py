@@ -912,7 +912,7 @@ def add_reminder_tool(event_name: str, datetime_text: str, description: str = ""
     # Format confirmation
     time_str = event_time.strftime("%A, %d %B %Y pukul %H:%M WIB")
     
-    confirmation = f"Baik Master Irfan, saya catat pengingat untuk **{event_name}** pada {time_str}."
+    confirmation = f"Baik Pantronux, saya catat pengingat untuk **{event_name}** pada {time_str}."
     if context:
         confirmation += f"\n\nIni berkaitan dengan: {context[:200]}..."
     confirmation += "\n\nBenar, Master?"

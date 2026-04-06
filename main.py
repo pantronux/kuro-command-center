@@ -22,6 +22,7 @@ from telegram.error import NetworkError, TimedOut
 
 from kuro_backend.config import settings
 from kuro_backend.core import process_chat
+from kuro_backend.langgraph_core import process_chat_with_graph
 from kuro_backend import memory_manager
 from kuro_backend import chat_history
 from kuro_backend import tools
@@ -29,6 +30,8 @@ from kuro_backend import compliance_db
 from kuro_backend import reminder_db
 from kuro_backend import daily_habits_db
 from kuro_backend import auth_db
+from kuro_backend import observability
+from kuro_backend import intelligence_db
 
 # --- Logging Setup with TimedRotatingFileHandler ---
 LOG_FILE = "kuro_butler.log"
@@ -315,9 +318,16 @@ async def index(request: Request):
     return FileResponse(os.path.join(WEB_DIR, "templates", "index.html"))
 
 @app.get("/api/history")
-async def get_chat_history(limit: int = 50):
-    """Get chat history from database."""
-    return {"history": chat_history.get_history(limit=limit), "status": "success"}
+async def get_chat_history(limit: int = 20, offset: int = 0):
+    """Get chat history from database with pagination for infinite scroll."""
+    history = chat_history.get_history(limit=limit, offset=offset)
+    total = chat_history.get_total_count()
+    return {
+        "history": history,
+        "status": "success",
+        "total": total,
+        "has_more": offset + len(history) < total
+    }
 
 @app.delete("/api/history")
 async def clear_chat_history():
@@ -375,8 +385,8 @@ async def chat_endpoint(
         # Save user message to chat history
         chat_history.add_message("web", "user", message, [f["filename"] for f in file_attachments])
         
-        # Process with AI core (with vision if images uploaded)
-        response = process_chat(enhanced_message, image_paths=image_paths if image_paths else None)
+        # Process with AI core using LangGraph (with vision if images uploaded)
+        response = process_chat_with_graph(enhanced_message, image_paths=image_paths if image_paths else None)
         
         # Save AI response to chat history
         chat_history.add_message("web", "assistant", response)
@@ -385,7 +395,7 @@ async def chat_endpoint(
         
     except Exception as e:
         logger.exception(f"Error in chat endpoint: {e}")
-        return {"response": f"Maaf, Master Irfan. Terjadi kesalahan: {e}", "status": "error"}
+        return {"response": f"Maaf, Pantronux. Terjadi kesalahan: {e}", "status": "error"}
 
 @app.get("/api/system-status")
 async def system_status():
@@ -410,6 +420,103 @@ async def health_check():
         "status": "healthy",
         "memory_stats": memory_manager.get_memory_stats()
     }
+
+@app.get("/api/observability/status")
+async def observability_status():
+    """Get observability status including Phoenix and OpenTelemetry."""
+    return {
+        "status": "success",
+        "data": {
+            "phoenix_running": observability._phoenix_app is not None,
+            "opentelemetry_enabled": observability.get_tracer() is not None,
+            "dashboard_url": observability._phoenix_app.url if observability._phoenix_app else None,
+            "phoenix_port": observability.PHOENIX_PORT,
+            "token_alert_threshold": observability.TOKEN_ALERT_THRESHOLD,
+        }
+    }
+
+@app.get("/api/observability/tokens")
+async def token_usage(session_id: str = None):
+    """Get token usage for sessions."""
+    if session_id:
+        usage = observability.get_session_token_usage(session_id)
+        return {"status": "success", "data": {session_id: usage}}
+    else:
+        # Return summary of all active sessions
+        all_usage = {}
+        total_tokens = 0
+        for sid, usage in observability._token_tracker.items():
+            all_usage[sid] = usage
+            total_tokens += usage.get("total_tokens", 0)
+        
+        return {
+            "status": "success",
+            "data": {
+                "sessions": all_usage,
+                "total_sessions": len(all_usage),
+                "total_tokens_all_sessions": total_tokens,
+            }
+        }
+
+@app.get("/api/observability/cleanup")
+async def cleanup_observability():
+    """Cleanup old observability data."""
+    observability.cleanup_old_sessions()
+    return {"status": "success", "message": "Observability cleanup completed"}
+
+@app.get("/observability", response_class=HTMLResponse)
+async def observability_dashboard(request: Request):
+    """Redirect to Phoenix dashboard."""
+    # Simple redirect to Phoenix
+    phoenix_url = f"http://localhost:{observability.PHOENIX_PORT}"
+    return f"""
+    <html>
+    <head>
+        <title>Kuro AI - Observability Dashboard</title>
+        <style>
+            body {{ font-family: Arial, sans-serif; margin: 40px; background: #1a1a2e; color: #eee; }}
+            .container {{ max-width: 800px; margin: 0 auto; }}
+            h1 {{ color: #00d4ff; }}
+            .card {{ background: #16213e; padding: 20px; margin: 20px 0; border-radius: 8px; }}
+            a {{ color: #00d4ff; text-decoration: none; }}
+            a:hover {{ text-decoration: underline; }}
+            .warning {{ color: #ff6b6b; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>🔍 Kuro AI Observability Dashboard</h1>
+            
+            <div class="card">
+                <h2>Phoenix Tracing Dashboard</h2>
+                <p>Access the Arize Phoenix dashboard for detailed trace analysis:</p>
+                <p><a href="{phoenix_url}" target="_blank">Open Phoenix Dashboard →</a></p>
+                <p class="warning">⚠️ Authentication required: username={observability.PHOENIX_AUTH_USERNAME}</p>
+            </div>
+            
+            <div class="card">
+                <h2>Quick Links</h2>
+                <ul>
+                    <li><a href="/api/observability/status">Observability Status API</a></li>
+                    <li><a href="/api/observability/tokens">Token Usage API</a></li>
+                    <li><a href="/">Main Dashboard</a></li>
+                </ul>
+            </div>
+            
+            <div class="card">
+                <h2>What's Tracked</h2>
+                <ul>
+                    <li>✅ LangGraph Node Execution (duration, input/output)</li>
+                    <li>✅ Guardrails Validation (re-ask loops, failures)</li>
+                    <li>✅ Token Usage (per session, with alerts)</li>
+                    <li>✅ Memory Operations (Mem0 retrieval/extraction)</li>
+                    <li>✅ Client Data Queries (special labeling)</li>
+                </ul>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
 
 @app.get("/api/system-analysis")
 async def system_analysis():
@@ -556,6 +663,53 @@ async def compliance_search(query: str):
         "results": results,
         "count": len(results)
     }
+
+# --- Intelligence Hub Routes ---
+@app.get("/api/intelligence/history")
+async def intelligence_history(limit: int = 20, offset: int = 0, search: str = None):
+    """Get intelligence briefing history with pagination and search."""
+    if search:
+        briefings = intelligence_db.search_briefings(search, limit=limit)
+        return {
+            "status": "success",
+            "briefings": briefings,
+            "total": len(briefings),
+            "has_more": False,
+            "search_query": search
+        }
+    
+    briefings = intelligence_db.get_briefings(limit=limit, offset=offset)
+    total = intelligence_db.get_total_count()
+    
+    return {
+        "status": "success",
+        "briefings": briefings,
+        "total": total,
+        "has_more": offset + len(briefings) < total
+    }
+
+@app.get("/api/intelligence/latest")
+async def intelligence_latest():
+    """Get the latest intelligence briefing."""
+    briefings = intelligence_db.get_briefings(limit=1)
+    if briefings:
+        return {"status": "success", "briefing": briefings[0]}
+    return {"status": "success", "briefing": None, "message": "No briefings available yet"}
+
+@app.get("/api/intelligence/run")
+async def intelligence_run():
+    """Manually trigger daily intelligence research."""
+    try:
+        from kuro_backend.intelligence_engine import run_daily_research
+        briefing = run_daily_research()
+        return {"status": "success", "briefing": briefing}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.get("/intelligence", response_class=HTMLResponse)
+async def intelligence_dashboard():
+    """Serve the intelligence hub dashboard."""
+    return FileResponse(os.path.join(WEB_DIR, "templates", "intelligence.html"))
 
 @app.post("/api/read-file")
 async def read_file(file_path: str = Form("")):
@@ -1030,13 +1184,13 @@ def hardware_sentinel_check():
         # Check thresholds and alert
         alerts = []
         if ram_percent > 90:
-            alerts.append(f"⚠️ [SYSTEM ALERT] Master Irfan, penggunaan RAM VM Kuro mencapai {ram_percent}%. Mohon tinjau proses yang berjalan.")
-        
+            alerts.append(f"⚠️ [SYSTEM ALERT] Pantronux, penggunaan RAM VM Kuro mencapai {ram_percent}%. Mohon tinjau proses yang berjalan.")
+
         if cpu_percent > 85:
-            alerts.append(f"🔥 [SYSTEM ALERT] Master Irfan, penggunaan CPU VM Kuro mencapai {cpu_percent}%. Proses intensif terdeteksi.")
-        
+            alerts.append(f"🔥 [SYSTEM ALERT] Pantronux, penggunaan CPU VM Kuro mencapai {cpu_percent}%. Proses intensif terdeteksi.")
+
         if disk_percent > 85:
-            alerts.append(f"💾 [SYSTEM ALERT] Master Irfan, penggunaan disk mencapai {disk_percent}%. Pertimbangkan untuk membersihkan file tidak diperlukan.")
+            alerts.append(f"💾 [SYSTEM ALERT] Pantronux, penggunaan disk mencapai {disk_percent}%. Pertimbangkan untuk membersihkan file tidak diperlukan.")
         
         # Send alerts if any
         for alert in alerts:
@@ -1094,8 +1248,18 @@ def start_reminder_scheduler():
         replace_existing=True
     )
     
+    # Daily intelligence briefing at 08:00 AM
+    _reminder_scheduler.add_job(
+        send_daily_intelligence_briefing,
+        'cron',
+        hour=8,
+        minute=0,
+        id='daily_intelligence_briefing',
+        replace_existing=True
+    )
+    
     _reminder_scheduler.start()
-    logger.info("Reminder & Habits scheduler started.")
+    logger.info("Reminder, Habits & Intelligence scheduler started.")
 
 def check_reminder_notifications():
     """Check and send notifications for due reminders."""
@@ -1150,6 +1314,24 @@ def send_end_of_day_report():
         logger.info("End-of-day habit report sent.")
     except Exception as e:
         logger.error(f"Failed to send end-of-day report: {e}")
+
+def send_daily_intelligence_briefing():
+    """Send daily intelligence briefing to Telegram at 08:00 AM."""
+    try:
+        from kuro_backend.intelligence_engine import run_daily_research, format_telegram_message
+        
+        logger.info("[INTELLIGENCE] Running daily research for 08:00 AM briefing...")
+        briefing = run_daily_research()
+        
+        # Format for Telegram
+        telegram_message = format_telegram_message(briefing)
+        
+        # Send to Telegram
+        send_telegram_reminder_notification(telegram_message)
+        
+        logger.info("[INTELLIGENCE] Daily briefing sent to Telegram")
+    except Exception as e:
+        logger.error(f"[INTELLIGENCE] Failed to send daily briefing: {e}")
 
 def cleanup_old_artifacts(days: int = 14):
     """Clean up uploaded files and cache older than specified days.
@@ -1262,18 +1444,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_chat.id) != settings.TELEGRAM_CHAT_ID:
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
-            text="I apologize, but I am only authorized to serve Master Irfan."
+            text="I apologize, but I am only authorized to serve Pantronux."
         )
         logger.warning(f"Unauthorized access attempt by chat_id: {update.effective_chat.id}")
         return
 
     message_text = update.message.text
-    logger.info(f"Received message from Master Irfan: {message_text}")
+    logger.info(f"Received message from Pantronux: {message_text}")
 
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
 
     try:
-        response_text = process_chat(message_text)
+        response_text = process_chat_with_graph(message_text)
 
         if len(response_text) > 4096:
             for i in range(0, len(response_text), 4000):
@@ -1291,7 +1473,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.exception(f"Error sending response to Telegram: {e}")
         await context.bot.send_message(
             chat_id=settings.TELEGRAM_CHAT_ID,
-            text="Maaf, Master Irfan. Kuro mengalami kesalahan saat mengirim respons. Silakan coba lagi."
+            text="Maaf, Pantronux. Kuro mengalami kesalahan saat mengirim respons. Silakan coba lagi."
         )
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
@@ -1405,6 +1587,8 @@ if __name__ == "__main__":
             _reminder_scheduler.shutdown()
         if _hardware_sentinel_scheduler:
             _hardware_sentinel_scheduler.shutdown()
+        # Shutdown observability
+        observability.shutdown_observability()
         sys.exit(0)
 
     signal.signal(signal.SIGINT, signal_handler)
@@ -1415,6 +1599,17 @@ if __name__ == "__main__":
     
     # Start hardware sentinel scheduler
     start_hardware_sentinel()
+    
+    # Initialize observability (Phoenix + OpenTelemetry)
+    obs_status = observability.initialize_observability()
+    if obs_status["phoenix"]:
+        logger.info(f"[OBSERVABILITY] Phoenix dashboard available at: {obs_status['dashboard_url']}")
+        logger.info(f"[OBSERVABILITY] Username: {observability.PHOENIX_AUTH_USERNAME}")
+    else:
+        logger.warning("[OBSERVABILITY] Failed to start Phoenix server")
+    
+    if obs_status["opentelemetry"]:
+        logger.info("[OBSERVABILITY] OpenTelemetry instrumentation enabled")
 
     # CRITICAL: python-telegram-bot v20+ requires main thread for asyncio event loop.
     # Error: "set_wakeup_fd only works in main thread of the main interpreter"

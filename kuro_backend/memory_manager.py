@@ -81,7 +81,7 @@ def load_master_profile() -> Dict:
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError) as e:
         logger.warning(f"Failed to load master profile: {e}")
-        return {"master": {"name": "Master Irfan"}, "infrastructure": {}, "preferences": {}, "notes": []}
+        return {"master": {"name": "Pantronux"}, "infrastructure": {}, "preferences": {}, "notes": []}
 
 def save_master_profile(profile: Dict):
     """Save updates to master profile."""
@@ -94,7 +94,7 @@ def get_master_profile_formatted() -> str:
     """Get formatted master profile for prompt injection."""
     profile = load_master_profile()
     lines = []
-    lines.append(f"Nama Master: {profile.get('master', {}).get('name', 'Master Irfan')}")
+    lines.append(f"Nama Master: {profile.get('master', {}).get('name', 'Pantronux')}")
     
     infra = profile.get('infrastructure', {})
     if infra:
@@ -658,7 +658,7 @@ def detect_and_save_master_facts(message: str, response: str) -> List[str]:
                     fact = sentence.strip()
                     if len(fact) > 10:  # Only save meaningful facts
                         # Save to ChromaDB with high importance
-                        add_long_term(f"Master Irfan: {fact}", metadata={
+                        add_long_term(f"Pantronux: {fact}", metadata={
                             "type": "master_fact",
                             "source": "auto_detect",
                             "keyword": keyword
@@ -686,7 +686,7 @@ def _classify_fact_with_llm(fact: str) -> Dict:
         
         client = genai.Client(api_key=settings.GEMINI_API_KEY)
         
-        prompt = f"""Klasifikasikan fakta berikut tentang Master Irfan ke dalam kategori yang tepat.
+        prompt = f"""Klasifikasikan fakta berikut tentang Pantronux ke dalam kategori yang tepat.
 
 Fakta: "{fact}"
 
@@ -1022,8 +1022,8 @@ def sync_chroma_to_profile() -> List[str]:
                 detail = fact_details[key]
                 fact_text = detail["doc"]
                 
-                # Extract the fact (remove "Master Irfan: " prefix if present)
-                clean_fact = fact_text.replace("Master Irfan: ", "")
+                # Extract the fact (remove "Pantronux: " prefix if present)
+                clean_fact = fact_text.replace("Pantronux: ", "")
                 
                 # Add to profile notes if not already there
                 if clean_fact not in profile.get("notes", []):

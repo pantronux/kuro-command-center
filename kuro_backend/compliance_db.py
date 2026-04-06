@@ -48,7 +48,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS audit_trail (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             action TEXT NOT NULL,
-            user TEXT DEFAULT 'Master Irfan',
+            user TEXT DEFAULT 'Pantronux',
             details TEXT,
             standard TEXT,
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP

@@ -1,6 +1,6 @@
 /**
- * Kuro AI Web Dashboard - Main Application V2.1
- * Full functionality with chat history, vision, system status, settings, and JWT authentication
+ * Kuro AI Web Dashboard - Main Application V4.0
+ * One UI + Glassmorphism Design with Infinite Scroll
  */
 
 // ============================================
@@ -9,6 +9,7 @@
 const CONFIG = {
     API_BASE: '/api',
     MAX_FILES: 10,
+    CHAT_PAGE_SIZE: 20,
     ALLOWED_TYPES: {
         'image/': 'image',
         'video/': 'video',
@@ -24,37 +25,22 @@ const CONFIG = {
 // ============================================
 // Authentication Helper Functions (Cookie-Based)
 // ============================================
-// Cookies are HttpOnly, so browser automatically sends them with requests.
-// No need to manually handle tokens in JavaScript.
-
-/**
- * Get the current username from storage (for display purposes only)
- */
 function getUsername() {
-    return localStorage.getItem('kuro_username') || sessionStorage.getItem('kuro_username') || 'Master';
+    return localStorage.getItem('kuro_username') || sessionStorage.getItem('kuro_username') || 'Pantronux';
 }
 
-/**
- * Logout the current user and redirect to login
- */
 function logout() {
     console.log('Logging out...');
-    // Call logout endpoint to clear cookie
     fetch('/api/auth/logout', { method: 'POST' })
         .then(() => { window.location.href = '/login'; })
         .catch(() => { window.location.href = '/login'; });
 }
 
-/**
- * Simple fetch wrapper - cookies are sent automatically by browser
- */
 async function authFetch(url, options = {}) {
-    // credentials: 'include' ensures cookies are sent with requests
     options.credentials = options.credentials || 'include';
     const response = await fetch(url, options);
     
     if (response.status === 401) {
-        // Server will handle redirect via middleware
         window.location.href = '/login';
         throw new Error('Authentication required');
     }
@@ -68,7 +54,13 @@ async function authFetch(url, options = {}) {
 let selectedFiles = [];
 let isProcessing = false;
 let chatHistory = [];
-let selectedPersona = 'consultant'; // Default persona
+let selectedPersona = 'consultant';
+
+// Infinite Scroll State
+let chatOffset = 0;
+let isLoadingMore = false;
+let hasMoreMessages = true;
+let scrollAnchorPosition = null;
 
 // ============================================
 // DOM Elements
@@ -85,6 +77,7 @@ const elements = {
     sidebar: document.getElementById('sidebar'),
     openSidebar: document.getElementById('openSidebar'),
     closeSidebar: document.getElementById('closeSidebar'),
+    scrollLoader: document.getElementById('scrollLoader'),
     // System Status Modal
     systemStatusModal: document.getElementById('systemStatusModal'),
     systemStatusBackdrop: document.getElementById('systemStatusBackdrop'),
@@ -120,7 +113,6 @@ const elements = {
 // Initialize
 // ============================================
 document.addEventListener('DOMContentLoaded', () => {
-    // Backend handles auth redirect via cookie, no client-side check needed
     lucide.createIcons();
     
     marked.setOptions({
@@ -137,6 +129,7 @@ document.addEventListener('DOMContentLoaded', () => {
     loadTheme();
     setupEventListeners();
     setupAutoResize();
+    setupInfiniteScroll();
     loadChatHistory();
     updateUserInfo();
 });
@@ -210,30 +203,25 @@ function setupEventListeners() {
             elements.personaDropdown.classList.toggle('hidden');
         });
         
-        // Close dropdown when clicking outside
         document.addEventListener('click', (e) => {
             if (!elements.personaDropdown.contains(e.target) && !elements.personaToggle.contains(e.target)) {
                 elements.personaDropdown.classList.add('hidden');
             }
         });
         
-        // Handle persona selection
         document.querySelectorAll('.persona-option').forEach(option => {
             option.addEventListener('click', () => {
                 selectedPersona = option.dataset.persona;
                 updatePersonaLabel();
-                // Highlight selected option
                 document.querySelectorAll('.persona-option').forEach(o => o.classList.remove('bg-emerald-50', 'dark:bg-emerald-900/30'));
                 option.classList.add('bg-emerald-50', 'dark:bg-emerald-900/30');
             });
         });
         
-        // Apply persona button
         if (elements.applyPersonaBtn) {
             elements.applyPersonaBtn.addEventListener('click', applyPersona);
         }
         
-        // Load saved persona on init
         loadPersona();
     }
 }
@@ -251,6 +239,64 @@ function setupAutoResize() {
         this.style.height = 'auto';
         this.style.height = Math.min(this.scrollHeight, 150) + 'px';
     });
+}
+
+// ============================================
+// Infinite Scroll Setup
+// ============================================
+function setupInfiniteScroll() {
+    elements.chatContainer.addEventListener('scroll', handleScroll);
+}
+
+function handleScroll() {
+    if (isLoadingMore || !hasMoreMessages) return;
+    
+    // Check if scrolled to top (with small threshold)
+    if (elements.chatContainer.scrollTop < 50) {
+        loadMoreMessages();
+    }
+}
+
+async function loadMoreMessages() {
+    if (isLoadingMore || !hasMoreMessages) return;
+    
+    isLoadingMore = true;
+    elements.scrollLoader.classList.add('visible');
+    
+    // Save current scroll height and position for anchor retention
+    const previousScrollHeight = elements.chatContainer.scrollHeight;
+    const previousScrollTop = elements.chatContainer.scrollTop;
+    
+    try {
+        const response = await authFetch(`${CONFIG.API_BASE}/history?limit=${CONFIG.CHAT_PAGE_SIZE}&offset=${chatOffset}`);
+        const data = await response.json();
+        
+        if (data.status === 'success' && data.history.length > 0) {
+            // Prepend older messages to the top
+            const reversedHistory = [...data.history].reverse();
+            reversedHistory.forEach(msg => {
+                const role = msg.role === 'user' ? 'user' : 'ai';
+                prependMessageToChat(role, msg.content);
+            });
+            
+            chatOffset += data.history.length;
+            hasMoreMessages = data.has_more;
+            
+            // Scroll anchor retention: maintain visual position
+            requestAnimationFrame(() => {
+                const newScrollHeight = elements.chatContainer.scrollHeight;
+                const heightDifference = newScrollHeight - previousScrollHeight;
+                elements.chatContainer.scrollTop = previousScrollTop + heightDifference;
+            });
+        } else {
+            hasMoreMessages = false;
+        }
+    } catch (error) {
+        console.error('Failed to load more messages:', error);
+    } finally {
+        isLoadingMore = false;
+        elements.scrollLoader.classList.remove('visible');
+    }
 }
 
 // ============================================
@@ -420,7 +466,7 @@ async function sendMessage() {
     } catch (error) {
         console.error('Chat error:', error);
         removeTypingIndicator();
-        addMessageToChat('ai', 'Maaf, Master Irfan. Terjadi kesalahan saat memproses permintaan Anda. Silakan coba lagi.');
+        addMessageToChat('ai', 'Maaf, Pantronux. Terjadi kesalahan saat memproses permintaan Anda. Silakan coba lagi.');
     } finally {
         isProcessing = false;
         elements.sendBtn.disabled = false;
@@ -431,9 +477,9 @@ function addMessageToChat(role, content, files = []) {
     const messageDiv = document.createElement('div');
     messageDiv.className = `flex items-start gap-3 message-enter ${role === 'user' ? 'flex-row-reverse' : ''}`;
     
-    // Cat icon for Kuro, initial for user
+    // Avatar
     const avatar = role === 'user' 
-        ? `<div class="w-8 h-8 rounded-full bg-gradient-to-br from-purple-400 to-pink-500 flex items-center justify-center flex-shrink-0 text-white font-bold text-sm">M</div>`
+        ? `<div class="w-8 h-8 rounded-full bg-gradient-to-br from-purple-400 to-pink-500 flex items-center justify-center flex-shrink-0 text-white font-bold text-sm">P</div>`
         : `<div class="w-8 h-8 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center flex-shrink-0"><i data-lucide="cat" class="w-4 h-4 text-white"></i></div>`;
     
     let contentHtml = '';
@@ -477,6 +523,46 @@ function addMessageToChat(role, content, files = []) {
     elements.chatContainer.scrollTop = elements.chatContainer.scrollHeight;
 }
 
+function prependMessageToChat(role, content, files = []) {
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `flex items-start gap-3 message-prepend ${role === 'user' ? 'flex-row-reverse' : ''}`;
+    
+    const avatar = role === 'user' 
+        ? `<div class="w-8 h-8 rounded-full bg-gradient-to-br from-purple-400 to-pink-500 flex items-center justify-center flex-shrink-0 text-white font-bold text-sm">P</div>`
+        : `<div class="w-8 h-8 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center flex-shrink-0"><i data-lucide="cat" class="w-4 h-4 text-white"></i></div>`;
+    
+    let contentHtml = '';
+    
+    if (content) {
+        if (role === 'ai') {
+            contentHtml += `<div class="markdown-content">${marked.parse(content)}</div>`;
+        } else {
+            contentHtml += `<p class="whitespace-pre-wrap">${escapeHtml(content)}</p>`;
+        }
+    }
+    
+    const bubbleClass = role === 'user' ? 'chat-bubble-user' : 'chat-bubble-ai';
+    
+    messageDiv.innerHTML = `
+        ${avatar}
+        <div class="max-w-[85%] lg:max-w-[70%]">
+            <div class="${bubbleClass} px-4 py-3 shadow-sm">
+                ${contentHtml}
+            </div>
+            <span class="text-xs text-gray-400 mt-1 block ${role === 'user' ? 'text-right' : ''}">${getCurrentTime()}</span>
+        </div>
+    `;
+    
+    // Insert after the scroll loader
+    if (elements.scrollLoader && elements.scrollLoader.nextSibling) {
+        elements.chatContainer.insertBefore(messageDiv, elements.scrollLoader.nextSibling);
+    } else {
+        elements.chatContainer.insertBefore(messageDiv, elements.chatContainer.firstChild);
+    }
+    
+    lucide.createIcons();
+}
+
 function showTypingIndicator() {
     const indicator = document.createElement('div');
     indicator.id = 'typingIndicator';
@@ -485,7 +571,7 @@ function showTypingIndicator() {
         <div class="w-8 h-8 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center flex-shrink-0">
             <i data-lucide="cat" class="w-4 h-4 text-white"></i>
         </div>
-        <div class="bg-white dark:bg-gray-800 rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm border border-gray-100 dark:border-gray-700">
+        <div class="chat-bubble-ai px-4 py-3 shadow-sm">
             <div class="typing-indicator">
                 <span></span><span></span><span></span>
             </div>
@@ -502,30 +588,50 @@ function removeTypingIndicator() {
 }
 
 // ============================================
-// Chat History
+// Chat History (Infinite Scroll)
 // ============================================
 async function loadChatHistory() {
     try {
-        const response = await authFetch(`${CONFIG.API_BASE}/history?limit=50`);
+        // Reset pagination state
+        chatOffset = 0;
+        hasMoreMessages = true;
+        isLoadingMore = false;
+        
+        const response = await authFetch(`${CONFIG.API_BASE}/history?limit=${CONFIG.CHAT_PAGE_SIZE}&offset=0`);
         const data = await response.json();
         
-        // CRITICAL FIX: Always clear container first to prevent duplicate messages on refresh
-        elements.chatContainer.innerHTML = '';
+        // Clear container but keep scroll loader
+        elements.chatContainer.innerHTML = `
+            <div class="scroll-loader" id="scrollLoader">
+                <div class="spinner"></div>
+            </div>
+        `;
+        elements.scrollLoader = document.getElementById('scrollLoader');
         
         if (data.status === 'success' && data.history.length > 0) {
+            // Render messages in chronological order
             data.history.forEach(msg => {
                 const role = msg.role === 'user' ? 'user' : 'ai';
                 addMessageToChat(role, msg.content);
             });
+            
+            chatOffset = data.history.length;
+            hasMoreMessages = data.has_more;
         } else {
             // Show welcome message if no history
-            addMessageToChat('ai', 'Halo Master Irfan! Saya Kuro, AI Butler setia Anda. Ada yang bisa saya bantu hari ini?');
+            addMessageToChat('ai', 'Halo Pantronux! Saya Kuro, AI Butler setia Anda. Ada yang bisa saya bantu hari ini?');
+            hasMoreMessages = false;
         }
     } catch (error) {
         console.error('Failed to load chat history:', error);
-        // Show welcome message on error
-        elements.chatContainer.innerHTML = '';
-        addMessageToChat('ai', 'Halo Master Irfan! Saya Kuro, AI Butler setia Anda. Ada yang bisa saya bantu hari ini?');
+        elements.chatContainer.innerHTML = `
+            <div class="scroll-loader" id="scrollLoader">
+                <div class="spinner"></div>
+            </div>
+        `;
+        elements.scrollLoader = document.getElementById('scrollLoader');
+        addMessageToChat('ai', 'Halo Pantronux! Saya Kuro, AI Butler setia Anda. Ada yang bisa saya bantu hari ini?');
+        hasMoreMessages = false;
     }
 }
 
@@ -536,6 +642,8 @@ async function clearChatHistory() {
             elements.chatContainer.innerHTML = '';
             showNotification('Chat history cleared', 'success');
             closeSettings();
+            // Reload chat with welcome message
+            loadChatHistory();
         } catch (error) {
             showNotification('Failed to clear history', 'error');
         }
@@ -550,7 +658,6 @@ async function openSystemStatus() {
     elements.systemStatusContent.innerHTML = '<div class="flex items-center justify-center py-8"><div class="spinner"></div></div>';
     
     try {
-        // Fetch both system status and log storage
         const [sysResponse, logResponse] = await Promise.all([
             authFetch(`${CONFIG.API_BASE}/system-status`),
             authFetch(`${CONFIG.API_BASE}/log-storage`)
@@ -623,7 +730,6 @@ function closeSettings() {
 // Uploaded Files Modal
 // ============================================
 async function openFilesModal() {
-    // Create modal if it doesn't exist
     if (!elements.filesModal) {
         const modalHtml = `
             <div id="filesModal" class="fixed inset-0 z-[60] hidden">
@@ -661,7 +767,6 @@ async function openFilesModal() {
         const data = await response.json();
         
         if (data.status === 'success' && data.data) {
-            // Parse the text response
             const lines = data.data.split('\n').filter(l => l.trim());
             
             if (lines.length === 0 || data.data.includes('empty') || data.data.includes('does not exist')) {
@@ -677,7 +782,7 @@ async function openFilesModal() {
                 
                 for (const line of lines) {
                     if (line.startsWith('📁')) {
-                        continue; // Skip header
+                        continue;
                     } else if (line.startsWith('📕') || line.startsWith('📄') || line.startsWith('🖼️') || line.startsWith('💻')) {
                         if (currentFile) {
                             html += renderFileCard(currentFile);
@@ -776,11 +881,8 @@ async function applyPersona() {
         const data = await response.json();
         
         if (data.status === 'success') {
-            // Close dropdown
             elements.personaDropdown.classList.add('hidden');
-            // Show notification
             showNotification(`Persona changed to ${personaLabels[selectedPersona]}`, 'success');
-            // Save to localStorage
             localStorage.setItem('kuro-persona', selectedPersona);
         } else {
             showNotification('Failed to change persona: ' + data.message, 'error');
@@ -791,16 +893,13 @@ async function applyPersona() {
 }
 
 async function loadPersona() {
-    // Try localStorage first
     const savedPersona = localStorage.getItem('kuro-persona');
     if (savedPersona) {
         selectedPersona = savedPersona;
     }
     
-    // Update UI
     updatePersonaLabel();
     
-    // Highlight selected option
     document.querySelectorAll('.persona-option').forEach(option => {
         if (option.dataset.persona === selectedPersona) {
             option.classList.add('bg-emerald-50', 'dark:bg-emerald-900/30');
@@ -811,17 +910,12 @@ async function loadPersona() {
 // ============================================
 // User Info & Logout
 // ============================================
-
-/**
- * Update the user info display in the header
- */
 function updateUserInfo() {
     const username = getUsername();
     if (elements.userInfo && username) {
         elements.userInfo.textContent = username;
     }
     
-    // Setup logout button
     if (elements.logoutBtn) {
         elements.logoutBtn.addEventListener('click', logout);
     }

@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kuro AI - Intelligence Hub</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body class="bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900 min-h-screen transition-colors duration-500">
+    <div class="fixed inset-0 -z-10 overflow-hidden">
+        <div class="absolute -top-40 -right-40 w-80 h-80 bg-emerald-300 dark:bg-emerald-900 rounded-full mix-blend-multiply dark:mix-blend-screen filter blur-3xl opacity-30 animate-float"></div>
+        <div class="absolute -bottom-40 -left-40 w-80 h-80 bg-teal-300 dark:bg-teal-900 rounded-full mix-blend-multiply dark:mix-blend-screen filter blur-3xl opacity-30 animate-float" style="animation-delay: 2s;"></div>
+    </div>
+
+    <div class="flex h-screen overflow-hidden">
+        <!-- Sidebar -->
+        <aside id="sidebar" class="fixed inset-y-0 left-0 z-50 w-72 glass-sidebar transform -translate-x-full lg:translate-x-0 transition-transform duration-300 ease-in-out">
+            <div class="flex flex-col h-full">
+                <div class="flex items-center justify-between p-6 border-b border-glass-border dark:border-glass-borderDark">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center shadow-lg">
+                            <i data-lucide="cat" class="w-6 h-6 text-white"></i>
+                        </div>
+                        <div>
+                            <h1 class="text-lg font-bold text-gray-800 dark:text-white">Kuro AI</h1>
+                            <p class="text-xs text-gray-500 dark:text-gray-400">Intelligence Hub</p>
+                        </div>
+                    </div>
+                    <button id="closeSidebar" class="lg:hidden p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                        <i data-lucide="x" class="w-5 h-5 text-gray-600 dark:text-gray-300"></i>
+                    </button>
+                </div>
+                <nav class="flex-1 p-4 space-y-1 overflow-y-auto">
+                    <a href="/" class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-all">
+                        <i data-lucide="message-square" class="w-5 h-5"></i>
+                        <span>Chat</span>
+                    </a>
+                    <a href="/habits" class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-all">
+                        <i data-lucide="target" class="w-5 h-5"></i>
+                        <span>Daily Habits</span>
+                    </a>
+                    <a href="/reminders" class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-all">
+                        <i data-lucide="clock" class="w-5 h-5"></i>
+                        <span>Reminders</span>
+                    </a>
+                    <a href="/compliance" class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-all">
+                        <i data-lucide="shield-check" class="w-5 h-5"></i>
+                        <span>Compliance</span>
+                    </a>
+                    <a href="/intelligence" class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-medium transition-all hover:bg-emerald-500/20">
+                        <i data-lucide="radar" class="w-5 h-5"></i>
+                        <span>Intelligence Hub</span>
+                    </a>
+                </nav>
+                <div class="p-4 border-t border-glass-border dark:border-glass-borderDark">
+                    <div class="flex items-center gap-3 px-4 py-3 rounded-xl bg-gray-50 dark:bg-gray-800/50">
+                        <div class="w-10 h-10 rounded-full bg-gradient-to-br from-purple-400 to-pink-500 flex items-center justify-center text-white font-bold">P</div>
+                        <div class="flex-1 min-w-0">
+                            <p class="text-sm font-medium text-gray-800 dark:text-white truncate">Pantronux</p>
+                            <p class="text-xs text-gray-500 dark:text-gray-400">Administrator</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="flex-1 flex flex-col lg:ml-72">
+            <header class="flex items-center justify-between px-6 py-4 glass-header sticky top-0 z-40">
+                <div class="flex items-center gap-4">
+                    <button id="openSidebar" class="lg:hidden p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                        <i data-lucide="menu" class="w-6 h-6 text-gray-600 dark:text-gray-300"></i>
+                    </button>
+                    <h2 class="text-xl font-semibold text-gray-800 dark:text-white">Intelligence Hub</h2>
+                </div>
+                <div class="flex items-center gap-3">
+                    <button id="darkModeToggle" class="p-2 rounded-xl bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-all duration-300">
+                        <i data-lucide="sun" class="w-5 h-5 text-gray-600 dark:hidden"></i>
+                        <i data-lucide="moon" class="w-5 h-5 text-gray-300 hidden dark:block"></i>
+                    </button>
+                </div>
+            </header>
+
+            <!-- Intelligence Content -->
+            <div class="flex-1 flex overflow-hidden">
+                <!-- Briefing List -->
+                <div class="w-80 border-r border-glass-border dark:border-glass-borderDark glass-panel overflow-y-auto">
+                    <div class="p-4">
+                        <div class="relative mb-4">
+                            <i data-lucide="search" class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"></i>
+                            <input type="text" id="searchInput" placeholder="Search briefings..." class="w-full pl-10 pr-4 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-sm text-gray-800 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                        </div>
+                        <div id="briefingList" class="space-y-2">
+                            <div class="flex items-center justify-center py-8"><div class="spinner"></div></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Briefing Detail -->
+                <div class="flex-1 overflow-y-auto p-6" id="briefingDetail">
+                    <div class="flex items-center justify-center h-full text-gray-500">
+                        <div class="text-center">
+                            <i data-lucide="newspaper" class="w-16 h-16 mx-auto mb-4 opacity-50"></i>
+                            <p class="text-lg">Select a briefing to view details</p>
+                            <p class="text-sm mt-2">Daily intelligence reports are generated at 08:00 AM</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const CONFIG = { API_BASE: '/api' };
+        let selectedBriefingId = null;
+
+        document.addEventListener('DOMContentLoaded', () => {
+            lucide.createIcons();
+            loadTheme();
+            loadBriefings();
+            setupEventListeners();
+        });
+
+        function loadTheme() {
+            const savedTheme = localStorage.getItem('kuro-theme');
+            if (savedTheme === 'dark' || (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+                document.documentElement.classList.add('dark');
+            }
+        }
+
+        function setupEventListeners() {
+            document.getElementById('darkModeToggle').addEventListener('click', () => {
+                document.documentElement.classList.toggle('dark');
+                localStorage.setItem('kuro-theme', document.documentElement.classList.contains('dark') ? 'dark' : 'light');
+            });
+
+            document.getElementById('searchInput').addEventListener('input', debounce((e) => {
+                loadBriefings(e.target.value);
+            }, 300));
+
+            document.getElementById('openSidebar').addEventListener('click', () => {
+                document.getElementById('sidebar').classList.remove('-translate-x-full');
+            });
+            document.getElementById('closeSidebar').addEventListener('click', () => {
+                document.getElementById('sidebar').classList.add('-translate-x-full');
+            });
+        }
+
+        function debounce(func, wait) {
+            let timeout;
+            return function(...args) {
+                clearTimeout(timeout);
+                timeout = setTimeout(() => func.apply(this, args), wait);
+            };
+        }
+
+        async function loadBriefings(searchQuery = null) {
+            const listEl = document.getElementById('briefingList');
+            listEl.innerHTML = '<div class="flex items-center justify-center py-8"><div class="spinner"></div></div>';
+
+            try {
+                const url = searchQuery 
+                    ? `${CONFIG.API_BASE}/intelligence/history?search=${encodeURIComponent(searchQuery)}`
+                    : `${CONFIG.API_BASE}/intelligence/history`;
+                
+                const response = await fetch(url, { credentials: 'include' });
+                const data = await response.json();
+
+                if (data.status === 'success' && data.briefings.length > 0) {
+                    listEl.innerHTML = data.briefings.map(b => `
+                        <div class="briefing-item p-3 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700/50 cursor-pointer transition-all ${selectedBriefingId === b.id ? 'bg-emerald-500/10 border border-emerald-500/30' : 'border border-transparent'}" onclick="loadBriefingDetail(${b.id})">
+                            <div class="flex items-center justify-between mb-1">
+                                <span class="text-sm font-medium text-gray-800 dark:text-white">${b.date}</span>
+                                <span class="text-xs text-gray-400">${new Date(b.created_at).toLocaleTimeString('id-ID', {hour: '2-digit', minute: '2-digit'})}</span>
+                            </div>
+                            <div class="flex gap-1 flex-wrap">
+                                <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400">#Security</span>
+                                <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">#AI</span>
+                                <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400">#Finance</span>
+                            </div>
+                        </div>
+                    `).join('');
+                } else {
+                    listEl.innerHTML = '<div class="text-center py-8 text-gray-500"><i data-lucide="inbox" class="w-8 h-8 mx-auto mb-2 opacity-50"></i><p class="text-sm">No briefings available</p></div>';
+                }
+                lucide.createIcons();
+            } catch (error) {
+                listEl.innerHTML = '<p class="text-center py-8 text-red-500">Failed to load briefings</p>';
+            }
+        }
+
+        async function loadBriefingDetail(id) {
+            selectedBriefingId = id;
+            const detailEl = document.getElementById('briefingDetail');
+            detailEl.innerHTML = '<div class="flex items-center justify-center h-full"><div class="spinner"></div></div>';
+
+            try {
+                const response = await fetch(`${CONFIG.API_BASE}/intelligence/history`, { credentials: 'include' });
+                const data = await response.json();
+                const briefing = data.briefings.find(b => b.id === id);
+
+                if (briefing) {
+                    detailEl.innerHTML = `
+                        <div class="max-w-4xl mx-auto">
+                            <div class="flex items-center justify-between mb-6">
+                                <h3 class="text-2xl font-bold text-gray-800 dark:text-white">Daily Intelligence Briefing</h3>
+                                <span class="px-3 py-1 rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 text-sm font-medium">${briefing.date}</span>
+                            </div>
+                            <div class="markdown-content glass-panel rounded-2xl p-6">
+                                ${marked.parse(briefing.summary_text)}
+                            </div>
+                            ${briefing.experimental_signals && briefing.experimental_signals.length > 0 ? `
+                                <div class="mt-6 glass-panel rounded-2xl p-6">
+                                    <h4 class="text-lg font-semibold text-gray-800 dark:text-white mb-3 flex items-center gap-2">
+                                        <i data-lucide="flask-conical" class="w-5 h-5 text-purple-500"></i>
+                                        Experimental Signals
+                                    </h4>
+                                    <ul class="space-y-2">
+                                        ${briefing.experimental_signals.map(s => `<li class="flex items-start gap-2"><span class="text-purple-500 mt-1">→</span><span class="text-gray-700 dark:text-gray-300">${s}</span></li>`).join('')}
+                                    </ul>
+                                </div>
+                            ` : ''}
+                        </div>
+                    `;
+                    lucide.createIcons();
+                    // Re-render markdown
+                    loadBriefings(document.getElementById('searchInput').value);
+                } else {
+                    detailEl.innerHTML = '<p class="text-center text-red-500">Briefing not found</p>';
+                }
+            } catch (error) {
+                detailEl.innerHTML = '<p class="text-center text-red-500">Failed to load briefing details</p>';
+            }
+        }
+    </script>
+</body>
+</html>
