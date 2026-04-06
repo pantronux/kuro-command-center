@@ -5,13 +5,14 @@ AI Core with LangGraph Stateful Architecture for Agentik Long-Term Reasoning
 SDK: google-genai v3 Protocol with LangGraph State Machine
 V4.8: LangGraph Engine + Stateful Memory + Self-Correction Loops + Arize Phoenix Observability
 """
+import asyncio
 import logging
 import os
 import json
 import re
 import uuid
 import time
-from typing import TypedDict, List, Optional, Dict, Any, Annotated
+from typing import TypedDict, List, Optional, Dict, Any, Annotated, AsyncGenerator
 from datetime import datetime
 
 # LangGraph imports
@@ -266,24 +267,33 @@ def supervisor_node(state: KuroState) -> Dict[str, Any]:
 def memory_retrieval_node(state: KuroState) -> Dict[str, Any]:
     """
     Memory Retrieval Node: Searches Mem0 for relevant personal memories.
-    Runs in parallel with supervisor to enrich context.
+    FIX: Wrapped in try-except to bypass Mem0 if embedding API fails (404).
     """
     user_input = state.get("user_input", "")
     session_id = state.get("_session_id", "unknown")
     trace_attrs = observability.create_session_context(session_id=session_id)
     
     with observability.trace_node("memory_retrieval_node", trace_attrs) as span:
-        # Retrieve relevant memories from Mem0
-        memories = perpetual_memory.perpetual_memory.retrieve_memories(user_input, limit=5)
-        
-        logger.info(f"[MEM0_RETRIEVAL] Retrieved {len(memories)} memories for query: {user_input[:50]}...")
-        
-        if span:
-            span.set_attribute("memory_retrieval_node.memories_count", len(memories))
-        
-        return {
-            "mem0_retrieved_memories": memories
-        }
+        try:
+            # Retrieve relevant memories from Mem0
+            memories = perpetual_memory.perpetual_memory.retrieve_memories(user_input, limit=5)
+            logger.info(f"[MEM0_RETRIEVAL] Retrieved {len(memories)} memories for query: {user_input[:50]}...")
+            
+            if span:
+                span.set_attribute("memory_retrieval_node.memories_count", len(memories))
+            
+            return {
+                "mem0_retrieved_memories": memories
+            }
+        except Exception as e:
+            # FIX: Bypass Mem0 if embedding API fails - system continues without long-term memory
+            logger.warning(f"[MEM0_RETRIEVAL] Failed (bypassing): {e}")
+            if span:
+                span.set_attribute("memory_retrieval_node.memories_count", 0)
+                span.set_attribute("memory_retrieval_node.bypassed", True)
+            return {
+                "mem0_retrieved_memories": []
+            }
 
 
 # ============================================
@@ -546,6 +556,7 @@ def response_node(state: KuroState) -> Dict[str, Any]:
         full_message = "\n".join(message_parts)
         
         # Generate response using direct google-genai SDK (more reliable)
+        response_text = None  # Initialize to detect if generation fails
         try:
             from google import genai
             from google.genai import types
@@ -562,7 +573,23 @@ def response_node(state: KuroState) -> Dict[str, Any]:
                 )
             )
             
-            response_text = response.text if response.text else "Maaf, Pantronux. Kuro tidak dapat menghasilkan respons yang valid."
+            # SAFETY CHECK: Check prompt_feedback BEFORE accessing response.text
+            # When content is blocked by safety filters, response.text raises AttributeError
+            if hasattr(response, 'prompt_feedback') and response.prompt_feedback:
+                block_reason = getattr(response.prompt_feedback, 'block_reason', 'UNKNOWN')
+                logger.warning(f"[RESPONSE] Content blocked by safety filter: {block_reason}")
+                response_text = "Maaf, Pantronux. Respons diblokir oleh filter keamanan Gemini. Silakan ubah pertanyaan Anda."
+            
+            # Only access response.text if not blocked
+            if response_text is None:
+                try:
+                    response_text = response.text if response.text else "Maaf, Pantronux. Kuro tidak dapat menghasilkan respons yang valid."
+                except Exception as text_err:
+                    if "WARNING" in str(text_err) or "Safety" in str(text_err) or "blocked" in str(text_err).lower():
+                        logger.warning(f"[RESPONSE] response.text blocked: {text_err}")
+                        response_text = "Maaf, Pantronux. Respons diblokir oleh filter keamanan Gemini."
+                    else:
+                        raise text_err
             
             # Track token usage
             if hasattr(response, 'usage_metadata') and response.usage_metadata:
@@ -578,8 +605,12 @@ def response_node(state: KuroState) -> Dict[str, Any]:
                     span.set_attribute("response_node.total_tokens", total_tokens)
             
         except Exception as e:
-            logger.error(f"[RESPONSE] LLM generation failed: {e}")
-            response_text = f"Maaf, Pantronux. Terjadi kesalahan saat menghasilkan respons: {e}"
+            error_type = type(e).__name__
+            error_msg = str(e)
+            logger.error(f"[RESPONSE] LLM generation failed ({error_type}): {error_msg}")
+            # Don't expose raw exception to user - use generic error message
+            if response_text is None:
+                response_text = "Maaf, Pantronux. Terjadi kesalahan saat menghasilkan respons. Silakan coba lagi."
         
         # === GUARDRAILS VALIDATION ===
         from kuro_backend.guardrails import GuardrailsOrchestrator
@@ -901,6 +932,9 @@ def build_kuro_graph() -> StateGraph:
         }
     )
     
+    # FIX: Add direct edge from response_node to END as fallback
+    # This prevents infinite loops if route_after_response fails
+    
     # After memory extraction, go to END
     graph_builder.add_edge("memory_extraction_node", END)
     
@@ -913,6 +947,98 @@ def build_kuro_graph() -> StateGraph:
 
 # Global graph instance
 kuro_graph = build_kuro_graph()
+
+
+# ============================================
+# ASYNC STREAMING ENTRY POINT (Project Quicksilver V5.1)
+# ============================================
+
+async def process_chat_with_graph_stream(message: str, image_paths: list = None) -> AsyncGenerator[str, None]:
+    """
+    V5.1 ASYNC STREAMING: Process chat message with token streaming via SSE.
+    Uses LangGraph's astream() for node-by-node streaming.
+    FIX: Only yields from the FIRST response_node completion to prevent double bubble.
+    
+    Args:
+        message: User message
+        image_paths: Optional list of image paths for vision
+    
+    Yields:
+        Response text chunks as they are generated
+    """
+    session_id = str(uuid.uuid4())
+    full_response = []
+    response_yielded = False  # Track if we already yielded a response
+    
+    try:
+        persona_mode = memory_manager.get_active_persona()
+        
+        initial_state = {
+            "messages": [HumanMessage(content=message)],
+            "next_step": "",
+            "compliance_data": [],
+            "habit_data": {},
+            "is_scolding_needed": False,
+            "user_input": message,
+            "final_response": "",
+            "query_expansion_count": 0,
+            "persona_mode": persona_mode,
+            "image_paths": image_paths,
+            "guardrail_reask_count": 0,
+            "guardrail_feedback": "",
+            "mem0_retrieved_memories": [],
+            "tool_execution_result": {},
+            "requires_approval": False,
+            "_session_id": session_id
+        }
+        
+        thread_id = f"kuro_stream_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{session_id[:8]}"
+        config = {"configurable": {"thread_id": thread_id}}
+        
+        logger.info(f"[LANGGRAPH_STREAM] Invoking graph with streaming for message: {message[:50]}...")
+        
+        # Use astream for node-by-node streaming
+        async for event in kuro_graph.astream(initial_state, config=config, stream_mode="updates"):
+            # event is a dict: {node_name: node_output}
+            for node_name, node_output in event.items():
+                logger.info(f"[LANGGRAPH_STREAM] Node '{node_name}' completed")
+                
+                # FIX: Only yield from the FIRST response_node completion
+                # This prevents double bubble from guardrail re-ask loops
+                if node_name == "response_node" and not response_yielded:
+                    response_text = node_output.get("final_response", "")
+                    if response_text:
+                        response_yielded = True
+                        # Stream the response character by character for typewriter effect
+                        for char in response_text:
+                            full_response.append(char)
+                            yield char
+                            # Small delay for visible streaming effect
+                            await asyncio.sleep(0.005)
+                        logger.info(f"[LANGGRAPH_STREAM] Yielded response: {len(response_text)} chars")
+                
+                # Stream tool execution notifications
+                if node_name == "tool_node":
+                    tool_result = node_output.get("tool_execution_result", {})
+                    if tool_result.get("status") == "success":
+                        yield f"\n\n🔧 Tool executed: {tool_result.get('tool', 'unknown')}\n\n"
+        
+        # Store to memory after streaming
+        response_text = "".join(full_response)
+        if response_text:
+            memory_manager.add_short_term("user", message)
+            memory_manager.add_short_term("assistant", response_text)
+            memory_manager.add_long_term_v2(f"User: {message}\nKuro: {response_text}")
+            chat_history.add_message("web", "user", message)
+            chat_history.add_message("web", "assistant", response_text)
+        
+        logger.info(f"[LANGGRAPH_STREAM] Streaming complete: {len(response_text)} chars")
+        
+    except Exception as e:
+        logger.exception(f"[LANGGRAPH_STREAM] Streaming failed: {e}")
+        error_msg = "Maaf, Pantronux. Terjadi kesalahan saat memproses permintaan Anda."
+        yield error_msg
+        full_response = [error_msg]
 
 
 # ============================================

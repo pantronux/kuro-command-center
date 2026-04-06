@@ -17,7 +17,7 @@ from contextlib import contextmanager
 from opentelemetry import trace, context
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
-from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.trace import Status, StatusCode
 
@@ -35,7 +35,8 @@ PHOENIX_HOST = "0.0.0.0"
 PHOENIX_AUTH_USERNAME = os.getenv("PHOENIX_USERNAME", "pantronux")
 PHOENIX_AUTH_PASSWORD = os.getenv("PHOENIX_PASSWORD", "Noobcry17!")
 
-OTLP_ENDPOINT = os.getenv("OTLP_ENDPOINT", "http://localhost:6006/v1/traces")
+# Phoenix OTLP HTTP endpoint (Phoenix UI port 6006 also serves OTLP on /v1/traces)
+OTLP_ENDPOINT = os.getenv("OTLP_ENDPOINT", "http://127.0.0.1:6006/v1/traces")
 
 MASTER_USER_ID = "master_irfan"
 TOKEN_ALERT_THRESHOLD = 5000
@@ -65,7 +66,7 @@ def start_phoenix_server() -> Optional[str]:
         
         logger.info(f"[OBSERVABILITY] Starting Phoenix server on port {PHOENIX_PORT}...")
         
-        # Launch Phoenix with minimal config
+        # Launch Phoenix with OTLP receiver enabled for trace ingestion
         _phoenix_app = px.launch_app(
             port=PHOENIX_PORT,
             host=PHOENIX_HOST,
@@ -122,12 +123,16 @@ def setup_opentelemetry() -> Optional[trace.Tracer]:
         # Create tracer provider
         tracer_provider = TracerProvider(resource=resource)
         
-        # Add OTLP exporter (points to Phoenix)
+        # Add OTLP exporter (points to Phoenix HTTP endpoint)
         otlp_exporter = OTLPSpanExporter(
             endpoint=OTLP_ENDPOINT,
-            insecure=True,
+            timeout=10,  # 10 second timeout
         )
-        span_processor = BatchSpanProcessor(otlp_exporter)
+        span_processor = BatchSpanProcessor(
+            otlp_exporter,
+            schedule_delay_millis=1000,  # Export every second
+            max_export_batch_size=10,
+        )
         tracer_provider.add_span_processor(span_processor)
         
         # Also add console exporter for debugging (optional)
@@ -204,8 +209,10 @@ def trace_node(node_name: str, attributes: Dict[str, str] = None):
         
         try:
             yield span
-            span.set_status(Status(StatusCode.OK))
+            # FIX: Set OK status explicitly so Phoenix shows green
+            span.set_status(Status(StatusCode.OK, f"Node {node_name} completed successfully"))
         except Exception as e:
+            # FIX: Set ERROR status so Phoenix shows red
             span.set_status(Status(StatusCode.ERROR, str(e)))
             span.record_exception(e)
             raise
@@ -398,11 +405,27 @@ def initialize_observability() -> Dict[str, Any]:
     if tracer:
         status["opentelemetry"] = True
     
+    # Initialize LangChain Instrumentor for LangGraph tracing
+    try:
+        from langchain_core.callbacks import BaseCallbackHandler
+        from opentelemetry.instrumentation.langchain import LangchainInstrumentor
+        
+        LangchainInstrumentor().instrument()
+        logger.info("[OBSERVABILITY] LangChain instrumentor initialized")
+    except Exception as e:
+        logger.warning(f"[OBSERVABILITY] Failed to initialize LangChain instrumentor: {e}")
+    
     logger.info(f"[OBSERVABILITY] Initialization complete: {status}")
     return status
 
 
 def shutdown_observability():
     """Shutdown all observability components."""
+    # Force flush all pending spans before shutdown
+    tracer_provider = trace.get_tracer_provider()
+    if hasattr(tracer_provider, 'force_flush'):
+        tracer_provider.force_flush(timeout_millis=5000)
+        logger.info("[OBSERVABILITY] Forced flush of pending spans")
+    
     stop_phoenix_server()
     logger.info("[OBSERVABILITY] Shutdown complete")

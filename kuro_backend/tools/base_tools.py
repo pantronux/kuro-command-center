@@ -711,8 +711,20 @@ Return ONLY a valid JSON array with this structure:
             )
         )
         
-        import json
-        results = json.loads(response.text)
+        # SAFETY CHECK: Check prompt_feedback before accessing response.text
+        if hasattr(response, 'prompt_feedback') and response.prompt_feedback:
+            block_reason = getattr(response.prompt_feedback, 'block_reason', 'UNKNOWN')
+            logger.warning(f"[COMPLIANCE] Content blocked by safety filter: {block_reason}")
+            return {"error": f"Content blocked by safety filter: {block_reason}", "standard": standard["name"]}
+        
+        try:
+            import json
+            results = json.loads(response.text)
+        except Exception as text_err:
+            if "WARNING" in str(text_err) or "Safety" in str(text_err) or "blocked" in str(text_err).lower():
+                logger.warning(f"[COMPLIANCE] response.text blocked: {text_err}")
+                return {"error": "Content blocked by safety filter", "standard": standard["name"]}
+            raise text_err
         
         return {
             "standard": standard["name"],
@@ -1071,6 +1083,10 @@ Berikan rangkuman untuk bagian ini saja."""
                     contents=chunk_prompt,
                     config=types.GenerateContentConfig(temperature=0.2)
                 )
+                # SAFETY CHECK
+                if hasattr(response, 'prompt_feedback') and response.prompt_feedback:
+                    logger.warning(f"[SUMMARIZE_PDF] Chunk blocked: {getattr(response.prompt_feedback, 'block_reason', 'UNKNOWN')}")
+                    continue
                 if response.text:
                     chunk_summaries.append(response.text)
             except Exception as e:
@@ -1092,6 +1108,10 @@ Berikan rangkuman final yang menyeluruh dan terstruktur."""
                     contents=final_prompt,
                     config=types.GenerateContentConfig(temperature=0.2)
                 )
+                # SAFETY CHECK
+                if hasattr(final_response, 'prompt_feedback') and final_response.prompt_feedback:
+                    logger.warning(f"[SUMMARIZE_PDF] Final response blocked: {getattr(final_response.prompt_feedback, 'block_reason', 'UNKNOWN')}")
+                    return {"success": False, "error": "Content blocked by safety filter"}
                 extracted_text = final_response.text if final_response.text else combined_text
             except Exception as e:
                 logger.error(f"Error creating final summary: {e}")
@@ -1116,6 +1136,11 @@ Berikan hasil yang diminta dengan format yang rapi dan terstruktur."""
                 contents=full_prompt,
                 config=types.GenerateContentConfig(temperature=0.2)
             )
+            # SAFETY CHECK
+            if hasattr(response, 'prompt_feedback') and response.prompt_feedback:
+                block_reason = getattr(response.prompt_feedback, 'block_reason', 'UNKNOWN')
+                logger.warning(f"[SUMMARIZE_PDF] Content blocked: {block_reason}")
+                return {"success": False, "error": f"Content blocked by safety filter: {block_reason}"}
             extracted_text = response.text if response.text else extracted_text
         except Exception as e:
             logger.error(f"Error sending to Gemini: {e}")
@@ -1454,6 +1479,10 @@ Berikan rangkuman untuk bagian ini saja."""
                     contents=chunk_prompt,
                     config=types.GenerateContentConfig(temperature=0.2)
                 )
+                # SAFETY CHECK
+                if hasattr(response, 'prompt_feedback') and response.prompt_feedback:
+                    logger.warning(f"[SUMMARIZE_DOC] Chunk blocked: {getattr(response.prompt_feedback, 'block_reason', 'UNKNOWN')}")
+                    continue
                 if response.text:
                     chunk_summaries.append(response.text)
             except Exception as e:
@@ -1474,6 +1503,10 @@ Berikan rangkuman final yang menyeluruh dan terstruktur."""
                     contents=final_prompt,
                     config=types.GenerateContentConfig(temperature=0.2)
                 )
+                # SAFETY CHECK
+                if hasattr(final_response, 'prompt_feedback') and final_response.prompt_feedback:
+                    logger.warning(f"[SUMMARIZE_DOC] Final response blocked: {getattr(final_response.prompt_feedback, 'block_reason', 'UNKNOWN')}")
+                    return {"success": False, "error": "Content blocked by safety filter"}
                 extracted_text = final_response.text if final_response.text else combined_text
             except Exception as e:
                 logger.error(f"Error creating final summary: {e}")
@@ -1495,6 +1528,11 @@ Berikan hasil yang diminta dengan format yang rapi dan terstruktur."""
                 contents=full_prompt,
                 config=types.GenerateContentConfig(temperature=0.2)
             )
+            # SAFETY CHECK
+            if hasattr(response, 'prompt_feedback') and response.prompt_feedback:
+                block_reason = getattr(response.prompt_feedback, 'block_reason', 'UNKNOWN')
+                logger.warning(f"[SUMMARIZE_DOC] Content blocked: {block_reason}")
+                return {"success": False, "error": f"Content blocked by safety filter: {block_reason}"}
             extracted_text = response.text if response.text else extracted_text
         except Exception as e:
             logger.error(f"Error sending to Gemini: {e}")

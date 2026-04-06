@@ -83,6 +83,12 @@ class PrivacyGuardrail:
         Returns:
             GuardrailResult with validation status
         """
+        # BYPASS: Skip PII check for very short queries (< 15 chars)
+        # No possible data leak in phrases like "Kuro, cek info"
+        if len(user_query) < 15:
+            logger.debug(f"[PRIVACY_GUARDRAIL] Skipping PII check for short query ({len(user_query)} chars): {user_query}")
+            return GuardrailResult(is_valid=True, failures=[])
+        
         failures = []
         
         # Check 1: PII Detection

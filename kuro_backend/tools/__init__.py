@@ -1,0 +1,42 @@
+"""
+Kuro AI Tools Package
+Re-exports all functions from the original tools.py module.
+"""
+# Re-export everything from the original tools.py (now base_tools.py)
+from kuro_backend.tools.base_tools import (
+    get_system_status,
+    check_proxmox_infrastructure,
+    list_my_files,
+    list_project_files,
+    universal_read,
+    read_pdf_content,
+    parse_log_content,
+    index_system_path,
+    analyze_system_health,
+    process_video,
+    analyze_compliance,
+    search_compliance_clause,
+    parse_datetime,
+    lookup_chroma_context,
+    add_reminder_tool,
+    get_reminders_tool,
+    mark_habit_done_tool,
+    get_habits_status_tool,
+    summarize_pdf,
+    summarize_document,
+    read_docx_content,
+    read_xlsx_content,
+    read_pptx_content,
+    PROJECT_ROOT,
+    UPLOAD_DIR,
+    LOGS_DIR,
+    DB_DIR,
+    MAX_FILE_SIZE_MB,
+    WHITELIST_PATHS,
+    TEXT_EXTENSIONS,
+    PDF_EXTENSIONS,
+    IMAGE_EXTENSIONS,
+    DOCX_EXTENSIONS,
+    XLSX_EXTENSIONS,
+    PPTX_EXTENSIONS,
+)

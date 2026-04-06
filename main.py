@@ -1,3 +1,4 @@
+import json
 import logging
 import logging.handlers
 import os
@@ -22,7 +23,7 @@ from telegram.error import NetworkError, TimedOut
 
 from kuro_backend.config import settings
 from kuro_backend.core import process_chat
-from kuro_backend.langgraph_core import process_chat_with_graph
+from kuro_backend.langgraph_core import process_chat_with_graph, process_chat_with_graph_stream
 from kuro_backend import memory_manager
 from kuro_backend import chat_history
 from kuro_backend import tools
@@ -340,7 +341,7 @@ async def chat_endpoint(
     message: str = Form(""),
     files: list[UploadFile] = File([])
 ):
-    """Handle chat requests from the web interface with vision and file reading support."""
+    """Handle chat requests from the web interface with vision and file reading support. (Non-streaming fallback)"""
     try:
         # Save and process uploaded files
         image_paths = []
@@ -396,6 +397,74 @@ async def chat_endpoint(
     except Exception as e:
         logger.exception(f"Error in chat endpoint: {e}")
         return {"response": f"Maaf, Pantronux. Terjadi kesalahan: {e}", "status": "error"}
+
+
+@app.post("/api/chat/stream")
+async def chat_stream_endpoint(
+    request: Request,
+    message: str = Form(""),
+    files: list[UploadFile] = File([])
+):
+    """V5.1 STREAMING: Handle chat requests with Server-Sent Events (SSE) streaming."""
+    from fastapi.responses import StreamingResponse
+    
+    async def event_generator():
+        """Generate SSE events for streaming response."""
+        try:
+            # Save uploaded files (same as non-streaming endpoint)
+            image_paths = []
+            file_contents = []
+            file_attachments = []
+            
+            for file in files:
+                if file.filename:
+                    file_path = os.path.join(UPLOAD_DIR, file.filename)
+                    with open(file_path, "wb") as f:
+                        content = await file.read()
+                        f.write(content)
+                    
+                    if file.content_type and file.content_type.startswith("image/"):
+                        image_paths.append(file_path)
+                        file_attachments.append({"type": "image", "filename": file.filename})
+                    else:
+                        read_result = tools.universal_read(file_path, max_chars=10000)
+                        if read_result.get("content"):
+                            file_contents.append(f"\n--- File: {file.filename} ---\n{read_result['content']}")
+                        file_attachments.append({"type": "file", "filename": file.filename})
+            
+            # Build enhanced message
+            enhanced_message = message
+            if file_contents:
+                enhanced_message += "\n\n[Attached Files Content:]\n" + "\n".join(file_contents)
+            
+            # Save user message
+            chat_history.add_message("web", "user", message, [f["filename"] for f in file_attachments])
+            
+            # Stream response using async generator
+            full_response = []
+            async for chunk in process_chat_with_graph_stream(enhanced_message, image_paths=image_paths if image_paths else None):
+                full_response.append(chunk)
+                # SSE format: event: chunk\ndata: {chunk}\n\n
+                yield f"event: chunk\ndata: {json.dumps({'chunk': chunk})}\n\n"
+            
+            # Send completion event
+            response_text = "".join(full_response)
+            chat_history.add_message("web", "assistant", response_text)
+            yield f"event: complete\ndata: {json.dumps({'response': response_text})}\n\n"
+            
+        except Exception as e:
+            logger.exception(f"Error in streaming endpoint: {e}")
+            yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
+    
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Disable nginx buffering
+        }
+    )
 
 @app.get("/api/system-status")
 async def system_status():

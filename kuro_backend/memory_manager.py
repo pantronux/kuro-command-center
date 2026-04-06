@@ -710,13 +710,26 @@ Berikan jawaban HANYA dalam format JSON berikut, tanpa teks tambahan:
             config=types.GenerateContentConfig(temperature=0.1)
         )
         
-        # PHASE 2: Error handling for API responses
-        if not response.text or not response.text.strip():
+        # SAFETY CHECK: Check prompt_feedback before accessing response.text
+        if hasattr(response, 'prompt_feedback') and response.prompt_feedback:
+            logger.warning(f"[CLASSIFIER] Content blocked: {getattr(response.prompt_feedback, 'block_reason', 'UNKNOWN')}")
+            return {"fact": fact, "category": "temporary", "decay_exempt": False}
+        
+        # PHASE 2: Error handling for API responses - safe text access
+        try:
+            resp_text = response.text if response.text else ""
+        except Exception as text_err:
+            if "WARNING" in str(text_err) or "Safety" in str(text_err) or "blocked" in str(text_err).lower():
+                logger.warning(f"[CLASSIFIER] response.text blocked: {text_err}")
+                return {"fact": fact, "category": "temporary", "decay_exempt": False}
+            raise text_err
+        
+        if not resp_text or not resp_text.strip():
             logger.error("Critical: Classifier Model Failed - Empty response. Falling back to safe mode.")
             return {"fact": fact, "category": "temporary", "decay_exempt": False}
         
         # Parse JSON from response
-        json_match = re.search(r'\{.*\}', response.text, re.DOTALL)
+        json_match = re.search(r'\{.*\}', resp_text, re.DOTALL)
         if json_match:
             try:
                 result = json.loads(json_match.group())
@@ -1156,7 +1169,18 @@ Respond with ONLY the 1-2 sentence description, nothing else. Example format:
             )
         )
         
-        context = response.text.strip() if response.text else f"Dokumen: {filename}"
+        # SAFETY CHECK
+        if hasattr(response, 'prompt_feedback') and response.prompt_feedback:
+            logger.warning(f"[FILE_CONTEXT] Content blocked: {getattr(response.prompt_feedback, 'block_reason', 'UNKNOWN')}")
+            return f"Dokumen: {filename} (konteks diblokir filter)"
+        
+        try:
+            context = response.text.strip() if response.text else f"Dokumen: {filename}"
+        except Exception as text_err:
+            if "WARNING" in str(text_err) or "Safety" in str(text_err) or "blocked" in str(text_err).lower():
+                logger.warning(f"[FILE_CONTEXT] response.text blocked: {text_err}")
+                return f"Dokumen: {filename} (konteks diblokir filter)"
+            raise text_err
         
         # Validate context length (should be 1-2 sentences)
         if len(context) > 300:
@@ -1470,7 +1494,18 @@ Example:
             )
         )
         
-        expanded = response.text.strip() if response.text else query
+        # SAFETY CHECK
+        if hasattr(response, 'prompt_feedback') and response.prompt_feedback:
+            logger.warning(f"[QUERY_EXPANSION] Content blocked: {getattr(response.prompt_feedback, 'block_reason', 'UNKNOWN')}")
+            return query  # Fallback to original query
+        
+        try:
+            expanded = response.text.strip() if response.text else query
+        except Exception as text_err:
+            if "WARNING" in str(text_err) or "Safety" in str(text_err) or "blocked" in str(text_err).lower():
+                logger.warning(f"[QUERY_EXPANSION] response.text blocked: {text_err}")
+                return query
+            raise text_err
         
         # Validate expanded query
         if len(expanded) < 5 or len(expanded) > 200:
@@ -1703,7 +1738,18 @@ Respond with ONLY the extracted text, no commentary."""
             )
         )
         
-        return response.text.strip() if response.text else ""
+        # SAFETY CHECK
+        if hasattr(response, 'prompt_feedback') and response.prompt_feedback:
+            logger.warning(f"[OCR] Content blocked: {getattr(response.prompt_feedback, 'block_reason', 'UNKNOWN')}")
+            return ""
+        
+        try:
+            return response.text.strip() if response.text else ""
+        except Exception as text_err:
+            if "WARNING" in str(text_err) or "Safety" in str(text_err) or "blocked" in str(text_err).lower():
+                logger.warning(f"[OCR] response.text blocked: {text_err}")
+                return ""
+            raise text_err
         
     except Exception as e:
         logger.error(f"OCR failed for {filename} page {page_num}: {e}")
@@ -1757,11 +1803,22 @@ If you cannot identify the ISO standard, use the filename as iso_name."""
             )
         )
         
+        # SAFETY CHECK
+        if hasattr(response, 'prompt_feedback') and response.prompt_feedback:
+            logger.warning(f"[COMPLIANCE_CONTEXT] Content blocked: {getattr(response.prompt_feedback, 'block_reason', 'UNKNOWN')}")
+            return {"iso_name": "Unknown", "scope": "Content blocked by filter", "summary": "N/A"}
+        
         # Parse JSON response - handle markdown code blocks and various formats
         import json
         import re
         
-        response_text = response.text.strip()
+        try:
+            response_text = response.text.strip()
+        except Exception as text_err:
+            if "WARNING" in str(text_err) or "Safety" in str(text_err) or "blocked" in str(text_err).lower():
+                logger.warning(f"[COMPLIANCE_CONTEXT] response.text blocked: {text_err}")
+                return {"iso_name": "Unknown", "scope": "Content blocked by filter", "summary": "N/A"}
+            raise text_err
         
         # Try to extract JSON from markdown code block first
         json_block_match = re.search(r'```(?:json)?\s*\n(.*?)\n```', response_text, re.DOTALL)

@@ -13,6 +13,7 @@ import re
 from typing import List, Dict, Optional, Any
 from datetime import datetime
 from mem0 import Memory
+from kuro_backend.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -25,11 +26,11 @@ MASTER_USER_ID = "pantronux"
 
 # Privacy keywords that indicate client/confidential data (should NOT be stored)
 CLIENT_DATA_KEYWORDS = [
-    "medco internal", "medco confidential", "medco secret",
+    "internal", "confidential", "secret",
     "client data", "client password", "client credential",
     "rahasia perusahaan", "confidential document",
-    "gap analysis medco", "audit medco",
-    "penilaian risiko medco", "dokumen internal medco",
+    "gap analysis", "audit",
+    "penilaian risiko", "dokumen internal",
 ]
 
 # Habit tracking keywords
@@ -92,8 +93,9 @@ class PerpetualMemory:
                     embedder=EmbedderConfig(
                         provider="gemini",
                         config={
-                            "model": "models/text-embedding-004",
+                            "model": "models/embedding-001",
                             "api_key": settings.GEMINI_API_KEY,
+                            "task_type": "retrieval_document",
                         }
                     )
                 )

@@ -420,6 +420,8 @@ function removeFile(index) {
 // ============================================
 // Chat Functions
 // ============================================
+// V5.1 STREAMING: Send message with SSE streaming
+// ============================================
 async function sendMessage() {
     const message = elements.messageInput.value.trim();
     
@@ -444,32 +446,103 @@ async function sendMessage() {
     // Show typing indicator
     showTypingIndicator();
     
+    // STEP 1: Create ONE empty chat bubble for Kuro and insert into DOM
+    const aiMessageDiv = document.createElement('div');
+    aiMessageDiv.className = 'flex items-start gap-3 message-enter';
+    aiMessageDiv.innerHTML = `
+        <div class="w-8 h-8 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center flex-shrink-0"><i data-lucide="cat" class="w-4 h-4 text-white"></i></div>
+        <div class="max-w-[85%] lg:max-w-[70%]">
+            <div class="chat-bubble-ai px-4 py-3 shadow-sm">
+                <div class="markdown-content streaming-content"></div>
+            </div>
+            <span class="text-xs text-gray-400 mt-1 block">${getCurrentTime()}</span>
+        </div>
+    `;
+    elements.chatContainer.appendChild(aiMessageDiv);
+    lucide.createIcons();
+    
+    // Get reference to the content div inside the bubble
+    const streamingContent = aiMessageDiv.querySelector('.streaming-content');
+    let botMessage = '';
+    let buffer = '';
+    
     try {
         const formData = new FormData();
         formData.append('message', message);
         filesToSend.forEach(file => formData.append('files', file));
         
-        const response = await authFetch(`${CONFIG.API_BASE}/chat`, {
+        // STEP 2: Fetch the streaming endpoint
+        const response = await fetch(`${CONFIG.API_BASE}/chat/stream`, {
             method: 'POST',
             body: formData,
+            credentials: 'include',
         });
         
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
         
-        const data = await response.json();
+        // STEP 3: Get reader and decoder
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        
+        // STEP 4: Start the loop with BUFFER pattern
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            
+            buffer += decoder.decode(value, { stream: true });
+            const parts = buffer.split('\n\n');
+            buffer = parts.pop(); // Simpan potongan yang belum selesai ke buffer
+            
+            for (const part of parts) {
+                if (part.startsWith('data: ')) {
+                    const dataStr = part.substring(6).trim();
+                    if (dataStr === '[DONE]') continue;
+                    
+                    try {
+                        const data = JSON.parse(dataStr);
+                        if (data.chunk) {
+                            botMessage += data.chunk;
+                            // Pastikan selector ini sesuai dengan class/id div tempat teks berada
+                            const textContainer = streamingContent;
+                            textContainer.innerHTML = marked.parse(botMessage);
+                            elements.chatContainer.scrollTop = elements.chatContainer.scrollHeight;
+                        }
+                    } catch (e) {
+                        console.error("JSON Parse Error on chunk:", dataStr);
+                    }
+                }
+            }
+        }
         
         removeTypingIndicator();
-        addMessageToChat('ai', data.response);
+        
+        // Final render
+        streamingContent.innerHTML = marked.parse(botMessage);
+        hljs.highlightAll();
+        elements.chatContainer.scrollTop = elements.chatContainer.scrollHeight;
         
     } catch (error) {
         console.error('Chat error:', error);
         removeTypingIndicator();
-        addMessageToChat('ai', 'Maaf, Pantronux. Terjadi kesalahan saat memproses permintaan Anda. Silakan coba lagi.');
+        // Error handling - show red text in the SAME bubble
+        if (streamingContent) {
+            streamingContent.innerHTML = `<span style="color:red">Connection lost.</span>`;
+        } else {
+            addMessageToChat('ai', '<span style="color:red">Connection lost.</span>');
+        }
     } finally {
         isProcessing = false;
         elements.sendBtn.disabled = false;
+        // FIX: DO NOT call loadHistory() here - DOM is already updated in real-time
+    }
+}
+
+// V5.1: Scroll to bottom helper for streaming
+function scrollToBottom() {
+    if (elements.chatContainer) {
+        elements.chatContainer.scrollTop = elements.chatContainer.scrollHeight;
     }
 }
 
@@ -609,8 +682,14 @@ async function loadChatHistory() {
         elements.scrollLoader = document.getElementById('scrollLoader');
         
         if (data.status === 'success' && data.history.length > 0) {
+            // FIX: Reverse array on first load (offset === 0) so oldest messages are at top
+            let messages = data.history;
+            if (chatOffset === 0 && Array.isArray(messages)) {
+                messages = messages.reverse();
+            }
+            
             // Render messages in chronological order
-            data.history.forEach(msg => {
+            messages.forEach(msg => {
                 const role = msg.role === 'user' ? 'user' : 'ai';
                 addMessageToChat(role, msg.content);
             });

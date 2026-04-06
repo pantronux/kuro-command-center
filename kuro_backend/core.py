@@ -260,7 +260,21 @@ def process_chat(message: str, image_paths: list = None) -> str:
             config=_DEFAULT_CONFIG
         )
 
-        response_text = response.text if response.text else "Maaf, Pantronux. Kuro tidak dapat menghasilkan respons yang valid."
+        # SAFETY CHECK: Check prompt_feedback BEFORE accessing response.text
+        # When content is blocked by safety filters, response.text raises AttributeError
+        if hasattr(response, 'prompt_feedback') and response.prompt_feedback:
+            block_reason = getattr(response.prompt_feedback, 'block_reason', 'UNKNOWN')
+            logger.warning(f"[CORE] Content blocked by safety filter: {block_reason}")
+            response_text = "Maaf, Pantronux. Respons diblokir oleh filter keamanan Gemini. Silakan ubah pertanyaan Anda."
+        else:
+            try:
+                response_text = response.text if response.text else "Maaf, Pantronux. Kuro tidak dapat menghasilkan respons yang valid."
+            except Exception as text_err:
+                if "WARNING" in str(text_err) or "Safety" in str(text_err) or "blocked" in str(text_err).lower():
+                    logger.warning(f"[CORE] response.text blocked: {text_err}")
+                    response_text = "Maaf, Pantronux. Respons diblokir oleh filter keamanan Gemini."
+                else:
+                    raise text_err
 
         # === POST-PROCESS: Store to Memory Tiers ===
         # Tier 1: Always store to short-term (SQLite)
