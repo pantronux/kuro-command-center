@@ -13,9 +13,9 @@ load_dotenv()
 # ============================================
 # PRIMARY MODEL CONFIGURATION
 # ============================================
-# CRITICAL: gemini-2.0-flash is DEPRECATED. Use gemini-2.5-flash.
-PRIMARY_MODEL = "gemini-2.5-flash"
-CLASSIFIER_MODEL = "gemini-2.5-flash"  # For fact classification
+# CRITICAL: gemini-2.0-flash is DEPRECATED. Use gemini-3-flash-preview.
+PRIMARY_MODEL = "gemini-3-flash-preview"
+CLASSIFIER_MODEL = "gemini-3-flash-preview"  # For fact classification
 
 class Settings:
     """

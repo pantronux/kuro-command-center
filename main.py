@@ -427,6 +427,136 @@ async def index_path(path: str = Form("/home/kuro/projects/")):
     result = tools.index_system_path(path)
     return result
 
+@app.post("/api/memory/reindex")
+async def memory_reindex(source: str = Form("uploaded_files")):
+    """
+    V3.0 CONTEXTUAL RAG RE-INDEXING:
+    Clear old ChromaDB and re-index files with contextual enrichment.
+    
+    source: "uploaded_files" (default) or "all" (includes system paths)
+    """
+    try:
+        import time
+        start_time = time.time()
+        
+        file_texts = {}
+        
+        if source == "uploaded_files":
+            # Read all files from uploaded_files directory
+            upload_dir = tools.UPLOAD_DIR
+            if os.path.exists(upload_dir):
+                for root, dirs, files in os.walk(upload_dir):
+                    for filename in files:
+                        filepath = os.path.join(root, filename)
+                        try:
+                            # Only process text-based files
+                            ext = os.path.splitext(filename)[1].lower()
+                            if ext in ['.txt', '.md', '.py', '.js', '.json', '.log', '.csv', '.yaml', '.yml']:
+                                with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
+                                    file_texts[filename] = f.read()[:100000]  # Limit to 100k chars
+                        except Exception as e:
+                            logger.warning(f"Could not read {filepath}: {e}")
+        
+        if not file_texts:
+            return {
+                "status": "error",
+                "message": "No files found to re-index",
+                "source": source
+            }
+        
+        # Run contextual re-indexing
+        result = memory_manager.reindex_all_files(file_texts)
+        
+        elapsed = time.time() - start_time
+        
+        return {
+            "status": "success" if result["success"] else "partial",
+            "files_processed": result["files_processed"],
+            "total_chunks": result["total_chunks"],
+            "errors": result["errors"],
+            "contexts": result["contexts"],
+            "elapsed_seconds": round(elapsed, 2)
+        }
+        
+    except Exception as e:
+        logger.error(f"Memory re-indexing failed: {e}")
+        return {
+            "status": "error",
+            "message": str(e)
+        }
+
+@app.get("/api/memory/stats")
+async def memory_stats():
+    """V3.0 Enhanced memory statistics."""
+    return {
+        "status": "success",
+        "data": memory_manager.get_memory_stats()
+    }
+
+@app.post("/api/compliance/ingest")
+async def compliance_ingest(clear: bool = Form(False)):
+    """
+    V3.1 COMPLIANCE KNOWLEDGE BASE INGESTION:
+    Trigger batch ingestion of compliance documents from /home/kuro/ComplianceDoc.
+    
+    clear: If true, clear existing compliance database before ingestion.
+    """
+    try:
+        import time
+        start_time = time.time()
+        
+        # Clear if requested
+        if clear:
+            collection = memory_manager._get_compliance_collection()
+            if collection:
+                existing = collection.get()
+                if existing and existing.get("ids"):
+                    collection.delete(ids=existing["ids"])
+                    logger.info(f"[COMPLIANCE_API] Cleared {len(existing['ids'])} existing chunks")
+        
+        # Run ingestion
+        result = memory_manager.ingest_compliance_base()
+        elapsed = time.time() - start_time
+        
+        return {
+            "status": "success" if result["success"] else "partial",
+            "files_processed": result["files_processed"],
+            "total_chunks": result["total_chunks"],
+            "iso_standards": result["iso_standards"],
+            "documents": result.get("documents", []),
+            "errors": result["errors"],
+            "elapsed_seconds": round(elapsed, 2)
+        }
+        
+    except Exception as e:
+        logger.error(f"Compliance ingestion failed: {e}")
+        return {
+            "status": "error",
+            "message": str(e)
+        }
+
+@app.get("/api/compliance/stats")
+async def compliance_stats():
+    """V3.1 Compliance knowledge base statistics."""
+    return {
+        "status": "success",
+        "data": memory_manager.get_compliance_stats()
+    }
+
+@app.get("/api/compliance/search")
+async def compliance_search(query: str):
+    """V3.1 Search compliance knowledge base."""
+    if not query:
+        return {"status": "error", "message": "No query provided"}
+    
+    results = memory_manager.search_compliance_base(query, top_k=5)
+    return {
+        "status": "success",
+        "query": query,
+        "results": results,
+        "count": len(results)
+    }
+
 @app.post("/api/read-file")
 async def read_file(file_path: str = Form("")):
     """Read a file using universal parser."""

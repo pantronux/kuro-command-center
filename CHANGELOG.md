@@ -1,3 +1,194 @@
+# Kuro AI V3.1 Official - Changelog
+
+**Release Date:** 2026-04-06
+**Version:** 3.1.0
+**Codename:** "Compliance Knowledge Base Integration"
+
+---
+
+## V3.1.0 - Compliance Knowledge Base Integration (2026-04-06)
+
+### Major Upgrade: Golden Memory Tier for Compliance
+
+#### Multimodal Ingestion Pipeline
+- **PROBLEM**: 25 ISO/compliance PDFs in `/home/kuro/ComplianceDoc` not being used as knowledge source
+- **SOLUTION**: Dedicated ingestion pipeline with OCR support for scanned documents
+- **Implementation**:
+  - `extract_pdf_text()`: Handles both text-based and scanned PDFs
+  - `_ocr_page_with_gemini()`: Uses Gemini 3 Flash multimodal vision for OCR on scanned pages
+  - Triggers OCR when >30% of pages are scanned (low text extraction)
+  - 2x resolution pixmap for better OCR accuracy
+  - Max 100 pages per PDF, 20 pages for OCR (RAM/API cost protection)
+
+#### Dedicated Compliance ChromaDB Collection
+- **New Collection**: `compliance_standards` in separate `kuro_compliance_chroma/` directory
+- **Isolation**: Compliance data completely separate from regular chat memory
+- **Chunking Rule**: Each chunk prefixed with `[COMPLIANCE_STANDARD: {ISO_NAME}] | [SCOPE: {Scope_Klausul}]`
+- **Clause-Aware Chunking**: Attempts to split by clause boundaries (e.g., "5.1.2", "A.8.1.3")
+- **Larger Chunks**: 2000 chars with 300 char overlap (vs 1500/200 for regular memory)
+
+#### Compliance Context Generation
+- **Global Summary**: Gemini 3 generates ISO name, scope, summary, and key clauses for each document
+- **Metadata Extraction**: Identifies ISO standard name automatically from content
+- **JSON Response**: Structured metadata for each document including clause numbers
+
+#### Search Weighting/Boosting
+- **Compliance Keywords**: 25+ keywords trigger boosted search (compliance, audit, ISO, A.5, A.8, etc.)
+- **Boosted Results**: 8 results for compliance queries (vs 5 for regular)
+- **Dedicated Search**: `search_compliance_base()` searches only compliance_standards collection
+- **Formatted Output**: Results include ISO name, clause numbers, and relevance scores
+
+#### Memory Injection
+- **New Memory Tier**: "compliance" section added to memory injection
+- **Format**: `[COMPLIANCE KNOWLEDGE BASE - SUMBER RESMI ISO/STANDAR]`
+- **Conditional**: Only injected when query matches compliance keywords
+- **Logging**: `[COMPLIANCE_BOOST]` log entry when compliance data is injected
+
+### Maintenance Script
+- **New Script**: `maintenance/rebuild_compliance_base.py`
+- **Options**:
+  - `--directory PATH`: Custom compliance document directory
+  - `--stats`: Show current compliance database statistics
+  ---clear`: Clear existing database before ingestion
+  - `--dry-run`: List files without processing
+- **Security**: Only reads from specified directory, never copies files
+- **RAM Protection**: 2 files per batch, 3-second delay between batches
+
+### API Endpoints Added
+- **POST `/api/compliance/ingest`**: Trigger compliance batch ingestion (with optional `clear` parameter)
+- **GET `/api/compliance/stats`**: Compliance knowledge base statistics
+- **GET `/api/compliance/search`**: Search compliance knowledge base with query parameter
+
+### Security & Git Protection
+- **External Directory**: Compliance docs remain in `/home/kuro/ComplianceDoc` (NOT copied to project)
+- **.gitignore Updated**: Added `compliance_cache/`, `kuro_compliance_chroma/`, `*.compliance.db`
+- **Read-Only Access**: Script only reads files, never modifies source directory
+
+### Documents Indexed (25 PDFs)
+- ISO 27001:2022, ISO 27002:2022, ISO 27005:2022, ISO 27017:2015, ISO 27018:2019
+- ISO 27031:2025, ISO 27037:2012, ISO 27037:2012 (SNI), ISO 27557:2022
+- ISO 27701:2019, ISO 27701:2025
+- ISO 19011:2018, ISO 19944-1:2020, ISO 20000-1:2018
+- ISO 22301:2019, ISO 22317:2021, ISO 22331:2018
+- ISO 23894:2022, ISO 38507:2022, ISO 42001:2023, ISO 42001:2024 (OCR)
+- BS ISO 29134:2020, GDPR, UU Nomor 27 Tahun 2022
+
+### Files Changed
+- **MODIFIED**: `.gitignore` - Added compliance cache exclusions
+- **MODIFIED**: `kuro_backend/memory_manager.py` - Added 600+ lines of compliance ingestion code
+- **MODIFIED**: `main.py` - Added 3 new compliance API endpoints
+- **NEW**: `maintenance/rebuild_compliance_base.py` - Maintenance script for manual rebuilds
+
+### Usage Examples
+```bash
+# Rebuild compliance base (clear and re-ingest all)
+python maintenance/rebuild_compliance_base.py --clear
+
+# Check current stats
+python maintenance/rebuild_compliance_base.py --stats
+
+# API trigger
+curl -X POST https://192.168.18.84:8443/api/compliance/ingest -F "clear=true" -b "kuro_access_token=..."
+
+# Search compliance
+curl "https://192.168.18.84:8443/api/compliance/search?query=access+control+A.8"
+```
+
+---
+
+# Kuro AI V3.0 Official - Changelog
+
+**Release Date:** 2026-04-06
+**Version:** 3.0.0
+**Codename:** "Gemini 3 Flash Engine & Contextual RAG Upgrade"
+
+---
+
+## V3.0.0 - Gemini 3 Flash Engine & Contextual RAG (2026-04-06)
+
+### Major Upgrade: Contextual Retrieval Architecture
+
+#### Gemini 3 Flash Engine
+- **Model**: Upgraded to `gemini-3-flash-preview` as PRIMARY_MODEL and CLASSIFIER_MODEL
+- **Configuration**: Verified in `config.py` and `.env` (MODEL_NAME="gemini-3-flash-preview")
+- **Benefits**: Improved reasoning, better context understanding, faster response times
+- **Version String**: Updated to "V3.0 Official - Contextual RAG"
+
+#### Contextual Ingestion (Memory Manager V3.0)
+- **PROBLEM**: Old ChromaDB entries lacked file-level context, causing poor retrieval accuracy
+- **SOLUTION**: Gemini 3 generates global file context before chunking, then prepends it to every chunk
+- **Implementation**:
+  - `generate_file_context()`: Sends first 100k chars to Gemini 3, gets 1-2 sentence dense description
+  - `chunk_text_with_context()`: Enriches each chunk with format `[FILE_CONTEXT: {deskripsi}] | [CHUNK_CONTENT: {isi_asli_chunk}]`
+  - `ingest_file_contextual()`: Main function combining context generation + chunking + upsert
+- **Example Context**: "Ini adalah dokumen Kebijakan Keamanan Informasi PT Medco tahun 2026 yang fokus pada kontrol akses fisik dan logis sesuai ISO 27001:2022 Annex A.5 dan A.8."
+
+#### Re-Indexing System
+- **New API**: `POST /api/memory/reindex` - Triggers full ChromaDB cleanup and re-indexing
+- **Process**:
+  1. Deletes all existing entries from ChromaDB (mass cleanup)
+  2. Reads files from `/uploaded_files` directory
+  3. Processes files in batches of 5 (MAX_FILES_PER_BATCH)
+  4. Generates context for each file using Gemini 3
+  5. Chunks with context injection and upserts to ChromaDB
+  6. 2-second delay between batches (RAM protection)
+- **Response**: Returns files processed, total chunks, contexts generated, and any errors
+
+#### Query Expansion (Intelligent Retrieval)
+- **PROBLEM**: Ambiguous queries like "ini maksudnya?" failed to find relevant context
+- **SOLUTION**: Gemini 3 expands queries using recent conversation context
+- **Implementation**:
+  - `expand_query()`: Analyzes last 6 messages to identify what pronouns refer to
+  - Detects ambiguous indicators: "ini", "itu", "dia", "mereka", "tersebut", "maksudnya"
+  - Generates expanded search query optimized for semantic retrieval
+  - Falls back to original query if expansion fails or query is already specific
+- **Example**: "ini maksudnya?" + context about ISO 27001 → "ISO 27001 access control policy requirements and implementation details"
+
+#### Enhanced Search Function
+- **New Function**: `search_long_term_contextual()` - Combines query expansion with contextual retrieval
+- **Features**:
+  - Automatically expands ambiguous queries
+  - Extracts clean chunk content (removes context prefix for display)
+  - Preserves anti-VCT bias filtering
+  - Returns top_k most relevant results
+
+### Resource Protection (6GB RAM Systems)
+
+#### Batch Processing
+- **MAX_FILES_PER_BATCH**: 5 files per batch to prevent OOM
+- **BATCH_DELAY_SECONDS**: 2-second delay between batches
+- **CHUNK_SIZE**: 1500 characters per chunk with 200 char overlap
+- **CONTEXT_MAX_CHARS**: 100k character limit for context generation input
+- **Batch Insert**: 100 chunks per ChromaDB insert operation
+
+#### Memory Safeguards
+- Text truncated to 100k chars before context generation
+- Context descriptions capped at 300 characters
+- Progress logging for large files during batch processing
+- Graceful error handling with fallback to original query
+
+### API Endpoints Added
+- **POST `/api/memory/reindex`**: Trigger contextual re-indexing of uploaded files
+- **GET `/api/memory/stats`**: Enhanced memory statistics (unchanged but documented)
+
+### Files Changed
+- **MODIFIED**: `kuro_backend/config.py` - Updated header to V3.0, verified gemini-3-flash-preview
+- **MODIFIED**: `kuro_backend/core.py` - Updated version string, passes recent_messages for query expansion
+- **MODIFIED**: `kuro_backend/memory_manager.py` - Added 6 new functions for Contextual RAG (~400 lines)
+- **MODIFIED**: `main.py` - Added `/api/memory/reindex` and `/api/memory/stats` endpoints
+
+### Architecture Changes
+- **Before**: ChromaDB stored raw chunks without file context → poor retrieval for ambiguous queries
+- **After**: Every chunk enriched with Gemini-generated file context → superior retrieval accuracy
+- **Query Flow**: User query → Query Expansion (if ambiguous) → Contextual Search → Relevant results
+
+### Security & Compliance
+- No changes to authentication or authorization
+- Contextual RAG maintains existing anti-VCT bias filtering
+- Memory decay and anti-hallucination protocols preserved
+
+---
+
 # Kuro AI V2.1.1 Official - Changelog
 
 **Release Date:** 2026-04-05
@@ -134,7 +325,7 @@
 ### Critical Fixes
 
 #### Model Deprecation Fix
-- **REPLACED**: `gemini-2.0-flash` → `gemini-2.5-flash` (deprecated model was causing 404 errors)
+- **REPLACED**: `gemini-2.0-flash` → `gemini-3-flash` (deprecated model was causing 404 errors)
 - Added `PRIMARY_MODEL` and `CLASSIFIER_MODEL` config variables in `config.py`
 - All model references now use centralized config variables
 

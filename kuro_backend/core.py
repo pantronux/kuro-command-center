@@ -1,8 +1,9 @@
 """
-Kuro AI V2.0 Official - Core [2026-04-05]
+Kuro AI V3.0 Official - Core [2026-04-06]
 ================================================================================
-AI Core with 3-Tier Memory Injection and Dynamic Persona System
+AI Core with Contextual RAG Memory Injection and Dynamic Persona System
 SDK: google-genai v3 Protocol (client.models.generate_content)
+V3.0: Gemini 3 Flash Engine + Contextual Retrieval + Query Expansion
 """
 import logging
 import base64
@@ -64,7 +65,7 @@ def _get_system_instruction_with_time() -> str:
     common_instruction = (
         f"\n\n[CURRENT_TIME: {current_time}] "
         f"[CURRENT_DATE: {current_date}] "
-        f"[KURO_VERSION: V2.0.1 Official - {current_date}] "
+        f"[KURO_VERSION: V3.0 Official - Contextual RAG - {current_date}] "
         "Gunakan waktu saat ini sebagai referensi untuk menghitung 'besok', 'nanti malam', '10 menit lagi', dll.\n\n"
         
         "CHAIN OF THOUGHT (HIDDEN THOUGHT PROCESS):\n"
@@ -189,8 +190,10 @@ def process_chat(message: str, image_paths: list = None) -> str:
         image_paths: Optional list of image file paths for vision analysis.
     """
     try:
-        # === PRE-PROCESS: Query Memory (3-Tier) ===
-        memory = memory_manager.query_memory(message)
+        # === PRE-PROCESS: Query Memory (3-Tier with V3.0 Contextual RAG) ===
+        # Get recent messages for query expansion
+        recent_messages = memory_manager.get_short_term()
+        memory = memory_manager.query_memory(message, recent_messages=recent_messages)
         
         # === MEMORY V2.1: Temporal Grounding ===
         memory_injection = memory_manager.format_memory_with_temporal_grounding(memory)

@@ -13,6 +13,12 @@ __pycache__/
 *.pem
 *.key
 
-#Uploaded files
+# Uploaded files
 uploaded_files/
 kuro_auth.db
+
+# Compliance Knowledge Base (External - DO NOT COPY TO PROJECT)
+# These are references to /home/kuro/ComplianceDoc
+compliance_cache/
+kuro_compliance_chroma/
+*.compliance.db

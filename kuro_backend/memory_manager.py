@@ -1,10 +1,16 @@
 """
-Kuro AI V2.0 Official - Memory Manager [2026-04-05]
+Kuro AI V3.0 Official - Memory Manager [2026-04-06]
 ================================================================================
-Kuro Cognitive Memory Engine V2.1 - Tier-3 Architecture with Anti-Hallucination
+Kuro Cognitive Memory Engine V3.0 - Contextual RAG Architecture
 TIER 1: Short-Term Buffer (SQLite) - Last 20 interactions
-TIER 2: Semantic Long-Term Memory (ChromaDB) - Embedded facts
+TIER 2: Semantic Long-Term Memory (ChromaDB) - Context-enriched embedded facts
 TIER 3: Structured Knowledge Base (JSON) - Permanent master profile (ABSOLUTE TRUTH)
+
+V3.0 CONTEXTUAL RAG:
+- Contextual Ingestion: Gemini 3 generates global file context before chunking
+- Context-Enriched Chunks: Each chunk prefixed with file-level context for better retrieval
+- Query Expansion: Gemini 3 expands ambiguous queries using conversation context
+- Resource Protection: Batch processing with RAM safeguards for 6GB systems
 
 Anti-Hallucination Protocol V2.1:
 - Semantic Upsert: Deduplication with similarity search + Gemini Flash classification
@@ -24,6 +30,7 @@ import os
 import re
 import sqlite3
 import threading
+import time
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Tuple
 from kuro_backend.config import settings
@@ -37,6 +44,10 @@ BASE_DIR = settings.WORKING_DIR
 SHORT_TERM_DB = os.path.join(BASE_DIR, "kuro_short_term.db")
 LONG_TERM_DIR = os.path.join(BASE_DIR, "kuro_chromadb")
 MASTER_PROFILE_PATH = os.path.join(BASE_DIR, "master_profile.json")
+
+# V3.1 Compliance Knowledge Base - External directory (READ ONLY)
+COMPLIANCE_DOC_DIR = "/home/kuro/ComplianceDoc"
+COMPLIANCE_CHROMA_DIR = os.path.join(BASE_DIR, "kuro_compliance_chroma")
 
 SHORT_TERM_LIMIT = 20  # Last 20 interactions
 IMPORTANCE_THRESHOLD = 7  # Only store to ChromaDB if importance > 7
@@ -385,9 +396,12 @@ def mark_obsolete(query: str):
 # ============================================
 # Unified Memory Query Interface
 # ============================================
-def query_memory(current_message: str) -> Dict[str, str]:
+def query_memory(current_message: str, recent_messages: List[Dict] = None) -> Dict[str, str]:
     """
     Pre-process memory before AI response.
+    
+    V3.0 Update: Accepts recent_messages for query expansion.
+    V3.1 Update: Includes compliance knowledge base with boosted weighting.
     Returns formatted memory sections for prompt injection.
     """
     # Tier 1: Short-term
@@ -400,17 +414,42 @@ def query_memory(current_message: str) -> Dict[str, str]:
             summaries.append(f"{role_label}: {entry['content'][:100]}")
         short_term_text = "\n".join(summaries)
     
-    # Tier 2: Long-term semantic search
-    long_term_facts = search_long_term(current_message, top_k=5)
+    # Tier 2: Long-term semantic search (V3.0 contextual with query expansion)
+    long_term_facts = search_long_term_contextual(current_message, top_k=5, recent_messages=recent_messages)
     long_term_text = "\n".join(long_term_facts) if long_term_facts else ""
     
     # Tier 3: Master profile
     profile_text = get_master_profile_formatted()
     
+    # V3.1: Compliance Knowledge Base (Boosted for compliance queries)
+    compliance_text = ""
+    compliance_keywords = ["compliance", "audit", "iso", "iso 27001", "iso 27002", "nist", "gdpr",
+                          "kontrol", "control", "a.5", "a.6", "a.7", "a.8", "a.9", "a.10",
+                          "klausul", "clause", "annex", "lampiran", "sertifikasi", "certification",
+                          "risk assessment", "risk treatment", "soa", "statement of applicability",
+                          "isms", "smsi", "pims", "ai management", "togaf", "business continuity"]
+    
+    msg_lower = current_message.lower()
+    is_compliance_query = any(kw in msg_lower for kw in compliance_keywords)
+    
+    if is_compliance_query:
+        # Boosted search: get more results for compliance queries
+        compliance_results = search_compliance_base(current_message, top_k=8)
+        if compliance_results:
+            compliance_parts = []
+            for result in compliance_results:
+                clause_info = f" (Klausul: {result['clauses']})" if result.get("clauses") else ""
+                compliance_parts.append(
+                    f"[{result['iso_name']}{clause_info}]\n{result['content'][:500]}"
+                )
+            compliance_text = "\n\n".join(compliance_parts)
+            logger.info(f"[COMPLIANCE_BOOST] Query matched compliance keywords: {len(compliance_results)} results injected")
+    
     return {
         "short_term": short_term_text,
         "long_term": long_term_text,
-        "profile": profile_text
+        "profile": profile_text,
+        "compliance": compliance_text
     }
 
 def format_memory_injection(memory: Dict[str, str]) -> str:
@@ -425,6 +464,10 @@ def format_memory_injection(memory: Dict[str, str]) -> str:
     
     if memory["long_term"]:
         parts.append(f"\n[FAKTA PENDUKUNG - Memori Jangka Panjang]\n{memory['long_term']}")
+    
+    # V3.1: Compliance Knowledge Base (Golden Memory Tier)
+    if memory.get("compliance"):
+        parts.append(f"\n[COMPLIANCE KNOWLEDGE BASE - SUMBER RESMI ISO/STANDAR]\n{memory['compliance']}")
     
     return "\n".join(parts)
 
@@ -1046,6 +1089,1104 @@ def get_memory_stats() -> Dict:
         "tier3_profile": {"type": "JSON", "file": MASTER_PROFILE_PATH, "notes": len(profile.get("notes", []))},
         "importance_threshold": IMPORTANCE_THRESHOLD
     }
+
+
+# ============================================
+# V3.0 CONTEXTUAL RAG - GEMINI 3 ENGINE
+# ============================================
+
+# Configuration for Contextual RAG
+CONTEXT_MAX_CHARS = 100000  # Max characters to send for context generation (100k)
+CHUNK_SIZE = 1500  # Characters per chunk
+CHUNK_OVERLAP = 200  # Overlap between chunks for context continuity
+MAX_FILES_PER_BATCH = 5  # Process max 5 files at once to avoid OOM
+BATCH_DELAY_SECONDS = 2  # Delay between file processing
+
+def generate_file_context(text: str, filename: str) -> str:
+    """
+    V3.0 CONTEXTUAL INGESTION - Step A (Global Context):
+    Use Gemini 3 Flash to generate a 1-2 sentence dense description of the file.
+    
+    This context will be prepended to every chunk for better retrieval accuracy.
+    
+    Args:
+        text: Full file text (or first 100k chars)
+        filename: Name of the file for context
+    
+    Returns:
+        A 1-2 sentence context string describing the file content.
+    """
+    try:
+        from google import genai
+        from google.genai import types
+        from kuro_backend.config import PRIMARY_MODEL
+        
+        client = genai.Client(api_key=settings.GEMINI_API_KEY)
+        
+        # Truncate text if too long (resource protection)
+        truncated_text = text[:CONTEXT_MAX_CHARS]
+        char_count = len(truncated_text)
+        
+        prompt = f"""Analyze the following document content and generate a concise, information-dense 1-2 sentence description.
+
+File: {filename}
+Content length: {char_count} characters
+
+Your description should capture:
+- What type of document is this? (policy, technical spec, log, code, etc.)
+- What is the main subject/topic?
+- Any key entities, organizations, or time periods mentioned?
+- What domain does this belong to? (security, IT infrastructure, compliance, etc.)
+
+Content (first {char_count} chars):
+---
+{truncated_text[:5000]}
+---
+
+Respond with ONLY the 1-2 sentence description, nothing else. Example format:
+"Ini adalah dokumen Kebijakan Keamanan Informasi PT Medco tahun 2026 yang fokus pada kontrol akses fisik dan logis sesuai ISO 27001:2022 Annex A.5 dan A.8."
+"""
+        
+        response = client.models.generate_content(
+            model=PRIMARY_MODEL,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                temperature=0.1,
+                max_output_tokens=200
+            )
+        )
+        
+        context = response.text.strip() if response.text else f"Dokumen: {filename}"
+        
+        # Validate context length (should be 1-2 sentences)
+        if len(context) > 300:
+            context = context[:300] + "..."
+        
+        logger.info(f"[CONTEXT_GENERATED] for file: {filename} - {context[:80]}...")
+        return context
+        
+    except Exception as e:
+        logger.error(f"Failed to generate file context for {filename}: {e}")
+        return f"Dokumen: {filename} (konteks gagal dibuat)"
+
+
+def chunk_text_with_context(text: str, file_context: str, filename: str) -> List[Dict]:
+    """
+    V3.0 CONTEXTUAL INGESTION - Step B (Context Injection):
+    Chunk text and prepend the global context to each chunk.
+    
+    Format: [FILE_CONTEXT: {deskripsi}] | [CHUNK_CONTENT: {isi_asli_chunk}]
+    
+    Args:
+        text: Full file text
+        file_context: Generated context from generate_file_context()
+        filename: Name of the file
+    
+    Returns:
+        List of dicts with 'id', 'content', 'metadata'
+    """
+    chunks = []
+    
+    # Split text into chunks with overlap
+    start = 0
+    chunk_index = 0
+    
+    while start < len(text):
+        end = start + CHUNK_SIZE
+        
+        # Get chunk content
+        chunk_content = text[start:end]
+        
+        # Skip empty chunks
+        if not chunk_content.strip():
+            start = end
+            continue
+        
+        # Create enriched chunk with context
+        enriched_content = f"[FILE_CONTEXT: {file_context}] | [CHUNK_CONTENT: {chunk_content}]"
+        
+        # Calculate chunk metadata
+        chunk_metadata = {
+            "source_file": filename,
+            "chunk_index": chunk_index,
+            "char_start": start,
+            "char_end": min(end, len(text)),
+            "timestamp": datetime.now().isoformat(),
+            "type": "contextual_chunk",
+            "importance": compute_importance_score(chunk_content)
+        }
+        
+        chunks.append({
+            "id": f"{filename}_chunk_{chunk_index}",
+            "content": enriched_content,
+            "metadata": chunk_metadata
+        })
+        
+        chunk_index += 1
+        start = end - CHUNK_OVERLAP  # Overlap for context continuity
+    
+    logger.info(f"Chunked {filename}: {chunk_index} chunks created (context: {file_context[:60]}...)")
+    return chunks
+
+
+def ingest_file_contextual(text: str, filename: str, metadata: Dict = None) -> Dict:
+    """
+    V3.0 CONTEXTUAL INGESTION - Main function:
+    1. Generate global context with Gemini 3
+    2. Chunk text with context injection
+    3. Upsert enriched chunks to ChromaDB
+    
+    Args:
+        text: Full file text content
+        filename: Name of the file
+        metadata: Additional metadata to attach
+    
+    Returns:
+        Dict with ingestion results
+    """
+    collection = _get_chroma_collection()
+    if collection is None:
+        return {"success": False, "reason": "ChromaDB unavailable"}
+    
+    try:
+        # Step A: Generate global context
+        file_context = generate_file_context(text, filename)
+        
+        # Step B: Chunk with context injection
+        chunks = chunk_text_with_context(text, file_context, filename)
+        
+        if not chunks:
+            return {"success": False, "reason": "No chunks created"}
+        
+        # Step C: Upsert to ChromaDB
+        ids = [chunk["id"] for chunk in chunks]
+        documents = [chunk["content"] for chunk in chunks]
+        metadatas = []
+        
+        for chunk in chunks:
+            chunk_meta = chunk["metadata"].copy()
+            chunk_meta["file_context"] = file_context[:200]  # Truncate for metadata
+            if metadata:
+                chunk_meta.update({k: v for k, v in metadata.items() if k not in chunk_meta})
+            metadatas.append(chunk_meta)
+        
+        # Delete existing chunks for this file (re-index support)
+        try:
+            existing = collection.get(where={"source_file": filename})
+            if existing and existing.get("ids"):
+                collection.delete(ids=existing["ids"])
+                logger.info(f"Deleted {len(existing['ids'])} existing chunks for {filename}")
+        except Exception as e:
+            logger.debug(f"No existing chunks to delete for {filename}: {e}")
+        
+        # Batch insert with RAM protection (max 100 chunks per batch)
+        batch_size = 100
+        total_inserted = 0
+        
+        for i in range(0, len(ids), batch_size):
+            batch_ids = ids[i:i+batch_size]
+            batch_docs = documents[i:i+batch_size]
+            batch_meta = metadatas[i:i+batch_size]
+            
+            collection.add(
+                ids=batch_ids,
+                documents=batch_docs,
+                metadatas=batch_meta
+            )
+            total_inserted += len(batch_ids)
+            
+            # Log progress for large files
+            if len(ids) > batch_size:
+                logger.info(f"Inserted batch {i//batch_size + 1}: {len(batch_ids)} chunks ({total_inserted}/{len(ids)})")
+        
+        logger.info(f"[CONTEXTUAL_INGEST] Complete: {filename} -> {total_inserted} chunks with context")
+        
+        return {
+            "success": True,
+            "filename": filename,
+            "chunks_created": total_inserted,
+            "file_context": file_context,
+            "action": "contextual_ingest"
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to ingest file {filename} contextually: {e}")
+        return {"success": False, "reason": str(e)}
+
+
+def reindex_all_files(file_texts: Dict[str, str]) -> Dict:
+    """
+    V3.0 RE-INDEXING TRIGGER:
+    Clear old ChromaDB collection and re-index all files with contextual RAG.
+    
+    This is a "mass cleanup" to ensure Kuro's memory isn't contaminated
+    with old context-less data.
+    
+    Args:
+        file_texts: Dict mapping filename -> text content
+    
+    Returns:
+        Dict with re-indexing results
+    """
+    collection = _get_chroma_collection()
+    if collection is None:
+        return {"success": False, "reason": "ChromaDB unavailable"}
+    
+    results = {
+        "success": True,
+        "files_processed": 0,
+        "total_chunks": 0,
+        "errors": [],
+        "contexts": {}
+    }
+    
+    try:
+        # Step 1: Clear old collection
+        old_count = collection.count()
+        logger.info(f"[REINDEX] Clearing {old_count} existing entries from ChromaDB...")
+        
+        # Delete all entries
+        try:
+            all_entries = collection.get()
+            if all_entries and all_entries.get("ids"):
+                collection.delete(ids=all_entries["ids"])
+                logger.info(f"[REINDEX] Deleted {len(all_entries['ids'])} old entries")
+        except Exception as e:
+            logger.warning(f"[REINDEX] Could not delete all entries: {e}")
+        
+        # Step 2: Process files in batches (resource protection)
+        file_list = list(file_texts.items())
+        batch_count = 0
+        
+        for i in range(0, len(file_list), MAX_FILES_PER_BATCH):
+            batch = file_list[i:i+MAX_FILES_PER_BATCH]
+            batch_count += 1
+            
+            logger.info(f"[REINDEX] Processing batch {batch_count}: {len(batch)} files")
+            
+            for filename, text in batch:
+                try:
+                    result = ingest_file_contextual(text, filename)
+                    
+                    if result["success"]:
+                        results["files_processed"] += 1
+                        results["total_chunks"] += result["chunks_created"]
+                        results["contexts"][filename] = result["file_context"]
+                        logger.info(f"[REINDEX] ✓ {filename}: {result['chunks_created']} chunks")
+                    else:
+                        results["errors"].append({"file": filename, "error": result["reason"]})
+                        logger.error(f"[REINDEX] ✗ {filename}: {result['reason']}")
+                    
+                except Exception as e:
+                    results["errors"].append({"file": filename, "error": str(e)})
+                    logger.error(f"[REINDEX] ✗ {filename}: {e}")
+            
+            # Delay between batches (RAM protection)
+            if i + MAX_FILES_PER_BATCH < len(file_list):
+                logger.info(f"[REINDEX] Waiting {BATCH_DELAY_SECONDS}s before next batch (RAM protection)...")
+                time.sleep(BATCH_DELAY_SECONDS)
+        
+        logger.info(f"[REINDEX] Complete: {results['files_processed']} files, {results['total_chunks']} chunks, {len(results['errors'])} errors")
+        
+    except Exception as e:
+        results["success"] = False
+        results["errors"].append({"file": "reindex_process", "error": str(e)})
+        logger.error(f"[REINDEX] Failed: {e}")
+    
+    return results
+
+
+def expand_query(query: str, recent_messages: List[Dict] = None) -> str:
+    """
+    V3.0 INTELLIGENT RETRIEVAL - Query Expansion:
+    Use Gemini 3 to expand ambiguous queries using recent conversation context.
+    
+    If Master asks "ini maksudnya?" (what does this mean?), Gemini guesses the subject
+    based on the last 3 chat messages before searching ChromaDB.
+    
+    Args:
+        query: The user's query
+        recent_messages: List of recent chat messages for context
+    
+    Returns:
+        Expanded query string optimized for semantic search
+    """
+    if not recent_messages or len(recent_messages) < 2:
+        return query  # No context to expand with
+    
+    # Check if query is ambiguous (short or pronoun-heavy)
+    ambiguous_indicators = ["ini", "itu", "dia", "mereka", "tersebut", "maksudnya", "apa itu", "bagaimana"]
+    query_lower = query.lower()
+    
+    is_ambiguous = (
+        len(query.split()) <= 4 or  # Short query
+        any(indicator in query_lower for indicator in ambiguous_indicators)
+    )
+    
+    if not is_ambiguous:
+        return query  # Query is specific enough
+    
+    try:
+        from google import genai
+        from google.genai import types
+        from kuro_backend.config import PRIMARY_MODEL
+        
+        client = genai.Client(api_key=settings.GEMINI_API_KEY)
+        
+        # Build conversation context
+        context_msgs = []
+        for msg in recent_messages[-6:]:  # Last 6 messages (3 exchanges)
+            role = "User" if msg.get("role") == "user" else "Kuro"
+            content = msg.get("content", "")[:200]  # Truncate
+            context_msgs.append(f"{role}: {content}")
+        
+        conversation_context = "\n".join(context_msgs)
+        
+        prompt = f"""Based on the recent conversation, expand the user's ambiguous query into a clear, specific search query.
+
+Recent conversation:
+{conversation_context}
+
+User's query: "{query}"
+
+Your task:
+1. Identify what "ini", "itu", "dia", etc. refers to based on conversation context
+2. Create a clear, specific search query that captures the user's intent
+3. Include relevant keywords from the conversation
+
+Respond with ONLY the expanded query, nothing else.
+
+Example:
+- If user says "ini maksudnya?" and conversation was about ISO 27001 access control
+- Respond: "ISO 27001 access control policy requirements and implementation details"
+"""
+        
+        response = client.models.generate_content(
+            model=PRIMARY_MODEL,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                temperature=0.1,
+                max_output_tokens=100
+            )
+        )
+        
+        expanded = response.text.strip() if response.text else query
+        
+        # Validate expanded query
+        if len(expanded) < 5 or len(expanded) > 200:
+            logger.warning(f"Query expansion produced invalid result, using original query")
+            return query
+        
+        logger.info(f"[QUERY_EXPANSION] Original: '{query}' -> Expanded: '{expanded}'")
+        return expanded
+        
+    except Exception as e:
+        logger.error(f"Query expansion failed: {e}")
+        return query  # Fallback to original query
+
+
+def search_long_term_contextual(query: str, top_k: int = 5, recent_messages: List[Dict] = None) -> List[str]:
+    """
+    V3.0 ENHANCED SEARCH:
+    Combines query expansion with contextual retrieval.
+    
+    Args:
+        query: User's query
+        top_k: Number of results to return
+        recent_messages: Recent chat messages for query expansion
+    
+    Returns:
+        List of relevant document strings
+    """
+    collection = _get_chroma_collection()
+    if collection is None:
+        return []
+    
+    try:
+        # Step 1: Expand query if ambiguous
+        expanded_query = expand_query(query, recent_messages)
+        
+        # Step 2: Search with expanded query
+        results = collection.query(
+            query_texts=[expanded_query],
+            n_results=top_k * 2,  # Get more results for filtering
+            include=['documents', 'distances', 'metadatas']
+        )
+        
+        documents = results.get('documents', [[]])[0]
+        distances = results.get('distances', [[]])[0]
+        metadatas = results.get('metadatas', [[]])[0]
+        
+        # Step 3: Filter by relevance threshold
+        relevant_facts = []
+        for doc, distance, metadata in zip(documents, distances, metadatas):
+            if distance <= RELEVANCE_DISTANCE_THRESHOLD:
+                # Extract just the chunk content (remove context prefix for display)
+                chunk_content = doc
+                if "[CHUNK_CONTENT:" in chunk_content:
+                    # Extract content after the context prefix
+                    content_start = chunk_content.find("[CHUNK_CONTENT:") + len("[CHUNK_CONTENT: ")
+                    content_end = chunk_content.rfind("]")
+                    if content_start > 0 and content_end > content_start:
+                        chunk_content = chunk_content[content_start:content_end]
+                
+                relevant_facts.append(chunk_content)
+            else:
+                logger.debug(f"Filtered out low-relevance fact (distance={distance:.3f}): {doc[:50]}...")
+        
+        # Step 4: Anti-VCT Bias (preserve existing logic)
+        vct_keywords = ['vct', 'valorant', 'tournament', 'competition ruleset', 'vct26']
+        query_lower = query.lower()
+        is_vct_query = any(kw in query_lower for kw in vct_keywords)
+        
+        if not is_vct_query:
+            vct_filtered = []
+            for fact in relevant_facts:
+                fact_lower = fact.lower()
+                if any(kw in fact_lower for kw in vct_keywords):
+                    logger.debug(f"Filtered out VCT fact (not VCT query): {fact[:50]}...")
+                else:
+                    vct_filtered.append(fact)
+            relevant_facts = vct_filtered
+        
+        logger.info(f"[CONTEXTUAL_SEARCH] {len(documents)} results -> {len(relevant_facts)} relevant (query expanded: {expanded_query != query})")
+        return relevant_facts[:top_k]  # Return top_k results
+        
+    except Exception as e:
+        logger.error(f"Contextual search failed: {e}")
+        return []
+
+
+# ============================================
+# V3.1 COMPLIANCE KNOWLEDGE BASE - GOLDEN MEMORY TIER
+# ============================================
+
+# Dedicated compliance ChromaDB client
+_compliance_client = None
+_compliance_collection = None
+
+def _get_compliance_collection():
+    """Get or create dedicated compliance_standards ChromaDB collection."""
+    global _compliance_client, _compliance_collection
+    if _compliance_collection is None:
+        try:
+            import chromadb
+            os.makedirs(COMPLIANCE_CHROMA_DIR, exist_ok=True)
+            _compliance_client = chromadb.PersistentClient(path=COMPLIANCE_CHROMA_DIR)
+            _compliance_collection = _compliance_client.get_or_create_collection(
+                name="compliance_standards",
+                metadata={"hnsw:space": "cosine"}
+            )
+            logger.info(f"Compliance ChromaDB initialized at {COMPLIANCE_CHROMA_DIR}")
+        except ImportError:
+            logger.warning("ChromaDB not installed. Compliance knowledge base disabled.")
+        except Exception as e:
+            logger.error(f"Failed to initialize compliance ChromaDB: {e}")
+    return _compliance_collection
+
+
+def extract_pdf_text(pdf_path: str) -> Dict:
+    """
+    V3.1 MULTIMODAL INGESTION - Step A: Extract text from PDF.
+    Handles both text-based and scanned (OCR) PDFs.
+    
+    For scanned PDFs, uses Gemini 3 Flash multimodal vision for OCR.
+    For text PDFs, uses standard extraction with Gemini verification.
+    
+    Returns dict with: text, is_scanned, page_count, filename
+    """
+    import fitz  # PyMuPDF
+    
+    filename = os.path.basename(pdf_path)
+    result = {
+        "text": "",
+        "is_scanned": False,
+        "page_count": 0,
+        "filename": filename,
+        "ocr_pages": 0
+    }
+    
+    try:
+        doc = fitz.open(pdf_path)
+        result["page_count"] = len(doc)
+        
+        # First pass: try standard text extraction
+        text_pages = []
+        scanned_pages = []
+        
+        for page_num in range(min(len(doc), 100)):  # Max 100 pages for RAM protection
+            page = doc[page_num]
+            text = page.get_text("text")
+            
+            # Check if page has meaningful text (>50 chars)
+            if len(text.strip()) > 50:
+                text_pages.append(text)
+            else:
+                # Likely scanned - mark for OCR
+                scanned_pages.append(page_num)
+        
+        result["text"] = "\n\n".join(text_pages)
+        
+        # If significant pages are scanned, use multimodal OCR
+        if len(scanned_pages) > len(doc) * 0.3:  # >30% scanned
+            result["is_scanned"] = True
+            logger.info(f"[COMPLIANCE_OCR] {filename}: {len(scanned_pages)}/{len(doc)} pages scanned, using Gemini vision")
+            
+            # Perform OCR on scanned pages (limit to first 20 for API cost protection)
+            ocr_texts = []
+            for page_num in scanned_pages[:20]:
+                page = doc[page_num]
+                pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))  # 2x resolution for better OCR
+                img_bytes = pix.tobytes("png")
+                
+                ocr_text = _ocr_page_with_gemini(img_bytes, filename, page_num + 1)
+                if ocr_text:
+                    ocr_texts.append(ocr_text)
+                    result["ocr_pages"] += 1
+            
+            # Merge OCR text with existing text
+            if ocr_texts:
+                result["text"] = result["text"] + "\n\n[OCR_EXTRACTED]\n" + "\n\n".join(ocr_texts)
+        
+        doc.close()
+        logger.info(f"[COMPLIANCE_EXTRACT] {filename}: {len(result['text'])} chars, {result['page_count']} pages, {result['ocr_pages']} OCR pages")
+        
+    except ImportError:
+        logger.error("PyMuPDF not installed. Install with: pip install PyMuPDF")
+    except Exception as e:
+        logger.error(f"Failed to extract PDF text from {pdf_path}: {e}")
+    
+    return result
+
+
+def _ocr_page_with_gemini(img_bytes: bytes, filename: str, page_num: int) -> str:
+    """
+    V3.1 MULTIMODAL OCR: Use Gemini 3 Flash vision to extract text from a page image.
+    Maintains exact clause numbering and table structure.
+    """
+    try:
+        from google import genai
+        from google.genai import types
+        from kuro_backend.config import PRIMARY_MODEL
+        import base64
+        
+        client = genai.Client(api_key=settings.GEMINI_API_KEY)
+        
+        prompt = f"""Extract all text from this ISO standard document page.
+
+CRITICAL REQUIREMENTS:
+1. Maintain the EXACT numbering of clauses (e.g., "5.1.2", "A.8.1.3")
+2. Preserve table structure and headers
+3. Identify the ISO standard name if visible
+4. Keep section headers clearly marked
+5. Do NOT summarize - extract verbatim
+
+Page {page_num} of {filename}
+
+Respond with ONLY the extracted text, no commentary."""
+        
+        # Encode image as base64
+        img_base64 = base64.b64encode(img_bytes).decode('utf-8')
+        
+        response = client.models.generate_content(
+            model=PRIMARY_MODEL,
+            contents=[
+                types.Part(text=prompt),
+                types.Part(inline_data=types.Blob(
+                    mime_type="image/png",
+                    data=img_base64
+                ))
+            ],
+            config=types.GenerateContentConfig(
+                temperature=0.0,  # Deterministic for OCR
+                max_output_tokens=4000
+            )
+        )
+        
+        return response.text.strip() if response.text else ""
+        
+    except Exception as e:
+        logger.error(f"OCR failed for {filename} page {page_num}: {e}")
+        return ""
+
+
+def generate_compliance_context(text: str, filename: str) -> Dict:
+    """
+    V3.1 CONTEXTUAL ENRICHMENT - Step B: Generate Global Summary for ISO document.
+    
+    Returns dict with:
+    - iso_name: Identified ISO standard name
+    - scope: Document scope description
+    - summary: 2-3 sentence dense summary
+    - key_clauses: List of main clause numbers
+    """
+    try:
+        from google import genai
+        from google.genai import types
+        from kuro_backend.config import PRIMARY_MODEL
+        
+        client = genai.Client(api_key=settings.GEMINI_API_KEY)
+        
+        # Truncate for context generation
+        sample = text[:15000] if len(text) > 15000 else text
+        
+        prompt = f"""Analyze this ISO/compliance document and extract key metadata.
+
+File: {filename}
+Content sample (first 15000 chars):
+---
+{sample}
+---
+
+Respond with ONLY a JSON object in this exact format:
+{{
+    "iso_name": "Full ISO standard name (e.g., ISO 27001:2022)",
+    "scope": "1-sentence description of document scope and key clauses",
+    "summary": "2-3 sentence dense summary of what this document covers",
+    "key_clauses": ["5.1", "5.2", "6.1", ...]
+}}
+
+If you cannot identify the ISO standard, use the filename as iso_name."""
+        
+        response = client.models.generate_content(
+            model=PRIMARY_MODEL,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                temperature=0.1,
+                max_output_tokens=500
+            )
+        )
+        
+        # Parse JSON response - handle markdown code blocks and various formats
+        import json
+        import re
+        
+        response_text = response.text.strip()
+        
+        # Try to extract JSON from markdown code block first
+        json_block_match = re.search(r'```(?:json)?\s*\n(.*?)\n```', response_text, re.DOTALL)
+        if json_block_match:
+            response_text = json_block_match.group(1)
+        
+        # Try to find JSON object
+        json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+        if json_match:
+            try:
+                result = json.loads(json_match.group())
+                # Validate required fields
+                if "iso_name" in result:
+                    logger.info(f"[COMPLIANCE_CONTEXT] {filename}: {result.get('iso_name', 'Unknown')} - {result.get('summary', '')[:80]}...")
+                    return result
+                else:
+                    logger.warning(f"JSON missing iso_name field for {filename}")
+            except json.JSONDecodeError as je:
+                logger.warning(f"JSON decode error for {filename}: {je}")
+        
+        # Fallback: try to extract info from response text
+        logger.warning(f"Failed to parse compliance context for {filename}, using fallback extraction")
+        return _extract_compliance_context_fallback(response_text, filename)
+        
+    except Exception as e:
+        logger.error(f"Failed to generate compliance context for {filename}: {e}")
+        return {
+            "iso_name": filename,
+            "scope": "Unknown",
+            "summary": f"Dokumen compliance: {filename} (context generation failed)",
+            "key_clauses": []
+        }
+
+
+def _extract_compliance_context_fallback(response_text: str, filename: str) -> Dict:
+    """
+    Fallback: Extract compliance context from raw text when JSON parsing fails.
+    Uses regex and heuristics to extract ISO name and summary.
+    """
+    import re
+    
+    # Try to extract ISO name from text (patterns like "ISO 27001:2022", "ISO/IEC 27001:2022")
+    iso_pattern = r'ISO[/\s]*(?:IEC\s*)?(\d+)[\s:]*(\d{4})?'
+    iso_match = re.search(iso_pattern, response_text, re.IGNORECASE)
+    
+    iso_name = filename
+    if iso_match:
+        iso_num = iso_match.group(1)
+        iso_year = iso_match.group(2) or ""
+        iso_name = f"ISO {iso_num}:{iso_year}" if iso_year else f"ISO {iso_num}"
+    
+    # Extract first meaningful sentence as summary
+    sentences = re.split(r'[.!?]+', response_text)
+    summary = ""
+    for sentence in sentences:
+        sentence = sentence.strip()
+        if len(sentence) > 30 and len(sentence) < 300:
+            summary = sentence + "."
+            break
+    
+    if not summary:
+        summary = f"Dokumen compliance: {filename}"
+    
+    # Try to extract clause numbers
+    clause_pattern = r'(\d+\.\d+(?:\.\d+)*)'
+    clauses = list(set(re.findall(clause_pattern, response_text)))[:10]
+    
+    result = {
+        "iso_name": iso_name,
+        "scope": f"Dokumen standar {iso_name}",
+        "summary": summary[:200],
+        "key_clauses": clauses
+    }
+    
+    logger.info(f"[COMPLIANCE_FALLBACK] {filename}: {iso_name} - {summary[:60]}...")
+    return result
+
+
+def chunk_compliance_document(text: str, context: Dict, filename: str) -> List[Dict]:
+    """
+    V3.1 COMPLIANCE-SPECIFIC CHUNKING:
+    Each chunk gets prefix: [COMPLIANCE_STANDARD: {ISO_NAME}] | [SCOPE: {Scope_Klausul}]
+    
+    Uses larger chunks (2000 chars) with clause-aware boundaries.
+    """
+    chunks = []
+    compliance_chunk_size = 2000  # Larger chunks for compliance docs
+    compliance_overlap = 300
+    
+    iso_name = context.get("iso_name", filename)
+    scope = context.get("scope", "Unknown")
+    summary = context.get("summary", "")
+    
+    # Try to split by clause boundaries first
+    clause_pattern = r'\n(\d+\.\d+[\.\d]*\s)'
+    clause_splits = list(re.finditer(clause_pattern, text))
+    
+    if clause_splits and len(clause_splits) > 5:
+        # Clause-aware chunking
+        current_chunk = ""
+        current_clauses = []
+        chunk_index = 0
+        
+        for i, match in enumerate(clause_splits):
+            clause_num = match.group(1).strip()
+            start = match.start()
+            end = clause_splits[i + 1].start() if i + 1 < len(clause_splits) else len(text)
+            clause_text = text[start:end]
+            
+            if len(current_chunk) + len(clause_text) > compliance_chunk_size:
+                # Save current chunk
+                if current_chunk.strip():
+                    enriched = f"[COMPLIANCE_STANDARD: {iso_name}] | [SCOPE: {scope}] | [CLAUSES: {', '.join(current_clauses)}] | [CONTENT: {current_chunk.strip()}]"
+                    
+                    chunks.append({
+                        "id": f"compliance_{filename}_chunk_{chunk_index}",
+                        "content": enriched,
+                        "metadata": {
+                            "source_file": filename,
+                            "iso_name": iso_name,
+                            "clauses": ", ".join(current_clauses),
+                            "chunk_index": chunk_index,
+                            "type": "compliance_clause",
+                            "timestamp": datetime.now().isoformat()
+                        }
+                    })
+                    chunk_index += 1
+                
+                current_chunk = clause_text
+                current_clauses = [clause_num]
+            else:
+                current_chunk += clause_text
+                current_clauses.append(clause_num)
+        
+        # Save remaining chunk
+        if current_chunk.strip():
+            enriched = f"[COMPLIANCE_STANDARD: {iso_name}] | [SCOPE: {scope}] | [CLAUSES: {', '.join(current_clauses)}] | [CONTENT: {current_chunk.strip()}]"
+            chunks.append({
+                "id": f"compliance_{filename}_chunk_{chunk_index}",
+                "content": enriched,
+                "metadata": {
+                    "source_file": filename,
+                    "iso_name": iso_name,
+                    "clauses": ", ".join(current_clauses),
+                    "chunk_index": chunk_index,
+                    "type": "compliance_clause",
+                    "timestamp": datetime.now().isoformat()
+                }
+            })
+    else:
+        # Fallback: standard chunking
+        start = 0
+        chunk_index = 0
+        
+        while start < len(text):
+            end = start + compliance_chunk_size
+            chunk_content = text[start:end]
+            
+            if chunk_content.strip():
+                enriched = f"[COMPLIANCE_STANDARD: {iso_name}] | [SCOPE: {scope}] | [CONTENT: {chunk_content.strip()}]"
+                
+                chunks.append({
+                    "id": f"compliance_{filename}_chunk_{chunk_index}",
+                    "content": enriched,
+                    "metadata": {
+                        "source_file": filename,
+                        "iso_name": iso_name,
+                        "chunk_index": chunk_index,
+                        "type": "compliance_text",
+                        "timestamp": datetime.now().isoformat()
+                    }
+                })
+                chunk_index += 1
+            
+            start = end - compliance_overlap
+    
+    logger.info(f"[COMPLIANCE_CHUNK] {filename}: {len(chunks)} chunks created (ISO: {iso_name})")
+    return chunks
+
+
+def ingest_compliance_file(pdf_path: str) -> Dict:
+    """
+    V3.1 MAIN COMPLIANCE INGESTION PIPELINE:
+    1. Extract text (with OCR for scanned PDFs)
+    2. Generate compliance context (ISO name, scope, summary)
+    3. Chunk with compliance-specific prefix
+    4. Upsert to dedicated compliance_standards collection
+    
+    Returns dict with ingestion results.
+    """
+    collection = _get_compliance_collection()
+    if collection is None:
+        return {"success": False, "reason": "Compliance ChromaDB unavailable"}
+    
+    filename = os.path.basename(pdf_path)
+    
+    try:
+        # Step 1: Extract text (multimodal if needed)
+        extraction = extract_pdf_text(pdf_path)
+        
+        if not extraction["text"]:
+            return {"success": False, "reason": "No text extracted from PDF"}
+        
+        # Step 2: Generate compliance context
+        context = generate_compliance_context(extraction["text"], filename)
+        
+        # Step 3: Chunk with compliance-specific prefix
+        chunks = chunk_compliance_document(extraction["text"], context, filename)
+        
+        if not chunks:
+            return {"success": False, "reason": "No chunks created"}
+        
+        # Step 4: Upsert to compliance collection
+        ids = [chunk["id"] for chunk in chunks]
+        documents = [chunk["content"] for chunk in chunks]
+        metadatas = [chunk["metadata"] for chunk in chunks]
+        
+        # Delete existing chunks for this file (re-index support)
+        try:
+            existing = collection.get(where={"source_file": filename})
+            if existing and existing.get("ids"):
+                collection.delete(ids=existing["ids"])
+                logger.info(f"[COMPLIANCE_REINDEX] Deleted {len(existing['ids'])} existing chunks for {filename}")
+        except Exception:
+            pass
+        
+        # Batch insert (100 chunks per batch)
+        batch_size = 100
+        total_inserted = 0
+        
+        for i in range(0, len(ids), batch_size):
+            collection.add(
+                ids=ids[i:i+batch_size],
+                documents=documents[i:i+batch_size],
+                metadatas=metadatas[i:i+batch_size]
+            )
+            total_inserted += len(ids[i:i+batch_size])
+        
+        logger.info(f"[COMPLIANCE_INGEST] Complete: {filename} -> {total_inserted} chunks (ISO: {context.get('iso_name', 'Unknown')})")
+        
+        return {
+            "success": True,
+            "filename": filename,
+            "iso_name": context.get("iso_name", "Unknown"),
+            "chunks_created": total_inserted,
+            "page_count": extraction["page_count"],
+            "is_scanned": extraction["is_scanned"],
+            "ocr_pages": extraction["ocr_pages"],
+            "summary": context.get("summary", "")
+        }
+        
+    except Exception as e:
+        logger.error(f"Compliance ingestion failed for {pdf_path}: {e}")
+        return {"success": False, "reason": str(e)}
+
+
+def ingest_compliance_base(directory_path: str = None) -> Dict:
+    """
+    V3.1 BATCH INGESTION: Process all compliance documents in directory.
+    
+    SECURITY: Only reads from specified directory, never copies files.
+    RAM PROTECTION: Processes 2 files per batch with 3-second delay.
+    
+    Returns dict with batch ingestion results.
+    """
+    target_dir = directory_path or COMPLIANCE_DOC_DIR
+    
+    # Security check: only allow reading from compliance directory
+    if not os.path.exists(target_dir):
+        return {"success": False, "reason": f"Directory not found: {target_dir}"}
+    
+    if not os.path.isdir(target_dir):
+        return {"success": False, "reason": f"Not a directory: {target_dir}"}
+    
+    # Find all PDF files
+    pdf_files = []
+    for f in os.listdir(target_dir):
+        if f.lower().endswith('.pdf'):
+            pdf_files.append(os.path.join(target_dir, f))
+    
+    if not pdf_files:
+        return {"success": False, "reason": "No PDF files found in directory"}
+    
+    results = {
+        "success": True,
+        "directory": target_dir,
+        "files_found": len(pdf_files),
+        "files_processed": 0,
+        "total_chunks": 0,
+        "iso_standards": [],
+        "errors": [],
+        "documents": []
+    }
+    
+    # Process in batches of 2 (RAM protection for large PDFs)
+    batch_size = 2
+    batch_delay = 3  # seconds
+    
+    for i in range(0, len(pdf_files), batch_size):
+        batch = pdf_files[i:i+batch_size]
+        batch_num = (i // batch_size) + 1
+        
+        logger.info(f"[COMPLIANCE_BATCH] Processing batch {batch_num}: {len(batch)} files")
+        
+        for pdf_path in batch:
+            try:
+                result = ingest_compliance_file(pdf_path)
+                
+                if result["success"]:
+                    results["files_processed"] += 1
+                    results["total_chunks"] += result["chunks_created"]
+                    results["iso_standards"].append(result.get("iso_name", "Unknown"))
+                    results["documents"].append({
+                        "filename": result["filename"],
+                        "iso_name": result.get("iso_name", "Unknown"),
+                        "chunks": result["chunks_created"],
+                        "pages": result.get("page_count", 0),
+                        "summary": result.get("summary", "")
+                    })
+                    logger.info(f"[COMPLIANCE_BATCH] ✓ {result['filename']}: {result['chunks_created']} chunks")
+                else:
+                    results["errors"].append({
+                        "file": os.path.basename(pdf_path),
+                        "error": result["reason"]
+                    })
+                    logger.error(f"[COMPLIANCE_BATCH] ✗ {os.path.basename(pdf_path)}: {result['reason']}")
+                
+            except Exception as e:
+                results["errors"].append({
+                    "file": os.path.basename(pdf_path),
+                    "error": str(e)
+                })
+                logger.error(f"[COMPLIANCE_BATCH] ✗ {os.path.basename(pdf_path)}: {e}")
+        
+        # Delay between batches (RAM protection)
+        if i + batch_size < len(pdf_files):
+            logger.info(f"[COMPLIANCE_BATCH] Waiting {batch_delay}s before next batch (RAM protection)...")
+            time.sleep(batch_delay)
+    
+    logger.info(f"[COMPLIANCE_BATCH] Complete: {results['files_processed']}/{results['files_found']} files, {results['total_chunks']} chunks")
+    
+    return results
+
+
+def search_compliance_base(query: str, top_k: int = 5) -> List[Dict]:
+    """
+    V3.1 COMPLIANCE SEARCH: Search dedicated compliance_standards collection.
+    
+    Returns list of dicts with document content, ISO name, clauses, and relevance score.
+    """
+    collection = _get_compliance_collection()
+    if collection is None:
+        return []
+    
+    try:
+        results = collection.query(
+            query_texts=[query],
+            n_results=top_k * 2,
+            include=['documents', 'distances', 'metadatas']
+        )
+        
+        documents = results.get('documents', [[]])[0]
+        distances = results.get('distances', [[]])[0]
+        metadatas = results.get('metadatas', [[]])[0]
+        
+        # Filter and format results
+        relevant = []
+        for doc, distance, metadata in zip(documents, distances, metadatas):
+            if distance <= RELEVANCE_DISTANCE_THRESHOLD:
+                # Extract clean content (remove prefix)
+                content = doc
+                if "[CONTENT:" in content:
+                    start = content.find("[CONTENT:") + len("[CONTENT: ")
+                    end = content.rfind("]")
+                    if start > 0 and end > start:
+                        content = content[start:end]
+                
+                relevant.append({
+                    "content": content,
+                    "iso_name": metadata.get("iso_name", "Unknown"),
+                    "clauses": metadata.get("clauses", ""),
+                    "source_file": metadata.get("source_file", ""),
+                    "distance": distance,
+                    "relevance": 1.0 - (distance / 2.0)
+                })
+        
+        # Sort by relevance and return top_k
+        relevant.sort(key=lambda x: x["distance"])
+        return relevant[:top_k]
+        
+    except Exception as e:
+        logger.error(f"Compliance search failed: {e}")
+        return []
+
+
+def get_compliance_stats() -> Dict:
+    """Get statistics about the compliance knowledge base."""
+    collection = _get_compliance_collection()
+    if collection is None:
+        return {"available": False, "reason": "Compliance ChromaDB not initialized"}
+    
+    try:
+        count = collection.count()
+        
+        # Get unique ISO standards
+        all_docs = collection.get(include=['metadatas'])
+        iso_names = set()
+        source_files = set()
+        
+        if all_docs and all_docs.get('metadatas'):
+            for meta in all_docs['metadatas']:
+                if meta:
+                    iso_names.add(meta.get("iso_name", "Unknown"))
+                    source_files.add(meta.get("source_file", "Unknown"))
+        
+        return {
+            "available": True,
+            "total_chunks": count,
+            "iso_standards": list(iso_names),
+            "source_files": list(source_files),
+            "standard_count": len(iso_names)
+        }
+        
+    except Exception as e:
+        return {"available": False, "error": str(e)}
 
 
 # ============================================
