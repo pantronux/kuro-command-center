@@ -13,6 +13,22 @@ from typing import Optional, Dict, Any
 from datetime import datetime
 from contextlib import contextmanager
 
+# ============================================
+# PHOENIX PERSISTENT DATABASE CONFIGURATION
+# MUST be set BEFORE importing phoenix module
+# ============================================
+_PHOENIX_DB_PATH = os.getenv(
+    "PHOENIX_DB_PATH",
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "phoenix_data", "phoenix.db")
+)
+# Ensure directory exists before Phoenix reads the env var
+os.makedirs(os.path.dirname(_PHOENIX_DB_PATH), exist_ok=True)
+
+# Set environment variables for Phoenix (must be before import)
+os.environ["PHOENIX_SQL_DATABASE_URL"] = f"sqlite:///{_PHOENIX_DB_PATH}"
+os.environ["PHOENIX_ENABLE_AUTH"] = "false"  # Disable auth for local private network
+os.environ["PHOENIX_PROJECT_NAME"] = "Kuro-AI-Audit"  # Force project identity
+
 # OpenTelemetry imports
 from opentelemetry import trace, context
 from opentelemetry.sdk.trace import TracerProvider
@@ -21,7 +37,7 @@ from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExport
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.trace import Status, StatusCode
 
-# Phoenix imports
+# Phoenix imports (after PHOENIX_SQL_DATABASE_URL is set)
 import phoenix as px
 
 logger = logging.getLogger(__name__)
@@ -32,14 +48,16 @@ logger = logging.getLogger(__name__)
 
 PHOENIX_PORT = 6006
 PHOENIX_HOST = "0.0.0.0"
-PHOENIX_AUTH_USERNAME = os.getenv("PHOENIX_USERNAME", "pantronux")
-PHOENIX_AUTH_PASSWORD = os.getenv("PHOENIX_PASSWORD", "Noobcry17!")
+PHOENIX_ENABLE_AUTH = False  # Auth disabled for local private network
 
 # Phoenix OTLP HTTP endpoint (Phoenix UI port 6006 also serves OTLP on /v1/traces)
 OTLP_ENDPOINT = os.getenv("OTLP_ENDPOINT", "http://127.0.0.1:6006/v1/traces")
 
+# Expose DB path for logging
+PHOENIX_DB_PATH = _PHOENIX_DB_PATH
+
 MASTER_USER_ID = "master_irfan"
-TOKEN_ALERT_THRESHOLD = 5000
+TOKEN_ALERT_THRESHOLD = 50000  # Raised from 5000 to 50000 to reduce false positives
 
 # Global state
 _phoenix_session = None
@@ -65,12 +83,16 @@ def start_phoenix_server() -> Optional[str]:
             return f"http://localhost:{PHOENIX_PORT}"
         
         logger.info(f"[OBSERVABILITY] Starting Phoenix server on port {PHOENIX_PORT}...")
+        logger.info(f"[OBSERVABILITY] Database path: {PHOENIX_DB_PATH}")
         
         # Launch Phoenix with OTLP receiver enabled for trace ingestion
+        # PHOENIX_SQL_DATABASE_URL is already set at module level
+        # use_temp_dir=False ensures Phoenix uses the configured database path
         _phoenix_app = px.launch_app(
             port=PHOENIX_PORT,
             host=PHOENIX_HOST,
             run_in_thread=True,
+            use_temp_dir=False,
         )
         
         # Wait for server to be ready
@@ -79,7 +101,8 @@ def start_phoenix_server() -> Optional[str]:
         
         dashboard_url = f"http://localhost:{PHOENIX_PORT}"
         logger.info(f"[OBSERVABILITY] Phoenix dashboard available at: {dashboard_url}")
-        logger.info(f"[OBSERVABILITY] Auth: username={PHOENIX_AUTH_USERNAME}")
+        logger.info(f"[OBSERVABILITY] Auth: DISABLED (local private network)")
+        logger.info(f"[OBSERVABILITY] Project name: Kuro-AI-Audit")
         
         return dashboard_url
         
@@ -113,9 +136,16 @@ def setup_opentelemetry() -> Optional[trace.Tracer]:
     global _tracer
     
     try:
-        # Create resource with service info
+        # Import propagators for proper trace context propagation
+        from opentelemetry.propagate import set_global_textmap
+        from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
+        
+        # Set global propagator for trace context (W3C standard)
+        set_global_textmap(TraceContextTextMapPropagator())
+        
+        # Create resource with service info - SPECIFIC PROJECT NAME for Phoenix
         resource = Resource.create({
-            "service.name": "kuro-ai",
+            "service.name": "Kuro-AI-Audit",
             "service.version": "4.8",
             "deployment.environment": "production",
         })
@@ -135,10 +165,6 @@ def setup_opentelemetry() -> Optional[trace.Tracer]:
         )
         tracer_provider.add_span_processor(span_processor)
         
-        # Also add console exporter for debugging (optional)
-        # console_exporter = ConsoleSpanExporter()
-        # tracer_provider.add_span_processor(BatchSpanProcessor(console_exporter))
-        
         # Set as global provider
         trace.set_tracer_provider(tracer_provider)
         
@@ -146,6 +172,7 @@ def setup_opentelemetry() -> Optional[trace.Tracer]:
         _tracer = trace.get_tracer("kuro-ai")
         
         logger.info("[OBSERVABILITY] OpenTelemetry initialized with Phoenix exporter")
+        logger.info("[OBSERVABILITY] Global propagator: TraceContextTextMapPropagator (W3C)")
         return _tracer
         
     except Exception as e:

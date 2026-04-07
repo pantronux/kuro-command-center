@@ -438,6 +438,7 @@ async def chat_stream_endpoint(
                     
                     if file.content_type and file.content_type.startswith("image/"):
                         image_paths.append(file_path)
+                        # FIX: Store image metadata separately, don't send raw metadata in text chunks
                         file_attachments.append({"type": "image", "filename": file.filename})
                     else:
                         read_result = tools.universal_read(file_path, max_chars=10000)
@@ -445,7 +446,8 @@ async def chat_stream_endpoint(
                             file_contents.append(f"\n--- File: {file.filename} ---\n{read_result['content']}")
                         file_attachments.append({"type": "file", "filename": file.filename})
             
-            # Build enhanced message
+            # Build enhanced message - image paths are passed separately to LangGraph
+            # Image metadata is NOT injected into the text message to prevent raw metadata in chunks
             enhanced_message = message
             if file_contents:
                 enhanced_message += "\n\n[Attached Files Content:]\n" + "\n".join(file_contents)
@@ -453,12 +455,22 @@ async def chat_stream_endpoint(
             # Save user message
             chat_history.add_message("web", "user", message, [f["filename"] for f in file_attachments])
             
-            # Stream response using async generator
+            # Stream response using async generator with 15-second timeout
             full_response = []
+            last_chunk_time = time.time()
+            STREAM_TIMEOUT = 15  # seconds
+            
             async for chunk in process_chat_with_graph_stream(enhanced_message, image_paths=image_paths if image_paths else None):
                 full_response.append(chunk)
+                last_chunk_time = time.time()
                 # SSE format: event: chunk\ndata: {chunk}\n\n
                 yield f"event: chunk\ndata: {json.dumps({'chunk': chunk})}\n\n"
+                
+                # FIX: Check timeout - if no chunk received for 15 seconds, abort
+                if time.time() - last_chunk_time > STREAM_TIMEOUT:
+                    logger.warning(f"[STREAM] Timeout: No chunk received for {STREAM_TIMEOUT}s, aborting")
+                    yield f"event: error\ndata: {json.dumps({'error': 'Response generation timed out. Please try again.'})}\n\n"
+                    return
             
             # Send completion event
             response_text = "".join(full_response)
@@ -1686,7 +1698,8 @@ if __name__ == "__main__":
     obs_status = observability.initialize_observability()
     if obs_status["phoenix"]:
         logger.info(f"[OBSERVABILITY] Phoenix dashboard available at: {obs_status['dashboard_url']}")
-        logger.info(f"[OBSERVABILITY] Username: {observability.PHOENIX_AUTH_USERNAME}")
+        logger.info(f"[OBSERVABILITY] Auth: DISABLED (local private network)")
+        logger.info(f"[OBSERVABILITY] Project: Kuro-AI-Audit")
     else:
         logger.warning("[OBSERVABILITY] Failed to start Phoenix server")
     

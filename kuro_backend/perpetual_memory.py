@@ -93,7 +93,7 @@ class PerpetualMemory:
                     embedder=EmbedderConfig(
                         provider="gemini",
                         config={
-                            "model": "models/embedding-001",
+                            "model": "models/text-embedding-004",
                             "api_key": settings.GEMINI_API_KEY,
                         }
                     )
