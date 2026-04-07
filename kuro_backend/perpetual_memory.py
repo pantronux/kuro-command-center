@@ -95,7 +95,6 @@ class PerpetualMemory:
                         config={
                             "model": "models/embedding-001",
                             "api_key": settings.GEMINI_API_KEY,
-                            "task_type": "retrieval_document",
                         }
                     )
                 )

@@ -16,14 +16,8 @@ from typing import TypedDict, List, Optional, Dict, Any, Annotated, AsyncGenerat
 from datetime import datetime
 
 # LangGraph imports
-from langgraph.graph import StateGraph, END
+from langgraph.graph import StateGraph, END, START
 from langgraph.checkpoint.memory import MemorySaver
-from langgraph.prebuilt import ToolNode
-
-# LangChain imports
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, BaseMessage
-from langchain_core.tools import tool
 
 # Kuro imports
 from kuro_backend.config import settings, PRIMARY_MODEL
@@ -45,7 +39,7 @@ class KuroState(TypedDict):
     Kuro Agent State - persists across graph nodes.
     
     Fields:
-    - messages: Conversation history (LangChain format)
+    - messages: Conversation history (list of dicts with role/content)
     - next_step: Next node to route to (supervisor decision)
     - compliance_data: Results from compliance RAG search
     - habit_data: Results from habit database query
@@ -60,7 +54,7 @@ class KuroState(TypedDict):
     - tool_execution_result: Result from tool execution (ToolNode output)
     - requires_approval: Flag for HITL interrupt (file operations need approval)
     """
-    messages: Annotated[List[BaseMessage], lambda x, y: x + y]
+    messages: Annotated[List[Dict], lambda x, y: x + y]
     next_step: str
     compliance_data: List[Dict]
     habit_data: Dict
@@ -76,23 +70,6 @@ class KuroState(TypedDict):
     tool_execution_result: Optional[Dict]
     requires_approval: bool
 
-
-# ============================================
-# LLM INITIALIZATION (LangChain Wrapper)
-# ============================================
-
-def create_llm() -> ChatGoogleGenerativeAI:
-    """Create LangChain-wrapped Gemini LLM."""
-    return ChatGoogleGenerativeAI(
-        model=PRIMARY_MODEL,
-        google_api_key=settings.GEMINI_API_KEY,
-        temperature=0.2,
-        top_p=0.8,
-        max_output_tokens=4096,
-    )
-
-# Global LLM instance
-llm = create_llm()
 
 # ============================================
 # PERSONA SYSTEM (LangChain System Prompts)
@@ -667,9 +644,10 @@ def response_node(state: KuroState) -> Dict[str, Any]:
         memory_manager.add_short_term("assistant", response_text)
         memory_manager.add_long_term_v2(f"User: {user_input}\nKuro: {response_text}")
         
-        # Store to chat history
-        chat_history.add_message("web", "user", user_input)
-        chat_history.add_message("web", "assistant", response_text)
+        # FIX: DO NOT save to chat_history here - it's saved in the streaming/non-streaming
+        # entry points to prevent duplicate database inserts (3-bubble bug).
+        # chat_history.add_message("web", "user", user_input)
+        # chat_history.add_message("web", "assistant", response_text)
         
         # Memory summarization and auto-save
         memory_manager.summarize_conversation_to_chroma()
@@ -888,8 +866,8 @@ def build_kuro_graph() -> StateGraph:
     graph_builder.add_node("response_node", response_node)
     graph_builder.add_node("memory_extraction_node", memory_extraction_node)
     
-    # Set entry point
-    graph_builder.set_entry_point("supervisor_node")
+    # Set entry point using START constant (LangGraph v0.2+ compatible)
+    graph_builder.add_edge(START, "supervisor_node")
     
     # After supervisor, run memory retrieval in parallel
     graph_builder.add_edge("supervisor_node", "memory_retrieval_node")
@@ -974,7 +952,7 @@ async def process_chat_with_graph_stream(message: str, image_paths: list = None)
         persona_mode = memory_manager.get_active_persona()
         
         initial_state = {
-            "messages": [HumanMessage(content=message)],
+            "messages": [{"role": "user", "content": message}],
             "next_step": "",
             "compliance_data": [],
             "habit_data": {},
@@ -1009,12 +987,14 @@ async def process_chat_with_graph_stream(message: str, image_paths: list = None)
                     response_text = node_output.get("final_response", "")
                     if response_text:
                         response_yielded = True
-                        # Stream the response character by character for typewriter effect
-                        for char in response_text:
-                            full_response.append(char)
-                            yield char
-                            # Small delay for visible streaming effect
-                            await asyncio.sleep(0.005)
+                        # OPTIMIZED: Stream in chunks of 10 chars for faster response on 4GB RAM VM
+                        chunk_size = 10
+                        for i in range(0, len(response_text), chunk_size):
+                            chunk = response_text[i:i+chunk_size]
+                            full_response.append(chunk)
+                            yield chunk
+                            # Minimal delay - frontend handles typewriter effect
+                            await asyncio.sleep(0.001)
                         logger.info(f"[LANGGRAPH_STREAM] Yielded response: {len(response_text)} chars")
                 
                 # Stream tool execution notifications
@@ -1023,14 +1003,15 @@ async def process_chat_with_graph_stream(message: str, image_paths: list = None)
                     if tool_result.get("status") == "success":
                         yield f"\n\n🔧 Tool executed: {tool_result.get('tool', 'unknown')}\n\n"
         
-        # Store to memory after streaming
+        # Store to memory after streaming (NOT chat_history - main.py handles that)
         response_text = "".join(full_response)
         if response_text:
             memory_manager.add_short_term("user", message)
             memory_manager.add_short_term("assistant", response_text)
             memory_manager.add_long_term_v2(f"User: {message}\nKuro: {response_text}")
-            chat_history.add_message("web", "user", message)
-            chat_history.add_message("web", "assistant", response_text)
+            # FIX: Do NOT save to chat_history here - main.py /api/chat/stream handles it
+            # chat_history.add_message("web", "user", message)
+            # chat_history.add_message("web", "assistant", response_text)
         
         logger.info(f"[LANGGRAPH_STREAM] Streaming complete: {len(response_text)} chars")
         
@@ -1066,7 +1047,7 @@ def process_chat_with_graph(message: str, image_paths: list = None) -> str:
         
         # Initialize state with session ID for observability
         initial_state = {
-            "messages": [HumanMessage(content=message)],
+            "messages": [{"role": "user", "content": message}],
             "next_step": "",
             "compliance_data": [],
             "habit_data": {},

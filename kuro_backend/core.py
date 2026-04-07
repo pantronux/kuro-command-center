@@ -109,29 +109,31 @@ def _get_system_instruction_with_time() -> str:
     return persona_instruction + common_instruction
 
 # --- Reusable Generation Config (SDK v3 Protocol) ---
-# Note: system_instruction is now dynamic with time injection
-_DEFAULT_CONFIG = types.GenerateContentConfig(
-    system_instruction=_get_system_instruction_with_time(),
-    temperature=0.2,
-    top_p=0.8,
-    tools=[
-        tools.get_system_status,
-        tools.check_proxmox_infrastructure,
-        tools.list_my_files,
-        tools.list_project_files,
-        tools.add_reminder_tool,
-        tools.get_reminders_tool,
-        tools.mark_habit_done_tool,
-        tools.get_habits_status_tool,
-        tools.summarize_pdf,
-        tools.summarize_document
-    ],
-    tool_config=types.ToolConfig(
-        function_calling_config=types.FunctionCallingConfig(
-            mode="AUTO"
+# Note: system_instruction is dynamic - rebuilt per request with current time
+def _get_generation_config() -> types.GenerateContentConfig:
+    """Build generation config with current system instruction."""
+    return types.GenerateContentConfig(
+        system_instruction=_get_system_instruction_with_time(),
+        temperature=0.2,
+        top_p=0.8,
+        tools=[
+            tools.get_system_status,
+            tools.check_proxmox_infrastructure,
+            tools.list_my_files,
+            tools.list_project_files,
+            tools.add_reminder_tool,
+            tools.get_reminders_tool,
+            tools.mark_habit_done_tool,
+            tools.get_habits_status_tool,
+            tools.summarize_pdf,
+            tools.summarize_document
+        ],
+        tool_config=types.ToolConfig(
+            function_calling_config=types.FunctionCallingConfig(
+                mode="AUTO"
+            )
         )
     )
-)
 
 
 def _encode_image_to_base64(image_path: str) -> str:
@@ -257,7 +259,7 @@ def process_chat(message: str, image_paths: list = None) -> str:
         response = client.models.generate_content(
             model=PRIMARY_MODEL,
             contents=contents_parts,
-            config=_DEFAULT_CONFIG
+            config=_get_generation_config()  # Dynamic config with current time
         )
 
         # SAFETY CHECK: Check prompt_feedback BEFORE accessing response.text

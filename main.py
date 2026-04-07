@@ -66,8 +66,10 @@ logger.info(f"Log rotation configured: {LOG_BACKUP_COUNT} days retention, rotati
 # Password hashing context (bcrypt)
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-# JWT Configuration
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "kuro-ai-secret-key-2026-irfan-proxmox-secure-auth")
+# JWT Configuration - SECURITY: No hardcoded fallback for secret key
+SECRET_KEY = os.getenv("JWT_SECRET_KEY")
+if not SECRET_KEY:
+    raise RuntimeError("JWT_SECRET_KEY environment variable is required. Set it in .env file.")
 ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_HOURS = int(os.getenv("JWT_EXPIRATION_HOURS", "12"))
 
@@ -244,10 +246,15 @@ async def logout_endpoint():
     response.delete_cookie(key=COOKIE_NAME, path="/")
     return response
 
-# CORS Middleware
+# CORS Middleware - SECURITY: Restrict to specific allowed origins
+ALLOWED_ORIGINS = os.getenv(
+    "ALLOWED_ORIGINS",
+    "https://localhost:8443,https://127.0.0.1:8443,http://localhost:8000"
+).split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Can be restricted in production
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -319,10 +326,16 @@ async def index(request: Request):
     return FileResponse(os.path.join(WEB_DIR, "templates", "index.html"))
 
 @app.get("/api/history")
-async def get_chat_history(limit: int = 20, offset: int = 0):
-    """Get chat history from database with pagination for infinite scroll."""
-    history = chat_history.get_history(limit=limit, offset=offset)
-    total = chat_history.get_total_count()
+async def get_chat_history(limit: int = 20, offset: int = 0, platform: str = None):
+    """Get chat history from database with pagination for infinite scroll.
+    
+    Args:
+        limit: Number of messages to return
+        offset: Pagination offset
+        platform: Filter by platform ('web', 'telegram', or None for all)
+    """
+    history = chat_history.get_history(limit=limit, offset=offset, platform=platform)
+    total = chat_history.get_total_count(platform=platform)
     return {
         "history": history,
         "status": "success",

@@ -75,8 +75,10 @@ const elements = {
     dropOverlay: document.getElementById('dropOverlay'),
     darkModeToggle: document.getElementById('darkModeToggle'),
     sidebar: document.getElementById('sidebar'),
+    mainContent: document.getElementById('mainContent'),
     openSidebar: document.getElementById('openSidebar'),
     closeSidebar: document.getElementById('closeSidebar'),
+    minimizeSidebar: document.getElementById('minimizeSidebar'),
     scrollLoader: document.getElementById('scrollLoader'),
     // System Status Modal
     systemStatusModal: document.getElementById('systemStatusModal'),
@@ -149,6 +151,9 @@ function setupEventListeners() {
     elements.uploadBtn.addEventListener('click', () => elements.fileInput.click());
     elements.fileInput.addEventListener('change', handleFileSelect);
     
+    // Ctrl+V paste support for images and files
+    elements.messageInput.addEventListener('paste', handlePaste);
+    
     setupDragAndDrop();
     elements.darkModeToggle.addEventListener('click', toggleDarkMode);
     
@@ -157,6 +162,16 @@ function setupEventListeners() {
         document.body.style.overflow = 'hidden';
     });
     elements.closeSidebar.addEventListener('click', closeSidebar);
+    
+    // Minimize sidebar toggle (desktop only)
+    if (elements.minimizeSidebar) {
+        elements.minimizeSidebar.addEventListener('click', toggleSidebarCollapse);
+        // Restore saved state
+        const savedCollapsed = localStorage.getItem('kuro-sidebar-collapsed');
+        if (savedCollapsed === 'true') {
+            applySidebarCollapse(true);
+        }
+    }
     
     document.addEventListener('click', (e) => {
         if (window.innerWidth < 1024 && 
@@ -232,6 +247,28 @@ function closeSidebar() {
 }
 
 // ============================================
+// Sidebar Collapse Toggle (Desktop)
+// ============================================
+function toggleSidebarCollapse() {
+    const isCollapsed = elements.sidebar.getAttribute('data-collapsed') === 'true';
+    applySidebarCollapse(!isCollapsed);
+}
+
+function applySidebarCollapse(collapsed) {
+    elements.sidebar.setAttribute('data-collapsed', collapsed);
+    elements.mainContent.classList.toggle('sidebar-collapsed', collapsed);
+    elements.minimizeSidebar.classList.toggle('collapsed', collapsed);
+    localStorage.setItem('kuro-sidebar-collapsed', collapsed);
+    
+    // Update icon
+    const icon = elements.minimizeSidebar.querySelector('i');
+    if (icon) {
+        icon.setAttribute('data-lucide', collapsed ? 'panel-left-open' : 'panel-left-close');
+        lucide.createIcons();
+    }
+}
+
+// ============================================
 // Auto-resize Textarea
 // ============================================
 function setupAutoResize() {
@@ -268,13 +305,16 @@ async function loadMoreMessages() {
     const previousScrollTop = elements.chatContainer.scrollTop;
     
     try {
-        const response = await authFetch(`${CONFIG.API_BASE}/history?limit=${CONFIG.CHAT_PAGE_SIZE}&offset=${chatOffset}`);
+        // FIX: Add platform=web filter to only load web messages
+        const response = await authFetch(`${CONFIG.API_BASE}/history?limit=${CONFIG.CHAT_PAGE_SIZE}&offset=${chatOffset}&platform=web`);
         const data = await response.json();
         
         if (data.status === 'success' && data.history.length > 0) {
-            // Prepend older messages to the top
-            const reversedHistory = [...data.history].reverse();
-            reversedHistory.forEach(msg => {
+            // FIX: Backend already returns data in chronological order (oldest first).
+            // For infinite scroll (loading older messages), we need to prepend them
+            // in reverse order so the oldest appears at the very top.
+            const messages = [...data.history].reverse();
+            messages.forEach(msg => {
                 const role = msg.role === 'user' ? 'user' : 'ai';
                 prependMessageToChat(role, msg.content);
             });
@@ -354,6 +394,40 @@ function setupDragAndDrop() {
 function handleFileSelect(e) {
     const files = Array.from(e.target.files);
     handleFiles(files);
+}
+
+// ============================================
+// Ctrl+V Paste Handler for Images and Files
+// ============================================
+function handlePaste(e) {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    
+    const filesToHandle = [];
+    
+    for (const item of items) {
+        // Handle image files (screenshots, copied images)
+        if (item.kind === 'file' && item.type.startsWith('image/')) {
+            const file = item.getAsFile();
+            if (file) {
+                filesToHandle.push(file);
+                e.preventDefault(); // Prevent default paste behavior
+            }
+        }
+        // Handle other file types (PDFs, documents, etc.)
+        else if (item.kind === 'file') {
+            const file = item.getAsFile();
+            if (file) {
+                filesToHandle.push(file);
+                e.preventDefault();
+            }
+        }
+    }
+    
+    if (filesToHandle.length > 0) {
+        handleFiles(filesToHandle);
+        showNotification(`${filesToHandle.length} file(s) pasted from clipboard`, 'success');
+    }
 }
 
 function handleFiles(files) {
@@ -487,31 +561,41 @@ async function sendMessage() {
         const decoder = new TextDecoder('utf-8');
         
         // STEP 4: Start the loop with BUFFER pattern
+        // FIX: Properly handle multi-line SSE events (event: chunk\ndata: {...}\n\n)
         while (true) {
             const { done, value } = await reader.read();
             if (done) break;
             
             buffer += decoder.decode(value, { stream: true });
-            const parts = buffer.split('\n\n');
-            buffer = parts.pop(); // Simpan potongan yang belum selesai ke buffer
+            const events = buffer.split('\n\n');
+            buffer = events.pop(); // Save incomplete event to buffer
             
-            for (const part of parts) {
-                if (part.startsWith('data: ')) {
-                    const dataStr = part.substring(6).trim();
-                    if (dataStr === '[DONE]') continue;
-                    
-                    try {
-                        const data = JSON.parse(dataStr);
-                        if (data.chunk) {
-                            botMessage += data.chunk;
-                            // Pastikan selector ini sesuai dengan class/id div tempat teks berada
-                            const textContainer = streamingContent;
-                            textContainer.innerHTML = marked.parse(botMessage);
-                            elements.chatContainer.scrollTop = elements.chatContainer.scrollHeight;
-                        }
-                    } catch (e) {
-                        console.error("JSON Parse Error on chunk:", dataStr);
+            for (const event of events) {
+                // Parse SSE event: extract data: line from multi-line event
+                const lines = event.split('\n');
+                let dataStr = null;
+                
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        dataStr = line.substring(6).trim();
+                        break;
                     }
+                }
+                
+                if (!dataStr) continue;
+                if (dataStr === '[DONE]') continue;
+                
+                try {
+                    const data = JSON.parse(dataStr);
+                    if (data.chunk) {
+                        botMessage += data.chunk;
+                        streamingContent.innerHTML = marked.parse(botMessage);
+                        elements.chatContainer.scrollTop = elements.chatContainer.scrollHeight;
+                    } else if (data.error) {
+                        streamingContent.innerHTML = `<span style="color:red">Error: ${escapeHtml(data.error)}</span>`;
+                    }
+                } catch (e) {
+                    console.error("JSON Parse Error on chunk:", dataStr);
                 }
             }
         }
@@ -526,11 +610,17 @@ async function sendMessage() {
     } catch (error) {
         console.error('Chat error:', error);
         removeTypingIndicator();
-        // Error handling - show red text in the SAME bubble
+        // Error handling with recovery - show red text in the SAME bubble
         if (streamingContent) {
-            streamingContent.innerHTML = `<span style="color:red">Connection lost.</span>`;
+            // If we already have partial content, show it with error notice
+            if (botMessage) {
+                streamingContent.innerHTML = marked.parse(botMessage) +
+                    `<p style="color:#f59e0b;margin-top:8px"><em>⚠️ Connection interrupted, but partial response above is available.</em></p>`;
+            } else {
+                streamingContent.innerHTML = `<span style="color:red">Connection lost. Please try again.</span>`;
+            }
         } else {
-            addMessageToChat('ai', '<span style="color:red">Connection lost.</span>');
+            addMessageToChat('ai', '<span style="color:red">Connection lost. Please try again.</span>');
         }
     } finally {
         isProcessing = false;
@@ -551,7 +641,7 @@ function addMessageToChat(role, content, files = []) {
     messageDiv.className = `flex items-start gap-3 message-enter ${role === 'user' ? 'flex-row-reverse' : ''}`;
     
     // Avatar
-    const avatar = role === 'user' 
+    const avatar = role === 'user'
         ? `<div class="w-8 h-8 rounded-full bg-gradient-to-br from-purple-400 to-pink-500 flex items-center justify-center flex-shrink-0 text-white font-bold text-sm">P</div>`
         : `<div class="w-8 h-8 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center flex-shrink-0"><i data-lucide="cat" class="w-4 h-4 text-white"></i></div>`;
     
@@ -573,7 +663,9 @@ function addMessageToChat(role, content, files = []) {
     
     if (content) {
         if (role === 'ai') {
-            contentHtml += `<div class="markdown-content">${marked.parse(content)}</div>`;
+            // Parse markdown and add copy buttons for code blocks and tables
+            const parsedContent = marked.parse(content);
+            contentHtml += `<div class="markdown-content">${parsedContent}</div>`;
         } else {
             contentHtml += `<p class="whitespace-pre-wrap">${escapeHtml(content)}</p>`;
         }
@@ -581,10 +673,19 @@ function addMessageToChat(role, content, files = []) {
     
     const bubbleClass = role === 'user' ? 'chat-bubble-user' : 'chat-bubble-ai';
     
+    // Add copy button for AI messages
+    const copyButton = role === 'ai' ? `
+        <button class="copy-message-btn absolute top-2 right-2 p-1.5 rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors opacity-0 group-hover:opacity-100"
+                onclick="copyMessageContent(this)" title="Copy message">
+            <i data-lucide="copy" class="w-3.5 h-3.5 text-gray-500 dark:text-gray-400"></i>
+        </button>
+    ` : '';
+    
     messageDiv.innerHTML = `
         ${avatar}
-        <div class="max-w-[85%] lg:max-w-[70%]">
-            <div class="${bubbleClass} px-4 py-3 shadow-sm">
+        <div class="max-w-[85%] lg:max-w-[70%] relative group">
+            <div class="${bubbleClass} px-4 py-3 shadow-sm relative">
+                ${copyButton}
                 ${contentHtml}
             </div>
             <span class="text-xs text-gray-400 mt-1 block ${role === 'user' ? 'text-right' : ''}">${getCurrentTime()}</span>
@@ -593,6 +694,13 @@ function addMessageToChat(role, content, files = []) {
     
     elements.chatContainer.appendChild(messageDiv);
     lucide.createIcons();
+    
+    // Add copy buttons to code blocks and tables
+    if (role === 'ai') {
+        addCodeBlockCopyButtons(messageDiv);
+        addTableCopyButtons(messageDiv);
+    }
+    
     elements.chatContainer.scrollTop = elements.chatContainer.scrollHeight;
 }
 
@@ -670,8 +778,10 @@ async function loadChatHistory() {
         hasMoreMessages = true;
         isLoadingMore = false;
         
-        const response = await authFetch(`${CONFIG.API_BASE}/history?limit=${CONFIG.CHAT_PAGE_SIZE}&offset=0`);
+        console.log('[CHAT_HISTORY] Fetching history from backend...');
+        const response = await authFetch(`${CONFIG.API_BASE}/history?limit=${CONFIG.CHAT_PAGE_SIZE}&offset=0&platform=web`);
         const data = await response.json();
+        console.log('[CHAT_HISTORY] Backend response:', data);
         
         // Clear container but keep scroll loader
         elements.chatContainer.innerHTML = `
@@ -681,14 +791,15 @@ async function loadChatHistory() {
         `;
         elements.scrollLoader = document.getElementById('scrollLoader');
         
-        if (data.status === 'success' && data.history.length > 0) {
-            // FIX: Reverse array on first load (offset === 0) so oldest messages are at top
-            let messages = data.history;
-            if (chatOffset === 0 && Array.isArray(messages)) {
-                messages = messages.reverse();
-            }
+        if (data.status === 'success' && data.history && data.history.length > 0) {
+            console.log(`[CHAT_HISTORY] Loaded ${data.history.length} messages from backend`);
             
-            // Render messages in chronological order
+            // FIX: Backend already returns data in chronological order (oldest first)
+            // via list(reversed(history)) in chat_history.py line 102.
+            // DO NOT reverse again - this was causing the double-reverse anomaly.
+            const messages = data.history;
+            
+            // Render messages in chronological order (oldest at top, newest at bottom)
             messages.forEach(msg => {
                 const role = msg.role === 'user' ? 'user' : 'ai';
                 addMessageToChat(role, msg.content);
@@ -696,13 +807,20 @@ async function loadChatHistory() {
             
             chatOffset = data.history.length;
             hasMoreMessages = data.has_more;
+            
+            // FIX: Auto-scroll to bottom after loading history
+            // Use setTimeout to ensure all DOM elements are fully rendered
+            setTimeout(() => {
+                elements.chatContainer.scrollTop = elements.chatContainer.scrollHeight;
+            }, 100);
         } else {
+            console.log('[CHAT_HISTORY] No history found, showing welcome message');
             // Show welcome message if no history
             addMessageToChat('ai', 'Halo Pantronux! Saya Kuro, AI Butler setia Anda. Ada yang bisa saya bantu hari ini?');
             hasMoreMessages = false;
         }
     } catch (error) {
-        console.error('Failed to load chat history:', error);
+        console.error('[CHAT_HISTORY] Failed to load chat history:', error);
         elements.chatContainer.innerHTML = `
             <div class="scroll-loader" id="scrollLoader">
                 <div class="spinner"></div>
@@ -998,4 +1116,137 @@ function updateUserInfo() {
     if (elements.logoutBtn) {
         elements.logoutBtn.addEventListener('click', logout);
     }
+}
+
+// ============================================
+// Copy Message Content
+// ============================================
+function copyMessageContent(button) {
+    const messageBubble = button.closest('.chat-bubble-ai');
+    const markdownContent = messageBubble.querySelector('.markdown-content');
+    
+    if (!markdownContent) return;
+    
+    // Get the raw text content (strip HTML for clean copy)
+    const textContent = markdownContent.innerText || markdownContent.textContent;
+    
+    navigator.clipboard.writeText(textContent).then(() => {
+        // Visual feedback
+        const originalIcon = button.innerHTML;
+        button.innerHTML = '<i data-lucide="check" class="w-3.5 h-3.5 text-emerald-500"></i>';
+        lucide.createIcons();
+        
+        setTimeout(() => {
+            button.innerHTML = originalIcon;
+            lucide.createIcons();
+        }, 2000);
+    }).catch(err => {
+        console.error('Failed to copy message:', err);
+    });
+}
+
+// ============================================
+// Copy Code Block
+// ============================================
+function copyCodeBlock(button) {
+    const pre = button.closest('pre');
+    const code = pre.querySelector('code');
+    const text = code.textContent || code.innerText;
+    
+    navigator.clipboard.writeText(text).then(() => {
+        const originalIcon = button.innerHTML;
+        button.innerHTML = '<i data-lucide="check" class="w-3.5 h-3.5 text-emerald-500"></i>';
+        button.querySelector('span').textContent = 'Copied!';
+        lucide.createIcons();
+        
+        setTimeout(() => {
+            button.innerHTML = originalIcon;
+            lucide.createIcons();
+        }, 2000);
+    }).catch(err => {
+        console.error('Failed to copy code:', err);
+    });
+}
+
+// ============================================
+// Copy Table
+// ============================================
+function copyTable(button) {
+    const table = button.closest('.table-wrapper').querySelector('table');
+    
+    // Convert table to CSV-like format
+    const rows = table.querySelectorAll('tr');
+    let csv = [];
+    
+    rows.forEach(row => {
+        const cells = row.querySelectorAll('th, td');
+        const rowData = [];
+        cells.forEach(cell => {
+            let text = cell.textContent || cell.innerText;
+            // Escape commas and quotes
+            if (text.includes(',') || text.includes('"') || text.includes('\n')) {
+                text = '"' + text.replace(/"/g, '""') + '"';
+            }
+            rowData.push(text);
+        });
+        csv.push(rowData.join(','));
+    });
+    
+    navigator.clipboard.writeText(csv.join('\n')).then(() => {
+        const originalIcon = button.innerHTML;
+        button.innerHTML = '<i data-lucide="check" class="w-3.5 h-3.5 text-emerald-500"></i>';
+        button.querySelector('span').textContent = 'Copied!';
+        lucide.createIcons();
+        
+        setTimeout(() => {
+            button.innerHTML = originalIcon;
+            lucide.createIcons();
+        }, 2000);
+    }).catch(err => {
+        console.error('Failed to copy table:', err);
+    });
+}
+
+// ============================================
+// Add Copy Buttons to Code Blocks
+// ============================================
+function addCodeBlockCopyButtons(container) {
+    const codeBlocks = container.querySelectorAll('pre');
+    codeBlocks.forEach(pre => {
+        // Wrap in relative container
+        const wrapper = document.createElement('div');
+        wrapper.className = 'relative group/code';
+        pre.parentNode.insertBefore(wrapper, pre);
+        wrapper.appendChild(pre);
+        
+        // Add copy button
+        const copyBtn = document.createElement('button');
+        copyBtn.className = 'absolute top-2 right-2 p-1.5 rounded-lg bg-gray-700 hover:bg-gray-600 text-white opacity-0 group-hover/code:opacity-100 transition-opacity flex items-center gap-1 text-xs';
+        copyBtn.onclick = function() { copyCodeBlock(this); };
+        copyBtn.innerHTML = '<i data-lucide="copy" class="w-3.5 h-3.5"></i><span>Copy</span>';
+        wrapper.appendChild(copyBtn);
+    });
+    lucide.createIcons();
+}
+
+// ============================================
+// Add Copy Buttons to Tables
+// ============================================
+function addTableCopyButtons(container) {
+    const tables = container.querySelectorAll('table');
+    tables.forEach(table => {
+        // Wrap in relative container
+        const wrapper = document.createElement('div');
+        wrapper.className = 'table-wrapper relative group/table overflow-x-auto';
+        table.parentNode.insertBefore(wrapper, table);
+        wrapper.appendChild(table);
+        
+        // Add copy button
+        const copyBtn = document.createElement('button');
+        copyBtn.className = 'absolute top-2 right-2 p-1.5 rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 opacity-0 group-hover/table:opacity-100 transition-opacity flex items-center gap-1 text-xs';
+        copyBtn.onclick = function() { copyTable(this); };
+        copyBtn.innerHTML = '<i data-lucide="copy" class="w-3.5 h-3.5 text-gray-500 dark:text-gray-400"></i><span class="text-gray-600 dark:text-gray-300">Copy</span>';
+        wrapper.appendChild(copyBtn);
+    });
+    lucide.createIcons();
 }

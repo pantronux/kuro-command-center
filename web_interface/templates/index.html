@@ -83,87 +83,93 @@
     <div class="flex h-screen overflow-hidden">
         
         <!-- Sidebar -->
-        <aside id="sidebar" class="fixed inset-y-0 left-0 z-50 w-72 glass-sidebar transform -translate-x-full lg:translate-x-0 transition-transform duration-300 ease-in-out">
+        <aside id="sidebar" class="fixed inset-y-0 left-0 z-50 w-72 glass-sidebar transform -translate-x-full lg:translate-x-0 transition-all duration-300 ease-in-out" data-collapsed="false">
             <div class="flex flex-col h-full">
                 <!-- Logo -->
                 <div class="flex items-center justify-between p-6 border-b border-glass-border dark:border-glass-borderDark">
-                    <div class="flex items-center gap-3">
-                        <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center shadow-lg">
+                    <div class="flex items-center gap-3 sidebar-logo-area">
+                        <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center shadow-lg flex-shrink-0">
                             <!-- Cat icon for Kuro branding -->
                             <i data-lucide="cat" class="w-6 h-6 text-white"></i>
                         </div>
-                        <div>
+                        <div class="sidebar-text">
                             <h1 class="text-lg font-bold text-gray-800 dark:text-white">Kuro AI</h1>
                             <p class="text-xs text-gray-500 dark:text-gray-400">Butler Dashboard</p>
                         </div>
                     </div>
-                    <button id="closeSidebar" class="lg:hidden p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
-                        <i data-lucide="x" class="w-5 h-5 text-gray-600 dark:text-gray-300"></i>
-                    </button>
+                    <div class="flex items-center gap-1">
+                        <!-- Minimize button (desktop only) -->
+                        <button id="minimizeSidebar" class="hidden lg:flex p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors" title="Minimize sidebar">
+                            <i data-lucide="panel-left-close" class="w-5 h-5 text-gray-600 dark:text-gray-300"></i>
+                        </button>
+                        <button id="closeSidebar" class="lg:hidden p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                            <i data-lucide="x" class="w-5 h-5 text-gray-600 dark:text-gray-300"></i>
+                        </button>
+                    </div>
                 </div>
                 
                 <!-- Navigation -->
                 <nav class="flex-1 p-4 space-y-1 overflow-y-auto">
                     <!-- Main Chat -->
-                    <a href="#" id="navChat" class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-medium transition-all hover:bg-emerald-500/20">
-                        <i data-lucide="message-square" class="w-5 h-5"></i>
-                        <span>Chat</span>
+                    <a href="#" id="navChat" class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-medium transition-all hover:bg-emerald-500/20" title="Chat">
+                        <i data-lucide="message-square" class="w-5 h-5 flex-shrink-0"></i>
+                        <span class="sidebar-text">Chat</span>
                     </a>
                     
                     <!-- Tools Section -->
-                    <div class="pt-4 pb-2">
+                    <div class="pt-4 pb-2 sidebar-section-label">
                         <p class="px-4 text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Tools</p>
                     </div>
                     
-                    <a href="/habits" class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-all">
-                        <i data-lucide="target" class="w-5 h-5"></i>
-                        <span>Daily Habits</span>
+                    <a href="/habits" class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-all" title="Daily Habits">
+                        <i data-lucide="target" class="w-5 h-5 flex-shrink-0"></i>
+                        <span class="sidebar-text">Daily Habits</span>
                     </a>
-                    <a href="/reminders" class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-all">
-                        <i data-lucide="clock" class="w-5 h-5"></i>
-                        <span>Reminders</span>
+                    <a href="/reminders" class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-all" title="Reminders">
+                        <i data-lucide="clock" class="w-5 h-5 flex-shrink-0"></i>
+                        <span class="sidebar-text">Reminders</span>
                     </a>
-                    <a href="/compliance" class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-all">
-                        <i data-lucide="shield-check" class="w-5 h-5"></i>
-                        <span>Compliance</span>
+                    <a href="/compliance" class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-all" title="Compliance">
+                        <i data-lucide="shield-check" class="w-5 h-5 flex-shrink-0"></i>
+                        <span class="sidebar-text">Compliance</span>
                     </a>
-                    <a href="/intelligence" class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-all">
-                        <i data-lucide="radar" class="w-5 h-5"></i>
-                        <span>Intelligence Hub</span>
+                    <a href="/intelligence" class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-all" title="Intelligence Hub">
+                        <i data-lucide="radar" class="w-5 h-5 flex-shrink-0"></i>
+                        <span class="sidebar-text">Intelligence Hub</span>
                     </a>
                     
                     <!-- System Section -->
-                    <div class="pt-4 pb-2">
+                    <div class="pt-4 pb-2 sidebar-section-label">
                         <p class="px-4 text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">System</p>
                     </div>
                     
-                    <a href="#" id="navSystemStatus" class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-all">
-                        <i data-lucide="server" class="w-5 h-5"></i>
-                        <span>System Status</span>
+                    <a href="#" id="navSystemStatus" class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-all" title="System Status">
+                        <i data-lucide="server" class="w-5 h-5 flex-shrink-0"></i>
+                        <span class="sidebar-text">System Status</span>
                     </a>
-                    <a href="#" id="navFiles" class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-all">
-                        <i data-lucide="folder-open" class="w-5 h-5"></i>
-                        <span>Uploaded Files</span>
+                    <a href="#" id="navFiles" class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-all" title="Uploaded Files">
+                        <i data-lucide="folder-open" class="w-5 h-5 flex-shrink-0"></i>
+                        <span class="sidebar-text">Uploaded Files</span>
                     </a>
                     
                     <!-- Settings -->
-                    <div class="pt-4 pb-2">
+                    <div class="pt-4 pb-2 sidebar-section-label">
                         <p class="px-4 text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Preferences</p>
                     </div>
                     
-                    <a href="#" id="navSettings" class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-all">
-                        <i data-lucide="settings" class="w-5 h-5"></i>
-                        <span>Settings</span>
+                    <a href="#" id="navSettings" class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-all" title="Settings">
+                        <i data-lucide="settings" class="w-5 h-5 flex-shrink-0"></i>
+                        <span class="sidebar-text">Settings</span>
                     </a>
                 </nav>
                 
                 <!-- User Profile -->
-                <div class="p-4 border-t border-glass-border dark:border-glass-borderDark">
+                <div class="p-4 border-t border-glass-border dark:border-glass-borderDark sidebar-user-area">
                     <div class="flex items-center gap-3 px-4 py-3 rounded-xl bg-gray-50 dark:bg-gray-800/50">
-                        <div class="w-10 h-10 rounded-full bg-gradient-to-br from-purple-400 to-pink-500 flex items-center justify-center text-white font-bold">
+                        <div class="w-10 h-10 rounded-full bg-gradient-to-br from-purple-400 to-pink-500 flex items-center justify-center text-white font-bold flex-shrink-0">
                             M
                         </div>
-                        <div class="flex-1 min-w-0">
+                        <div class="flex-1 min-w-0 sidebar-text">
                             <p class="text-sm font-medium text-gray-800 dark:text-white truncate">Pantronux</p>
                             <p class="text-xs text-gray-500 dark:text-gray-400">Administrator</p>
                         </div>
@@ -173,7 +179,7 @@
         </aside>
         
         <!-- Main Content -->
-        <main class="flex-1 flex flex-col lg:ml-72">
+        <main class="flex-1 flex flex-col lg:ml-72 transition-all duration-300 ease-in-out" id="mainContent">
             <!-- Header -->
             <header class="flex items-center justify-between px-6 py-4 glass-header sticky top-0 z-40">
                 <div class="flex items-center gap-4">
