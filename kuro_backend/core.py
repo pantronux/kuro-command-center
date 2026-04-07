@@ -17,6 +17,7 @@ from kuro_backend import memory_manager
 from kuro_backend import chat_history
 
 logger = logging.getLogger(__name__)
+logger.propagate = False  # Prevent double-reporting to root logger
 
 # Initialize the Generative AI client (SDK v3) - single instance for memory efficiency
 client = genai.Client(api_key=settings.GEMINI_API_KEY)

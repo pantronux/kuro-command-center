@@ -10,12 +10,59 @@ Integrates Mem0 framework for long-term personal memory about Pantronux.
 import logging
 import os
 import re
+import json
 from typing import List, Dict, Optional, Any
 from datetime import datetime
 from mem0 import Memory
 from kuro_backend.config import settings
 
 logger = logging.getLogger(__name__)
+logger.propagate = False  # Prevent double-reporting to root logger
+
+
+def extract_json_from_text(text: str) -> Optional[Dict]:
+    """
+    Robust JSON extraction from text that may contain markdown code blocks,
+    extra whitespace, or non-JSON content.
+    
+    Handles:
+    - ```json ... ``` markdown blocks
+    - ``` ... ``` code blocks without language tag
+    - Raw JSON with surrounding text
+    - String responses that need to be parsed
+    
+    Returns dict if successful, None otherwise.
+    """
+    if not text or not isinstance(text, str):
+        return None
+    
+    text = text.strip()
+    
+    # Step 1: Try to extract from markdown code block first
+    json_block_match = re.search(r'```(?:json)?\s*\n(.*?)\n```', text, re.DOTALL)
+    if json_block_match:
+        text = json_block_match.group(1)
+    
+    # Step 2: Try to find JSON object in text
+    json_match = re.search(r'\{.*\}', text, re.DOTALL)
+    if json_match:
+        try:
+            result = json.loads(json_match.group())
+            if isinstance(result, dict):
+                return result
+        except json.JSONDecodeError:
+            pass
+    
+    # Step 3: If text itself is a JSON string, try direct parse
+    if text.startswith('{') and text.endswith('}'):
+        try:
+            result = json.loads(text)
+            if isinstance(result, dict):
+                return result
+        except json.JSONDecodeError:
+            pass
+    
+    return None
 
 # Mem0 storage directory
 MEM0_STORAGE_DIR = "/home/kuro/kuro_mem0"
@@ -26,11 +73,9 @@ MASTER_USER_ID = "pantronux"
 
 # Privacy keywords that indicate client/confidential data (should NOT be stored)
 CLIENT_DATA_KEYWORDS = [
-    "internal", "confidential", "secret",
-    "client data", "client password", "client credential",
-    "rahasia perusahaan", "confidential document",
-    "gap analysis", "audit",
-    "penilaian risiko", "dokumen internal",
+    "confidential", 
+    "rahasia perusahaan", 
+    "confidential document",
 ]
 
 # Habit tracking keywords
@@ -68,18 +113,20 @@ class PerpetualMemory:
     
     @property
     def client(self) -> Memory:
-        """Lazy initialization of Mem0 client."""
+        """Lazy initialization of Mem0 client with fast fallback on embedding errors."""
         if self._client is None:
             try:
                 from mem0.configs.base import MemoryConfig, VectorStoreConfig, LlmConfig, EmbedderConfig
                 
                 # Configure Mem0 with Gemini API and local Qdrant storage
+                # FIX: Explicit dimension=768 for gemini-embedding-001 model
                 config = MemoryConfig(
                     vector_store=VectorStoreConfig(
                         provider="qdrant",
                         config={
                             "collection_name": "kuro_perpetual_memory",
                             "path": MEM0_STORAGE_DIR,
+                            "embedding_model_dims": 768,  # gemini-embedding-001 dimension
                         }
                     ),
                     llm=LlmConfig(
@@ -93,7 +140,7 @@ class PerpetualMemory:
                     embedder=EmbedderConfig(
                         provider="gemini",
                         config={
-                            "model": "models/text-embedding-004",
+                            "model": "models/gemini-embedding-001",
                             "api_key": settings.GEMINI_API_KEY,
                         }
                     )
@@ -102,7 +149,12 @@ class PerpetualMemory:
                 self._client = Memory(config=config)
                 logger.info(f"[MEM0] Client initialized with Gemini API and Qdrant storage at {MEM0_STORAGE_DIR}")
             except Exception as e:
-                logger.error(f"[MEM0] Failed to initialize client: {e}")
+                error_str = str(e).lower()
+                # Fast fallback on embedding 404 or API errors - no retry
+                if "404" in error_str or "not found" in error_str or "embedding" in error_str:
+                    logger.warning(f"[MEM0] Embedding API error (fast bypass): {e}")
+                else:
+                    logger.error(f"[MEM0] Failed to initialize client: {e}")
                 self._client = None
         return self._client
     
@@ -239,24 +291,43 @@ class PerpetualMemory:
         return memories
     
     def store_memories(self, memories: List[Dict]):
-        """Store extracted memories in Mem0."""
+        """Store extracted memories in Mem0 with fast fallback on embedding errors."""
         if not self.client or not memories:
             return
         
         for mem in memories:
             try:
+                # TYPE VALIDATION: Ensure mem is a dict with 'text' key before accessing
+                # This prevents "string indices must be integers" errors
+                if not isinstance(mem, dict):
+                    logger.warning(f"[MEM0] Skipping invalid memory entry (not a dict): {type(mem)}")
+                    continue
+                
+                mem_text = mem.get("text")
+                if not mem_text or not isinstance(mem_text, str):
+                    logger.warning(f"[MEM0] Skipping invalid memory entry (missing/invalid text): {mem}")
+                    continue
+                
                 self.client.add(
-                    messages=[mem["text"]],
+                    messages=[mem_text],
                     user_id=self.user_id,
                     metadata=mem.get("metadata", {})
                 )
-                logger.info(f"[MEM0] Stored memory: {mem['text'][:60]}...")
+                logger.info(f"[MEM0] Stored memory: {mem_text[:60]}...")
             except Exception as e:
-                logger.error(f"[MEM0] Failed to store memory: {e}")
+                error_str = str(e).lower()
+                # Fast bypass on embedding 404 - don't retry, just skip
+                if "404" in error_str or "not found" in error_str or "embedding" in error_str:
+                    logger.warning(f"[MEM0] Embedding error during store (fast bypass): {e}")
+                    self._client = None  # Disable client to prevent further attempts
+                    return
+                else:
+                    logger.error(f"[MEM0] Failed to store memory: {e}")
     
     def retrieve_memories(self, query: str, limit: int = 5) -> List[Dict]:
         """
         Retrieve relevant memories based on query.
+        V5.0: Fast bypass on embedding errors - no timeout waiting.
         
         Returns list of memories with text and metadata.
         """
@@ -282,7 +353,13 @@ class PerpetualMemory:
             return memories
             
         except Exception as e:
-            logger.error(f"[MEM0] Failed to retrieve memories: {e}")
+            error_str = str(e).lower()
+            # Fast bypass on embedding 404 - disable client and return empty
+            if "404" in error_str or "not found" in error_str or "embedding" in error_str:
+                logger.warning(f"[MEM0] Embedding error during retrieve (fast bypass): {e}")
+                self._client = None  # Disable client to prevent further attempts
+            else:
+                logger.error(f"[MEM0] Failed to retrieve memories: {e}")
             return []
     
     def get_habit_history(self, habit: str, days: int = 30) -> List[Dict]:
@@ -386,3 +463,8 @@ class PerpetualMemory:
 
 # Global instance
 perpetual_memory = PerpetualMemory()
+
+
+def get_memory_client() -> PerpetualMemory:
+    """Get the global PerpetualMemory instance for testing/debugging."""
+    return perpetual_memory

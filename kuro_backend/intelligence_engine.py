@@ -15,6 +15,7 @@ from kuro_backend.serper_tool import serper_search, serper_news, RESEARCH_PILLAR
 from kuro_backend import intelligence_db
 
 logger = logging.getLogger(__name__)
+logger.propagate = False  # Prevent double-reporting to root logger
 
 # Briefings log directory
 BRIEFINGS_LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs", "briefings")

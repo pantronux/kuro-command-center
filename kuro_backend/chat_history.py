@@ -16,6 +16,7 @@ from typing import List, Dict, Optional
 from kuro_backend.config import settings
 
 logger = logging.getLogger(__name__)
+logger.propagate = False  # Prevent double-reporting to root logger
 
 DB_PATH = os.path.join(settings.WORKING_DIR, "kuro_chat_history.db")
 

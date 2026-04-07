@@ -5,6 +5,7 @@ from google.genai.errors import APIError, ClientError
 from kuro_backend.config import settings
 
 logger = logging.getLogger(__name__)
+logger.propagate = False  # Prevent double-reporting to root logger
 
 # Reuse the global client instance for memory efficiency (same as core.py)
 _client = None

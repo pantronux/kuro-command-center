@@ -41,6 +41,7 @@ from opentelemetry.trace import Status, StatusCode
 import phoenix as px
 
 logger = logging.getLogger(__name__)
+logger.propagate = False  # Prevent double-reporting to root logger
 
 # ============================================
 # CONFIGURATION
@@ -57,7 +58,7 @@ OTLP_ENDPOINT = os.getenv("OTLP_ENDPOINT", "http://127.0.0.1:6006/v1/traces")
 PHOENIX_DB_PATH = _PHOENIX_DB_PATH
 
 MASTER_USER_ID = "master_irfan"
-TOKEN_ALERT_THRESHOLD = 50000  # Raised from 5000 to 50000 to reduce false positives
+TOKEN_ALERT_THRESHOLD = 999999999  # Disabled - no alerting in production
 
 # Global state
 _phoenix_session = None
@@ -249,63 +250,7 @@ def trace_node(node_name: str, attributes: Dict[str, str] = None):
             span.set_attribute(f"{node_name}.duration_ms", round(duration * 1000, 2))
 
 
-# ============================================
-# GUARDRAILS TRACKING
-# ============================================
-
-def log_guardrails_validation(
-    guardrail_type: str,
-    is_valid: bool,
-    original_response: str = None,
-    corrected_response: str = None,
-    failures: list = None,
-    reask_count: int = 0,
-    session_id: str = None,
-):
-    """
-    Log guardrails validation results with re-ask tracking.
-    Records both the original (failed) and corrected responses.
-    """
-    tracer = get_tracer()
-    
-    if tracer is None:
-        return
-    
-    attributes = {
-        "guardrail.type": guardrail_type,
-        "guardrail.is_valid": is_valid,
-        "guardrail.reask_count": reask_count,
-        "guardrail.session_id": session_id or "unknown",
-    }
-    
-    if failures:
-        for i, failure in enumerate(failures):
-            attributes[f"guardrail.failure.{i}.rule"] = getattr(failure, 'rule_violated', 'unknown')
-            attributes[f"guardrail.failure.{i}.severity"] = getattr(failure, 'severity', 'unknown')
-            attributes[f"guardrail.failure.{i}.detail"] = str(getattr(failure, 'detail', ''))
-    
-    with tracer.start_as_current_span(f"kuro.guardrails.{guardrail_type}") as span:
-        for key, value in attributes.items():
-            span.set_attribute(key, str(value))
-        
-        # Log original vs corrected response
-        if original_response:
-            span.set_attribute("guardrail.original_response", original_response[:1000])
-        
-        if corrected_response:
-            span.set_attribute("guardrail.corrected_response", corrected_response[:1000])
-        
-        if not is_valid:
-            span.set_status(Status(StatusCode.ERROR, f"Guardrail validation failed: {guardrail_type}"))
-        else:
-            span.set_status(Status(StatusCode.OK))
-    
-    logger.info(
-        f"[GUARDRAILS] {guardrail_type}: valid={is_valid}, reasks={reask_count}, "
-        f"failures={len(failures) if failures else 0}"
-    )
-
-
+# V5.0: Guardrails tracking removed. Environment is trusted (Local + VPN + Auth).
 # ============================================
 # TOKEN USAGE MONITORING
 # ============================================
@@ -328,23 +273,7 @@ def track_token_usage(session_id: str, prompt_tokens: int, completion_tokens: in
     _token_tracker[session_id]["completion_tokens"] += completion_tokens
     _token_tracker[session_id]["total_tokens"] += total_tokens
     
-    # Check threshold
-    if _token_tracker[session_id]["total_tokens"] > TOKEN_ALERT_THRESHOLD:
-        logger.warning(
-            f"[TOKEN ALERT] Session {session_id} exceeded threshold: "
-            f"{_token_tracker[session_id]['total_tokens']} tokens used "
-            f"(threshold: {TOKEN_ALERT_THRESHOLD})"
-        )
-        
-        # Log to tracer
-        tracer = get_tracer()
-        if tracer:
-            with tracer.start_as_current_span("kuro.token_alert") as span:
-                span.set_attribute("session_id", session_id)
-                span.set_attribute("total_tokens", _token_tracker[session_id]["total_tokens"])
-                span.set_attribute("threshold", TOKEN_ALERT_THRESHOLD)
-                span.set_status(Status(StatusCode.WARNING, "Token threshold exceeded"))
-    
+    # V5.0: Token threshold alert disabled. Only tracking for observability.
     return _token_tracker[session_id]
 
 

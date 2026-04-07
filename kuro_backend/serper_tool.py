@@ -9,6 +9,7 @@ import requests
 from typing import Optional, Dict, Any, List
 
 logger = logging.getLogger(__name__)
+logger.propagate = False  # Prevent double-reporting to root logger
 
 SERPER_API_KEY = os.getenv("SERPER_API_KEY", "")
 SERPER_API_URL = "https://google.serper.dev"

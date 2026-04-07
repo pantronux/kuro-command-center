@@ -13,6 +13,7 @@ from datetime import datetime
 from typing import Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
+logger.propagate = False  # Prevent double-reporting to root logger
 
 # Tool descriptions for LLM routing
 TOOL_DESCRIPTIONS = {

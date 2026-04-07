@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
+logger.propagate = False  # Prevent double-reporting to root logger
 
 # Database path
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "kuro_auth.db")

@@ -1,9 +1,10 @@
 """
-Kuro AI V4.8 Official - LangGraph Core with Observability [2026-04-06]
+Kuro AI V5.0 Official - LangGraph Core (Guardrails Removed) [2026-04-07]
 ================================================================================
 AI Core with LangGraph Stateful Architecture for Agentik Long-Term Reasoning
 SDK: google-genai v3 Protocol with LangGraph State Machine
-V4.8: LangGraph Engine + Stateful Memory + Self-Correction Loops + Arize Phoenix Observability
+V5.0: Guardrails REMOVED for maximum performance. Local + VPN + Auth environment.
+      Latency optimized: direct path from memory retrieval to response generation.
 """
 import asyncio
 import logging
@@ -29,6 +30,7 @@ from kuro_backend import perpetual_memory
 from kuro_backend import observability
 
 logger = logging.getLogger(__name__)
+logger.propagate = False  # Prevent double-reporting to root logger
 
 # ============================================
 # AGENT STATE DEFINITION (The Memory)
@@ -37,6 +39,7 @@ logger = logging.getLogger(__name__)
 class KuroState(TypedDict):
     """
     Kuro Agent State - persists across graph nodes.
+    V5.0: Guardrail-related fields removed for performance.
     
     Fields:
     - messages: Conversation history (list of dicts with role/content)
@@ -48,8 +51,6 @@ class KuroState(TypedDict):
     - final_response: Generated response to return
     - query_expansion_count: Track self-correction iterations
     - persona_mode: Current active persona
-    - guardrail_reask_count: Track guardrail re-ask attempts
-    - guardrail_feedback: Feedback from guardrails for re-generation
     - mem0_retrieved_memories: Memories retrieved from Mem0 for context
     - tool_execution_result: Result from tool execution (ToolNode output)
     - requires_approval: Flag for HITL interrupt (file operations need approval)
@@ -64,8 +65,6 @@ class KuroState(TypedDict):
     query_expansion_count: int
     persona_mode: str
     image_paths: Optional[List[str]]
-    guardrail_reask_count: int
-    guardrail_feedback: str
     mem0_retrieved_memories: List[Dict]
     tool_execution_result: Optional[Dict]
     requires_approval: bool
@@ -241,66 +240,71 @@ def supervisor_node(state: KuroState) -> Dict[str, Any]:
 # NODE: MEMORY RETRIEVAL (Mem0)
 # ============================================
 
-def memory_retrieval_node(state: KuroState) -> Dict[str, Any]:
-    """
-    Memory Retrieval Node: Searches Mem0 for relevant personal memories.
-    FIX: Wrapped in try-except to bypass Mem0 if embedding API fails (404).
-    """
+def memory_extraction_node(state: KuroState) -> Dict[str, Any]:
     user_input = state.get("user_input", "")
-    session_id = state.get("_session_id", "unknown")
-    trace_attrs = observability.create_session_context(session_id=session_id)
-    
-    with observability.trace_node("memory_retrieval_node", trace_attrs) as span:
+    final_response = state.get("final_response", "")
+
+    # 1. Guard Clause: Jangan jalankan ekstraksi jika respon asisten kosong
+    # Ini mencegah penyimpanan memori yang tidak lengkap atau error API
+    if not final_response or len(final_response.strip()) == 0:
+        logger.warning("[MEM0_EXTRACTION] Skipped: No final_response found in state.")
+        return {}
+
+    with observability.trace_node("memory_extraction_node") as span:
         try:
-            # Retrieve relevant memories from Mem0
-            memories = perpetual_memory.perpetual_memory.retrieve_memories(user_input, limit=5)
-            logger.info(f"[MEM0_RETRIEVAL] Retrieved {len(memories)} memories for query: {user_input[:50]}...")
+            # 2. Ekstraksi dengan konteks penuh (Input + Output)
+            memories_to_store = perpetual_memory.perpetual_memory.extract_personal_info(
+                user_input, 
+                final_response
+            )
             
-            if span:
-                span.set_attribute("memory_retrieval_node.memories_count", len(memories))
+            # 3. Validasi sebelum Store
+            if memories_to_store and isinstance(memories_to_store, list):
+                perpetual_memory.perpetual_memory.store_memories(memories_to_store)
+                logger.info(f"[MEM0_EXTRACTION] Successfully stored {len(memories_to_store)} memories.")
             
-            return {
-                "mem0_retrieved_memories": memories
-            }
+            return {}
         except Exception as e:
-            # FIX: Bypass Mem0 if embedding API fails - system continues without long-term memory
-            logger.warning(f"[MEM0_RETRIEVAL] Failed (bypassing): {e}")
-            if span:
-                span.set_attribute("memory_retrieval_node.memories_count", 0)
-                span.set_attribute("memory_retrieval_node.bypassed", True)
-            return {
-                "mem0_retrieved_memories": []
-            }
+            logger.error(f"[MEM0_EXTRACTION] Failed to store memories: {e}")
+            return {}
+
 
 
 # ============================================
 # NODE: MEMORY EXTRACTION (Mem0)
 # ============================================
 
-def memory_extraction_node(state: KuroState) -> Dict[str, Any]:
-    """
-    Memory Extraction Node: Analyzes conversation for personal info to store.
-    Runs after response generation to capture new memories.
-    """
+def memory_retrieval_node(state: KuroState) -> Dict[str, Any]:
+    # 1. Validasi Input State: Pastikan state adalah dictionary
+    if not isinstance(state, dict):
+        logger.error(f"[MEM0] Invalid state type: {type(state)}")
+        return {"mem0_retrieved_memories": []}
+
     user_input = state.get("user_input", "")
-    final_response = state.get("final_response", "")
-    session_id = state.get("_session_id", "unknown")
-    trace_attrs = observability.create_session_context(session_id=session_id)
     
-    with observability.trace_node("memory_extraction_node", trace_attrs) as span:
-        # Extract personal information from conversation
-        memories_to_store = perpetual_memory.perpetual_memory.extract_personal_info(user_input, final_response)
-        
-        # Store extracted memories
-        if memories_to_store:
-            perpetual_memory.perpetual_memory.store_memories(memories_to_store)
-            logger.info(f"[MEM0_EXTRACTION] Stored {len(memories_to_store)} new memories")
-        
-        if span:
-            span.set_attribute("memory_extraction_node.memories_stored", len(memories_to_store))
-        
-        # No state change needed - memories are stored externally
-        return {}
+    with observability.trace_node("memory_retrieval_node") as span:
+        try:
+            # 2. Pemanggilan API dengan Timeout (jika didukung library-nya)
+            raw_memories = perpetual_memory.perpetual_memory.retrieve_memories(user_input, limit=5)
+            
+            # 3. Validasi Output: Pastikan selalu mengembalikan List of Strings/Dicts
+            # Menghindari kasus Mem0 mengembalikan None atau String Error
+            if not isinstance(raw_memories, list):
+                logger.warning(f"[MEM0] Unexpected output format: {type(raw_memories)}")
+                processed_memories = []
+            else:
+                # Opsional: Ekstrak hanya teks memori jika outputnya objek kompleks
+                processed_memories = [
+                    m.get("text", str(m)) if isinstance(m, dict) else str(m) 
+                    for m in raw_memories
+                ]
+
+            return {"mem0_retrieved_memories": processed_memories}
+
+        except Exception as e:
+            logger.error(f"[MEM0_RETRIEVAL] Critical Failure: {e}")
+            return {"mem0_retrieved_memories": []}
+
 
 
 # ============================================
@@ -446,13 +450,13 @@ EVALUASI:"""
 
 
 # ============================================
-# NODE: RESPONSE GENERATOR (Final Answer with Guardrails)
+# NODE: RESPONSE GENERATOR (Final Answer - No Guardrails)
 # ============================================
 
 def response_node(state: KuroState) -> Dict[str, Any]:
     """
     Response Generator Node: Synthesizes all state data into final response.
-    Includes Guardrails AI validation with re-ask loop and Mem0 context injection.
+    V5.0: Guardrails validation removed. Direct LLM response is returned.
     """
     user_input = state.get("user_input", "")
     compliance_data = state.get("compliance_data", [])
@@ -460,8 +464,6 @@ def response_node(state: KuroState) -> Dict[str, Any]:
     persona_mode = state.get("persona_mode", memory_manager.get_active_persona())
     image_paths = state.get("image_paths")
     is_scolding_needed = state.get("is_scolding_needed", False)
-    guardrail_reask_count = state.get("guardrail_reask_count", 0)
-    guardrail_feedback = state.get("guardrail_feedback", "")
     mem0_memories = state.get("mem0_retrieved_memories", [])
     tool_result = state.get("tool_execution_result", {})
     session_id = state.get("_session_id", "unknown")
@@ -509,10 +511,6 @@ def response_node(state: KuroState) -> Dict[str, Any]:
         
         # Add memory injection
         message_parts.append(memory_injection)
-        
-        # Add guardrail feedback if re-asking
-        if guardrail_feedback:
-            message_parts.append(f"\n\n[GUARDRAIL FEEDBACK]\n{guardrail_feedback}")
         
         # Add tool execution result if available
         if tool_result and tool_result.get("status"):
@@ -587,59 +585,10 @@ def response_node(state: KuroState) -> Dict[str, Any]:
             logger.error(f"[RESPONSE] LLM generation failed ({error_type}): {error_msg}")
             # Don't expose raw exception to user - use generic error message
             if response_text is None:
-                response_text = "Maaf, Pantronux. Terjadi kesalahan saat menghasilkan respons. Silakan coba lagi."
-        
-        # === GUARDRAILS VALIDATION ===
-        from kuro_backend.guardrails import GuardrailsOrchestrator
-        
-        orchestrator = GuardrailsOrchestrator()
-        validation_result = orchestrator.validate_response(
-            response_text=response_text,
-            user_query=user_input,
-            compliance_data=compliance_data,
-            is_scolding=is_scolding_needed,
-            habit_data=habit_data
-        )
-        
-        # Log guardrails validation to Phoenix
-        observability.log_guardrails_validation(
-            guardrail_type="compliance_privacy_tone",
-            is_valid=validation_result.is_valid,
-            original_response=response_text if not validation_result.is_valid else None,
-            corrected_response=validation_result.corrected_text if validation_result.corrected_text else None,
-            failures=validation_result.failures,
-            reask_count=guardrail_reask_count,
-            session_id=session_id
-        )
-        
-        # Check if re-ask is needed
-        if not validation_result.is_valid and guardrail_reask_count < 2:
-            # Generate re-ask prompt
-            reask_prompt = orchestrator.generate_reask_prompt(
-                original_query=user_input,
-                original_response=response_text,
-                failures=validation_result.failures
-            )
+                    response_text = "Maaf, Pantronux. Terjadi kesalahan saat menghasilkan respons. Silakan coba lagi."
             
-            logger.info(f"[GUARDRAILS] Re-ask triggered (attempt {guardrail_reask_count + 1}/2)")
-            
-            if span:
-                span.set_attribute("response_node.guardrails_reask", True)
-                span.set_attribute("response_node.reask_count", guardrail_reask_count + 1)
-            
-            return {
-                "final_response": "",
-                "guardrail_reask_count": guardrail_reask_count + 1,
-                "guardrail_feedback": reask_prompt,
-                "next_step": "response_node"  # Loop back to response_node
-            }
-        
-        # Validation passed or max re-asks reached
-        if not validation_result.is_valid:
-            logger.warning(f"[GUARDRAILS] Max re-asks reached. Using fallback response.")
-            response_text = f"[Guardrails Warning] Respons asli gagal validasi ({validation_result.failure_summary}). Silakan periksa kembali informasi."
-        
-        # Store to memory (preserve existing memory flow)
+            # V5.0: Guardrails validation removed. Response goes directly to memory.
+            # Store to memory (preserve existing memory flow)
         memory_manager.add_short_term("user", user_input)
         memory_manager.add_short_term("assistant", response_text)
         memory_manager.add_long_term_v2(f"User: {user_input}\nKuro: {response_text}")
@@ -653,16 +602,13 @@ def response_node(state: KuroState) -> Dict[str, Any]:
         memory_manager.summarize_conversation_to_chroma()
         memory_manager.detect_and_save_master_facts(user_input, response_text)
         
-        logger.info(f"[RESPONSE] Generated response ({len(response_text)} chars) | Guardrails: {'PASSED' if validation_result.is_valid else 'FAILED'}")
+        logger.info(f"[RESPONSE] Generated response ({len(response_text)} chars)")
         
         if span:
             span.set_attribute("response_node.response_length", len(response_text))
-            span.set_attribute("response_node.guardrails_passed", validation_result.is_valid)
         
         return {
             "final_response": response_text,
-            "guardrail_reask_count": 0,  # Reset for next request
-            "guardrail_feedback": ""
         }
 
 
@@ -890,28 +836,8 @@ def build_kuro_graph() -> StateGraph:
     graph_builder.add_edge("habit_node", "response_node")
     graph_builder.add_edge("tool_node", "response_node")
     
-    # Response node has conditional edge: either loop back for re-ask or go to memory extraction
-    def route_after_response(state: KuroState) -> str:
-        """Route based on guardrail validation result."""
-        reask_count = state.get("guardrail_reask_count", 0)
-        feedback = state.get("guardrail_feedback", "")
-        
-        # If there's feedback and we haven't exceeded max re-asks, loop back
-        if feedback and reask_count < 2:
-            return "response_node"  # Loop back for re-generation
-        return "memory_extraction_node"  # Go to memory extraction
-    
-    graph_builder.add_conditional_edges(
-        "response_node",
-        route_after_response,
-        {
-            "response_node": "response_node",
-            "memory_extraction_node": "memory_extraction_node",
-        }
-    )
-    
-    # FIX: Add direct edge from response_node to END as fallback
-    # This prevents infinite loops if route_after_response fails
+    # V5.0: Direct edge from response_node to memory_extraction_node (no re-ask loop)
+    graph_builder.add_edge("response_node", "memory_extraction_node")
     
     # After memory extraction, go to END
     graph_builder.add_edge("memory_extraction_node", END)
@@ -933,16 +859,17 @@ kuro_graph = build_kuro_graph()
 
 async def process_chat_with_graph_stream(message: str, image_paths: list = None) -> AsyncGenerator[str, None]:
     """
-    V5.1 ASYNC STREAMING: Process chat message with token streaming via SSE.
+    V5.2 ASYNC STREAMING: Process chat message with token streaming via SSE.
     Uses LangGraph's astream() for node-by-node streaming.
-    FIX: Only yields from the FIRST response_node completion to prevent double bubble.
+    FIX: ONLY yields from response_node to eliminate triple bubbles.
+    All other nodes (supervisor, memory_retrieval, compliance, habit, tool, memory_extraction) are silently skipped.
     
     Args:
         message: User message
         image_paths: Optional list of image paths for vision
     
     Yields:
-        Response text chunks as they are generated
+        Response text chunks as they are generated (ONLY from response_node)
     """
     session_id = str(uuid.uuid4())
     full_response = []
@@ -962,8 +889,6 @@ async def process_chat_with_graph_stream(message: str, image_paths: list = None)
             "query_expansion_count": 0,
             "persona_mode": persona_mode,
             "image_paths": image_paths,
-            "guardrail_reask_count": 0,
-            "guardrail_feedback": "",
             "mem0_retrieved_memories": [],
             "tool_execution_result": {},
             "requires_approval": False,
@@ -979,12 +904,19 @@ async def process_chat_with_graph_stream(message: str, image_paths: list = None)
         async for event in kuro_graph.astream(initial_state, config=config, stream_mode="updates"):
             # event is a dict: {node_name: node_output}
             for node_name, node_output in event.items():
-                logger.info(f"[LANGGRAPH_STREAM] Node '{node_name}' completed")
+                logger.debug(f"[LANGGRAPH_STREAM] Node '{node_name}' completed (silent)")
                 
-                # FIX: Only yield from the FIRST response_node completion
-                # This prevents double bubble from guardrail re-ask loops
+                # CRITICAL: ONLY yield from response_node, ignore ALL other nodes
+                # This eliminates triple bubbles by filtering out:
+                # - supervisor_node (routing decision)
+                # - memory_retrieval_node (Mem0 search)
+                # - compliance_node (RAG search)
+                # - habit_node (habit tracking)
+                # - tool_node (file operations)
+                # - memory_extraction_node (personal info extraction)
                 if node_name == "response_node" and not response_yielded:
                     response_text = node_output.get("final_response", "")
+                    
                     if response_text:
                         response_yielded = True
                         # OPTIMIZED: Stream in chunks of 10 chars for faster response on 4GB RAM VM
@@ -996,12 +928,7 @@ async def process_chat_with_graph_stream(message: str, image_paths: list = None)
                             # Minimal delay - frontend handles typewriter effect
                             await asyncio.sleep(0.001)
                         logger.info(f"[LANGGRAPH_STREAM] Yielded response: {len(response_text)} chars")
-                
-                # Stream tool execution notifications
-                if node_name == "tool_node":
-                    tool_result = node_output.get("tool_execution_result", {})
-                    if tool_result.get("status") == "success":
-                        yield f"\n\n🔧 Tool executed: {tool_result.get('tool', 'unknown')}\n\n"
+                # NOTE: All other nodes are silently skipped - no yields
         
         # Store to memory after streaming (NOT chat_history - main.py handles that)
         response_text = "".join(full_response)
@@ -1020,6 +947,100 @@ async def process_chat_with_graph_stream(message: str, image_paths: list = None)
         error_msg = "Maaf, Pantronux. Terjadi kesalahan saat memproses permintaan Anda."
         yield error_msg
         full_response = [error_msg]
+
+
+# ============================================
+# ASYNC PDF PROCESSING WITH SSE THINKING SIGNALS (AFC Optimization)
+# ============================================
+
+async def process_pdf_with_thinking(
+    file_path: str,
+    max_pages: int = 50,
+    max_chars: int = 50000
+) -> AsyncGenerator[str, None]:
+    """
+    Process PDF with SSE "Kuro is thinking..." signals to prevent browser timeout.
+    
+    This function:
+    1. Sends periodic "thinking" signals to keep SSE connection alive
+    2. Processes PDF chunks with timeout protection
+    3. Yields progress updates and final content
+    
+    Args:
+        file_path: Path to the PDF file
+        max_pages: Maximum pages to process
+        max_chars: Maximum characters to return
+    
+    Yields:
+        Progress signals and extracted content
+    """
+    from kuro_backend.tools.base_tools import (
+        read_pdf_content,
+        PDF_PROCESSING_TIMEOUT_SECONDS,
+        PDF_CHUNK_PROCESSING_TIMEOUT
+    )
+    
+    # Verify file exists
+    if not os.path.exists(file_path):
+        yield f"\n\n⚠️ File not found: {file_path}\n\n"
+        return
+    
+    # Send initial thinking signal
+    yield "\n\n📄 Kuro is analyzing PDF document...\n\n"
+    
+    start_time = time.time()
+    
+    # Define progress callback for SSE signals
+    thinking_signals_sent = []
+    
+    def progress_callback(current_page: int, total_pages: int):
+        """Send 'Kuro is thinking...' signal for each chunk processed."""
+        elapsed = time.time() - start_time
+        
+        # Check timeout
+        if elapsed > PDF_PROCESSING_TIMEOUT_SECONDS:
+            raise TimeoutError(f"PDF processing exceeded timeout ({PDF_PROCESSING_TIMEOUT_SECONDS}s)")
+        
+        # Calculate progress percentage
+        progress_pct = (current_page / total_pages) * 100
+        
+        # Send thinking signal every 5 pages or at key milestones
+        if current_page % 5 == 0 or current_page == total_pages:
+            signal = f"\n📖 Kuro is thinking... Processing page {current_page}/{total_pages} ({progress_pct:.0f}%)\n"
+            thinking_signals_sent.append(signal)
+    
+    try:
+        # Process PDF with progress callback
+        pdf_result = read_pdf_content(
+            file_path=file_path,
+            max_pages=max_pages,
+            max_chars=max_chars,
+            progress_callback=progress_callback
+        )
+        
+        # Check for errors
+        if pdf_result.get("error"):
+            yield f"\n\n⚠️ PDF Processing Error: {pdf_result['error']}\n\n"
+            return
+        
+        # Send completion signal
+        elapsed = time.time() - start_time
+        yield f"\n\n✅ PDF analysis complete in {elapsed:.1f}s\n"
+        yield f"📊 Pages: {pdf_result.get('page_count', 0)} | Tables found: {pdf_result.get('tables_found', 0)}\n\n"
+        
+        # Yield extracted content
+        content = pdf_result.get("content", "")
+        if content:
+            yield content
+        else:
+            yield "\n\n⚠️ No text content could be extracted from this PDF.\n\n"
+        
+    except TimeoutError as te:
+        logger.warning(f"[PDF_PROCESSING] Timeout after {time.time() - start_time:.1f}s: {te}")
+        yield f"\n\n⏱️ PDF processing timed out after {PDF_PROCESSING_TIMEOUT_SECONDS} seconds. The document may be too large or complex.\n\n"
+    except Exception as e:
+        logger.exception(f"[PDF_PROCESSING] Failed: {e}")
+        yield f"\n\n⚠️ PDF processing failed: {str(e)}\n\n"
 
 
 # ============================================
@@ -1057,8 +1078,6 @@ def process_chat_with_graph(message: str, image_paths: list = None) -> str:
             "query_expansion_count": 0,
             "persona_mode": persona_mode,
             "image_paths": image_paths,
-            "guardrail_reask_count": 0,
-            "guardrail_feedback": "",
             "mem0_retrieved_memories": [],
             "tool_execution_result": {},
             "requires_approval": False,

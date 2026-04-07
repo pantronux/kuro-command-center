@@ -562,6 +562,8 @@ async function sendMessage() {
         
         // STEP 4: Start the loop with BUFFER pattern
         // FIX: Properly handle multi-line SSE events (event: chunk\ndata: {...}\n\n)
+        // CRITICAL: Only 'chunk' events update the active bubble.
+        // 'complete' event is used ONLY for final rendering, NOT to create a new bubble.
         while (true) {
             const { done, value } = await reader.read();
             if (done) break;
@@ -571,14 +573,16 @@ async function sendMessage() {
             buffer = events.pop(); // Save incomplete event to buffer
             
             for (const event of events) {
-                // Parse SSE event: extract data: line from multi-line event
+                // Parse SSE event: extract event: and data: lines
                 const lines = event.split('\n');
+                let eventType = 'chunk'; // Default event type
                 let dataStr = null;
                 
                 for (const line of lines) {
-                    if (line.startsWith('data: ')) {
+                    if (line.startsWith('event: ')) {
+                        eventType = line.substring(7).trim();
+                    } else if (line.startsWith('data: ')) {
                         dataStr = line.substring(6).trim();
-                        break;
                     }
                 }
                 
@@ -587,24 +591,36 @@ async function sendMessage() {
                 
                 try {
                     const data = JSON.parse(dataStr);
-                    if (data.chunk) {
+                    
+                    if (eventType === 'chunk' && data.chunk) {
+                        // Chunk event: Append to the EXISTING bubble (streaming content)
                         botMessage += data.chunk;
                         streamingContent.innerHTML = marked.parse(botMessage);
                         elements.chatContainer.scrollTop = elements.chatContainer.scrollHeight;
-                    } else if (data.error) {
+                    } else if (eventType === 'complete' && data.response) {
+                        // Complete event: DO NOT create a new bubble.
+                        // Only use for final markdown rendering and syntax highlighting.
+                        // The bubble already exists from the chunk events above.
+                        botMessage = data.response; // Use the complete response for consistency
+                        streamingContent.innerHTML = marked.parse(botMessage);
+                        hljs.highlightAll();
+                        elements.chatContainer.scrollTop = elements.chatContainer.scrollHeight;
+                    } else if (eventType === 'error' && data.error) {
                         streamingContent.innerHTML = `<span style="color:red">Error: ${escapeHtml(data.error)}</span>`;
                     }
                 } catch (e) {
-                    console.error("JSON Parse Error on chunk:", dataStr);
+                    console.error("JSON Parse Error on event:", dataStr);
                 }
             }
         }
         
         removeTypingIndicator();
         
-        // Final render
-        streamingContent.innerHTML = marked.parse(botMessage);
-        hljs.highlightAll();
+        // Final render (fallback if complete event wasn't received)
+        if (botMessage) {
+            streamingContent.innerHTML = marked.parse(botMessage);
+            hljs.highlightAll();
+        }
         elements.chatContainer.scrollTop = elements.chatContainer.scrollHeight;
         
     } catch (error) {

@@ -53,9 +53,11 @@ file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelnam
 console_handler = logging.StreamHandler()
 console_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
 
-# Configure root logger
+# Configure root logger - V5.0: Single configuration, no duplication
 root_logger = logging.getLogger()
 root_logger.setLevel(logging.INFO)
+# Clear any existing handlers to prevent duplication on reload
+root_logger.handlers.clear()
 root_logger.addHandler(file_handler)
 root_logger.addHandler(console_handler)
 
@@ -455,22 +457,13 @@ async def chat_stream_endpoint(
             # Save user message
             chat_history.add_message("web", "user", message, [f["filename"] for f in file_attachments])
             
-            # Stream response using async generator with 15-second timeout
+            # V5.0: Stream response - no guardrail overhead, direct LLM response
             full_response = []
-            last_chunk_time = time.time()
-            STREAM_TIMEOUT = 15  # seconds
             
             async for chunk in process_chat_with_graph_stream(enhanced_message, image_paths=image_paths if image_paths else None):
                 full_response.append(chunk)
-                last_chunk_time = time.time()
                 # SSE format: event: chunk\ndata: {chunk}\n\n
                 yield f"event: chunk\ndata: {json.dumps({'chunk': chunk})}\n\n"
-                
-                # FIX: Check timeout - if no chunk received for 15 seconds, abort
-                if time.time() - last_chunk_time > STREAM_TIMEOUT:
-                    logger.warning(f"[STREAM] Timeout: No chunk received for {STREAM_TIMEOUT}s, aborting")
-                    yield f"event: error\ndata: {json.dumps({'error': 'Response generation timed out. Please try again.'})}\n\n"
-                    return
             
             # Send completion event
             response_text = "".join(full_response)
@@ -525,7 +518,6 @@ async def observability_status():
             "opentelemetry_enabled": observability.get_tracer() is not None,
             "dashboard_url": observability._phoenix_app.url if observability._phoenix_app else None,
             "phoenix_port": observability.PHOENIX_PORT,
-            "token_alert_threshold": observability.TOKEN_ALERT_THRESHOLD,
         }
     }
 

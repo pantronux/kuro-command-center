@@ -22,6 +22,7 @@ from typing import Dict, List, Optional, Tuple
 from kuro_backend.config import settings
 
 logger = logging.getLogger(__name__)
+logger.propagate = False  # Prevent double-reporting to root logger
 
 # Disable SSL warnings for self-signed Proxmox certificates
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -217,7 +218,17 @@ def _get_proxmox_headers():
 # ============================================
 # PDF ENGINE (pdfplumber - Robust with Table Support)
 # ============================================
-def read_pdf_content(file_path: str, max_pages: int = 20, max_chars: int = 15000) -> Dict:
+
+# PDF Processing Timeout Configuration (AFC - Automatic Function Calling)
+PDF_PROCESSING_TIMEOUT_SECONDS = 120  # 2 minutes timeout for large PDFs
+PDF_CHUNK_PROCESSING_TIMEOUT = 30  # 30 seconds per chunk
+
+def read_pdf_content(
+    file_path: str,
+    max_pages: int = 20,
+    max_chars: int = 15000,
+    progress_callback=None  # NEW: Optional callback for SSE "thinking" signals
+) -> Dict:
     """
     Robust PDF text extractor using pdfplumber.
     Preserves table structure in Markdown format when possible.
@@ -226,6 +237,7 @@ def read_pdf_content(file_path: str, max_pages: int = 20, max_chars: int = 15000
         file_path: Path to the PDF file
         max_pages: Maximum pages to extract (RAM protection)
         max_chars: Maximum characters to return
+        progress_callback: Optional callable(current_page, total_pages) for SSE signals
     
     Returns:
         Dict with 'content', 'page_count', 'tables_found', 'error' keys
@@ -255,8 +267,16 @@ def read_pdf_content(file_path: str, max_pages: int = 20, max_chars: int = 15000
             result["page_count"] = len(pdf.pages)
             text_parts = []
             total_tables = 0
+            total_pages_to_process = min(len(pdf.pages), max_pages)
             
             for i, page in enumerate(pdf.pages[:max_pages]):
+                # Send progress signal for SSE "Kuro is thinking..." updates
+                if progress_callback:
+                    try:
+                        progress_callback(current_page=i + 1, total_pages=total_pages_to_process)
+                    except Exception as cb_err:
+                        logger.debug(f"[PDF_PROGRESS] Callback error (non-critical): {cb_err}")
+                
                 page_text = f"\n--- Page {i+1} ---\n"
                 
                 # Extract tables first and convert to Markdown

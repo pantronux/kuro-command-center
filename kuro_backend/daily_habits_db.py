@@ -19,6 +19,7 @@ from typing import List, Dict, Optional
 from kuro_backend.tools import PROJECT_ROOT
 
 logger = logging.getLogger(__name__)
+logger.propagate = False  # Prevent double-reporting to root logger
 
 HABITS_DB = os.path.join(PROJECT_ROOT, "kuro_habits.db")
 _lock = threading.Lock()

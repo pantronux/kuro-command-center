@@ -36,6 +36,56 @@ from typing import List, Dict, Optional, Tuple
 from kuro_backend.config import settings
 
 logger = logging.getLogger(__name__)
+logger.propagate = False  # Prevent double-reporting to root logger
+
+
+# ============================================
+# JSON Parsing Utilities
+# ============================================
+def extract_json_from_text(text: str) -> Optional[Dict]:
+    """
+    Robust JSON extraction from text that may contain markdown code blocks,
+    extra whitespace, or non-JSON content.
+    
+    Handles:
+    - ```json ... ``` markdown blocks
+    - ``` ... ``` code blocks without language tag
+    - Raw JSON with surrounding text
+    - String responses that need to be parsed
+    
+    Returns dict if successful, None otherwise.
+    """
+    if not text or not isinstance(text, str):
+        return None
+    
+    text = text.strip()
+    
+    # Step 1: Try to extract from markdown code block first
+    json_block_match = re.search(r'```(?:json)?\s*\n(.*?)\n```', text, re.DOTALL)
+    if json_block_match:
+        text = json_block_match.group(1)
+    
+    # Step 2: Try to find JSON object in text
+    json_match = re.search(r'\{.*\}', text, re.DOTALL)
+    if json_match:
+        try:
+            result = json.loads(json_match.group())
+            if isinstance(result, dict):
+                return result
+        except json.JSONDecodeError:
+            pass
+    
+    # Step 3: If text itself is a JSON string, try direct parse
+    if text.startswith('{') and text.endswith('}'):
+        try:
+            result = json.loads(text)
+            if isinstance(result, dict):
+                return result
+        except json.JSONDecodeError:
+            pass
+    
+    return None
+
 
 # ============================================
 # Configuration
@@ -728,20 +778,14 @@ Berikan jawaban HANYA dalam format JSON berikut, tanpa teks tambahan:
             logger.error("Critical: Classifier Model Failed - Empty response. Falling back to safe mode.")
             return {"fact": fact, "category": "temporary", "decay_exempt": False}
         
-        # Parse JSON from response
-        json_match = re.search(r'\{.*\}', resp_text, re.DOTALL)
-        if json_match:
-            try:
-                result = json.loads(json_match.group())
-                # Validate required fields
-                if "category" in result and "decay_exempt" in result:
-                    return result
-                else:
-                    logger.error(f"Critical: Classifier Model Failed - Invalid JSON structure. Falling back to safe mode.")
-            except json.JSONDecodeError:
-                logger.error("Critical: Classifier Model Failed - JSON parse error. Falling back to safe mode.")
+        # Use robust JSON extraction helper
+        result = extract_json_from_text(resp_text)
+        if result and "category" in result and "decay_exempt" in result:
+            logger.info(f"[CLASSIFIER] {fact[:50]}... -> {result.get('category')} (decay_exempt={result.get('decay_exempt')})")
+            return result
         
         # Fallback if parsing fails
+        logger.warning(f"[CLASSIFIER] JSON extraction failed, using fallback for: {fact[:50]}...")
         return {"fact": fact, "category": "temporary", "decay_exempt": False}
         
     except Exception as e:
@@ -1502,14 +1546,22 @@ Example:
         try:
             expanded = response.text.strip() if response.text else query
         except Exception as text_err:
-            if "WARNING" in str(text_err) or "Safety" in str(text_err) or "blocked" in str(text_err).lower():
+            error_str = str(text_err).lower()
+            if "WARNING" in str(text_err) or "Safety" in str(text_err) or "blocked" in error_str:
                 logger.warning(f"[QUERY_EXPANSION] response.text blocked: {text_err}")
                 return query
-            raise text_err
+            # FIX: Any error during text extraction falls back to original query
+            logger.warning(f"[QUERY_EXPANSION] Failed to extract response text: {text_err}")
+            return query
         
-        # Validate expanded query
+        # Validate expanded query - ensure it's a valid string
+        if not isinstance(expanded, str):
+            logger.warning(f"[QUERY_EXPANSION] Expanded query is not a string: {type(expanded)}")
+            return query
+        
+        # Validate expanded query length
         if len(expanded) < 5 or len(expanded) > 200:
-            logger.warning(f"Query expansion produced invalid result, using original query")
+            logger.warning(f"[QUERY_EXPANSION] Invalid length ({len(expanded)} chars), using original query")
             return query
         
         logger.info(f"[QUERY_EXPANSION] Original: '{query}' -> Expanded: '{expanded}'")
@@ -1808,10 +1860,7 @@ If you cannot identify the ISO standard, use the filename as iso_name."""
             logger.warning(f"[COMPLIANCE_CONTEXT] Content blocked: {getattr(response.prompt_feedback, 'block_reason', 'UNKNOWN')}")
             return {"iso_name": "Unknown", "scope": "Content blocked by filter", "summary": "N/A"}
         
-        # Parse JSON response - handle markdown code blocks and various formats
-        import json
-        import re
-        
+        # Use robust JSON extraction helper
         try:
             response_text = response.text.strip()
         except Exception as text_err:
@@ -1820,24 +1869,10 @@ If you cannot identify the ISO standard, use the filename as iso_name."""
                 return {"iso_name": "Unknown", "scope": "Content blocked by filter", "summary": "N/A"}
             raise text_err
         
-        # Try to extract JSON from markdown code block first
-        json_block_match = re.search(r'```(?:json)?\s*\n(.*?)\n```', response_text, re.DOTALL)
-        if json_block_match:
-            response_text = json_block_match.group(1)
-        
-        # Try to find JSON object
-        json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
-        if json_match:
-            try:
-                result = json.loads(json_match.group())
-                # Validate required fields
-                if "iso_name" in result:
-                    logger.info(f"[COMPLIANCE_CONTEXT] {filename}: {result.get('iso_name', 'Unknown')} - {result.get('summary', '')[:80]}...")
-                    return result
-                else:
-                    logger.warning(f"JSON missing iso_name field for {filename}")
-            except json.JSONDecodeError as je:
-                logger.warning(f"JSON decode error for {filename}: {je}")
+        result = extract_json_from_text(response_text)
+        if result and "iso_name" in result:
+            logger.info(f"[COMPLIANCE_CONTEXT] {filename}: {result.get('iso_name', 'Unknown')} - {result.get('summary', '')[:80]}...")
+            return result
         
         # Fallback: try to extract info from response text
         logger.warning(f"Failed to parse compliance context for {filename}, using fallback extraction")
