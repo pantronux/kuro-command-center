@@ -283,9 +283,10 @@ def process_chat(message: str, image_paths: list = None) -> str:
         memory_manager.add_short_term("user", message)
         memory_manager.add_short_term("assistant", response_text)
         
-        # Also store to chat_history for cross-platform sync
-        chat_history.add_message("web", "user", message)
-        chat_history.add_message("web", "assistant", response_text)
+        # FIX: DO NOT save to chat_history here - this is the legacy fallback path.
+        # Only main.py endpoints should save to chat_history (Single Source of Truth).
+        # chat_history.add_message("web", "user", message)
+        # chat_history.add_message("web", "assistant", response_text)
         
         # Tier 2: Store to long-term with V2.1 Semantic Upsert
         memory_manager.add_long_term_v2(f"User: {message}\nKuro: {response_text}")
