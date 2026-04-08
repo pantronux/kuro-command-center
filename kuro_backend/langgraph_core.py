@@ -240,40 +240,6 @@ def supervisor_node(state: KuroState) -> Dict[str, Any]:
 # NODE: MEMORY RETRIEVAL (Mem0)
 # ============================================
 
-def memory_extraction_node(state: KuroState) -> Dict[str, Any]:
-    user_input = state.get("user_input", "")
-    final_response = state.get("final_response", "")
-
-    # 1. Guard Clause: Jangan jalankan ekstraksi jika respon asisten kosong
-    # Ini mencegah penyimpanan memori yang tidak lengkap atau error API
-    if not final_response or len(final_response.strip()) == 0:
-        logger.warning("[MEM0_EXTRACTION] Skipped: No final_response found in state.")
-        return {}
-
-    with observability.trace_node("memory_extraction_node") as span:
-        try:
-            # 2. Ekstraksi dengan konteks penuh (Input + Output)
-            memories_to_store = perpetual_memory.perpetual_memory.extract_personal_info(
-                user_input, 
-                final_response
-            )
-            
-            # 3. Validasi sebelum Store
-            if memories_to_store and isinstance(memories_to_store, list):
-                perpetual_memory.perpetual_memory.store_memories(memories_to_store)
-                logger.info(f"[MEM0_EXTRACTION] Successfully stored {len(memories_to_store)} memories.")
-            
-            return {}
-        except Exception as e:
-            logger.error(f"[MEM0_EXTRACTION] Failed to store memories: {e}")
-            return {}
-
-
-
-# ============================================
-# NODE: MEMORY EXTRACTION (Mem0)
-# ============================================
-
 def memory_retrieval_node(state: KuroState) -> Dict[str, Any]:
     # 1. Validasi Input State: Pastikan state adalah dictionary
     if not isinstance(state, dict):
@@ -282,7 +248,7 @@ def memory_retrieval_node(state: KuroState) -> Dict[str, Any]:
 
     user_input = state.get("user_input", "")
     
-    with observability.trace_node("memory_retrieval_node") as span:
+    with observability.trace_node("memory_retrieval_node"):
         try:
             # 2. Pemanggilan API dengan Timeout (jika didukung library-nya)
             raw_memories = perpetual_memory.perpetual_memory.retrieve_memories(user_input, limit=5)
@@ -304,6 +270,41 @@ def memory_retrieval_node(state: KuroState) -> Dict[str, Any]:
         except Exception as e:
             logger.error(f"[MEM0_RETRIEVAL] Critical Failure: {e}")
             return {"mem0_retrieved_memories": []}
+
+
+# ============================================
+# NODE: MEMORY EXTRACTION (Mem0)
+# ============================================
+
+def memory_extraction_node(state: KuroState) -> Dict[str, Any]:
+    user_input = state.get("user_input", "")
+    final_response = state.get("final_response", "")
+
+    # 1. Guard Clause: Jangan jalankan ekstraksi jika respon asisten kosong
+    # Ini mencegah penyimpanan memori yang tidak lengkap atau error API
+    if not final_response or len(final_response.strip()) == 0:
+        logger.warning("[MEM0_EXTRACTION] Skipped: No final_response found in state.")
+        return {}
+
+    with observability.trace_node("memory_extraction_node"):
+        try:
+            # 2. Ekstraksi dengan konteks penuh (Input + Output)
+            memories_to_store = perpetual_memory.perpetual_memory.extract_personal_info(
+                user_input, 
+                final_response
+            )
+            
+            # 3. Validasi sebelum Store
+            if memories_to_store and isinstance(memories_to_store, list):
+                perpetual_memory.perpetual_memory.store_memories(memories_to_store)
+                logger.info(f"[MEM0_EXTRACTION] Stored {len(memories_to_store)} memories.")
+            else:
+                logger.info("[MEM0_EXTRACTION] No memories to store from this exchange.")
+            
+            return {}
+        except Exception as e:
+            logger.error(f"[MEM0_EXTRACTION] Failed to store memories: {e}")
+            return {}
 
 
 

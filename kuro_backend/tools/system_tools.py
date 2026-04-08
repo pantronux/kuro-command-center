@@ -26,7 +26,7 @@ EXPORTS_DIR = "/home/kuro/exports"
 os.makedirs(EXPORTS_DIR, exist_ok=True)
 
 
-def generate_excel_report(data: Dict, filename: str, sheet_name: str = "Sheet1") -> Dict[str, Any]:
+def generate_excel_report(data: Optional[Dict] = None, filename: str = "report.xlsx", sheet_name: str = "Sheet1") -> Dict[str, Any]:
     """Generate an Excel report from JSON data."""
     try:
         import openpyxl
@@ -102,7 +102,7 @@ def manage_files(action: str, filename: str = None, content: str = None) -> Dict
         return {"status": "error", "message": str(e)}
 
 
-def generate_report_template(template_type: str, filename: str, data: Dict = None, format: str = "md") -> Dict[str, Any]:
+def generate_report_template(template_type: str, filename: str, data: Optional[Dict] = None, format: str = "md") -> Dict[str, Any]:
     """Generate a report template for audit/compliance."""
     try:
         templates = {

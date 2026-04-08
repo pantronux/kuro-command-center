@@ -340,14 +340,32 @@ class PerpetualMemory:
                 user_id=self.user_id,
                 limit=limit
             )
+
+            # FIX: Guard against non-list return (e.g. None or error string from Mem0)
+            if not isinstance(results, list):
+                logger.warning(f"[MEM0] Unexpected search result type: {type(results)}")
+                return []
             
             memories = []
             for result in results:
-                memories.append({
-                    "text": result.get("memory", ""),
-                    "metadata": result.get("metadata", {}),
-                    "score": result.get("score", 0),
-                })
+                if isinstance(result, dict):
+                    # Normal case: Mem0 returns list of dicts
+                    memories.append({
+                        "text": result.get("memory", result.get("text", "")),
+                        "metadata": result.get("metadata", {}),
+                        "score": result.get("score", 0),
+                    })
+                elif isinstance(result, str):
+                    # FIX: Mem0 kadang return plain string — wrap jadi dict agar konsisten
+                    # Root cause: 'str' object has no attribute 'get'
+                    logger.warning(f"[MEM0] Result is plain string (unexpected format), wrapping: {result[:60]}")
+                    memories.append({
+                        "text": result,
+                        "metadata": {},
+                        "score": 0,
+                    })
+                else:
+                    logger.warning(f"[MEM0] Skipping unknown result type: {type(result)}")
             
             logger.info(f"[MEM0] Retrieved {len(memories)} memories for query: {query[:50]}...")
             return memories
@@ -373,9 +391,17 @@ class PerpetualMemory:
                 user_id=self.user_id,
                 limit=50
             )
+
+            # FIX: Guard against non-list return
+            if not isinstance(results, list):
+                return []
             
             history = []
             for result in results:
+                # FIX: Only process dict results — string results have no metadata to filter on
+                if not isinstance(result, dict):
+                    continue
+
                 metadata = result.get("metadata", {})
                 if metadata.get("type") == "habit_completion" and metadata.get("habit") == habit:
                     history.append({

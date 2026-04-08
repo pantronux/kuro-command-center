@@ -868,6 +868,7 @@ async function clearChatHistory() {
 // ============================================
 async function openSystemStatus() {
     elements.systemStatusModal.classList.remove('hidden');
+    elements.systemStatusModal.classList.add('flex');
     elements.systemStatusContent.innerHTML = '<div class="flex items-center justify-center py-8"><div class="spinner"></div></div>';
     
     try {
@@ -926,6 +927,7 @@ async function openSystemStatus() {
 
 function closeSystemStatus() {
     elements.systemStatusModal.classList.add('hidden');
+    elements.systemStatusModal.classList.remove('flex');
 }
 
 // ============================================
