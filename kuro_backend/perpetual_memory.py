@@ -20,6 +20,22 @@ logger = logging.getLogger(__name__)
 logger.propagate = False  # Prevent double-reporting to root logger
 
 
+def _ensure_json_serializable(value: Any) -> Any:
+    """Recursively coerce objects into JSON-serializable primitives for Mem0 metadata."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, dict):
+        out: Dict[str, Any] = {}
+        for k, v in value.items():
+            out[str(k)] = _ensure_json_serializable(v)
+        return out
+    if isinstance(value, (list, tuple, set)):
+        return [_ensure_json_serializable(v) for v in value]
+    return str(value)
+
+
 def coerce_mem0_search_results(raw: Any) -> List[Any]:
     """
     Mem0 `Memory.search` may return a list of hits, a dict wrapper (e.g. results/memories),
@@ -313,30 +329,41 @@ class PerpetualMemory:
         
         return memories
     
-    def store_memories(self, memories: List[Dict]):
+    def store_memories(self, memories: List[Any]):
         """Store extracted memories in Mem0 with fast fallback on embedding errors."""
         if not self.client or not memories:
             return
         
         for mem in memories:
             try:
-                # TYPE VALIDATION: Ensure mem is a dict with 'text' key before accessing
-                # This prevents "string indices must be integers" errors
-                if not isinstance(mem, dict):
-                    logger.warning(f"[MEM0] Skipping invalid memory entry (not a dict): {type(mem)}")
+                # Normalize all input shapes before .add(), including bare strings.
+                # Prevents "string indices must be integers" from downstream dict-style access.
+                if isinstance(mem, str):
+                    payload = {"data": mem}
+                    mem_text = mem
+                    metadata = {}
+                elif isinstance(mem, dict):
+                    mem_text = mem.get("text") or mem.get("data")
+                    if isinstance(mem_text, dict):
+                        mem_text = json.dumps(_ensure_json_serializable(mem_text), ensure_ascii=False)
+                    if not mem_text or not isinstance(mem_text, str):
+                        logger.warning(f"[MEM0] Skipping invalid memory entry (missing/invalid text): {mem}")
+                        continue
+                    payload = {"data": mem_text}
+                    metadata = _ensure_json_serializable(mem.get("metadata", {}))
+                    if not isinstance(metadata, dict):
+                        metadata = {"metadata_raw": str(metadata)}
+                else:
+                    logger.warning(f"[MEM0] Skipping invalid memory entry (unknown type): {type(mem)}")
                     continue
-                
-                mem_text = mem.get("text")
-                if not mem_text or not isinstance(mem_text, str):
-                    logger.warning(f"[MEM0] Skipping invalid memory entry (missing/invalid text): {mem}")
-                    continue
-                
+
                 self.client.add(
-                    messages=[mem_text],
+                    messages=[payload],
                     user_id=self.user_id,
-                    metadata=mem.get("metadata", {})
+                    metadata=metadata
                 )
-                logger.info(f"[MEM0] Stored memory: {mem_text[:60]}...")
+                logger.info("[MEM0] Memory successfully stored.")
+                logger.debug(f"[MEM0] Stored memory preview: {mem_text[:60]}...")
             except Exception as e:
                 error_str = str(e).lower()
                 # Fast bypass on embedding 404 - don't retry, just skip

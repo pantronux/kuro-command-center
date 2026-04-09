@@ -137,9 +137,20 @@ async def _gemini_short_answer_async(prompt: str, max_tokens: int = 128) -> str:
     return await asyncio.to_thread(_gemini_short_answer, prompt, max_tokens)
 
 
-def self_check_input_python(user_message: str, is_habit_report: bool) -> Optional[str]:
+def self_check_input_python(
+    user_message: str,
+    is_habit_report: bool,
+    bypass_guardrails: bool = False,
+    bypass_reason: str = "",
+) -> Optional[str]:
     """Return refusal string if blocked; None if OK."""
     if is_habit_report:
+        return None
+    if bypass_guardrails:
+        logger.info(
+            "[SNIPER] Bypassing fact-check for general knowledge/command (reason=%s)",
+            bypass_reason or "intent",
+        )
         return None
     if not _nemoguardrails_available():
         _warn_nemoguardrails_missing_once()
@@ -163,8 +174,19 @@ def self_check_input_python(user_message: str, is_habit_report: bool) -> Optiona
     return None
 
 
-async def self_check_input_python_async(user_message: str, is_habit_report: bool) -> Optional[str]:
+async def self_check_input_python_async(
+    user_message: str,
+    is_habit_report: bool,
+    bypass_guardrails: bool = False,
+    bypass_reason: str = "",
+) -> Optional[str]:
     if is_habit_report:
+        return None
+    if bypass_guardrails:
+        logger.info(
+            "[SNIPER] Bypassing fact-check for general knowledge/command (reason=%s)",
+            bypass_reason or "intent",
+        )
         return None
     if not _nemoguardrails_available():
         _warn_nemoguardrails_missing_once()
@@ -216,14 +238,25 @@ def _assistant_looks_like_tool_mutation_confirmation(assistant_message: str) -> 
     return False
 
 
+def _ensure_kuro_analysis_prefix(assistant_message: str) -> str:
+    """Add a single `[Kuro Analysis]` prefix unless the label already exists anywhere."""
+    if not assistant_message:
+        return assistant_message
+    if "[kuro analysis]" in assistant_message.lower():
+        return assistant_message
+    return f"[Kuro Analysis]\n{assistant_message}"
+
+
 def sniper_fact_gate_python(user_message: str) -> Optional[str]:
-    """If fact-check heuristic fires and memory lacks support, return canned refusal."""
+    """Advisor mode: keep fact-check as guidance, never hard-block because DB/memory is thin."""
     if not sniper_ctx.should_fact_check_heuristic(user_message):
         return None
     if memory_grounding_ok(user_message):
         return None
-    entity = sniper_ctx.extract_entity_hint(user_message)
-    return f"Saya tidak memiliki data faktual mengenai {entity} tersebut, Pantronux."
+    logger.info(
+        "[SNIPER] Grounding is thin; allowing response as general analysis (no hard block)."
+    )
+    return None
 
 
 def self_check_output_python(user_message: str, bot_message: str) -> Optional[str]:
@@ -282,7 +315,16 @@ def sniper_validate_and_maybe_block_input(message: str) -> Optional[str]:
     if hit:
         return hit
     ctx = sniper_ctx.build_sniper_context(message)
-    return self_check_input_python(message, bool(ctx.get("is_habit_report")))
+    bypass = bool(ctx.get("is_command_intent") or ctx.get("is_general_compliance_knowledge"))
+    bypass_reason = (
+        "command" if ctx.get("is_command_intent") else "general_knowledge" if ctx.get("is_general_compliance_knowledge") else ""
+    )
+    return self_check_input_python(
+        message,
+        bool(ctx.get("is_habit_report")),
+        bypass_guardrails=bypass,
+        bypass_reason=bypass_reason,
+    )
 
 
 def sniper_postprocess_output(user_message: str, assistant_message: str) -> str:
@@ -292,6 +334,14 @@ def sniper_postprocess_output(user_message: str, assistant_message: str) -> str:
     if not assistant_message:
         return assistant_message
     ctx = sniper_ctx.build_sniper_context(user_message)
+    if not ctx.get("should_fact_check") and (
+        ctx.get("is_command_intent") or ctx.get("is_general_compliance_knowledge")
+    ):
+        reason = "command" if ctx.get("is_command_intent") else "general_knowledge"
+        logger.info(
+            "[SNIPER] Bypassing fact-check for general knowledge/command (reason=%s)",
+            reason,
+        )
     fact_hit = None
     if ctx.get("should_fact_check") and not _assistant_looks_like_tool_mutation_confirmation(
         assistant_message
@@ -302,6 +352,12 @@ def sniper_postprocess_output(user_message: str, assistant_message: str) -> str:
     blocked = self_check_output_python(user_message, assistant_message)
     if blocked:
         return blocked
+    # Visual formatting: if this is general/compliance knowledge with thin grounding,
+    # explicitly label as analysis (not personal factual history).
+    if ctx.get("is_general_compliance_knowledge") and not _assistant_looks_like_tool_mutation_confirmation(
+        assistant_message
+    ):
+        assistant_message = _ensure_kuro_analysis_prefix(assistant_message)
     return assistant_message
 
 
@@ -311,7 +367,16 @@ async def sniper_validate_and_maybe_block_input_async(message: str) -> Optional[
     if hit:
         return hit
     ctx = sniper_ctx.build_sniper_context(message)
-    return await self_check_input_python_async(message, bool(ctx.get("is_habit_report")))
+    bypass = bool(ctx.get("is_command_intent") or ctx.get("is_general_compliance_knowledge"))
+    bypass_reason = (
+        "command" if ctx.get("is_command_intent") else "general_knowledge" if ctx.get("is_general_compliance_knowledge") else ""
+    )
+    return await self_check_input_python_async(
+        message,
+        bool(ctx.get("is_habit_report")),
+        bypass_guardrails=bypass,
+        bypass_reason=bypass_reason,
+    )
 
 
 async def sniper_postprocess_output_async(user_message: str, assistant_message: str) -> str:
@@ -320,6 +385,14 @@ async def sniper_postprocess_output_async(user_message: str, assistant_message: 
     if not assistant_message:
         return assistant_message
     ctx = sniper_ctx.build_sniper_context(user_message)
+    if not ctx.get("should_fact_check") and (
+        ctx.get("is_command_intent") or ctx.get("is_general_compliance_knowledge")
+    ):
+        reason = "command" if ctx.get("is_command_intent") else "general_knowledge"
+        logger.info(
+            "[SNIPER] Bypassing fact-check for general knowledge/command (reason=%s)",
+            reason,
+        )
     if ctx.get("should_fact_check") and not _assistant_looks_like_tool_mutation_confirmation(
         assistant_message
     ):
@@ -329,4 +402,8 @@ async def sniper_postprocess_output_async(user_message: str, assistant_message: 
     blocked = await self_check_output_python_async(user_message, assistant_message)
     if blocked:
         return blocked
+    if ctx.get("is_general_compliance_knowledge") and not _assistant_looks_like_tool_mutation_confirmation(
+        assistant_message
+    ):
+        assistant_message = _ensure_kuro_analysis_prefix(assistant_message)
     return assistant_message

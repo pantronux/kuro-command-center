@@ -1,7 +1,8 @@
-import asyncio
-import json
+import warnings
 import logging
 import logging.handlers
+import asyncio
+import json
 import os
 import signal
 import sys
@@ -22,6 +23,12 @@ from passlib.context import CryptContext
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 from telegram.error import NetworkError, TimedOut
+
+# --- Early warning suppression (must run before heavy imports initialize) ---
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+warnings.filterwarnings("ignore", message=".*Pydantic V1 style.*")
+logging.getLogger("pydantic").setLevel(logging.ERROR)
+logging.getLogger("opentelemetry").setLevel(logging.ERROR)
 
 from kuro_backend.config import settings
 from kuro_backend.core import process_chat
@@ -57,6 +64,15 @@ file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelnam
 console_handler = logging.StreamHandler()
 console_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
 
+
+class OTelStatusNoiseFilter(logging.Filter):
+    """Silence non-error OpenTelemetry span-status chatter in normal operations."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.name.startswith("opentelemetry.trace.status") and record.levelno < logging.ERROR:
+            return False
+        return True
+
 # Configure root logger - V5.0: Single configuration, no duplication
 root_logger = logging.getLogger()
 root_logger.setLevel(logging.INFO)
@@ -65,6 +81,8 @@ root_logger.propagate = False  # Do not propagate root records upward (avoids du
 root_logger.handlers.clear()
 root_logger.addHandler(file_handler)
 root_logger.addHandler(console_handler)
+file_handler.addFilter(OTelStatusNoiseFilter())
+console_handler.addFilter(OTelStatusNoiseFilter())
 
 # APScheduler: prevent duplicate hardware-sentinel / job lines (root + apscheduler)
 logging.getLogger("apscheduler").handlers = []
@@ -72,6 +90,8 @@ logging.getLogger("apscheduler").propagate = False
 
 # Phoenix: suppress noisy POST /graphql 200 access lines in user-facing logs
 logging.getLogger("phoenix.server.api").setLevel(logging.WARNING)
+logging.getLogger("pydantic").setLevel(logging.ERROR)
+logging.getLogger("opentelemetry").setLevel(logging.ERROR)
 
 logger = logging.getLogger(__name__)
 logger.info(f"Log rotation configured: {LOG_BACKUP_COUNT} days retention, rotating at midnight")

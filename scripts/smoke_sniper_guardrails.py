@@ -37,6 +37,13 @@ def main():
     assert "tidak memiliki data faktual" not in (
         sniper_pipeline.sniper_postprocess_output(factish, tool_like) or ""
     ).lower()
+    general_q = "Jelaskan prinsip chain of custody dalam forensik digital"
+    labeled = sniper_pipeline.sniper_postprocess_output(general_q, "Jawaban umum forensik.")
+    assert "tidak memiliki data faktual" not in (labeled or "").lower()
+    assert (labeled or "").lstrip().startswith("[Kuro Analysis]")
+    pre_labeled = "[Kuro Analysis]\nAnalisis awal sudah berlabel."
+    no_dup = sniper_pipeline.sniper_postprocess_output(general_q, pre_labeled)
+    assert (no_dup or "").count("[Kuro Analysis]") == 1
     _log.info("smoke_sniper_guardrails: OK")
 
 
