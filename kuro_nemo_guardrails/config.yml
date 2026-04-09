@@ -1,0 +1,75 @@
+# Sniper profile: jailbreak heuristics + self-check safety + grounded fact gate.
+# PII detection, topic routing, and third-party guard APIs are NOT enabled (no flows, no integrations).
+
+colang_version: "2.x"
+
+# Skip full Colang dialog / user-intent generation when using rails-only API (input + output checks).
+passthrough: true
+
+models:
+  - type: main
+    engine: kuro_gemini
+    model: gemini-3-flash-preview
+  - type: self_check_input
+    engine: kuro_gemini
+    model: gemini-3-flash-preview
+  - type: self_check_output
+    engine: kuro_gemini
+    model: gemini-3-flash-preview
+
+rails:
+  dialog:
+    single_call:
+      enabled: false
+  # Explicitly not configured: sensitive_data_detection (PII), topic_safety, third-party APIs.
+
+prompts:
+  - task: self_check_input
+    max_tokens: 8
+    output_parser: is_content_safe
+    content: |
+      Your task is to check if the user message complies with strict content policy.
+
+      BLOCK only if the message clearly involves:
+      - Hate speech, harassment, or demeaning a protected group
+      - Instructions or encouragement for crime / violence / self-harm
+      - Sexually explicit content toward a real person or minors
+
+      ALLOW normal discussion (including Indonesian greetings, security, compliance, IT, coding help).
+
+      User message: "{{ user_input }}"
+
+      Should this user message be BLOCKED?
+      Reply with exactly one English word only: Yes (blocked) or No (allowed).
+      Answer:
+  - task: self_check_output
+    max_tokens: 8
+    output_parser: is_content_safe
+    content: |
+      Your task is to check if the bot message complies with content policy.
+
+      BLOCK only if the bot output contains:
+      - Hate speech or harassment
+      - Instructions for crime, violence, or self-harm
+      - Sexually explicit material
+
+      Refusals and safe technical explanations are ALLOWED.
+
+      Bot message: "{{ bot_response }}"
+
+      Should this bot message be BLOCKED?
+      Reply with exactly one English word only: Yes (blocked) or No (allowed).
+      Answer:
+
+instructions:
+  - type: general
+    content: |
+      You validate user and assistant messages for Kuro, a disciplined butler assistant for Pantronux.
+
+sample_conversation: |
+  user action: user said "Hello"
+  user intent: user expressed greeting
+  bot intent: bot express greeting
+  bot action: bot say "Hello, Pantronux."
+
+prompting_mode: standard

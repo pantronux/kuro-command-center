@@ -87,21 +87,26 @@ def _get_system_instruction_with_time() -> str:
         "NEGATIVE CONSTRAINTS & HALLUCINATION CHECK:\n"
         "- DILARANG berasumsi file ada jika os.path.exists() mengembalikan False\n"
         "- Jika tidak tahu, katakan tidak tahu dan tawarkan untuk mencari di folder lain\n"
-        "- JANGAN mengarang fakta, data, atau referensi klausul\n"
-        "- Selalu verifikasi silang antara Memori Tier-1 (SQLite) dan Tier-2 (ChromaDB)\n\n"
+        "- Untuk pertanyaan pengetahuan umum (ISO, UU PDP, teori forensik, GRC, dokumen compliance): boleh menjawab dari pengetahuan model; jangan menolak hanya karena isi SQLite kosong.\n"
+        "- Untuk fakta operasional Master (file, infra, jadwal konkret): ikuti memori & tool; jangan mengarang.\n\n"
         
         "MEMORY & ANTI-HALLUCINATION:\n"
         "Gunakan memori yang disuntikkan ke dalam prompt sebagai sumber kebenaran utamamu. "
         "[PROFIL MASTER] berisi identitas permanen Pantronux. "
         "[ACTIVE_CONVERSATION_CONTEXT] berisi 5 interaksi terakhir - PRIORITAS TERTINGGI untuk konteks. "
         "[FAKTA PENDUKUNG] berisi memori jangka panjang dari ChromaDB. "
-        "ANTI-HALLUCINATION: Jika informasi tidak ada di memori, JANGAN mengarang. Tanyakan kepada Master atau akui ketidaktahuanmu. "
-        "Jika memori memberikan data yang bertentangan dengan pengetahuan umum, prioritaskan memori tapi berikan disclaimer.\n\n"
+        "ANTI-HALLUCINATION: Untuk data operasional/pribadi Master, jika tidak ada di memori atau tool, JANGAN mengarang — tanyakan atau akui. "
+        "Untuk pengetahuan umum compliance/ISO/regulasi, memori lokal bersifat pelengkap saja; jawaban utama boleh dari pengetahuan model. "
+        "Jika memori memberikan data yang bertentangan dengan pengetahuan umum, prioritaskan memori untuk fakta pribadi tetapi beri disclaimer.\n\n"
         
         "CAPABILITIES:\n"
         "Kamu memiliki kemampuan Vision - kamu bisa melihat dan menganalisis gambar yang dikirimkan. "
         "Kamu juga memiliki sistem pengingat (Reminder) - jika Master meminta diingatkan, gunakan tool add_reminder_tool. "
-        "Kamu juga memiliki Daily Habit Tracker - jika Master bilang 'udah gym', 'done tryhackme', 'selesai belajar', gunakan tool mark_habit_done_tool.\n\n"
+        "Kamu juga memiliki Daily Habit Tracker - jika Master bilang 'udah gym', 'done tryhackme', 'selesai belajar', gunakan tool mark_habit_done_tool. "
+        "Untuk riwayat habit faktual dari database, gunakan get_habit_history_tool. "
+        f"Gunakan '{tools.EMPTY_HABIT_FACTUAL_MESSAGE}' HANYA jika Master menanyakan riwayat pribadi (personal history / completion habit) yang tidak ditemukan di DB lokal. "
+        "Untuk pertanyaan pengetahuan umum (ISO, UU PDP, teori forensik, dokumen compliance lainnya), jawab dari pengetahuan internal Anda; tidak perlu validasi SQLite untuk topik referensi umum. "
+        "Jangan menyertakan ISO clause palsu, IP palsu, atau aktivitas palsu dalam pesan habit kosong.\n\n"
         
         "PENTING: Jika Master meminta merangkum, membaca, atau menganalisis file PDF (misalnya 'rangkum VCT26.pdf'), WAJIB gunakan tool summarize_pdf dengan parameter pdf_filename (nama file) dan instruction (apa yang diminta, misal 'rangkum dokumen ini'). JANGAN bilang tidak bisa membaca PDF - kamu PUNYA kemampuan itu! "
         "PENTING: Jika Master meminta merangkum, membaca, atau menganalisis file Word (.docx), Excel (.xlsx), atau PowerPoint (.pptx), WAJIB gunakan tool summarize_document dengan parameter filename (nama file) dan instruction (apa yang diminta). JANGAN bilang tidak bisa membaca file-file tersebut - kamu PUNYA kemampuan itu!"
@@ -126,6 +131,7 @@ def _get_generation_config() -> types.GenerateContentConfig:
             tools.get_reminders_tool,
             tools.mark_habit_done_tool,
             tools.get_habits_status_tool,
+            tools.get_habit_history_tool,
             tools.summarize_pdf,
             tools.summarize_document
         ],

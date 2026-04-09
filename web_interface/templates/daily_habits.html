@@ -46,13 +46,13 @@
             align-items: center;
             justify-content: center;
             font-size: 10px;
-            cursor: pointer;
+            cursor: default;
             transition: all 0.2s ease;
         }
         
-        .grid-cell:hover {
-            border-color: rgba(255, 255, 255, 0.4);
-            transform: scale(1.1);
+        .grid-cell.readonly:hover {
+            transform: none;
+            border-color: rgba(255, 255, 255, 0.15);
         }
         
         .grid-cell.done {
@@ -190,9 +190,12 @@
                     <h1 class="text-3xl lg:text-4xl font-bold bg-gradient-to-r from-emerald-400 to-teal-400 bg-clip-text text-transparent">
                         📊 Habit Tracker V2.0
                     </h1>
-                    <p class="text-gray-400 mt-1">Monthly & Weekly Analytics with AI Evaluation</p>
+                    <p class="text-gray-400 mt-1">Monthly & Weekly Analytics — view only; log habits via Kuro chat</p>
                 </div>
-                <div class="flex items-center gap-3">
+                <div class="flex items-center gap-3 flex-wrap justify-end">
+                    <span class="text-xs font-medium px-3 py-1.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                        View only
+                    </span>
                     <a href="/" class="glass px-4 py-2 rounded-lg hover:bg-white/10 transition text-sm">
                         ← Back to Chat
                     </a>
@@ -287,14 +290,10 @@
 
         <!-- Monthly/Weekly Grid -->
         <div class="max-w-7xl mx-auto glass p-4 lg:p-6 mb-6">
-            <div class="flex items-center justify-between mb-4">
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
                 <h3 class="text-lg font-semibold" id="grid-title">📅 April 2026 - Habit Grid</h3>
-                <div class="flex items-center gap-3">
-                    <button onclick="openAddHabitModal()" class="bg-emerald-600 hover:bg-emerald-500 px-3 py-1.5 rounded-lg text-sm font-medium transition flex items-center gap-1">
-                        <span>➕</span> Add Habit
-                    </button>
-                </div>
-                <div class="flex items-center gap-4 text-xs text-gray-400">
+                <div class="flex flex-wrap items-center gap-4 text-xs text-gray-400">
+                    <span class="text-gray-500">Sync rev <span id="data-revision-display" class="font-mono text-gray-300">—</span></span>
                     <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-emerald-500"></span> Done</span>
                     <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-red-500/30"></span> Missed</span>
                     <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-white/5"></span> Future</span>
@@ -318,12 +317,9 @@
         <!-- AI Report Card -->
         <div class="max-w-7xl mx-auto mb-6">
             <div class="glass p-4 lg:p-6">
-                <div class="flex items-center justify-between mb-4">
+                <div class="mb-4">
                     <h3 class="text-lg font-semibold">🤖 AI Evaluation Report</h3>
-                    <button id="generate-report-btn" onclick="generateAIReport()" 
-                            class="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 px-4 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2">
-                        <span>✨</span> Generate AI Evaluation
-                    </button>
+                    <p class="text-xs text-gray-500 mt-1">Shown when Kuro has saved an evaluation for this period (read-only).</p>
                 </div>
                 <div id="report-card" class="report-card hidden">
                     <div class="flex items-center gap-3 mb-3">
@@ -335,53 +331,6 @@
                     </div>
                     <div id="report-content" class="typewriter text-sm text-gray-300 leading-relaxed whitespace-pre-wrap"></div>
                 </div>
-                <div id="report-loading" class="hidden text-center py-8">
-                    <div class="inline-block animate-spin rounded-full h-8 w-8 border-2 border-emerald-500 border-t-transparent"></div>
-                    <p class="text-gray-400 mt-2">Kuro is analyzing your habits...</p>
-                </div>
-            </div>
-        </div>
-
-        <!-- Add Habit Modal -->
-        <div id="add-habit-modal" class="fixed inset-0 z-50 hidden">
-            <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" onclick="closeAddHabitModal()"></div>
-            <div class="absolute right-0 top-0 h-full w-full max-w-md bg-gray-900 border-l border-white/10 p-6 overflow-y-auto animate-slide-right">
-                <div class="flex items-center justify-between mb-6">
-                    <h3 class="text-xl font-semibold">➕ Add New Habit</h3>
-                    <button onclick="closeAddHabitModal()" class="text-gray-400 hover:text-white">✕</button>
-                </div>
-                <form id="add-habit-form" class="space-y-4">
-                    <div>
-                        <label class="block text-sm text-gray-400 mb-1">Habit Title</label>
-                        <input type="text" id="habit-title" placeholder="e.g., Gym, TryHackMe, Reading" 
-                               class="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500">
-                    </div>
-                    <div>
-                        <label class="block text-sm text-gray-400 mb-1">Category</label>
-                        <select id="habit-category" class="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-emerald-500">
-                            <option value="General" class="bg-gray-800">🎯 General</option>
-                            <option value="Gym" class="bg-gray-800">💪 Gym</option>
-                            <option value="Study" class="bg-gray-800">📚 Study</option>
-                            <option value="Game" class="bg-gray-800">🎮 Game</option>
-                            <option value="Work" class="bg-gray-800">💼 Work</option>
-                            <option value="Health" class="bg-gray-800">🏥 Health</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label class="block text-sm text-gray-400 mb-1">Monthly Target (days)</label>
-                        <input type="number" id="habit-target-month" value="30" min="1" max="31"
-                               class="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-emerald-500">
-                    </div>
-                    <div>
-                        <label class="block text-sm text-gray-400 mb-1">Weekly Target (days)</label>
-                        <input type="number" id="habit-target-week" value="7" min="1" max="7"
-                               class="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-emerald-500">
-                    </div>
-                    <button type="submit" 
-                            class="w-full bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 px-4 py-2 rounded-lg font-medium transition">
-                        Add Habit
-                    </button>
-                </form>
             </div>
         </div>
 
@@ -395,13 +344,89 @@
         let currentData = null;
         let sparklineChart = null;
         let donutChart = null;
-        
+        let lastDataRevision = null;
+        let dashboardWs = null;
+
+        async function refreshFromSyncSignal(revision) {
+            if (revision != null) lastDataRevision = revision;
+            const el = document.getElementById('data-revision-display');
+            if (el && revision != null) el.textContent = String(revision);
+            if (currentView === 'monthly') await loadData();
+            else await loadWeeklyData();
+        }
+
+        function connectDashboardWS() {
+            const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+            const url = proto + '://' + location.host + '/ws/dashboard';
+            try {
+                dashboardWs = new WebSocket(url);
+            } catch (e) {
+                console.warn('WebSocket unavailable', e);
+                return;
+            }
+            dashboardWs.onmessage = async (ev) => {
+                try {
+                    const msg = JSON.parse(ev.data);
+                    if (msg.type === 'REFRESH_NOW') await refreshFromSyncSignal(msg.revision);
+                } catch (e) { console.warn('dashboard ws message', e); }
+            };
+            dashboardWs.onclose = () => {
+                dashboardWs = null;
+                setTimeout(connectDashboardWS, 2000);
+            };
+            dashboardWs.onerror = () => { try { dashboardWs.close(); } catch (e) {} };
+        }
+
+        async function pollDataRevision() {
+            try {
+                const r = await fetch('/api/dashboard/data-revision');
+                const j = await r.json();
+                const el = document.getElementById('data-revision-display');
+                if (el) el.textContent = j.revision != null ? String(j.revision) : '—';
+                if (lastDataRevision !== null && j.revision !== lastDataRevision) {
+                    if (currentView === 'monthly') await loadData();
+                    else await loadWeeklyData();
+                }
+                lastDataRevision = j.revision;
+            } catch (e) {
+                console.error('data-revision poll failed', e);
+            }
+        }
+
+        async function tryLoadCachedEvaluation() {
+            if (!currentData) return;
+            const reportCard = document.getElementById('report-card');
+            const reportContent = document.getElementById('report-content');
+            const year = currentData.year;
+            const period = currentView === 'monthly' ? currentData.month : currentData.week;
+            try {
+                const response = await fetch(
+                    `/api/habits/evaluation-cached?period_type=${encodeURIComponent(currentView)}&year=${year}&period=${period}`
+                );
+                const data = await response.json();
+                if (data.status === 'success' && data.cached && data.evaluation) {
+                    reportCard.classList.remove('hidden');
+                    if (parseFloat(data.score) < 90) reportCard.classList.add('scolding');
+                    else reportCard.classList.remove('scolding');
+                    reportContent.textContent = data.evaluation;
+                } else {
+                    reportCard.classList.add('hidden');
+                    reportContent.textContent = '';
+                }
+            } catch (err) {
+                reportCard.classList.add('hidden');
+            }
+        }
+
         // Initialize
         document.addEventListener('DOMContentLoaded', () => {
             populateYearFilters();
             populateWeekFilters();
             setDefaultFilters();
+            connectDashboardWS();
             loadData();
+            pollDataRevision();
+            setInterval(pollDataRevision, 25000);
         });
         
         function populateYearFilters() {
@@ -550,11 +575,6 @@
                     <div class="flex items-center gap-2">
                         <span class="w-2 h-2 rounded-full ${catClass}"></span>
                         <span class="font-medium truncate flex-1">${escapeHtml(habit.title)}</span>
-                        <button onclick="deleteHabit(${habit.id})" class="text-red-400 hover:text-red-300 transition p-1" title="Delete habit">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
-                            </svg>
-                        </button>
                     </div>
                 </td>`;
                 
@@ -563,9 +583,7 @@
                     const isFuture = isCurrentMonth && d > todayDate;
                     const cellClass = isFuture ? 'future' : (status === 1 ? 'done' : 'missed');
                     const icon = status === 1 ? '✓' : '';
-                    // FIX: Add click handler for interactive cells (only for non-future dates)
-                    const clickHandler = isFuture ? '' : `onclick="toggleHabitDay(${habit.id}, ${data.year}, ${data.month}, ${d}, this)"`;
-                    html += `<td class="p-1"><div class="grid-cell ${cellClass} mx-auto" ${clickHandler} data-habit="${habit.id}" data-day="${d}">${icon}</div></td>`;
+                    html += `<td class="p-1"><div class="grid-cell ${cellClass} readonly mx-auto" data-habit="${habit.id}" data-day="${d}">${icon}</div></td>`;
                 }
                 
                 html += `<td class="p-2">
@@ -613,25 +631,17 @@
                     <div class="flex items-center gap-2">
                         <span class="w-2 h-2 rounded-full ${catClass}"></span>
                         <span class="font-medium truncate flex-1">${escapeHtml(habit.title)}</span>
-                        <button onclick="deleteHabit(${habit.id})" class="text-red-400 hover:text-red-300 transition p-1" title="Delete habit">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
-                            </svg>
-                        </button>
                     </div>
                 </td>`;
                 
                 for (let d = 0; d < 7; d++) {
                     const status = habit.daily_log[d] || 0;
-                    const cellClass = status === 1 ? 'done' : 'missed';
-                    const icon = status === 1 ? '✓' : '';
-                    // FIX: Add click handler for interactive cells
                     const dayDate = new Date(weekStartUTC);
                     dayDate.setUTCDate(dayDate.getUTCDate() + d);
-                    const dayDateStr = dayDate.toISOString().split('T')[0];
                     const isFuture = dayDate > todayUTC;
-                    const clickHandler = isFuture ? '' : `onclick="toggleHabitDay(${habit.id}, ${data.year}, ${data.week}, ${d}, this, true)"`;
-                    html += `<td class="p-1"><div class="grid-cell ${cellClass} mx-auto" ${clickHandler} data-habit="${habit.id}" data-day="${d}">${icon}</div></td>`;
+                    const cellClass = isFuture ? 'future' : (status === 1 ? 'done' : 'missed');
+                    const icon = status === 1 ? '✓' : '';
+                    html += `<td class="p-1"><div class="grid-cell ${cellClass} readonly mx-auto" data-habit="${habit.id}" data-day="${d}">${icon}</div></td>`;
                 }
                 
                 html += `<td class="p-2">
@@ -796,231 +806,13 @@
             
             document.getElementById('report-period').textContent = `${currentView === 'monthly' ? 'Monthly' : 'Weekly'} Report - ${period}`;
             document.getElementById('report-score').textContent = `Overall Score: ${data.overall_stats.overall_percentage}%`;
-            
-            // Hide report content until generated
-            document.getElementById('report-card').classList.add('hidden');
-            document.getElementById('report-content').textContent = '';
-        }
-        
-        async function generateAIReport() {
-            const btn = document.getElementById('generate-report-btn');
-            const loading = document.getElementById('report-loading');
-            const reportCard = document.getElementById('report-card');
-            const reportContent = document.getElementById('report-content');
-            
-            if (!currentData) {
-                showToast('No data loaded. Please load monthly/weekly data first.', 'error');
-                return;
-            }
-            
-            btn.disabled = true;
-            btn.classList.add('opacity-50');
-            loading.classList.remove('hidden');
-            reportCard.classList.add('hidden');
-            
-            try {
-                const year = currentView === 'monthly' 
-                    ? document.getElementById('filter-year').value 
-                    : document.getElementById('filter-week-year').value;
-                const period = currentView === 'monthly' 
-                    ? document.getElementById('filter-month').value 
-                    : document.getElementById('filter-week').value;
-                
-                const response = await fetch('/api/habits/evaluate', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        period_type: currentView,
-                        year: parseInt(year),
-                        period: parseInt(period)
-                    })
-                });
-                
-                const data = await response.json();
-                
-                if (data.status === 'success') {
-                    reportCard.classList.remove('hidden');
-                    if (parseFloat(data.score) < 90) {
-                        reportCard.classList.add('scolding');
-                    } else {
-                        reportCard.classList.remove('scolding');
-                    }
-                    
-                    // Typewriter effect
-                    typewriterEffect(reportContent, data.evaluation, 20);
-                    
-                    if (data.cached) {
-                        showToast('Loaded cached evaluation', 'info');
-                    }
-                } else {
-                    showToast('Error: ' + data.message, 'error');
-                }
-            } catch (err) {
-                showToast('Error: ' + err.message, 'error');
-            } finally {
-                btn.disabled = false;
-                btn.classList.remove('opacity-50');
-                loading.classList.add('hidden');
-            }
-        }
-        
-        function typewriterEffect(element, text, speed = 20) {
-            element.textContent = '';
-            let i = 0;
-            
-            function type() {
-                if (i < text.length) {
-                    element.textContent += text.charAt(i);
-                    i++;
-                    setTimeout(type, speed);
-                }
-            }
-            
-            type();
+            tryLoadCachedEvaluation();
         }
         
         function getMonthName(month) {
             const months = ['January', 'February', 'March', 'April', 'May', 'June', 
                            'July', 'August', 'September', 'October', 'November', 'December'];
             return months[month - 1] || 'Unknown';
-        }
-        
-        // Add Habit Modal
-        document.getElementById('add-habit-form').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            
-            const title = document.getElementById('habit-title').value.trim();
-            const category = document.getElementById('habit-category').value;
-            const targetMonth = document.getElementById('habit-target-month').value;
-            const targetWeek = document.getElementById('habit-target-week').value;
-            
-            if (!title) {
-                showToast('Please enter a habit title.', 'error');
-                return;
-            }
-            
-            try {
-                const formData = new FormData();
-                formData.append('title', title);
-                formData.append('scheduled_time', '08:00');
-                formData.append('category', category);
-                
-                const response = await fetch('/api/habits/add', {
-                    method: 'POST',
-                    body: formData
-                });
-                
-                const data = await response.json();
-                
-                if (data.success) {
-                    // Update targets
-                    await fetch(`/api/habits/${data.habit_id}`, {
-                        method: 'PUT',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            target_per_month: parseInt(targetMonth),
-                            target_per_week: parseInt(targetWeek)
-                        })
-                    });
-                    
-                    showToast('Habit added successfully!', 'success');
-                    closeAddHabitModal();
-                    document.getElementById('add-habit-form').reset();
-                    loadData();
-                } else {
-                    showToast(data.error || 'Failed to add habit.', 'error');
-                }
-            } catch (err) {
-                showToast('Error: ' + err.message, 'error');
-            }
-        });
-        
-        function openAddHabitModal() {
-            document.getElementById('add-habit-modal').classList.remove('hidden');
-        }
-        
-        function closeAddHabitModal() {
-            document.getElementById('add-habit-modal').classList.add('hidden');
-        }
-        
-        // FIX 2: Toggle habit day status (interactive grid cells)
-        async function toggleHabitDay(habitId, year, period, day, element, isWeekly = false) {
-            const cell = element.closest ? element : element;
-            const isDone = cell.classList.contains('done');
-            
-            // Calculate the date string for this cell
-            let dateStr;
-            if (isWeekly) {
-                // For weekly view, we need to calculate the actual date
-                const weekStart = new Date(Date.UTC(year, 0, 1));
-                weekStart.setUTCDate(weekStart.getUTCDate() + (period - 1) * 7 - weekStart.getUTCDay() + 1);
-                const cellDate = new Date(weekStart);
-                cellDate.setUTCDate(cellDate.getUTCDate() + day);
-                dateStr = cellDate.toISOString().split('T')[0];
-            } else {
-                dateStr = `${year}-${String(period).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-            }
-            
-            try {
-                const formData = new FormData();
-                formData.append('habit_id', habitId);
-                formData.append('date', dateStr);
-                formData.append('status', isDone ? '0' : '1');
-                
-                const response = await fetch('/api/habits/toggle', {
-                    method: 'POST',
-                    body: formData
-                });
-                
-                const data = await response.json();
-                
-                if (data.success) {
-                    // Update cell appearance
-                    if (isDone) {
-                        cell.classList.remove('done');
-                        cell.classList.add('missed');
-                        cell.textContent = '';
-                    } else {
-                        cell.classList.remove('missed');
-                        cell.classList.add('done');
-                        cell.textContent = '✓';
-                    }
-                    
-                    // FIX 4: Refresh all data to sync state
-                    if (currentView === 'monthly') {
-                        await loadData();
-                    } else {
-                        await loadWeeklyData();
-                    }
-                    
-                    showToast(isDone ? 'Marked as missed' : 'Marked as done! ✓', 'success');
-                } else {
-                    showToast(data.error || 'Failed to toggle status', 'error');
-                }
-            } catch (err) {
-                showToast('Error: ' + err.message, 'error');
-            }
-        }
-        
-        // Delete habit function
-        async function deleteHabit(habitId) {
-            if (!confirm('Delete this habit and all its history?')) return;
-            try {
-                const response = await fetch(`/api/habits/${habitId}`, { method: 'DELETE' });
-                const data = await response.json();
-                if (data.status === 'success') {
-                    showToast('Habit deleted.', 'info');
-                    if (currentView === 'monthly') {
-                        await loadData();
-                    } else {
-                        await loadWeeklyData();
-                    }
-                } else {
-                    showToast(data.message || 'Failed to delete habit', 'error');
-                }
-            } catch (err) {
-                showToast('Error: ' + err.message, 'error');
-            }
         }
         
         function showToast(message, type = 'info') {

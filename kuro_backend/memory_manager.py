@@ -378,8 +378,40 @@ def add_long_term(content: str, metadata: Dict = None):
         logger.error(f"Failed to add to ChromaDB: {e}")
         return False
 
-# Relevance threshold for memory injection - facts below this are excluded
+# Legacy L2 distance cap (used as default MEMORY_MAX_L2_DISTANCE)
 RELEVANCE_DISTANCE_THRESHOLD = 0.5  # Lower distance = more relevant (0 = perfect match)
+
+# Cosine collections: min similarity in [0,1] (we use sim = 1 - d/2 on Chroma cosine distance)
+MEMORY_INJECTION_MIN_SIMILARITY = float(os.getenv("KURO_MEMORY_MIN_SIMILARITY", "0.7"))
+# L2 (default long-term): Chroma distances are often >1; do not use 1/(1+d)>=0.7 (that implies d<=0.43).
+# Keep a direct distance ceiling aligned with legacy RELEVANCE_DISTANCE_THRESHOLD unless overridden.
+MEMORY_MAX_L2_DISTANCE = float(os.getenv("KURO_MEMORY_MAX_L2_DISTANCE", str(RELEVANCE_DISTANCE_THRESHOLD)))
+
+
+def _collection_vector_space(collection) -> str:
+    try:
+        meta = getattr(collection, "metadata", None) or {}
+        return str(meta.get("hnsw:space", "l2")).lower()
+    except Exception:
+        return "l2"
+
+
+def _memory_relevance_similarity(distance: float, space: str) -> float:
+    """Map Chroma distance to [0,1] similarity (for logging / cosine gating only)."""
+    space = (space or "l2").lower()
+    d = float(distance)
+    if space == "cosine":
+        return max(0.0, 1.0 - (d / 2.0))
+    # L2: monotonic score for debug only — gating uses MEMORY_MAX_L2_DISTANCE
+    return 1.0 / (1.0 + max(0.0, d))
+
+
+def memory_similarity_passes(distance: float, space: str) -> bool:
+    space = (space or "l2").lower()
+    d = float(distance)
+    if space == "cosine":
+        return _memory_relevance_similarity(d, "cosine") >= MEMORY_INJECTION_MIN_SIMILARITY
+    return d <= MEMORY_MAX_L2_DISTANCE
 
 def search_long_term(query: str, top_k: int = 5) -> List[str]:
     """Search ChromaDB for relevant facts with context ranking.
@@ -393,17 +425,23 @@ def search_long_term(query: str, top_k: int = 5) -> List[str]:
         return []
     
     try:
+        space = _collection_vector_space(collection)
         results = collection.query(query_texts=[query], n_results=top_k, include=['documents', 'distances'])
         documents = results.get('documents', [[]])[0]
         distances = results.get('distances', [[]])[0]
         
-        # PHASE 2: Context Ranking - filter by relevance threshold
+        # PHASE 2: Context Ranking - filter by similarity floor for LLM injection
         relevant_facts = []
         for doc, distance in zip(documents, distances):
-            if distance <= RELEVANCE_DISTANCE_THRESHOLD:
+            if memory_similarity_passes(distance, space):
                 relevant_facts.append(doc)
             else:
-                logger.debug(f"Filtered out low-relevance fact (distance={distance:.3f}): {doc[:50]}...")
+                logger.debug(
+                    "Filtered low-similarity fact (sim=%.3f space=%s): %s...",
+                    _memory_relevance_similarity(distance, space),
+                    space,
+                    doc[:50],
+                )
         
         # PHASE 2: Anti-VCT Bias - only return VCT data if query is VCT-related
         vct_keywords = ['vct', 'valorant', 'tournament', 'competition ruleset', 'vct26']
@@ -420,8 +458,25 @@ def search_long_term(query: str, top_k: int = 5) -> List[str]:
                 else:
                     vct_filtered.append(fact)
             relevant_facts = vct_filtered
-        
-        logger.info(f"Memory search: {len(documents)} results -> {len(relevant_facts)} relevant (threshold={RELEVANCE_DISTANCE_THRESHOLD})")
+
+        if not relevant_facts and documents and distances:
+            logger.debug(
+                "Memory search: all %d candidates rejected (space=%s cosine_min_sim=%s l2_max_d=%s sample_d=%.4f)",
+                len(documents),
+                space,
+                MEMORY_INJECTION_MIN_SIMILARITY,
+                MEMORY_MAX_L2_DISTANCE,
+                float(distances[0]),
+            )
+
+        logger.debug(
+            "Memory search: %s results -> %s relevant (space=%s cosine_min_sim=%s l2_max_d=%s)",
+            len(documents),
+            len(relevant_facts),
+            space,
+            MEMORY_INJECTION_MIN_SIMILARITY,
+            MEMORY_MAX_L2_DISTANCE,
+        )
         return relevant_facts
         
     except Exception as e:
@@ -493,7 +548,11 @@ def query_memory(current_message: str, recent_messages: List[Dict] = None) -> Di
                     f"[{result['iso_name']}{clause_info}]\n{result['content'][:500]}"
                 )
             compliance_text = "\n\n".join(compliance_parts)
-            logger.info(f"[COMPLIANCE_BOOST] Query matched compliance keywords: {len(compliance_results)} results injected")
+            logger.debug(
+                "[COMPLIANCE_BOOST] compliance query: %s results injected (min_sim=%s)",
+                len(compliance_results),
+                MEMORY_INJECTION_MIN_SIMILARITY,
+            )
     
     return {
         "short_term": short_term_text,
@@ -1534,7 +1593,7 @@ Example:
             contents=prompt,
             config=types.GenerateContentConfig(
                 temperature=0.1,
-                max_output_tokens=100
+                max_output_tokens=64,
             )
         )
         
@@ -1559,11 +1618,15 @@ Example:
             logger.warning(f"[QUERY_EXPANSION] Expanded query is not a string: {type(expanded)}")
             return query
         
-        # Validate expanded query length
-        if len(expanded) < 5 or len(expanded) > 200:
+        # Cap and validate length (Chroma / embedders reject overly long query strings)
+        QUERY_EXPANSION_MAX = 150
+        expanded = expanded.strip()
+        if len(expanded) > QUERY_EXPANSION_MAX:
+            expanded = expanded[:QUERY_EXPANSION_MAX].rstrip()
+        if len(expanded) < 5:
             logger.warning(f"[QUERY_EXPANSION] Invalid length ({len(expanded)} chars), using original query")
             return query
-        
+
         logger.info(f"[QUERY_EXPANSION] Original: '{query}' -> Expanded: '{expanded}'")
         return expanded
         
@@ -1593,6 +1656,7 @@ def search_long_term_contextual(query: str, top_k: int = 5, recent_messages: Lis
         # Step 1: Expand query if ambiguous
         expanded_query = expand_query(query, recent_messages)
         
+        space = _collection_vector_space(collection)
         # Step 2: Search with expanded query
         results = collection.query(
             query_texts=[expanded_query],
@@ -1604,10 +1668,10 @@ def search_long_term_contextual(query: str, top_k: int = 5, recent_messages: Lis
         distances = results.get('distances', [[]])[0]
         metadatas = results.get('metadatas', [[]])[0]
         
-        # Step 3: Filter by relevance threshold
+        # Step 3: Filter by similarity floor (query_memory / LLM injection)
         relevant_facts = []
         for doc, distance, metadata in zip(documents, distances, metadatas):
-            if distance <= RELEVANCE_DISTANCE_THRESHOLD:
+            if memory_similarity_passes(distance, space):
                 # Extract just the chunk content (remove context prefix for display)
                 chunk_content = doc
                 if "[CHUNK_CONTENT:" in chunk_content:
@@ -1619,7 +1683,12 @@ def search_long_term_contextual(query: str, top_k: int = 5, recent_messages: Lis
                 
                 relevant_facts.append(chunk_content)
             else:
-                logger.debug(f"Filtered out low-relevance fact (distance={distance:.3f}): {doc[:50]}...")
+                logger.debug(
+                    "Filtered contextual fact (sim=%.3f space=%s): %s...",
+                    _memory_relevance_similarity(distance, space),
+                    space,
+                    doc[:50],
+                )
         
         # Step 4: Anti-VCT Bias (preserve existing logic)
         vct_keywords = ['vct', 'valorant', 'tournament', 'competition ruleset', 'vct26']
@@ -1635,8 +1704,26 @@ def search_long_term_contextual(query: str, top_k: int = 5, recent_messages: Lis
                 else:
                     vct_filtered.append(fact)
             relevant_facts = vct_filtered
-        
-        logger.info(f"[CONTEXTUAL_SEARCH] {len(documents)} results -> {len(relevant_facts)} relevant (query expanded: {expanded_query != query})")
+
+        if not relevant_facts and documents and distances:
+            logger.debug(
+                "[CONTEXTUAL_SEARCH] all %d candidates rejected (space=%s cos_min_sim=%s l2_max_d=%s sample_d=%.4f)",
+                len(documents),
+                space,
+                MEMORY_INJECTION_MIN_SIMILARITY,
+                MEMORY_MAX_L2_DISTANCE,
+                float(distances[0]),
+            )
+
+        logger.debug(
+            "[CONTEXTUAL_SEARCH] %s results -> %s relevant (expanded=%s space=%s cos_min_sim=%s l2_max_d=%s)",
+            len(documents),
+            len(relevant_facts),
+            expanded_query != query,
+            space,
+            MEMORY_INJECTION_MIN_SIMILARITY,
+            MEMORY_MAX_L2_DISTANCE,
+        )
         return relevant_facts[:top_k]  # Return top_k results
         
     except Exception as e:
@@ -2219,10 +2306,11 @@ def search_compliance_base(query: str, top_k: int = 5) -> List[Dict]:
         distances = results.get('distances', [[]])[0]
         metadatas = results.get('metadatas', [[]])[0]
         
+        space = _collection_vector_space(collection)
         # Filter and format results
         relevant = []
         for doc, distance, metadata in zip(documents, distances, metadatas):
-            if distance <= RELEVANCE_DISTANCE_THRESHOLD:
+            if memory_similarity_passes(distance, space):
                 # Extract clean content (remove prefix)
                 content = doc
                 if "[CONTENT:" in content:
@@ -2237,7 +2325,7 @@ def search_compliance_base(query: str, top_k: int = 5) -> List[Dict]:
                     "clauses": metadata.get("clauses", ""),
                     "source_file": metadata.get("source_file", ""),
                     "distance": distance,
-                    "relevance": 1.0 - (distance / 2.0)
+                    "relevance": _memory_relevance_similarity(distance, space),
                 })
         
         # Sort by relevance and return top_k

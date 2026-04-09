@@ -20,6 +20,29 @@ logger = logging.getLogger(__name__)
 logger.propagate = False  # Prevent double-reporting to root logger
 
 
+def coerce_mem0_search_results(raw: Any) -> List[Any]:
+    """
+    Mem0 `Memory.search` may return a list of hits, a dict wrapper (e.g. results/memories),
+    or a single memory dict. Normalize to a list for downstream iteration.
+    """
+    if raw is None:
+        return []
+    if isinstance(raw, list):
+        return raw
+    if isinstance(raw, dict):
+        for key in ("results", "memories", "data", "items", "search_results", "hits"):
+            val = raw.get(key)
+            if isinstance(val, list):
+                return val
+        # Single row: common Mem0 shape
+        if isinstance(raw.get("memory"), str) or isinstance(raw.get("text"), str):
+            return [raw]
+        nested = raw.get("results")
+        if isinstance(nested, dict) and isinstance(nested.get("memory"), str):
+            return [nested]
+    return []
+
+
 def extract_json_from_text(text: str) -> Optional[Dict]:
     """
     Robust JSON extraction from text that may contain markdown code blocks,
@@ -341,13 +364,15 @@ class PerpetualMemory:
                 limit=limit
             )
 
-            # FIX: Guard against non-list return (e.g. None or error string from Mem0)
-            if not isinstance(results, list):
-                logger.warning(f"[MEM0] Unexpected search result type: {type(results)}")
-                return []
-            
+            coerced = coerce_mem0_search_results(results)
+            if not coerced and results is not None:
+                logger.debug(
+                    "[MEM0] search returned non-iterable shape %s; treating as empty",
+                    type(results),
+                )
+
             memories = []
-            for result in results:
+            for result in coerced:
                 if isinstance(result, dict):
                     # Normal case: Mem0 returns list of dicts
                     memories.append({
@@ -383,6 +408,11 @@ class PerpetualMemory:
     def get_habit_history(self, habit: str, days: int = 30) -> List[Dict]:
         """Get habit completion history for the past N days."""
         if not self.client:
+            logger.warning(
+                "[MEM0] get_habit_history(%r, days=%s): Mem0 client unavailable — returning [] (do not infer habits from this)",
+                habit,
+                days,
+            )
             return []
         
         try:
@@ -392,12 +422,15 @@ class PerpetualMemory:
                 limit=50
             )
 
-            # FIX: Guard against non-list return
-            if not isinstance(results, list):
-                return []
-            
+            coerced = coerce_mem0_search_results(results)
+            if not coerced and results is not None:
+                logger.debug(
+                    "[MEM0] habit search non-list shape %s; no history",
+                    type(results),
+                )
+
             history = []
-            for result in results:
+            for result in coerced:
                 # FIX: Only process dict results — string results have no metadata to filter on
                 if not isinstance(result, dict):
                     continue
@@ -410,6 +443,20 @@ class PerpetualMemory:
                         "memory": result.get("memory", ""),
                     })
             
+            if not history:
+                logger.info(
+                    "[MEM0] get_habit_history(%r, days=%s): 0 entries after filter (raw coerced len=%s)",
+                    habit,
+                    days,
+                    len(coerced),
+                )
+            else:
+                logger.debug(
+                    "[MEM0] get_habit_history(%r, days=%s): %s entries",
+                    habit,
+                    days,
+                    len(history),
+                )
             return history
             
         except Exception as e:
@@ -425,7 +472,10 @@ class PerpetualMemory:
         history = self.get_habit_history(habit, days=30)
         
         if not history:
-            return f"Saya belum memiliki catatan konsisten untuk habit '{habit}'."
+            return (
+                "Tidak ada catatan aktivitas untuk habit ini dalam memori yang tersedia. "
+                "Gunakan data habit SQLite aplikasi jika perlu fakta penyelesaian; jangan mengarang."
+            )
         
         # Analyze patterns
         total_completions = len(history)

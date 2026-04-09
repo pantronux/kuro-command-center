@@ -1,0 +1,3 @@
+import core
+flow main
+  await sub a

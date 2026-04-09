@@ -22,6 +22,8 @@ from kuro_backend.tools.base_tools import (
     get_reminders_tool,
     mark_habit_done_tool,
     get_habits_status_tool,
+    get_habit_history_tool,
+    EMPTY_HABIT_FACTUAL_MESSAGE,
     summarize_pdf,
     summarize_document,
     read_docx_content,

@@ -1,0 +1,6 @@
+# Heuristic jailbreak rail (uses sniper_jailbreak_heuristic action — no LLM).
+flow sniper jailbreak gate
+  $blocked = await SniperJailbreakHeuristicAction
+  if $blocked
+    bot say "Maaf Pantronux, command sistem tidak diizinkan di sesi ini."
+    abort

@@ -1,0 +1,8 @@
+colang_version: "2.x"
+models:
+  - type: main
+    engine: kuro_gemini
+    model: gemini-2.0-flash
+rails:
+  input:
+    flows: []

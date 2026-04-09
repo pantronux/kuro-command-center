@@ -931,14 +931,14 @@ def add_reminder_tool(event_name: str, datetime_text: str, description: str = ""
     if context:
         full_description += f"\n\n[Konteks dari Memori]:\n{context}"
     
-    # Save to database
-    from kuro_backend.reminder_db import add_reminder
-    reminder_id = add_reminder(
+    from kuro_backend.services.core_service import add_reminder_svc as persist_reminder
+
+    reminder_id = persist_reminder(
         event_name=event_name,
         event_time=event_time.isoformat(),
         description=full_description,
         source=source,
-        context=context
+        context=context,
     )
     
     # Format confirmation
@@ -963,7 +963,10 @@ def add_reminder_tool(event_name: str, datetime_text: str, description: str = ""
 
 def get_reminders_tool() -> Dict:
     """Get all active reminders for display."""
-    from kuro_backend.reminder_db import get_upcoming_reminders, get_reminder_stats
+    from kuro_backend.services.core_service import (
+        get_reminder_stats_validated as get_reminder_stats,
+        list_reminders_upcoming_validated as get_upcoming_reminders,
+    )
     upcoming = get_upcoming_reminders()
     stats = get_reminder_stats()
     
@@ -981,8 +984,12 @@ def mark_habit_done_tool(habit_title: str) -> Dict:
     Mark a daily habit as done via natural language.
     E.g., "Aku udah gym ya hari ini" -> marks "Gym" as done.
     """
-    from kuro_backend.daily_habits_db import get_habit_by_title, mark_habit_done, get_completion_stats
-    
+    from kuro_backend.services.core_service import (
+        get_completion_stats_validated as get_completion_stats,
+        get_habit_by_title,
+        mark_habit_done_svc as persist_mark_done,
+    )
+
     habit = get_habit_by_title(habit_title)
     if not habit:
         return {
@@ -990,7 +997,7 @@ def mark_habit_done_tool(habit_title: str) -> Dict:
             "error": f"Master, saya tidak menemukan habit '{habit_title}'. Mungkin belum ditambahkan?"
         }
     
-    success = mark_habit_done(habit['id'])
+    success = persist_mark_done(habit['id'])
     if success:
         stats = get_completion_stats()
         return {
@@ -1008,15 +1015,78 @@ def mark_habit_done_tool(habit_title: str) -> Dict:
 
 
 def get_habits_status_tool() -> Dict:
-    """Get today's habit status for reporting."""
-    from kuro_backend.daily_habits_db import get_all_habits, get_completion_stats
-    
-    habits = get_all_habits()
-    stats = get_completion_stats()
-    
+    """Get today's habit status for reporting (same validated shapes as /api/habits*)."""
+    from kuro_backend.services.core_service import (
+        get_completion_stats_validated,
+        list_habits_validated,
+    )
+
+    habits = list_habits_validated()
+    stats = get_completion_stats_validated()
+
     return {
         "habits": habits,
         "stats": stats
+    }
+
+
+EMPTY_HABIT_FACTUAL_MESSAGE = "Saya tidak menemukan catatan data faktual."
+
+
+def get_habit_history_tool(habit_title: str, days: int = 30) -> Dict:
+    """
+    Factual habit log rows from SQLite for one habit. If has_factual_data is false, you MUST
+    reply to the user with exactly: 'Saya tidak menemukan catatan data faktual.' — no ISO clauses,
+    no IP addresses, no invented activities.
+    """
+    from kuro_backend.services import core_service as core_data
+
+    habit = core_data.get_habit_by_title(habit_title)
+    if not habit:
+        return {
+            "success": True,
+            "has_factual_data": False,
+            "ai_required_reply": EMPTY_HABIT_FACTUAL_MESSAGE,
+            "habit_logs": [],
+            "completion_dates": [],
+            "strict_instruction": (
+                "Jika has_factual_data=false, jawab PERSIS ai_required_reply tanpa tambahan."
+            ),
+        }
+
+    snap = core_data.fetch_habit_activity_snapshot(days)
+    title_lower = (habit.get("title") or "").lower()
+    logs = [
+        r
+        for r in (snap.get("habit_log_rows") or [])
+        if (r.get("title") or "").lower() == title_lower
+    ]
+    completions = [
+        r
+        for r in (snap.get("completion_samples") or [])
+        if (r.get("title") or "").lower() == title_lower
+    ]
+
+    if not logs and not completions:
+        return {
+            "success": True,
+            "has_factual_data": False,
+            "ai_required_reply": EMPTY_HABIT_FACTUAL_MESSAGE,
+            "habit_logs": [],
+            "completion_dates": [],
+            "strict_instruction": (
+                "Jika has_factual_data=false, jawab PERSIS ai_required_reply. "
+                "Dilarang mengarang ISO, IP, atau aktivitas."
+            ),
+        }
+
+    return {
+        "success": True,
+        "has_factual_data": True,
+        "habit": habit.get("title"),
+        "habit_logs": logs,
+        "completion_dates": completions,
+        "strict_instruction": "Hanya gunakan field habit_logs dan completion_dates di atas.",
     }
 
 

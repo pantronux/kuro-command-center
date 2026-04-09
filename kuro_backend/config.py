@@ -31,6 +31,8 @@ class Settings:
     TELEGRAM_CHAT_ID: str = os.getenv("TELEGRAM_CHAT_ID")
     WORKING_DIR: str = os.getenv("WORKING_DIR")
     TIMEZONE: str = os.getenv("TIMEZONE", "Asia/Jakarta")
+    # Optional Gemini cached content resource (e.g. cachedContents/abc123) for repeated static prompts
+    GEMINI_CACHED_CONTENT: str = os.getenv("GEMINI_CACHED_CONTENT", "").strip()
     
     @property
     def tz(self):

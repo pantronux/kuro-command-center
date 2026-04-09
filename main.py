@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import logging.handlers
@@ -14,6 +15,7 @@ from fastapi import FastAPI, UploadFile, File, Form, Request, Depends, HTTPExcep
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, RedirectResponse
+from starlette.websockets import WebSocket, WebSocketDisconnect
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -28,8 +30,10 @@ from kuro_backend import memory_manager
 from kuro_backend import chat_history
 from kuro_backend import tools
 from kuro_backend import compliance_db
-from kuro_backend import reminder_db
-from kuro_backend import daily_habits_db
+from kuro_backend import reminder_service
+from kuro_backend import dashboard_broadcast
+from kuro_backend.services import core_service as core_data
+from kuro_backend.services.schemas import AiEvaluationRecord
 from kuro_backend import auth_db
 from kuro_backend import observability
 from kuro_backend import intelligence_db
@@ -56,10 +60,18 @@ console_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(level
 # Configure root logger - V5.0: Single configuration, no duplication
 root_logger = logging.getLogger()
 root_logger.setLevel(logging.INFO)
+root_logger.propagate = False  # Do not propagate root records upward (avoids duplicate handlers in some setups)
 # Clear any existing handlers to prevent duplication on reload
 root_logger.handlers.clear()
 root_logger.addHandler(file_handler)
 root_logger.addHandler(console_handler)
+
+# APScheduler: prevent duplicate hardware-sentinel / job lines (root + apscheduler)
+logging.getLogger("apscheduler").handlers = []
+logging.getLogger("apscheduler").propagate = False
+
+# Phoenix: suppress noisy POST /graphql 200 access lines in user-facing logs
+logging.getLogger("phoenix.server.api").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 logger.info(f"Log rotation configured: {LOG_BACKUP_COUNT} days retention, rotating at midnight")
@@ -124,6 +136,20 @@ def validate_token(token: str) -> Optional[Dict]:
 
 # --- FastAPI App ---
 app = FastAPI(title="Kuro AI Web Dashboard")
+
+
+@app.on_event("startup")
+async def _register_dashboard_sync_loop():
+    """Enable cross-thread revision bumps to schedule WebSocket REFRESH_NOW."""
+    core_data.register_main_event_loop(asyncio.get_running_loop())
+
+
+def _ws_token_from_cookie(ws: WebSocket) -> Optional[str]:
+    raw = ws.cookies.get(COOKIE_NAME)
+    if raw and raw.startswith("Bearer "):
+        return raw[7:]
+    return raw
+
 
 # --- Auth Routes ---
 @app.get("/login", response_class=HTMLResponse)
@@ -462,17 +488,18 @@ async def chat_stream_endpoint(
             
             async for chunk in process_chat_with_graph_stream(enhanced_message, image_paths=image_paths if image_paths else None):
                 full_response.append(chunk)
-                # SSE format: event: chunk\ndata: {chunk}\n\n
-                yield f"event: chunk\ndata: {json.dumps({'chunk': chunk})}\n\n"
+                # SSE: UI accepts `text` (preferred) or `chunk`; ensure_ascii=False for Indonesian / markdown
+                payload = json.dumps({"text": chunk, "chunk": chunk}, ensure_ascii=False)
+                yield f"event: chunk\ndata: {payload}\n\n"
             
             # Send completion event
             response_text = "".join(full_response)
             chat_history.add_message("web", "assistant", response_text)
-            yield f"event: complete\ndata: {json.dumps({'response': response_text})}\n\n"
+            yield f"event: complete\ndata: {json.dumps({'response': response_text}, ensure_ascii=False)}\n\n"
             
         except Exception as e:
             logger.exception(f"Error in streaming endpoint: {e}")
-            yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
+            yield f"event: error\ndata: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
     
     return StreamingResponse(
         event_generator(),
@@ -852,55 +879,50 @@ async def reminder_dashboard():
     """Serve the reminder dashboard."""
     return FileResponse(os.path.join(WEB_DIR, "templates", "reminder.html"))
 
-@app.post("/api/reminders/add")
-async def add_reminder(
-    event_name: str = Form(""),
-    event_time: str = Form(""),
-    description: str = Form(""),
-    source: str = Form("web")
-):
-    """Add a new reminder."""
-    if not event_name or not event_time:
-        return {"success": False, "error": "Event name and time are required."}
-    
-    reminder_id = reminder_db.add_reminder(
-        event_name=event_name,
-        event_time=event_time,
-        description=description,
-        source=source
-    )
-    
-    # Format confirmation
-    from datetime import datetime
-    try:
-        dt = datetime.fromisoformat(event_time)
-        time_str = dt.strftime("%A, %d %B %Y pukul %H:%M WIB")
-    except:
-        time_str = event_time
-    
-    return {
-        "success": True,
-        "reminder_id": reminder_id,
-        "confirmation": f"Reminder '{event_name}' set for {time_str}."
-    }
-
 @app.get("/api/reminders/upcoming")
 async def get_upcoming_reminders():
     """Get upcoming reminders."""
-    reminders = reminder_db.get_upcoming_reminders()
+    reminders = reminder_service.get_upcoming_reminders()
     return {"status": "success", "reminders": reminders}
 
 @app.get("/api/reminders/history")
 async def get_reminder_history():
-    """Get reminder history."""
-    reminders = reminder_db.get_reminder_history()
+    """Get reminder history (read-only)."""
+    reminders = reminder_service.get_reminder_history()
+    logger.debug(
+        "api reminders/history: returning %s rows (revision=%s)",
+        len(reminders),
+        reminder_service.get_data_revision(),
+    )
     return {"status": "success", "reminders": reminders}
 
 @app.get("/api/reminders/stats")
 async def get_reminder_stats():
     """Get reminder statistics."""
-    stats = reminder_db.get_reminder_stats()
+    stats = reminder_service.get_reminder_stats()
     return {"status": "success", "stats": stats}
+
+@app.get("/api/dashboard/data-revision")
+async def dashboard_data_revision():
+    """Cross-worker revision from SQLite (fallback if WebSocket disconnects)."""
+    return {"status": "success", "revision": core_data.get_data_revision()}
+
+
+@app.websocket("/ws/dashboard")
+async def dashboard_sync_websocket(websocket: WebSocket):
+    """Push REFRESH_NOW when data_revision bumps (same cookie auth as dashboards)."""
+    token = _ws_token_from_cookie(websocket)
+    if not validate_token(token):
+        await websocket.close(code=4401)
+        return
+    await dashboard_broadcast.connect(websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await dashboard_broadcast.disconnect(websocket)
 
 @app.get("/api/reminders/notifications")
 async def get_pending_notifications():
@@ -908,9 +930,9 @@ async def get_pending_notifications():
     notifications = []
     
     # Check 10-minute warnings
-    ten_min_reminders = reminder_db.get_reminders_needing_10m_notification()
+    ten_min_reminders = reminder_service.get_reminders_needing_10m_notification()
     for r in ten_min_reminders:
-        reminder_db.mark_notified_10m(r['id'])
+        reminder_service.mark_notified_10m(r['id'])
         notifications.append({
             "type": "warning",
             "message": f"Persiapan Master, 10 menit lagi event '{r['event_name']}'.",
@@ -918,9 +940,9 @@ async def get_pending_notifications():
         })
     
     # Check event-time notifications
-    event_reminders = reminder_db.get_reminders_needing_event_notification()
+    event_reminders = reminder_service.get_reminders_needing_event_notification()
     for r in event_reminders:
-        reminder_db.mark_notified_event(r['id'])
+        reminder_service.mark_notified_event(r['id'])
         notifications.append({
             "type": "urgent",
             "message": f"Waktunya event '{r['event_name']}' dimulai, Master!",
@@ -928,12 +950,6 @@ async def get_pending_notifications():
         })
     
     return {"status": "success", "notifications": notifications}
-
-@app.delete("/api/reminders/{reminder_id}")
-async def delete_reminder(reminder_id: int):
-    """Delete a reminder."""
-    reminder_db.delete_reminder(reminder_id)
-    return {"status": "success", "message": "Reminder deleted."}
 
 # --- Daily Habits Routes ---
 @app.get("/habits", response_class=HTMLResponse)
@@ -943,110 +959,21 @@ async def habits_dashboard():
 
 @app.get("/api/habits")
 async def get_habits():
-    """Get all daily habits."""
-    habits = daily_habits_db.get_all_habits()
+    """Get all daily habits (Pydantic-validated; same data path as Telegram/schedulers)."""
+    habits = core_data.list_habits_validated()
     return {"status": "success", "habits": habits}
-
-@app.post("/api/habits/add")
-async def add_habit(
-    title: str = Form(""),
-    scheduled_time: str = Form(""),
-    category: str = Form("General")
-):
-    """Add a new daily habit."""
-    if not title or not scheduled_time:
-        return {"success": False, "error": "Title and scheduled time are required."}
-    
-    habit_id = daily_habits_db.add_habit(title, scheduled_time, category)
-    return {"success": True, "habit_id": habit_id}
-
-@app.post("/api/habits/{habit_id}/done")
-async def mark_habit_done(habit_id: int):
-    """Mark a habit as done for today."""
-    success = daily_habits_db.mark_habit_done(habit_id)
-    if success:
-        # Send Telegram notification
-        habit = daily_habits_db.get_all_habits()
-        habit = next((h for h in habit if h['id'] == habit_id), None)
-        if habit:
-            send_telegram_reminder_notification(f"✅ Habit '{habit['title']}' selesai hari ini, Master!")
-    return {"success": success}
-
-@app.post("/api/habits/{habit_id}/undo")
-async def undo_habit(habit_id: int):
-    """Undo a habit (mark as pending)."""
-    daily_habits_db.mark_habit_undone(habit_id)
-    return {"success": True}
-
-@app.delete("/api/habits/{habit_id}")
-async def delete_habit(habit_id: int):
-    """Delete a habit."""
-    daily_habits_db.delete_habit(habit_id)
-    return {"status": "success", "message": "Habit deleted."}
 
 @app.get("/api/habits/stats")
 async def get_habits_stats():
     """Get today's habit completion stats."""
-    stats = daily_habits_db.get_completion_stats()
+    stats = core_data.get_completion_stats_validated()
     return {"status": "success", "stats": stats}
 
 @app.get("/api/habits/report")
 async def get_end_of_day_report():
     """Get end-of-day narrative report."""
-    report = daily_habits_db.get_end_of_day_report()
+    report = core_data.get_end_of_day_report()
     return {"status": "success", "report": report}
-
-@app.post("/api/habits/toggle")
-async def toggle_habit_day(
-    habit_id: int = Form(...),
-    date: str = Form(...),
-    status: str = Form("1")
-):
-    """V2.0 FIX: Toggle habit status for a specific date."""
-    import sqlite3
-    try:
-        from datetime import datetime
-        from calendar import monthrange
-        target_date = datetime.fromisoformat(date).date()
-        new_status = int(status)
-        
-        conn = sqlite3.connect(daily_habits_db.HABITS_DB)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            INSERT INTO habit_logs (habit_id, log_date, status)
-            VALUES (?, ?, ?)
-            ON CONFLICT(habit_id, log_date) DO UPDATE SET status = ?
-        """, (habit_id, date, new_status, new_status))
-        
-        if new_status == 1:
-            cursor.execute("""
-                INSERT OR IGNORE INTO completion_history (habit_id, completed_date, completed_at)
-                VALUES (?, ?, ?)
-            """, (habit_id, date, datetime.now().isoformat()))
-        else:
-            cursor.execute("""
-                DELETE FROM completion_history WHERE habit_id = ? AND completed_date = ?
-            """, (habit_id, date))
-        
-        conn.commit()
-        conn.close()
-        
-        # Invalidate AI evaluation cache
-        year = target_date.year
-        month = target_date.month
-        _, days_in_month = monthrange(year, month)
-        period_start = f"{year}-{month:02d}-01"
-        period_end = f"{year}-{month:02d}-{days_in_month:02d}"
-        try:
-            daily_habits_db.save_ai_evaluation(None, 'monthly', period_start, period_end, 0, '')
-        except:
-            pass
-        
-        return {"success": True, "message": f"Habit toggled to {'done' if new_status else 'missed'}"}
-    except Exception as e:
-        logger.error(f"Error toggling habit: {e}")
-        return {"success": False, "error": str(e)}
 
 # --- V2.0: Monthly/Weekly Analytics Endpoints ---
 
@@ -1060,7 +987,7 @@ async def get_monthly_habits(year: int = None, month: int = None):
         month = today.month
     
     try:
-        data = daily_habits_db.get_monthly_data(year, month)
+        data = core_data.get_monthly_data_validated(year, month)
         return {"status": "success", "data": data}
     except Exception as e:
         logger.error(f"Error getting monthly data: {e}")
@@ -1076,112 +1003,64 @@ async def get_weekly_habits(year: int = None, week: int = None):
         week = today.isocalendar()[1]
     
     try:
-        data = daily_habits_db.get_weekly_data(year, week)
+        data = core_data.get_weekly_data_validated(year, week)
         return {"status": "success", "data": data}
     except Exception as e:
         logger.error(f"Error getting weekly data: {e}")
         return {"status": "error", "message": str(e)}
 
-@app.post("/api/habits/evaluate")
-async def generate_habit_evaluation(request: Request):
-    """V2.0: Generate AI evaluation for monthly/weekly habit data using Gemini 3."""
-    from google import genai
-    from google.genai import types
-    from google.genai.errors import APIError, ClientError
-    import json
-    
+
+@app.get("/api/habits/evaluation-cached")
+async def get_habits_evaluation_cached(period_type: str, year: int, period: int):
+    """Read-only: cached aggregate AI evaluation for a month or ISO week (if any)."""
+    rev_headers = {
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+        "X-Data-Revision": str(core_data.get_data_revision()),
+    }
     try:
-        body = await request.json()
-        period_type = body.get('period_type', 'monthly')  # 'monthly' or 'weekly'
-        year = body.get('year')
-        period = body.get('period')  # month number or week number
-        
-        if not year or not period:
-            return {"status": "error", "message": "Year and period are required"}
-        
-        # Get report data
-        if period_type == 'monthly':
-            report_data = daily_habits_db.get_monthly_report_data(year, period)
+        if period_type == "monthly":
+            meta = core_data.get_monthly_report_data(year, period)
+        elif period_type == "weekly":
+            meta = core_data.get_weekly_report_data(year, period)
         else:
-            report_data = daily_habits_db.get_weekly_report_data(year, period)
-        
-        # Check cache first
-        cached = daily_habits_db.get_ai_evaluation(
-            None, period_type, report_data['period_start'], report_data['period_end']
-        )
-        if cached:
-            return {
-                "status": "success",
-                "evaluation": cached['evaluation_text'],
-                "score": cached['overall_score'],
-                "cached": True
-            }
-        
-        # Generate AI evaluation using Gemini 3
-        gemini_client = genai.Client(api_key=settings.GEMINI_API_KEY)
-        
-        prompt = f"""Kamu adalah Kuro, asisten dan mentor kedisiplinan yang sangat logis dan agak perfeksionis. Evaluasi data habit bulan/minggu ini.
-
-DATA HABIT {period_type.upper()}:
-{json.dumps(report_data, indent=2, ensure_ascii=False)}
-
-INSTRUKSI:
-1. Jika overall score atau ada habit di bawah 90%, tegur (scold) dengan tegas namun logis. Jelaskan dampak nyata dari kemalasan tersebut terhadap tujuan jangka panjang (misal: jarang gym merusak progres hipertrofi otot, jarang belajar IT menurunkan daya saing).
-2. Jika di atas 90%, berikan pujian layaknya raport sekolah yang memuaskan.
-3. Format response dengan paragraf pendek dan gunakan gaya bahasa mentor profesional.
-4. Gunakan bahasa Indonesia yang profesional namun mengalir.
-5. Berikan analisis per-habit yang spesifik.
-6. Akhiri dengan motivasi untuk periode berikutnya.
-
-EVALUASI:"""
-        
-        response = gemini_client.models.generate_content(
-            model="gemini-3-flash-preview",
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                temperature=0.7,
-                max_output_tokens=2000
+            return JSONResponse(
+                status_code=400,
+                content={"status": "error", "message": "period_type must be monthly or weekly"},
+                headers=rev_headers,
             )
+        row = core_data.get_ai_evaluation(
+            None,
+            meta["period_type"],
+            meta["period_start"],
+            meta["period_end"],
         )
-        
-        evaluation_text = response.text
-        
-        # Save to cache
-        overall_score = float(report_data['overall_score'].replace('%', ''))
-        daily_habits_db.save_ai_evaluation(
-            None, period_type,
-            report_data['period_start'], report_data['period_end'],
-            overall_score, evaluation_text
+        text = (row or {}).get("evaluation_text") or ""
+        if not row or not str(text).strip():
+            return JSONResponse(
+                content={"status": "success", "cached": False},
+                headers=rev_headers,
+            )
+        rec = AiEvaluationRecord.model_validate(dict(row))
+        return JSONResponse(
+            content={
+                "status": "success",
+                "cached": True,
+                "evaluation": text,
+                "score": rec.overall_score,
+                "period_start": meta["period_start"],
+                "period_end": meta["period_end"],
+            },
+            headers=rev_headers,
         )
-        
-        return {
-            "status": "success",
-            "evaluation": evaluation_text,
-            "score": report_data['overall_score'],
-            "cached": False
-        }
-        
     except Exception as e:
-        logger.error(f"Error generating habit evaluation: {e}")
-        return {"status": "error", "message": str(e)}
+        logger.error("evaluation-cached failed: %s", e)
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "message": str(e)},
+            headers=rev_headers,
+        )
 
-@app.put("/api/habits/{habit_id}")
-async def update_habit_endpoint(habit_id: int, request: Request):
-    """V2.0: Update habit settings including targets."""
-    try:
-        body = await request.json()
-        daily_habits_db.update_habit(
-            habit_id,
-            title=body.get('title'),
-            scheduled_time=body.get('scheduled_time'),
-            category=body.get('category'),
-            target_per_month=body.get('target_per_month'),
-            target_per_week=body.get('target_per_week')
-        )
-        return {"status": "success", "message": "Habit updated"}
-    except Exception as e:
-        logger.error(f"Error updating habit: {e}")
-        return {"status": "error", "message": str(e)}
 
 # --- Persona API Endpoint ---
 @app.post("/api/persona")
@@ -1351,18 +1230,18 @@ def check_reminder_notifications():
     """Check and send notifications for due reminders."""
     try:
         # 10-minute warnings
-        ten_min_reminders = reminder_db.get_reminders_needing_10m_notification()
+        ten_min_reminders = reminder_service.get_reminders_needing_10m_notification()
         for r in ten_min_reminders:
-            reminder_db.mark_notified_10m(r['id'])
+            reminder_service.mark_notified_10m(r['id'])
             msg = f"⏰ Persiapan Master, 10 menit lagi event '{r['event_name']}'."
             logger.info(f"Reminder notification (10m): {r['event_name']}")
             # Send to Telegram if source is telegram or always
             send_telegram_reminder_notification(msg)
         
         # Event-time notifications
-        event_reminders = reminder_db.get_reminders_needing_event_notification()
+        event_reminders = reminder_service.get_reminders_needing_event_notification()
         for r in event_reminders:
-            reminder_db.mark_notified_event(r['id'])
+            reminder_service.mark_notified_event(r['id'])
             msg = f"🔔 Waktunya event '{r['event_name']}' dimulai, Master!"
             logger.info(f"Reminder notification (event): {r['event_name']}")
             send_telegram_reminder_notification(msg)
@@ -1372,7 +1251,7 @@ def check_reminder_notifications():
 def recover_pending_reminders():
     """Recovery protocol: Load and report pending reminders on startup."""
     try:
-        pending = reminder_db.get_pending_reminders()
+        pending = reminder_service.get_pending_reminders()
         if pending:
             logger.info(f"Recovery: Found {len(pending)} pending reminders on startup.")
             for r in pending:
@@ -1395,7 +1274,7 @@ def send_telegram_reminder_notification(message: str):
 def send_end_of_day_report():
     """Send end-of-day habit report at 8 PM."""
     try:
-        report = daily_habits_db.get_end_of_day_report()
+        report = core_data.get_end_of_day_report()
         send_telegram_reminder_notification(f"📊 Laporan Harian:\n\n{report}")
         logger.info("End-of-day habit report sent.")
     except Exception as e:
@@ -1508,8 +1387,8 @@ def reset_daily_habits():
         today = datetime.now().strftime('%Y-%m-%d')
         logger.info(f"--- END OF LOG FOR {today} - ROTATING NOW ---")
         
-        # Reset habits
-        daily_habits_db.reset_all_habits()
+        # Reset habits (single write gateway)
+        reminder_service.reset_all_habits()
         logger.info("Daily habits reset for new day.")
         
         # Run artifact cleanup

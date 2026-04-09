@@ -91,12 +91,29 @@ def get_history(limit: int = 50, offset: int = 0, platform: str = None) -> List[
         
         history = []
         for row in rows:
+            raw_att = row["attachments"]
+            try:
+                attachments = json.loads(raw_att) if raw_att else []
+                if not isinstance(attachments, list):
+                    logger.warning(
+                        "chat_history attachments not a list id=%s raw=%r",
+                        row["id"],
+                        raw_att,
+                    )
+                    attachments = []
+            except json.JSONDecodeError:
+                logger.warning(
+                    "chat_history attachments JSON decode failed id=%s raw=%r",
+                    row["id"],
+                    raw_att,
+                )
+                attachments = []
             history.append({
                 "id": row["id"],
                 "platform": row["platform"],
                 "role": row["role"],
                 "content": row["content"],
-                "attachments": json.loads(row["attachments"]),
+                "attachments": attachments,
                 "timestamp": row["timestamp"]
             })
         

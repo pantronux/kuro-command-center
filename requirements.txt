@@ -20,6 +20,7 @@ passlib[bcrypt]
 langgraph
 langchain-google-genai
 langchain-core
+nemoguardrails>=0.21.0,<0.22
 arize-phoenix
 opentelemetry-sdk
 opentelemetry-exporter-otlp

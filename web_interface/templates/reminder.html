@@ -144,7 +144,10 @@
                     </button>
                     <h2 class="text-xl font-semibold text-gray-800 dark:text-white">Reminders</h2>
                 </div>
-                <div class="flex items-center gap-3">
+                <div class="flex items-center gap-3 flex-wrap justify-end">
+                    <span id="dashboard-mode-label" class="text-xs font-medium px-3 py-1.5 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">
+                        View only — add or edit via Kuro chat
+                    </span>
                     <button id="darkModeToggle" class="p-2 rounded-xl bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-all duration-300">
                         <i data-lucide="sun" class="w-5 h-5 text-gray-600 dark:hidden"></i>
                         <i data-lucide="moon" class="w-5 h-5 text-gray-300 hidden dark:block"></i>
@@ -175,33 +178,17 @@
                 </div>
 
                 <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    <!-- Add Reminder Form -->
-                    <div class="glass-panel rounded-xl p-6">
-                        <h2 class="text-lg font-semibold text-gray-800 dark:text-white mb-4 flex items-center">
-                            <i data-lucide="plus-circle" class="w-5 h-5 mr-2 text-emerald-500"></i> Add New Reminder
+                    <!-- Read-only info -->
+                    <div class="glass-panel rounded-xl p-6 border border-emerald-500/20">
+                        <h2 class="text-lg font-semibold text-gray-800 dark:text-white mb-3 flex items-center">
+                            <i data-lucide="info" class="w-5 h-5 mr-2 text-emerald-500"></i> How this page works
                         </h2>
-                        <form id="add-reminder-form" class="space-y-4">
-                            <div>
-                                <label class="block text-sm text-gray-600 dark:text-gray-400 mb-1">Event Name</label>
-                                <input type="text" id="event-name" placeholder="e.g., Audit Medco"
-                                       class="w-full bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg px-4 py-2 text-gray-800 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-emerald-500">
-                            </div>
-                            <div>
-                                <label class="block text-sm text-gray-600 dark:text-gray-400 mb-1">Date & Time</label>
-                                <input type="datetime-local" id="event-time"
-                                       class="w-full bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg px-4 py-2 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500">
-                            </div>
-                            <div>
-                                <label class="block text-sm text-gray-600 dark:text-gray-400 mb-1">Description (Optional)</label>
-                                <textarea id="event-desc" rows="3" placeholder="Additional details..."
-                                          class="w-full bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg px-4 py-2 text-gray-800 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none"></textarea>
-                            </div>
-                            <button type="submit"
-                                    class="w-full bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white px-4 py-2 rounded-lg font-medium transition">
-                                Set Reminder
-                            </button>
-                        </form>
-                        <div id="form-response" class="mt-4 hidden"></div>
+                        <p class="text-sm text-gray-600 dark:text-gray-400 leading-relaxed">
+                            Reminders are created and updated only through Kuro (web chat or Telegram). This dashboard refreshes automatically when data changes.
+                        </p>
+                        <p class="text-xs text-gray-500 dark:text-gray-500 mt-4">
+                            Sync: data revision <span id="data-revision-display" class="font-mono">—</span>
+                        </p>
                     </div>
 
                     <!-- Upcoming Reminders -->
@@ -232,19 +219,67 @@
     <div id="toast-container" class="fixed top-4 right-4 z-50 space-y-2"></div>
 
     <script>
-        // Load reminders on page load
+        let lastDataRevision = null;
+        let dashboardWs = null;
+
+        async function refreshAllReminderViews() {
+            await Promise.all([loadStats(), loadUpcoming(), loadHistory()]);
+        }
+
+        async function onDashboardSyncPush(revision) {
+            if (revision != null) lastDataRevision = revision;
+            const el = document.getElementById('data-revision-display');
+            if (el && revision != null) el.textContent = String(revision);
+            await refreshAllReminderViews();
+        }
+
+        function connectDashboardWS() {
+            const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+            const url = proto + '://' + location.host + '/ws/dashboard';
+            try {
+                dashboardWs = new WebSocket(url);
+            } catch (e) {
+                console.warn('WebSocket unavailable', e);
+                return;
+            }
+            dashboardWs.onmessage = async (ev) => {
+                try {
+                    const msg = JSON.parse(ev.data);
+                    if (msg.type === 'REFRESH_NOW') await onDashboardSyncPush(msg.revision);
+                } catch (e) { console.warn('dashboard ws message', e); }
+            };
+            dashboardWs.onclose = () => {
+                dashboardWs = null;
+                setTimeout(connectDashboardWS, 2000);
+            };
+            dashboardWs.onerror = () => { try { dashboardWs.close(); } catch (e) {} };
+        }
+
+        async function pollDataRevision() {
+            try {
+                const response = await fetch('/api/dashboard/data-revision', { credentials: 'include' });
+                const data = await response.json();
+                const rev = data.revision;
+                const el = document.getElementById('data-revision-display');
+                if (el) el.textContent = rev != null ? String(rev) : '—';
+                if (lastDataRevision !== null && rev !== lastDataRevision) {
+                    await refreshAllReminderViews();
+                }
+                lastDataRevision = rev;
+            } catch (err) {
+                console.error('data-revision poll failed:', err);
+            }
+        }
+
         document.addEventListener('DOMContentLoaded', () => {
             lucide.createIcons();
             loadTheme();
-            loadStats();
-            loadUpcoming();
-            loadHistory();
-            
-            // Refresh every 30 seconds
-            setInterval(() => {
-                loadStats();
-                loadUpcoming();
-            }, 30000);
+            connectDashboardWS();
+            refreshAllReminderViews();
+            pollDataRevision();
+
+            setInterval(refreshAllReminderViews, 30000);
+            setInterval(pollDataRevision, 25000);
         });
 
         function loadTheme() {
@@ -254,55 +289,6 @@
             } else {
                 document.documentElement.classList.remove('dark');
             }
-        }
-
-        // Add reminder form
-        document.getElementById('add-reminder-form').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            
-            const eventName = document.getElementById('event-name').value.trim();
-            const eventTime = document.getElementById('event-time').value;
-            const eventDesc = document.getElementById('event-desc').value.trim();
-            
-            if (!eventName || !eventTime) {
-                showFormResponse('Please fill in event name and time.', 'error');
-                return;
-            }
-            
-            try {
-                const formData = new FormData();
-                formData.append('event_name', eventName);
-                formData.append('event_time', eventTime);
-                formData.append('description', eventDesc);
-                formData.append('source', 'web');
-                
-                const response = await fetch('/api/reminders/add', {
-                    method: 'POST',
-                    body: formData,
-                    credentials: 'include'
-                });
-                
-                const data = await response.json();
-                
-                if (data.success) {
-                    showFormResponse(data.confirmation || 'Reminder added successfully!', 'success');
-                    document.getElementById('add-reminder-form').reset();
-                    loadStats();
-                    loadUpcoming();
-                } else {
-                    showFormResponse(data.error || 'Failed to add reminder.', 'error');
-                }
-            } catch (err) {
-                showFormResponse('Error: ' + err.message, 'error');
-            }
-        });
-
-        function showFormResponse(message, type) {
-            const el = document.getElementById('form-response');
-            el.classList.remove('hidden');
-            el.className = `mt-4 p-3 rounded-lg ${type === 'success' ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300' : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'}`;
-            el.textContent = message;
-            setTimeout(() => el.classList.add('hidden'), 5000);
         }
 
         async function loadStats() {
@@ -339,7 +325,7 @@
                     const diff = eventTime - now;
                     const countdown = formatCountdown(diff);
                     const statusColor = getStatusColor(r.status);
-                    const hasContext = r.context && r.context.length > 0;
+                    const hasContext = reminderHasContext(r.context);
                     
                     return `
                         <div class="reminder-card glass-panel rounded-xl p-4 border-l-4 ${statusColor}">
@@ -392,6 +378,13 @@
             } catch (err) {
                 console.error('Failed to load history:', err);
             }
+        }
+
+        function reminderHasContext(ctx) {
+            if (ctx == null || ctx === '') return false;
+            if (typeof ctx === 'string') return ctx.length > 0;
+            if (typeof ctx === 'object') return Object.keys(ctx).length > 0;
+            return false;
         }
 
         function formatCountdown(diffMs) {

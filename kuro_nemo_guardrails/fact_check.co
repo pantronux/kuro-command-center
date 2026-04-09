@@ -1,0 +1,7 @@
+# Selective grounding: when $should_fact_check is True, require Chroma/compliance memory support.
+flow sniper fact gate
+  if $should_fact_check == True
+    $ok = await SniperMemoryGroundingCheckAction
+    if not $ok
+      bot say $factual_refusal_message
+      abort

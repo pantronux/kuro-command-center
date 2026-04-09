@@ -1,0 +1,6 @@
+# Content safety: LLM self-check on input, skipped for personal habit/report context.
+import nemoguardrails.library.self_check.input_check
+
+flow sniper content safety input
+  if $is_habit_report != True
+    self check input

@@ -1,0 +1,2 @@
+flow sub a
+  bot say "a"

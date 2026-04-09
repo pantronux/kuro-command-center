@@ -13,7 +13,7 @@ import json
 import re
 import uuid
 import time
-from typing import TypedDict, List, Optional, Dict, Any, Annotated, AsyncGenerator
+from typing import TypedDict, List, Optional, Dict, Any, Annotated, AsyncGenerator, Iterator
 from datetime import datetime
 
 # LangGraph imports
@@ -24,10 +24,12 @@ from langgraph.checkpoint.memory import MemorySaver
 from kuro_backend.config import settings, PRIMARY_MODEL
 from kuro_backend import memory_manager
 from kuro_backend import chat_history
-from kuro_backend import daily_habits_db
+from kuro_backend.services import core_service as core_data
+from kuro_backend import habit_service
 from kuro_backend import tools as kuro_tools
 from kuro_backend import perpetual_memory
 from kuro_backend import observability
+from kuro_backend.guardrails import sniper_pipeline
 
 logger = logging.getLogger(__name__)
 logger.propagate = False  # Prevent double-reporting to root logger
@@ -371,11 +373,14 @@ def habit_node(state: KuroState) -> Dict[str, Any]:
     
     with observability.trace_node("habit_node", trace_attrs) as span:
         # Get all habits
-        habits = daily_habits_db.get_all_habits()
+        habits = core_data.get_all_habits()
         
         # Get today's stats
-        stats = daily_habits_db.get_completion_stats()
+        stats = core_data.get_completion_stats()
         
+        sqlite_snapshot = habit_service.fetch_sqlite_habit_snapshot(days=30)
+        habit_service.log_snapshot_debug(sqlite_snapshot)
+
         # Check if user is asking for evaluation
         is_evaluation_request = any(kw in user_input for kw in ["evaluasi", "evaluation", "raport", "report", "laporan"])
         
@@ -383,7 +388,9 @@ def habit_node(state: KuroState) -> Dict[str, Any]:
             "habits": habits,
             "stats": stats,
             "is_evaluation_request": is_evaluation_request,
-            "evaluation_text": ""
+            "evaluation_text": "",
+            "from_sqlite": True,
+            "sqlite_snapshot_empty_activity": habit_service.snapshot_has_no_positive_activity(sqlite_snapshot),
         }
         
         # If evaluation requested, generate AI evaluation
@@ -396,28 +403,16 @@ def habit_node(state: KuroState) -> Dict[str, Any]:
                 
                 # Get monthly data for evaluation
                 today = datetime.now()
-                monthly_data = daily_habits_db.get_monthly_report_data(today.year, today.month)
+                monthly_data = core_data.get_monthly_report_data(today.year, today.month)
                 
-                prompt = f"""Kamu adalah Kuro, asisten dan mentor kedisiplinan yang sangat logis dan agak perfeksionis. Evaluasi data habit bulan ini.
-
-DATA HABIT BULAN INI:
-{json.dumps(monthly_data, indent=2, ensure_ascii=False)}
-
-INSTRUKSI:
-1. Jika overall score atau ada habit di bawah 90%, tegur (scold) dengan tegas namun logis.
-2. Jika di atas 90%, berikan pujian layaknya raport sekolah yang memuaskan.
-3. Format response dengan paragraf pendek dan gunakan gaya bahasa mentor profesional.
-4. Gunakan bahasa Indonesia yang profesional namun mengalir.
-5. Berikan analisis per-habit yang spesifik.
-6. Akhiri dengan motivasi untuk periode berikutnya.
-
-EVALUASI:"""
+                eval_user_prompt = habit_service.build_monthly_eval_user_prompt(monthly_data)
                 
                 response = client.models.generate_content(
                     model=PRIMARY_MODEL,
-                    contents=prompt,
+                    contents=eval_user_prompt,
                     config=types.GenerateContentConfig(
-                        temperature=0.7,
+                        system_instruction=habit_service.STRICT_HABIT_NARRATIVE_INSTRUCTION,
+                        temperature=0.35,
                         max_output_tokens=2000
                     )
                 )
@@ -499,16 +494,15 @@ def response_node(state: KuroState) -> Dict[str, Any]:
                 compliance_context += f"{i}. [{ref['iso_name']}] Klausul: {ref['clauses']}\n{ref['content'][:300]}\n\n"
             message_parts.append(compliance_context)
         
-        # Add habit context if available
-        if habit_data and habit_data.get("habits"):
-            habit_context = "\n\n[HABIT STATUS]\n"
-            stats = habit_data.get("stats", {})
-            habit_context += f"Completion Rate: {stats.get('completion_rate', 'N/A')}\n"
-            
-            if habit_data.get("evaluation_text"):
-                habit_context += f"\nAI Evaluation:\n{habit_data['evaluation_text']}\n"
-            
-            message_parts.append(habit_context)
+        # Habit grounding: must run for habit_node path even when habits=[] (avoid Tier-1 hallucinations)
+        if habit_data.get("from_sqlite"):
+            snap = habit_service.fetch_sqlite_habit_snapshot(days=30)
+            habit_service.log_snapshot_debug(snap, prefix="[RESPONSE]")
+            habit_block = habit_service.format_habit_block_for_llm(
+                snap,
+                evaluation_text=habit_data.get("evaluation_text") or "",
+            )
+            message_parts.append("\n\n" + habit_block)
         
         # Add memory injection
         message_parts.append(memory_injection)
@@ -854,16 +848,81 @@ def build_kuro_graph() -> StateGraph:
 kuro_graph = build_kuro_graph()
 
 
+def _iter_sse_text_chunks(text: str, soft_limit: int = 56) -> Iterator[str]:
+    """
+    Split assistant text for SSE after guardrails. Prefer word boundaries so the web UI
+    does not run marked.parse on half-open markdown tokens (empty / broken bubbles).
+    """
+    if not text:
+        return
+    if not text.strip():
+        yield text
+        return
+    buf: List[str] = []
+    size = 0
+    for m in re.finditer(r"\S+\s*", text):
+        w = m.group(0)
+        if len(w) > soft_limit:
+            if buf:
+                yield "".join(buf)
+                buf = []
+                size = 0
+            for i in range(0, len(w), soft_limit):
+                yield w[i : i + soft_limit]
+            continue
+        if size + len(w) > soft_limit and buf:
+            yield "".join(buf)
+            buf = []
+            size = 0
+        buf.append(w)
+        size += len(w)
+    if buf:
+        yield "".join(buf)
+
+
+def _sync_stream_collect_final_response(initial_state: Dict[str, Any], config: Dict[str, Any]) -> str:
+    """Run sync LangGraph stream in a worker thread (keeps asyncio event loop free for SSE)."""
+    raw: Optional[str] = None
+    for event in kuro_graph.stream(initial_state, config=config, stream_mode="updates"):
+        for node_name, node_output in event.items():
+            if node_name != "response_node":
+                continue
+            text = (node_output or {}).get("final_response")
+            if text is None:
+                continue
+            s = str(text)
+            if s.strip():
+                raw = s
+            elif raw is None:
+                raw = s
+    return raw if raw is not None else ""
+
+
+def _split_head_for_early_flush(text: str) -> tuple[str, str]:
+    """First sentence or first line first, so SSE can flush before chunking the rest."""
+    if not text:
+        return "", ""
+    head_cap = min(len(text), 1200)
+    head_candidate = text[:head_cap]
+    m = re.search(r"(?<=[.!?。！？])\s+", head_candidate)
+    if m:
+        end = m.end()
+        return text[:end], text[end:]
+    nl = text.find("\n")
+    if nl != -1:
+        return text[: nl + 1], text[nl + 1 :]
+    return "", text
+
+
 # ============================================
 # ASYNC STREAMING ENTRY POINT (Project Quicksilver V5.1)
 # ============================================
 
 async def process_chat_with_graph_stream(message: str, image_paths: list = None) -> AsyncGenerator[str, None]:
     """
-    V5.2 ASYNC STREAMING: Process chat message with token streaming via SSE.
-    Uses LangGraph's astream() for node-by-node streaming.
-    FIX: ONLY yields from response_node to eliminate triple bubbles.
-    All other nodes (supervisor, memory_retrieval, compliance, habit, tool, memory_extraction) are silently skipped.
+    V5.3 STREAMING: Graph runs in asyncio.to_thread (sync stream) so the event loop can serve SSE.
+    Sniper input/output checks use async wrappers (Gemini/NeMo in thread pool).
+    After postprocess, first sentence/line is yielded once with flush, then word-chunked tail.
     
     Args:
         message: User message
@@ -874,9 +933,15 @@ async def process_chat_with_graph_stream(message: str, image_paths: list = None)
     """
     session_id = str(uuid.uuid4())
     full_response = []
-    response_yielded = False  # Track if we already yielded a response
-    
+    response_text = ""
+
     try:
+        blocked = await sniper_pipeline.sniper_validate_and_maybe_block_input_async(message)
+        if blocked:
+            logger.debug("[SNIPER] Input blocked before graph invoke (stream)")
+            yield blocked
+            return
+
         persona_mode = memory_manager.get_active_persona()
         
         initial_state = {
@@ -899,49 +964,50 @@ async def process_chat_with_graph_stream(message: str, image_paths: list = None)
         thread_id = f"kuro_stream_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{session_id[:8]}"
         config = {"configurable": {"thread_id": thread_id}}
         
-        logger.info(f"[LANGGRAPH_STREAM] Invoking graph with streaming for message: {message[:50]}...")
-        
-        # Use astream for node-by-node streaming
-        async for event in kuro_graph.astream(initial_state, config=config, stream_mode="updates"):
-            # event is a dict: {node_name: node_output}
-            for node_name, node_output in event.items():
-                logger.debug(f"[LANGGRAPH_STREAM] Node '{node_name}' completed (silent)")
-                
-                # CRITICAL: ONLY yield from response_node, ignore ALL other nodes
-                # This eliminates triple bubbles by filtering out:
-                # - supervisor_node (routing decision)
-                # - memory_retrieval_node (Mem0 search)
-                # - compliance_node (RAG search)
-                # - habit_node (habit tracking)
-                # - tool_node (file operations)
-                # - memory_extraction_node (personal info extraction)
-                if node_name == "response_node" and not response_yielded:
-                    response_text = node_output.get("final_response", "")
-                    
-                    if response_text:
-                        response_yielded = True
-                        # OPTIMIZED: Stream in chunks of 10 chars for faster response on 4GB RAM VM
-                        chunk_size = 10
-                        for i in range(0, len(response_text), chunk_size):
-                            chunk = response_text[i:i+chunk_size]
-                            full_response.append(chunk)
-                            yield chunk
-                            # Minimal delay - frontend handles typewriter effect
-                            await asyncio.sleep(0.001)
-                        logger.info(f"[LANGGRAPH_STREAM] Yielded response: {len(response_text)} chars")
-                # NOTE: All other nodes are silently skipped - no yields
-        
-        # Store to memory after streaming (NOT chat_history - main.py handles that)
-        response_text = "".join(full_response)
+        logger.debug("[LANGGRAPH_STREAM] graph invoke (thread offload) preview=%.50s", message)
+
+        raw_model_response = await asyncio.to_thread(
+            _sync_stream_collect_final_response, initial_state, config
+        )
+        if raw_model_response is None:
+            raw_model_response = ""
+        logger.debug(
+            "[LANGGRAPH_STREAM] model bytes=%s (sniper postprocess next)",
+            len(raw_model_response),
+        )
+
+        response_text = await sniper_pipeline.sniper_postprocess_output_async(
+            message, raw_model_response
+        )
+        if response_text is None:
+            response_text = ""
+        if not str(response_text).strip():
+            response_text = (
+                "Maaf, Pantronux. Respons model kosong setelah pemeriksaan. Silakan ulangi pertanyaan."
+            )
+            logger.warning("[LANGGRAPH_STREAM] empty model text after postprocess; sent fallback bubble")
         if response_text:
-            memory_manager.add_short_term("user", message)
-            memory_manager.add_short_term("assistant", response_text)
-            memory_manager.add_long_term_v2(f"User: {message}\nKuro: {response_text}")
-            # FIX: Do NOT save to chat_history here - main.py /api/chat/stream handles it
-            # chat_history.add_message("web", "user", message)
-            # chat_history.add_message("web", "assistant", response_text)
-        
-        logger.info(f"[LANGGRAPH_STREAM] Streaming complete: {len(response_text)} chars")
+            head, tail = _split_head_for_early_flush(response_text)
+            if head:
+                full_response.append(head)
+                yield head
+                await asyncio.sleep(0)
+                chunk_iter = _iter_sse_text_chunks(tail)
+            else:
+                chunk_iter = _iter_sse_text_chunks(response_text)
+            for i, chunk in enumerate(chunk_iter):
+                full_response.append(chunk)
+                yield chunk
+                if i == 0 and not head:
+                    await asyncio.sleep(0)
+                else:
+                    await asyncio.sleep(0.012)
+            logger.debug("[LANGGRAPH_STREAM] yielded total_chars=%s", len(response_text))
+
+        # Memory: response_node already persists short/long-term; avoid duplicate writes here.
+        # chat_history: main.py /api/chat/stream adds assistant message after the generator finishes.
+
+        logger.debug("[LANGGRAPH_STREAM] streaming complete chars=%s", len(response_text))
         
     except Exception as e:
         logger.exception(f"[LANGGRAPH_STREAM] Streaming failed: {e}")
@@ -1064,9 +1130,14 @@ def process_chat_with_graph(message: str, image_paths: list = None) -> str:
     session_id = str(uuid.uuid4())
     
     try:
+        blocked = sniper_pipeline.sniper_validate_and_maybe_block_input(message)
+        if blocked:
+            logger.info("[SNIPER] Input blocked before graph invoke")
+            return blocked
+
         # Get current persona
         persona_mode = memory_manager.get_active_persona()
-        
+
         # Initialize state with session ID for observability
         initial_state = {
             "messages": [{"role": "user", "content": message}],
@@ -1084,11 +1155,11 @@ def process_chat_with_graph(message: str, image_paths: list = None) -> str:
             "requires_approval": False,
             "_session_id": session_id  # Internal field for observability
         }
-        
+
         # Create unique thread ID for persistence
         thread_id = f"kuro_session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         config = {"configurable": {"thread_id": thread_id}}
-        
+
         # Invoke graph
         logger.info(f"[LANGGRAPH] Invoking graph for message: {message[:50]}... (session: {session_id})")
         final_state = kuro_graph.invoke(initial_state, config=config)
@@ -1101,7 +1172,8 @@ def process_chat_with_graph(message: str, image_paths: list = None) -> str:
             # Fallback to original process_chat
             from kuro_backend.core import process_chat as original_process_chat
             response = original_process_chat(message, image_paths)
-        
+
+        response = sniper_pipeline.sniper_postprocess_output(message, response)
         return response
         
     except Exception as e:

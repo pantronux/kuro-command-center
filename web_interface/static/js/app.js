@@ -539,6 +539,7 @@ async function sendMessage() {
     const streamingContent = aiMessageDiv.querySelector('.streaming-content');
     let botMessage = '';
     let buffer = '';
+    let streamStarted = false;
     
     try {
         const formData = new FormData();
@@ -591,11 +592,16 @@ async function sendMessage() {
                 
                 try {
                     const data = JSON.parse(dataStr);
+                    const piece = data.text != null && data.text !== '' ? data.text : data.chunk;
                     
-                    if (eventType === 'chunk' && data.chunk) {
-                        // Chunk event: Append to the EXISTING bubble (streaming content)
-                        botMessage += data.chunk;
-                        streamingContent.innerHTML = marked.parse(botMessage);
+                    if (eventType === 'chunk' && piece != null && piece !== '') {
+                        if (!streamStarted) {
+                            removeTypingIndicator();
+                            streamStarted = true;
+                        }
+                        // Prefer plain text while streaming so half-open markdown does not blank the bubble
+                        botMessage += piece;
+                        streamingContent.textContent = botMessage;
                         elements.chatContainer.scrollTop = elements.chatContainer.scrollHeight;
                     } else if (eventType === 'complete' && data.response) {
                         // Complete event: DO NOT create a new bubble.
@@ -603,6 +609,7 @@ async function sendMessage() {
                         // The bubble already exists from the chunk events above.
                         botMessage = data.response; // Use the complete response for consistency
                         streamingContent.innerHTML = marked.parse(botMessage);
+                        streamingContent.classList.add('markdown-content');
                         hljs.highlightAll();
                         elements.chatContainer.scrollTop = elements.chatContainer.scrollHeight;
                     } else if (eventType === 'error' && data.error) {
@@ -614,7 +621,9 @@ async function sendMessage() {
             }
         }
         
-        removeTypingIndicator();
+        if (!streamStarted) {
+            removeTypingIndicator();
+        }
         
         // Final render (fallback if complete event wasn't received)
         if (botMessage) {
