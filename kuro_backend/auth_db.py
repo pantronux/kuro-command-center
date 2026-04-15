@@ -1,5 +1,5 @@
 # auth_db.py
-# Kuro AI V2.1 - Authentication Database for Brute Force Protection
+# Kuro AI V5.0 - Authentication Database for Brute Force Protection
 # ISO 27001 Compliant: A.9.4.2 Secure Log-on, A.9.5.1 Information Access Restriction
 
 import sqlite3

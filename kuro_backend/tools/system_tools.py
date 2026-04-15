@@ -1,5 +1,5 @@
 """
-Kuro AI V5.1 - System Tools for LangGraph Tool Node
+Kuro AI V5.0 - System Tools for LangGraph Tool Node
 ================================================================================
 Tools available:
 - generate_excel_report: Create Excel files from JSON data

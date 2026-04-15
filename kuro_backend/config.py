@@ -1,5 +1,5 @@
 """
-Kuro AI V2.0.1 Official - Config [2026-04-05]
+Kuro AI V5.0 Official - Config [2026-04-15]
 ================================================================================
 Centralized configuration for Kuro AI Butler System.
 """

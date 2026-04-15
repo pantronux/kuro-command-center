@@ -437,7 +437,7 @@ def get_system_instruction(persona_override: str = None) -> str:
     common_instruction = (
         f"\n\n[CURRENT_TIME: {current_time}] "
         f"[CURRENT_DATE: {current_date}] "
-        f"[KURO_VERSION: V4.0 LangGraph - {current_date}] "
+        f"[KURO_VERSION: V5.0 LangGraph - {current_date}] "
         "Gunakan waktu saat ini sebagai referensi untuk menghitung 'besok', 'nanti malam', '10 menit lagi', dll.\n\n"
         
         "CHAIN OF THOUGHT (HIDDEN THOUGHT PROCESS):\n"

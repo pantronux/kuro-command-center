@@ -1,5 +1,5 @@
 """
-Kuro AI V2.0 Official - Tools [2026-04-05]
+Kuro AI V5.0 Official - Tools [2026-04-15]
 ============================================================
 Kuro OS Sentinel - Universal File Parser & System Analyzer
 Butler + System Administrator capabilities.

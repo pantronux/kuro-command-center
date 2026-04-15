@@ -1,9 +1,9 @@
 """
-Kuro AI V3.0 Official - Core [2026-04-06]
+Kuro AI V5.0 Official - Core [2026-04-15]
 ================================================================================
 AI Core with Contextual RAG Memory Injection and Dynamic Persona System
 SDK: google-genai v3 Protocol (client.models.generate_content)
-V3.0: Gemini 3 Flash Engine + Contextual Retrieval + Query Expansion
+V5.0: Gemini 3 Flash Engine + Contextual Retrieval + Query Expansion
 """
 import logging
 import base64
@@ -85,7 +85,7 @@ def _get_system_instruction_with_time(persona_override: str = None) -> str:
     common_instruction = (
         f"\n\n[CURRENT_TIME: {current_time}] "
         f"[CURRENT_DATE: {current_date}] "
-        f"[KURO_VERSION: V3.0 Official - Contextual RAG - {current_date}] "
+        f"[KURO_VERSION: V5.0 Official - Contextual RAG - {current_date}] "
         "Gunakan waktu saat ini sebagai referensi untuk menghitung 'besok', 'nanti malam', '10 menit lagi', dll.\n\n"
         
         "CHAIN OF THOUGHT (HIDDEN THOUGHT PROCESS):\n"

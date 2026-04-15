@@ -1,5 +1,5 @@
 """
-Kuro AI V4.8 - Observability with Arize Phoenix & OpenTelemetry
+Kuro AI V5.0 - Observability with Arize Phoenix & OpenTelemetry
 ================================================================================
 Black Box System for Tracing, Guardrails Validation, and Performance Monitoring
 Port 6006 - Phoenix Dashboard with Simple Auth
@@ -148,7 +148,7 @@ def setup_opentelemetry() -> Optional[trace.Tracer]:
         # Create resource with service info - SPECIFIC PROJECT NAME for Phoenix
         resource = Resource.create({
             "service.name": "Kuro-AI-Audit",
-            "service.version": "4.8",
+            "service.version": "5.0",
             "deployment.environment": "production",
         })
         

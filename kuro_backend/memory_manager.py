@@ -1,5 +1,5 @@
 """
-Kuro AI V3.0 Official - Memory Manager [2026-04-06]
+Kuro AI V5.0 Official - Memory Manager [2026-04-15]
 ================================================================================
 Kuro Cognitive Memory Engine V3.0 - Contextual RAG Architecture
 TIER 1: Short-Term Buffer (SQLite) - Last 20 interactions

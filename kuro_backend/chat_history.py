@@ -1,5 +1,5 @@
 """
-Kuro AI V2.0 Official - Chat History [2026-04-05]
+Kuro AI V5.0 Official - Chat History [2026-04-15]
 ================================================================================
 Chat History Database - SQLite-based persistent storage.
 Supports cross-platform sync between Telegram and Web.
