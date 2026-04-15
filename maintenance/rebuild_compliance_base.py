@@ -32,12 +32,78 @@ import sys
 import os
 import argparse
 import json
+import time
 from datetime import datetime
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from kuro_backend import memory_manager
+
+
+def _debug_log(run_id: str, hypothesis_id: str, location: str, message: str, data: dict) -> None:
+    try:
+        payload = {
+            "sessionId": "f653ac",
+            "runId": run_id,
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "message": message,
+            "data": data,
+            "timestamp": int(time.time() * 1000),
+        }
+        with open("/home/kuro/projects/kuro/.cursor/debug-f653ac.log", "a", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
+def preflight_dependency_check() -> bool:
+    """
+    Ensure local maintenance runtime has mandatory dependencies before ingest.
+    This avoids noisy per-file failures when the script uses a different Python env.
+    """
+    missing = []
+    try:
+        import chromadb  # noqa: F401
+    except Exception:
+        missing.append("chromadb")
+
+    try:
+        import fitz  # noqa: F401
+    except Exception:
+        missing.append("PyMuPDF(fitz)")
+
+    if not missing:
+        # region agent log
+        _debug_log(
+            run_id="post_fix",
+            hypothesis_id="H6",
+            location="rebuild_compliance_base.py:preflight_dependency_check:ok",
+            message="Dependency preflight passed",
+            data={"python_executable": sys.executable},
+        )
+        # endregion
+        return True
+
+    print("[ERROR] Dependency preflight failed.")
+    print(f"  Missing packages in current interpreter: {', '.join(missing)}")
+    print(f"  Python executable: {sys.executable}")
+    print("  Reason: maintenance script likely uses different environment from running API server.")
+    print("  Action: activate the same virtualenv/runtime as API server, then rerun.")
+    print("  Example:")
+    print("    source .venv/bin/activate")
+    print("    pip install chromadb PyMuPDF")
+    # region agent log
+    _debug_log(
+        run_id="post_fix",
+        hypothesis_id="H6",
+        location="rebuild_compliance_base.py:preflight_dependency_check:failed",
+        message="Dependency preflight failed",
+        data={"missing": missing, "python_executable": sys.executable},
+    )
+    # endregion
+    return False
 
 
 def print_header():
@@ -219,6 +285,9 @@ def main():
     
     if args.dry_run:
         list_files(args.directory)
+        return
+
+    if not preflight_dependency_check():
         return
     
     rebuild(args.directory, args.clear)

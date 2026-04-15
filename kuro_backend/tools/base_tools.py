@@ -9,10 +9,13 @@ PHASE 1 Fixes [2026-04-05]:
 - Path Integrity: All file interactions use os.path.abspath(PROJECT_ROOT)
 - Physical Validation: os.path.exists() checks before file operations
 """
+import asyncio
+import json
 import logging
 import os
 import re
 import gzip
+import threading
 import urllib3
 import requests
 import psutil
@@ -1635,3 +1638,150 @@ Berikan hasil yang diminta dengan format yang rapi dan terstruktur."""
         "file_type": file_info.get("type", "unknown"),
         "summary": extracted_text
     }
+
+
+def _run_async_coro_sync(coro):
+    """
+    Run async coroutine from sync context.
+    If already inside a running loop, execute in a dedicated worker thread.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+
+    result_holder = {"value": None, "error": None}
+
+    def _runner():
+        try:
+            result_holder["value"] = asyncio.run(coro)
+        except Exception as exc:
+            result_holder["error"] = exc
+
+    thread = threading.Thread(target=_runner, daemon=True)
+    thread.start()
+    thread.join()
+
+    if result_holder["error"] is not None:
+        raise result_holder["error"]
+    return result_holder["value"]
+
+
+def advanced_execution_tool(
+    task_description: str,
+    params: Optional[Dict] = None,
+    skill_name: str = "general_execution",
+) -> Dict:
+    """
+    Delegate advanced operational/system tasks to OpenClaw daemon.
+
+    Args:
+        task_description: Natural language execution brief from model/user.
+        params: Optional structured parameters.
+        skill_name: OpenClaw skill identifier (default: general_execution).
+    """
+    task = (task_description or "").strip()
+    if not task:
+        return {
+            "success": False,
+            "error": "task_description wajib diisi untuk advanced_execution_tool.",
+        }
+
+    payload = {
+        "task_description": task,
+        **(params or {}),
+    }
+
+    try:
+        from kuro_backend.execution.openclaw_bridge import execute_openclaw_skill
+
+        execution_result = _run_async_coro_sync(
+            execute_openclaw_skill(skill_name=skill_name, params=payload)
+        )
+    except Exception as exc:
+        logger.exception("[OPENCLAW_TOOL] Bridge execution failed: %s", exc)
+        return {
+            "success": False,
+            "error": f"OpenClaw bridge error: {exc}",
+            "message": "Eksekusi OpenClaw gagal dijalankan.",
+        }
+
+    success = bool(execution_result.get("success"))
+    raw = execution_result.get("result") or execution_result.get("raw_response") or {}
+    if not isinstance(raw, dict):
+        raw = {"raw": raw}
+
+    # SSoT integrity rule: if OpenClaw touched reminders/habits (or requests sync), bump revision.
+    should_bump_revision = bool(
+        raw.get("touched_habits")
+        or raw.get("touched_reminders")
+        or raw.get("ssot_bump_required")
+        or raw.get("data_mutation")
+    )
+
+    revision_bumped = False
+    revision_bump_error = None
+    if success and should_bump_revision:
+        try:
+            from kuro_backend.services import core_service
+
+            core_service.bump_data_revision()
+            revision_bumped = True
+        except Exception as exc:
+            revision_bump_error = str(exc)
+            logger.exception("[OPENCLAW_TOOL] Failed to bump SSoT revision: %s", exc)
+
+    message = "Tugas berhasil didelegasikan ke OpenClaw."
+    memory_fallback_required = bool(execution_result.get("memory_fallback_required"))
+    memory_fallback_saved = False
+    memory_fallback_error = None
+
+    if memory_fallback_required:
+        try:
+            from kuro_backend import memory_manager
+
+            fallback_note = (
+                "[OPENCLAW_UNAVAILABLE_FALLBACK]\n"
+                f"skill_name={skill_name}\n"
+                f"task_description={task}\n"
+                f"params={json.dumps(params or {}, ensure_ascii=False)}"
+            )
+            memory_manager.add_short_term("system", fallback_note)
+            memory_fallback_saved = True
+        except Exception as exc:
+            memory_fallback_error = str(exc)
+            logger.exception("[OPENCLAW_TOOL] Failed to persist memory fallback: %s", exc)
+
+    if not success:
+        message = "Eksekusi OpenClaw gagal."
+        if memory_fallback_required:
+            message = execution_result.get("error") or message
+            if memory_fallback_saved:
+                message += " Instruksi sudah dicatat ke memori sementara."
+            elif memory_fallback_error:
+                message += " Namun pencatatan memori sementara gagal."
+    elif revision_bumped:
+        message += " Data revision berhasil diperbarui untuk sinkronisasi dashboard."
+    elif should_bump_revision and revision_bump_error:
+        message += " Namun bump data revision gagal."
+
+    response = {
+        "success": success,
+        "message": message,
+        "execution_result": execution_result,
+        "skill_name": skill_name,
+        "task_description": task,
+        "ssot_sync": {
+            "requested": should_bump_revision,
+            "revision_bumped": revision_bumped,
+            "error": revision_bump_error,
+        },
+        "memory_fallback": {
+            "required": memory_fallback_required,
+            "saved": memory_fallback_saved,
+            "error": memory_fallback_error,
+        },
+    }
+    if not success and execution_result.get("error"):
+        response["error"] = execution_result.get("error")
+    return response

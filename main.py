@@ -44,6 +44,7 @@ from kuro_backend.services.schemas import AiEvaluationRecord
 from kuro_backend import auth_db
 from kuro_backend import observability
 from kuro_backend import intelligence_db
+from kuro_backend import persona_history_admin
 
 # --- Logging Setup with TimedRotatingFileHandler ---
 LOG_FILE = "kuro_butler.log"
@@ -345,7 +346,7 @@ async def auth_middleware(request: Request, call_next):
         # Already handled in login_page endpoint, just pass through
         return await call_next(request)
     
-    if path == "/" or path in ["/compliance", "/reminders", "/habits"]:
+    if path == "/" or path in ["/chat", "/compliance", "/reminders", "/habits"]:
         if not is_authenticated:
             logger.info(f"Unauthenticated access to {path} from {request.client.host}, redirecting to /login")
             return RedirectResponse(url="/login", status_code=302)
@@ -373,20 +374,37 @@ async def index(request: Request):
         return RedirectResponse(url="/login", status_code=302)
     return FileResponse(os.path.join(WEB_DIR, "templates", "index.html"))
 
+
+@app.get("/chat", response_class=HTMLResponse)
+async def chat_page(request: Request):
+    """Serve chat dashboard route that supports URL persona state."""
+    token = get_token_from_cookie(request)
+    if not validate_token(token):
+        return RedirectResponse(url="/login", status_code=302)
+    return FileResponse(os.path.join(WEB_DIR, "templates", "index.html"))
+
 @app.get("/api/history")
-async def get_chat_history(limit: int = 20, offset: int = 0, platform: str = None):
+async def get_chat_history(limit: int = 20, offset: int = 0, platform: str = None, persona: str = None):
     """Get chat history from database with pagination for infinite scroll.
     
     Args:
         limit: Number of messages to return
         offset: Pagination offset
         platform: Filter by platform ('web', 'telegram', or None for all)
+        persona: Filter by persona mode (defaults to active persona)
     """
-    history = chat_history.get_history(limit=limit, offset=offset, platform=platform)
-    total = chat_history.get_total_count(platform=platform)
+    resolved_persona = memory_manager.normalize_persona(persona or memory_manager.get_active_persona())
+    history = chat_history.get_history(
+        limit=limit,
+        offset=offset,
+        platform=platform,
+        persona=resolved_persona,
+    )
+    total = chat_history.get_total_count(platform=platform, persona=resolved_persona)
     return {
         "history": history,
         "status": "success",
+        "persona": resolved_persona,
         "total": total,
         "has_more": offset + len(history) < total
     }
@@ -399,11 +417,17 @@ async def clear_chat_history():
 
 @app.post("/api/chat")
 async def chat_endpoint(
+    request: Request,
     message: str = Form(""),
-    files: list[UploadFile] = File([])
+    files: list[UploadFile] = File([]),
+    persona: str = Form(None),
 ):
     """Handle chat requests from the web interface with vision and file reading support. (Non-streaming fallback)"""
     try:
+        resolved_persona = memory_manager.normalize_persona(
+            persona or request.query_params.get("persona") or memory_manager.get_active_persona()
+        )
+
         # Save and process uploaded files
         image_paths = []
         file_contents = []
@@ -445,13 +469,23 @@ async def chat_endpoint(
             enhanced_message += "\n\n[Attached Files Content:]\n" + "\n".join(file_contents)
         
         # Save user message to chat history
-        chat_history.add_message("web", "user", message, [f["filename"] for f in file_attachments])
+        chat_history.add_message(
+            "web",
+            "user",
+            message,
+            [f["filename"] for f in file_attachments],
+            persona=resolved_persona,
+        )
         
         # Process with AI core using LangGraph (with vision if images uploaded)
-        response = process_chat_with_graph(enhanced_message, image_paths=image_paths if image_paths else None)
+        response = process_chat_with_graph(
+            enhanced_message,
+            image_paths=image_paths if image_paths else None,
+            persona_override=resolved_persona,
+        )
         
         # Save AI response to chat history
-        chat_history.add_message("web", "assistant", response)
+        chat_history.add_message("web", "assistant", response, persona=resolved_persona)
         
         return {"response": response, "status": "success"}
         
@@ -464,7 +498,8 @@ async def chat_endpoint(
 async def chat_stream_endpoint(
     request: Request,
     message: str = Form(""),
-    files: list[UploadFile] = File([])
+    files: list[UploadFile] = File([]),
+    persona: str = Form(None),
 ):
     """V5.1 STREAMING: Handle chat requests with Server-Sent Events (SSE) streaming."""
     from fastapi.responses import StreamingResponse
@@ -472,6 +507,9 @@ async def chat_stream_endpoint(
     async def event_generator():
         """Generate SSE events for streaming response."""
         try:
+            resolved_persona = memory_manager.normalize_persona(
+                persona or request.query_params.get("persona") or memory_manager.get_active_persona()
+            )
             # Save uploaded files (same as non-streaming endpoint)
             image_paths = []
             file_contents = []
@@ -501,12 +539,22 @@ async def chat_stream_endpoint(
                 enhanced_message += "\n\n[Attached Files Content:]\n" + "\n".join(file_contents)
             
             # Save user message
-            chat_history.add_message("web", "user", message, [f["filename"] for f in file_attachments])
+            chat_history.add_message(
+                "web",
+                "user",
+                message,
+                [f["filename"] for f in file_attachments],
+                persona=resolved_persona,
+            )
             
             # V5.0: Stream response - no guardrail overhead, direct LLM response
             full_response = []
             
-            async for chunk in process_chat_with_graph_stream(enhanced_message, image_paths=image_paths if image_paths else None):
+            async for chunk in process_chat_with_graph_stream(
+                enhanced_message,
+                image_paths=image_paths if image_paths else None,
+                persona_override=resolved_persona,
+            ):
                 full_response.append(chunk)
                 # SSE: UI accepts `text` (preferred) or `chunk`; ensure_ascii=False for Indonesian / markdown
                 payload = json.dumps({"text": chunk, "chunk": chunk}, ensure_ascii=False)
@@ -514,7 +562,7 @@ async def chat_stream_endpoint(
             
             # Send completion event
             response_text = "".join(full_response)
-            chat_history.add_message("web", "assistant", response_text)
+            chat_history.add_message("web", "assistant", response_text, persona=resolved_persona)
             yield f"event: complete\ndata: {json.dumps({'response': response_text}, ensure_ascii=False)}\n\n"
             
         except Exception as e:
@@ -1103,6 +1151,71 @@ async def get_persona():
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
+
+@app.get("/api/persona/history/stats")
+async def persona_history_stats():
+    """Get persona distribution and available backup snapshots."""
+    try:
+        return {
+            "status": "success",
+            "counts": persona_history_admin.get_persona_counts(),
+            "backups": persona_history_admin.list_backups(limit=30),
+        }
+    except Exception as e:
+        logger.exception("persona_history_stats failed: %s", e)
+        return {"status": "error", "message": str(e)}
+
+
+@app.get("/api/persona/history/preview")
+async def persona_history_preview(limit_turns: int = 30):
+    """Preview consultant/advisor turn classification without writing data."""
+    try:
+        preview = persona_history_admin.preview_reclassify(limit_turns=limit_turns)
+        return {"status": "success", "preview": preview}
+    except Exception as e:
+        logger.exception("persona_history_preview failed: %s", e)
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/api/persona/history/reclassify")
+async def persona_history_reclassify(request: Request):
+    """Reclassify consultant/advisor history into separated persona buckets."""
+    try:
+        body = await request.json()
+        apply_changes = bool(body.get("apply", False))
+        result = persona_history_admin.run_reclassify(apply_changes=apply_changes)
+        return {"status": "success", "result": result}
+    except Exception as e:
+        logger.exception("persona_history_reclassify failed: %s", e)
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/api/persona/history/override")
+async def persona_history_override(request: Request):
+    """Manual override persona assignment for specific chat_history row IDs."""
+    try:
+        body = await request.json()
+        row_ids = body.get("row_ids", [])
+        persona = body.get("persona", "")
+        result = persona_history_admin.override_persona(row_ids=row_ids, persona=persona)
+        return {"status": "success", "result": result}
+    except Exception as e:
+        logger.exception("persona_history_override failed: %s", e)
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/api/persona/history/restore")
+async def persona_history_restore(request: Request):
+    """Restore persona labels from a selected DB backup snapshot."""
+    try:
+        body = await request.json()
+        backup_file = body.get("backup_file", "")
+        result = persona_history_admin.restore_persona_from_backup(backup_file=backup_file)
+        return {"status": "success", "result": result}
+    except Exception as e:
+        logger.exception("persona_history_restore failed: %s", e)
+        return {"status": "error", "message": str(e)}
+
 # --- Hardware Sentinel ---
 _hardware_sentinel_scheduler = None
 
@@ -1440,7 +1553,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
 
     try:
-        response_text = process_chat_with_graph(message_text)
+        telegram_persona = route_telegram_persona(message_text)
+        response_text = process_chat_with_graph(message_text, persona_override=telegram_persona)
 
         if len(response_text) > 4096:
             for i in range(0, len(response_text), 4000):
@@ -1460,6 +1574,32 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             chat_id=settings.TELEGRAM_CHAT_ID,
             text="Maaf, Pantronux. Kuro mengalami kesalahan saat mengirim respons. Silakan coba lagi."
         )
+
+
+def route_telegram_persona(message_text: str) -> str:
+    """
+    Telegram hybrid auto-router:
+    - tactical for infra/code/security/ops intent
+    - chill for daily/social intent
+    """
+    text = (message_text or "").lower()
+    technical_keywords = [
+        "proxmox", "server", "docker", "kubernetes", "code", "python", "error", "bug",
+        "api", "database", "sql", "log", "linux", "deploy", "security", "iso", "audit",
+        "openclaw", "memory", "websocket", "revision", "ci", "cd",
+    ]
+    casual_keywords = [
+        "gym", "musik", "lagu", "hindia", "hsr", "honkai", "capek", "semangat",
+        "mood", "curhat", "istirahat", "ngobrol", "santai", "hari ini",
+    ]
+    if any(keyword in text for keyword in technical_keywords):
+        logger.info("[TELEGRAM_PERSONA] Routed to tactical")
+        return "tactical"
+    if any(keyword in text for keyword in casual_keywords):
+        logger.info("[TELEGRAM_PERSONA] Routed to chill")
+        return "chill"
+    logger.info("[TELEGRAM_PERSONA] Ambiguous intent -> default tactical")
+    return "tactical"
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     error = context.error

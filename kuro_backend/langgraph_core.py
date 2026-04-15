@@ -34,6 +34,109 @@ from kuro_backend.guardrails import sniper_pipeline
 logger = logging.getLogger(__name__)
 logger.propagate = False  # Prevent double-reporting to root logger
 
+DESTRUCTIVE_KEYWORDS = [
+    "delete",
+    "hapus",
+    "format",
+    "rm -rf",
+    "rm ",
+    "truncate",
+    "shutdown",
+    "reboot",
+    "overwrite",
+    "drop table",
+]
+OPENCLAW_READONLY_KEYWORDS = [
+    "search",
+    "web search",
+    "paper",
+    "novelty",
+    "novelty check",
+    "analisis",
+    "analyze",
+    "metadata",
+    "log",
+    "forensic",
+    "mapping",
+    "uu pdp",
+    "eu ai act",
+    "nist",
+    "iso",
+]
+APPROVAL_YES_TOKEN = "y"
+_approval_lock = asyncio.Lock()
+_pending_tool_approval: Optional[Dict[str, Any]] = None
+
+
+def _is_approval_yes(user_input: str) -> bool:
+    return (user_input or "").strip().lower() == APPROVAL_YES_TOKEN
+
+
+def _contains_destructive_keyword(text: str) -> bool:
+    lowered = (text or "").lower()
+    return any(keyword in lowered for keyword in DESTRUCTIVE_KEYWORDS)
+
+
+async def _set_pending_approval(tool_name: str, args: Dict[str, Any], reason: str) -> None:
+    global _pending_tool_approval
+    async with _approval_lock:
+        _pending_tool_approval = {
+            "tool": tool_name,
+            "args": args,
+            "reason": reason,
+            "created_at": datetime.now().isoformat(),
+        }
+
+
+async def _get_pending_approval() -> Optional[Dict[str, Any]]:
+    async with _approval_lock:
+        if not _pending_tool_approval:
+            return None
+        return dict(_pending_tool_approval)
+
+
+async def _clear_pending_approval() -> None:
+    global _pending_tool_approval
+    async with _approval_lock:
+        _pending_tool_approval = None
+
+
+def _render_pending_approval_message(pending: Dict[str, Any]) -> str:
+    tool_name = pending.get("tool", "unknown_tool")
+    reason = pending.get("reason", "Aksi berisiko terdeteksi.")
+    return (
+        "[HITL APPROVAL REQUIRED]\n"
+        f"{reason}\n"
+        f"Tool `{tool_name}` belum dieksekusi.\n"
+        f"Ketik '{APPROVAL_YES_TOKEN}' untuk lanjut, atau perintah lain untuk batal."
+    )
+
+
+async def _maybe_handle_pending_approval(user_input: str) -> Optional[str]:
+    pending = await _get_pending_approval()
+    if not pending:
+        return None
+
+    if not _is_approval_yes(user_input):
+        return _render_pending_approval_message(pending)
+
+    tool_name = pending.get("tool")
+    args = pending.get("args", {})
+    try:
+        tool_result = _execute_tool(tool_name, args)
+    finally:
+        await _clear_pending_approval()
+
+    if tool_result.get("status") == "success":
+        return (
+            f"Approval diterima ('{APPROVAL_YES_TOKEN}'). "
+            f"Tool `{tool_name}` berhasil dieksekusi.\nHasil: {tool_result.get('result')}"
+        )
+    return (
+        f"Approval diterima ('{APPROVAL_YES_TOKEN}'), tetapi eksekusi `{tool_name}` gagal: "
+        f"{tool_result.get('message', 'unknown error')}"
+    )
+
 # ============================================
 # AGENT STATE DEFINITION (The Memory)
 # ============================================
@@ -77,42 +180,61 @@ class KuroState(TypedDict):
 # ============================================
 
 _PERSONA_INSTRUCTIONS = {
-    'casual': (
+    'consultant': (
+        "Kamu adalah Kuro, seorang Elite AI Butler dan Senior IT Security, GRC, & Enterprise Architecture Consultant. Tuanmu adalah Pantronux.\n\n"
+        "CORE KNOWLEDGE BASE (PREDEFINED EXPERTISE):\n"
+        "Kamu memiliki pemahaman mendalam setara Lead Auditor untuk:\n"
+        "- ISO Frameworks: ISO 27001:2022 (ISMS), ISO 27701 (PIMS), ISO/IEC 42001.\n"
+        "- NIST: NIST CSF 2.0 & NIST SP 800-53.\n"
+        "- Enterprise Architecture: TOGAF.\n"
+        "- Regulasi privasi & IT: UU PDP No. 27/2022 dan GDPR.\n\n"
+        "MINDSET KONSULTAN:\n"
+        "1. Kritis dan risk-based: identifikasi gap, risiko, serta dampak bisnis.\n"
+        "2. Struktur eksplisit: Gap Analysis, Mapping regulasi, Evaluasi Risiko, Mitigasi actionable.\n"
+        "3. Citation rule: saat memberi rekomendasi keamanan/compliance, sertakan referensi kontrol/klausul relevan.\n\n"
+        "TONE:\n"
+        "Profesional, strategic-partner, tajam namun tetap komunikatif."
+    ),
+    'chill': (
         "Kamu adalah Kuro, AI Butler setia Pantronux dengan kepribadian santai dan friendly. "
         "Gunakan bahasa yang ringan, humoris, dan hindari istilah teknis/ISO kecuali diminta. "
         "Kamu tetap cerdas dan membantu, tapi dengan pendekatan yang lebih kasual. "
         "Panggil 'Pantronux' dengan sopan tapi tidak terlalu formal."
     ),
-    'consultant': (
-        "Kamu adalah Kuro, seorang Elite AI Butler dan Senior IT Security, GRC, & Enterprise Architecture Consultant. Tuanmu adalah Pantronux.\n\n"
-        "CORE KNOWLEDGE BASE (PREDEFINED EXPERTISE):\n"
-        "Kamu memiliki pemahaman mendalam dan setara dengan Lead Auditor untuk:\n"
-        "- ISO Frameworks: ISO 27001:2022 (ISMS), ISO 27701 (PIMS), dan ISO/IEC 42001 (AI Management System).\n"
-        "- NIST: NIST Cybersecurity Framework (CSF 2.0) & NIST SP 800-53.\n"
-        "- Enterprise Architecture: TOGAF Standard.\n"
-        "- Regulasi privasi & IT: UU Pelindungan Data Pribadi (UU PDP No. 27 Tahun 2022 - Indonesia) dan GDPR.\n\n"
-        "MINDSET & METODOLOGI BERPIKIR (THE CONSULTANT WAY):\n"
-        "1. Kritis & Skeptis: Jangan pernah menerima premis mentah-mentah. Selalu cari hidden risks, single points of failure, dan kelemahan compliance.\n"
-        "2. Struktur Eksplisit: Saat menganalisis masalah IT/Bisnis, gunakan struktur: (1) Analisis Celah (Gap Analysis), (2) Pemetaan Regulasi (Mapping to ISO/NIST), (3) Evaluasi Risiko, (4) Rekomendasi Mitigasi yang actionable.\n"
-        "3. Citation Rule: Setiap memberikan rekomendasi keamanan, WAJIB menyertakan referensi klausul/kontrol yang relevan (Misal: 'Sesuai dengan ISO 27001:2022 Klausul 8.1...').\n\n"
-        "TONE & STYLE:\n"
-        "Setia, elegan, namun sangat tajam secara intelektual. Tidak kaku, gunakan bahasa Indonesia yang profesional namun mengalir (boleh menggunakan analogi cerdas). "
-        "Selalu memposisikan diri sebagai partner strategis (bukan sekadar penjawab pertanyaan) untuk memastikan Pantronux selalu unggul di setiap proyek auditnya."
-    ),
-    'support': (
+    'tactical': (
         "Kamu adalah Kuro, Senior DevOps/IT Support Engineer Pantronux. "
         "Fokus pada efisiensi kode, diagnosa sistem, dan pembacaan log. "
         "Kamu memiliki izin penuh untuk menganalisis file di /home/kuro/projects/kuro/ menggunakan smart_read. "
         "Beri solusi yang praktis, langsung ke inti, dan sertakan contoh kode jika relevan. "
         "Jika mendeteksi error di log, WAJIB sarankan perbaikan kodingan secara spesifik."
+    ),
+    'advisor': (
+        "Kamu adalah Rekan Peneliti Senior dan Auditor Forensik Digital untuk riset PhD Pantronux tentang Digital Forensics on AI.\n\n"
+        "MODUS KERJA WAJIB:\n"
+        "1. Jangan pernah menerima argumen Master mentah-mentah; gunakan Socratic questioning.\n"
+        "2. Untuk setiap hipotesis, sajikan minimal dua counter-evidence atau edge-case kegagalan.\n"
+        "3. Bongkar asumsi tersembunyi dalam metodologi, dataset, dan evaluasi.\n"
+        "4. Evidence-first: prioritaskan grounding pada NIST AI 100-2, ISO/IEC 27001:2022, EU AI Act, dan UU PDP No. 27/2022.\n"
+        "5. Fokus investigasi forensik AI: data provenance/poisoning, explainability sebagai evidence, adversarial forensics.\n"
+        "6. Audit integritas teknis: chain of custody, konsistensi timestamp, volatilitas memori AI, jejak token/inference.\n\n"
+        "FORMAT JAWABAN WAJIB (gunakan heading ini persis):\n"
+        "- Analisis Logika\n"
+        "- Novelty Check\n"
+        "- Forensic Challenge\n"
+        "- Pertanyaan Provokatif\n"
+    ),
+    'butler': (
+        "Kamu adalah Sentinel Butler Pantronux, penjaga integritas operasional Kuro.\n"
+        "Fokusmu: habits, reminders, data revision, sinkronisasi dashboard, dan reliabilitas workflow.\n"
+        "Bersikap formal-friendly, disiplin, dan proaktif. Prioritaskan akurasi data serta kejelasan status."
     )
 }
 
-def get_system_instruction() -> str:
+def get_system_instruction(persona_override: str = None) -> str:
     """Get system instruction with current time and active persona."""
     current_time = settings.get_current_time_formatted()
     current_date = settings.get_current_time().strftime("%Y-%m-%d")
-    active_persona = memory_manager.get_active_persona()
+    active_persona = memory_manager.normalize_persona(persona_override or memory_manager.get_active_persona())
     
     persona_instruction = _PERSONA_INSTRUCTIONS.get(active_persona, _PERSONA_INSTRUCTIONS['consultant'])
     
@@ -136,6 +258,13 @@ def get_system_instruction() -> str:
         "- Jika tidak tahu, katakan tidak tahu dan tawarkan untuk mencari di folder lain\n"
         "- JANGAN mengarang fakta, data, atau referensi klausul\n"
         "- Selalu verifikasi silang antara Memori Tier-1 (SQLite) dan Tier-2 (ChromaDB)\n\n"
+        "HITL SECURITY POLICY (WAJIB):\n"
+        "- Jika ada perintah destruktif lewat advanced_execution_tool (contoh: 'hapus', 'format', 'rm -rf'), WAJIB stop di approval.\n"
+        "- DILARANG mengeksekusi bridge OpenClaw sebelum Master mengirim input tepat 'y'.\n"
+        "- Jika approval belum ada, minta konfirmasi dan jangan lanjutkan eksekusi.\n\n"
+        "OPENCLAW EXECUTION POLICY:\n"
+        "- Tugas read-only (web search paper terbaru, novelty check, analisis metadata/log, mapping regulasi) boleh auto-execute via advanced_execution_tool.\n"
+        "- Tugas non-read-only, modifikasi sistem, atau aksi destruktif wajib menunggu approval Master.\n\n"
         
         "CAPABILITIES:\n"
         "Kamu memiliki kemampuan Vision - kamu bisa melihat dan menganalisis gambar yang dikirimkan. "
@@ -457,7 +586,9 @@ def response_node(state: KuroState) -> Dict[str, Any]:
     user_input = state.get("user_input", "")
     compliance_data = state.get("compliance_data", [])
     habit_data = state.get("habit_data", {})
-    persona_mode = state.get("persona_mode", memory_manager.get_active_persona())
+    persona_mode = memory_manager.normalize_persona(
+        state.get("persona_mode", memory_manager.get_active_persona())
+    )
     image_paths = state.get("image_paths")
     is_scolding_needed = state.get("is_scolding_needed", False)
     mem0_memories = state.get("mem0_retrieved_memories", [])
@@ -470,12 +601,16 @@ def response_node(state: KuroState) -> Dict[str, Any]:
     
     with observability.trace_node("response_node", trace_attrs) as span:
         # Build memory injection
-        recent_messages = memory_manager.get_short_term()
-        memory = memory_manager.query_memory(user_input, recent_messages=recent_messages)
+        recent_messages = memory_manager.get_short_term(persona_scope=persona_mode)
+        memory = memory_manager.query_memory(
+            user_input,
+            recent_messages=recent_messages,
+            persona_scope=persona_mode,
+        )
         memory_injection = memory_manager.format_memory_with_temporal_grounding(memory)
         
         # Build system prompt
-        system_prompt = get_system_instruction()
+        system_prompt = get_system_instruction(persona_override=persona_mode)
         
         # Build user message with context injection
         message_parts = [user_input]
@@ -513,7 +648,11 @@ def response_node(state: KuroState) -> Dict[str, Any]:
                 tool_context = f"\n\n[TOOL EXECUTION RESULT]\nTool: {tool_result.get('tool', 'unknown')}\nResult: {tool_result.get('result', '')}\n\nPlease inform the user about the successful tool execution in a professional manner."
                 message_parts.append(tool_context)
             elif tool_result["status"] == "pending_approval":
-                tool_context = f"\n\n[HITL APPROVAL REQUIRED]\n{tool_result.get('message', 'Approval needed for tool execution.')}\n\nAsk the user for approval before proceeding."
+                tool_context = (
+                    f"\n\n[HITL APPROVAL REQUIRED]\n"
+                    f"{tool_result.get('message', 'Approval needed for tool execution.')}\n\n"
+                    f"Ask user to reply exactly '{APPROVAL_YES_TOKEN}' to proceed."
+                )
                 message_parts.append(tool_context)
             elif tool_result["status"] == "error":
                 tool_context = f"\n\n[TOOL ERROR]\nError: {tool_result.get('message', 'Unknown error')}\n\nInform the user about the error professionally."
@@ -584,8 +723,8 @@ def response_node(state: KuroState) -> Dict[str, Any]:
             
             # V5.0: Guardrails validation removed. Response goes directly to memory.
             # Store to memory (preserve existing memory flow)
-        memory_manager.add_short_term("user", user_input)
-        memory_manager.add_short_term("assistant", response_text)
+        memory_manager.add_short_term("user", user_input, persona_scope=persona_mode)
+        memory_manager.add_short_term("assistant", response_text, persona_scope=persona_mode)
         memory_manager.add_long_term_v2(f"User: {user_input}\nKuro: {response_text}")
         
         # FIX: DO NOT save to chat_history here - it's saved in the streaming/non-streaming
@@ -620,6 +759,7 @@ def tool_node(state: KuroState) -> Dict[str, Any]:
     - generate_excel_report: Create Excel files from JSON data
     - manage_files: List, read, write, delete files in /home/kuro/exports/
     - generate_report_template: Generate audit/compliance report templates
+    - advanced_execution_tool: Delegate complex system automation to OpenClaw
     """
     from kuro_backend.tools.system_tools import (
         generate_excel_report,
@@ -646,6 +786,7 @@ AVAILABLE TOOLS:
 1. generate_excel_report(data, filename, sheet_name) - Create Excel from JSON data
 2. manage_files(action, filename, content) - Manage files (list, read, write, delete, info)
 3. generate_report_template(template_type, filename, data, format) - Generate report templates
+4. advanced_execution_tool(task_description, params, skill_name) - Delegate complex execution tasks to OpenClaw
 
 USER REQUEST: {user_input}
 
@@ -654,10 +795,17 @@ Respond with ONLY a JSON object in this format:
 
 If no tool is appropriate, respond with: {{"tool": null, "reason": "explanation"}}
 
+POLICY:
+- Use advanced_execution_tool for complex execution tasks.
+- If task is read-only (search/analyze/mapping), include args.read_only=true.
+- If task can modify/delete/format/reboot system state, still route to advanced_execution_tool but include args.read_only=false.
+
 Examples:
 - "Buatkan excel audit" -> {{"tool": "manage_files", "args": {{"action": "list"}}}}
 - "List file di exports" -> {{"tool": "manage_files", "args": {{"action": "list"}}}}
 - "Buat laporan audit" -> {{"tool": "generate_report_template", "args": {{"template_type": "audit_findings", "filename": "audit_report.md"}}}}
+- "Kuro tolong bersihkan log lama di Proxmox pake OpenClaw" -> {{"tool": "advanced_execution_tool", "args": {{"task_description": "bersihkan log lama di Proxmox", "skill_name": "general_execution"}}}}
+- "Cari paper terbaru digital forensics on AI" -> {{"tool": "advanced_execution_tool", "args": {{"task_description": "cari paper terbaru digital forensics on AI", "skill_name": "general_execution", "read_only": true}}}}
 
 TOOL CALL:"""
             
@@ -698,11 +846,42 @@ TOOL CALL:"""
             # Check for HITL interrupt (file write/delete operations)
             args = tool_call.get("args", {})
             action = args.get("action", "")
-            
-            requires_approval = action in ["write", "delete"] or tool_name == "generate_excel_report" or tool_name == "generate_report_template"
+
+            high_risk_text = f"{user_input} {json.dumps(args, ensure_ascii=False)}"
+            openclaw_risky = tool_name == "advanced_execution_tool" and _contains_destructive_keyword(high_risk_text)
+            openclaw_read_only_flag = bool(args.get("read_only")) if tool_name == "advanced_execution_tool" else False
+            openclaw_read_only_by_keyword = (
+                tool_name == "advanced_execution_tool"
+                and any(keyword in high_risk_text.lower() for keyword in OPENCLAW_READONLY_KEYWORDS)
+            )
+            openclaw_read_only = openclaw_read_only_flag or openclaw_read_only_by_keyword
+            openclaw_requires_approval = (
+                tool_name == "advanced_execution_tool"
+                and not openclaw_read_only
+            )
+
+            requires_approval = (
+                action in ["write", "delete"]
+                or tool_name in ["generate_excel_report", "generate_report_template"]
+                or openclaw_requires_approval
+                or openclaw_risky
+            )
             
             if requires_approval:
                 logger.info(f"[TOOL_NODE] HITL interrupt required for {tool_name}:{action}")
+                reason = (
+                    "Perintah berisiko/destruktif terdeteksi. "
+                    f"Balas '{APPROVAL_YES_TOKEN}' jika Master mengizinkan eksekusi."
+                    if openclaw_risky
+                    else (
+                        "Aksi advanced_execution_tool non-read-only membutuhkan persetujuan Master. "
+                        f"Balas '{APPROVAL_YES_TOKEN}' untuk lanjut."
+                        if openclaw_requires_approval
+                        else "Aksi tulis/generate membutuhkan persetujuan Master."
+                    )
+                )
+                # Persist pending action; execution is strictly blocked until approval token is received.
+                asyncio.run(_set_pending_approval(tool_name, args, reason))
                 if span:
                     span.set_attribute("tool_node.requires_approval", True)
                     span.set_attribute("tool_node.tool_name", tool_name)
@@ -711,7 +890,7 @@ TOOL CALL:"""
                         "status": "pending_approval",
                         "tool": tool_name,
                         "args": args,
-                        "message": f"Kuro ingin menjalankan {tool_name}. Apakah Master mengizinkan?"
+                        "message": reason,
                     },
                     "requires_approval": True,
                     "next_step": "response_node"  # Go to response to ask for approval
@@ -751,6 +930,7 @@ def _execute_tool(tool_name: str, args: Dict) -> Dict[str, Any]:
         "generate_excel_report": generate_excel_report,
         "manage_files": manage_files,
         "generate_report_template": generate_report_template,
+        "advanced_execution_tool": kuro_tools.advanced_execution_tool,
     }
     
     tool_func = tools_map.get(tool_name)
@@ -758,7 +938,10 @@ def _execute_tool(tool_name: str, args: Dict) -> Dict[str, Any]:
         return {"status": "error", "message": f"Unknown tool: {tool_name}"}
     
     try:
-        result = tool_func.invoke(args)
+        if hasattr(tool_func, "invoke"):
+            result = tool_func.invoke(args)
+        else:
+            result = tool_func(**args)
         return {"status": "success", "tool": tool_name, "result": result}
     except Exception as e:
         return {"status": "error", "tool": tool_name, "message": str(e)}
@@ -918,7 +1101,11 @@ def _split_head_for_early_flush(text: str) -> tuple[str, str]:
 # ASYNC STREAMING ENTRY POINT (Project Quicksilver V5.1)
 # ============================================
 
-async def process_chat_with_graph_stream(message: str, image_paths: list = None) -> AsyncGenerator[str, None]:
+async def process_chat_with_graph_stream(
+    message: str,
+    image_paths: list = None,
+    persona_override: str = None,
+) -> AsyncGenerator[str, None]:
     """
     V5.3 STREAMING: Graph runs in asyncio.to_thread (sync stream) so the event loop can serve SSE.
     Sniper input/output checks use async wrappers (Gemini/NeMo in thread pool).
@@ -936,13 +1123,20 @@ async def process_chat_with_graph_stream(message: str, image_paths: list = None)
     response_text = ""
 
     try:
+        approval_response = await _maybe_handle_pending_approval(message)
+        if approval_response is not None:
+            yield approval_response
+            return
+
         blocked = await sniper_pipeline.sniper_validate_and_maybe_block_input_async(message)
         if blocked:
             logger.debug("[SNIPER] Input blocked before graph invoke (stream)")
             yield blocked
             return
 
-        persona_mode = memory_manager.get_active_persona()
+        persona_mode = memory_manager.normalize_persona(
+            persona_override or memory_manager.get_active_persona()
+        )
         
         initial_state = {
             "messages": [{"role": "user", "content": message}],
@@ -1114,7 +1308,7 @@ async def process_pdf_with_thinking(
 # MAIN ENTRY POINT (Backward Compatible)
 # ============================================
 
-def process_chat_with_graph(message: str, image_paths: list = None) -> str:
+def process_chat_with_graph(message: str, image_paths: list = None, persona_override: str = None) -> str:
     """
     Process chat message using LangGraph state machine.
     Backward compatible with existing process_chat() signature.
@@ -1130,13 +1324,19 @@ def process_chat_with_graph(message: str, image_paths: list = None) -> str:
     session_id = str(uuid.uuid4())
     
     try:
+        approval_response = asyncio.run(_maybe_handle_pending_approval(message))
+        if approval_response is not None:
+            return approval_response
+
         blocked = sniper_pipeline.sniper_validate_and_maybe_block_input(message)
         if blocked:
             logger.info("[SNIPER] Input blocked before graph invoke")
             return blocked
 
         # Get current persona
-        persona_mode = memory_manager.get_active_persona()
+        persona_mode = memory_manager.normalize_persona(
+            persona_override or memory_manager.get_active_persona()
+        )
 
         # Initialize state with session ID for observability
         initial_state = {
@@ -1171,7 +1371,7 @@ def process_chat_with_graph(message: str, image_paths: list = None) -> str:
             logger.warning("[LANGGRAPH] Empty response from graph, falling back")
             # Fallback to original process_chat
             from kuro_backend.core import process_chat as original_process_chat
-            response = original_process_chat(message, image_paths)
+            response = original_process_chat(message, image_paths, persona_override=persona_mode)
 
         response = sniper_pipeline.sniper_postprocess_output(message, response)
         return response
@@ -1181,7 +1381,7 @@ def process_chat_with_graph(message: str, image_paths: list = None) -> str:
         # Fallback to original process_chat
         try:
             from kuro_backend.core import process_chat as original_process_chat
-            return original_process_chat(message, image_paths)
+            return original_process_chat(message, image_paths, persona_override=persona_mode)
         except Exception as fallback_error:
             logger.critical(f"[LANGGRAPH] Fallback also failed: {fallback_error}")
             return "Maaf, Pantronux. Kuro mengalami kendala sistem. Silakan coba lagi."

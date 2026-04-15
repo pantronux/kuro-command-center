@@ -23,6 +23,7 @@ from kuro_backend.tools.base_tools import (
     mark_habit_done_tool,
     get_habits_status_tool,
     get_habit_history_tool,
+    advanced_execution_tool,
     EMPTY_HABIT_FACTUAL_MESSAGE,
     summarize_pdf,
     summarize_document,

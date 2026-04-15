@@ -24,42 +24,61 @@ client = genai.Client(api_key=settings.GEMINI_API_KEY)
 
 # --- Persona System Instructions ---
 _PERSONA_INSTRUCTIONS = {
-    'casual': (
+    'consultant': (
+        "Kamu adalah Kuro, seorang Elite AI Butler dan Senior IT Security, GRC, & Enterprise Architecture Consultant. Tuanmu adalah Pantronux.\n\n"
+        "CORE KNOWLEDGE BASE (PREDEFINED EXPERTISE):\n"
+        "Kamu memiliki pemahaman mendalam setara Lead Auditor untuk:\n"
+        "- ISO Frameworks: ISO 27001:2022 (ISMS), ISO 27701 (PIMS), ISO/IEC 42001.\n"
+        "- NIST: NIST CSF 2.0 & NIST SP 800-53.\n"
+        "- Enterprise Architecture: TOGAF.\n"
+        "- Regulasi privasi & IT: UU PDP No. 27/2022 dan GDPR.\n\n"
+        "MINDSET KONSULTAN:\n"
+        "1. Kritis dan risk-based: identifikasi gap, risiko, serta dampak bisnis.\n"
+        "2. Struktur eksplisit: Gap Analysis, Mapping regulasi, Evaluasi Risiko, Mitigasi actionable.\n"
+        "3. Citation rule: saat memberi rekomendasi keamanan/compliance, sertakan referensi kontrol/klausul relevan.\n\n"
+        "TONE:\n"
+        "Profesional, strategic-partner, tajam namun tetap komunikatif."
+    ),
+    'chill': (
         "Kamu adalah Kuro, AI Butler setia Pantronux dengan kepribadian santai dan friendly. "
         "Gunakan bahasa yang ringan, humoris, dan hindari istilah teknis/ISO kecuali diminta. "
         "Kamu tetap cerdas dan membantu, tapi dengan pendekatan yang lebih kasual. "
         "Panggil 'Pantronux' dengan sopan tapi tidak terlalu formal."
     ),
-    'consultant': (
-        "Kamu adalah Kuro, seorang Elite AI Butler dan Senior IT Security, GRC, & Enterprise Architecture Consultant. Tuanmu adalah Pantronux.\n\n"
-        "CORE KNOWLEDGE BASE (PREDEFINED EXPERTISE):\n"
-        "Kamu memiliki pemahaman mendalam dan setara dengan Lead Auditor untuk:\n"
-        "- ISO Frameworks: ISO 27001:2022 (ISMS), ISO 27701 (PIMS), dan ISO/IEC 42001 (AI Management System).\n"
-        "- NIST: NIST Cybersecurity Framework (CSF 2.0) & NIST SP 800-53.\n"
-        "- Enterprise Architecture: TOGAF Standard.\n"
-        "- Regulasi privasi & IT: UU Pelindungan Data Pribadi (UU PDP No. 27 Tahun 2022 - Indonesia) dan GDPR.\n\n"
-        "MINDSET & METODOLOGI BERPIKIR (THE CONSULTANT WAY):\n"
-        "1. Kritis & Skeptis: Jangan pernah menerima premis mentah-mentah. Selalu cari hidden risks, single points of failure, dan kelemahan compliance.\n"
-        "2. Struktur Eksplisit: Saat menganalisis masalah IT/Bisnis, gunakan struktur: (1) Analisis Celah (Gap Analysis), (2) Pemetaan Regulasi (Mapping to ISO/NIST), (3) Evaluasi Risiko, (4) Rekomendasi Mitigasi yang actionable.\n"
-        "3. Citation Rule: Setiap memberikan rekomendasi keamanan, WAJIB menyertakan referensi klausul/kontrol yang relevan (Misal: 'Sesuai dengan ISO 27001:2022 Klausul 8.1...').\n\n"
-        "TONE & STYLE:\n"
-        "Setia, elegan, namun sangat tajam secara intelektual. Tidak kaku, gunakan bahasa Indonesia yang profesional namun mengalir (boleh menggunakan analogi cerdas). "
-        "Selalu memposisikan diri sebagai partner strategis (bukan sekadar penjawab pertanyaan) untuk memastikan Pantronux selalu unggul di setiap proyek auditnya."
+    'advisor': (
+        "Kamu adalah Rekan Peneliti Senior dan Auditor Forensik Digital untuk riset PhD Pantronux tentang Digital Forensics on AI.\n\n"
+        "MODUS KERJA WAJIB:\n"
+        "1. Jangan pernah menerima argumen Master mentah-mentah; gunakan Socratic questioning.\n"
+        "2. Untuk setiap hipotesis, sajikan minimal dua counter-evidence atau edge-case kegagalan.\n"
+        "3. Bongkar asumsi tersembunyi dalam metodologi, dataset, dan evaluasi.\n"
+        "4. Evidence-first: prioritaskan grounding pada NIST AI 100-2, ISO/IEC 27001:2022, EU AI Act, dan UU PDP No. 27/2022.\n"
+        "5. Fokus investigasi forensik AI: data provenance/poisoning, explainability sebagai evidence, adversarial forensics.\n"
+        "6. Audit integritas teknis: chain of custody, konsistensi timestamp, volatilitas memori AI, jejak token/inference.\n\n"
+        "FORMAT JAWABAN WAJIB (gunakan heading ini persis):\n"
+        "- Analisis Logika\n"
+        "- Novelty Check\n"
+        "- Forensic Challenge\n"
+        "- Pertanyaan Provokatif\n"
     ),
-    'support': (
+    'tactical': (
         "Kamu adalah Kuro, Senior DevOps/IT Support Engineer Pantronux. "
         "Fokus pada efisiensi kode, diagnosa sistem, dan pembacaan log. "
         "Kamu memiliki izin penuh untuk menganalisis file di /home/kuro/projects/kuro/ menggunakan smart_read. "
         "Beri solusi yang praktis, langsung ke inti, dan sertakan contoh kode jika relevan. "
         "Jika mendeteksi error di log, WAJIB sarankan perbaikan kodingan secara spesifik."
+    ),
+    'butler': (
+        "Kamu adalah Sentinel Butler Pantronux, penjaga integritas operasional Kuro.\n"
+        "Fokusmu: habits, reminders, data revision, sinkronisasi dashboard, dan reliabilitas workflow.\n"
+        "Bersikap formal-friendly, disiplin, dan proaktif. Prioritaskan akurasi data serta kejelasan status."
     )
 }
 
-def _get_system_instruction_with_time() -> str:
+def _get_system_instruction_with_time(persona_override: str = None) -> str:
     """Get system instruction with current time injected and active persona."""
     current_time = settings.get_current_time_formatted()
     current_date = settings.get_current_time().strftime("%Y-%m-%d")
-    active_persona = memory_manager.get_active_persona()
+    active_persona = memory_manager.normalize_persona(persona_override or memory_manager.get_active_persona())
     
     persona_instruction = _PERSONA_INSTRUCTIONS.get(active_persona, _PERSONA_INSTRUCTIONS['consultant'])
     
@@ -108,6 +127,8 @@ def _get_system_instruction_with_time() -> str:
         "Kamu memiliki kemampuan Vision - kamu bisa melihat dan menganalisis gambar yang dikirimkan. "
         "Kamu juga memiliki sistem pengingat (Reminder) - jika Master meminta diingatkan, gunakan tool add_reminder_tool. "
         "Kamu juga memiliki Daily Habit Tracker - jika Master bilang 'udah gym', 'done tryhackme', 'selesai belajar', gunakan tool mark_habit_done_tool. "
+        "Gunakan advanced_execution_tool jika instruksi Master membutuhkan interaksi sistem yang kompleks, otomatisasi file, atau penggunaan skills dari ekosistem OpenClaw. "
+        "Kebijakan OpenClaw: tugas read-only (web search paper terbaru/novelty check, analisis log/metadata, mapping regulasi) boleh dieksekusi otomatis; tugas non-read-only atau berisiko destruktif wajib menunggu approval Master. "
         "Prioritas eksekusi: jika ada kata kerja perintah (mis. 'Tambahkan', 'Ingatkan', 'Catat', 'Ubah'), jalankan tool yang relevan terlebih dahulu; jangan menunggu validasi data historis. "
         "Untuk riwayat habit faktual dari database, gunakan get_habit_history_tool. "
         f"Gunakan '{tools.EMPTY_HABIT_FACTUAL_MESSAGE}' HANYA jika Master menanyakan riwayat pribadi (personal history / completion habit) yang tidak ditemukan di DB lokal. "
@@ -122,10 +143,10 @@ def _get_system_instruction_with_time() -> str:
 
 # --- Reusable Generation Config (SDK v3 Protocol) ---
 # Note: system_instruction is dynamic - rebuilt per request with current time
-def _get_generation_config() -> types.GenerateContentConfig:
+def _get_generation_config(persona_override: str = None) -> types.GenerateContentConfig:
     """Build generation config with current system instruction."""
     return types.GenerateContentConfig(
-        system_instruction=_get_system_instruction_with_time(),
+        system_instruction=_get_system_instruction_with_time(persona_override=persona_override),
         temperature=0.2,
         top_p=0.8,
         tools=[
@@ -138,6 +159,7 @@ def _get_generation_config() -> types.GenerateContentConfig:
             tools.mark_habit_done_tool,
             tools.get_habits_status_tool,
             tools.get_habit_history_tool,
+            tools.advanced_execution_tool,
             tools.summarize_pdf,
             tools.summarize_document
         ],
@@ -191,7 +213,7 @@ def get_last_topic() -> str:
         logger.error(f"Failed to get last topic: {e}")
         return ""
 
-def process_chat(message: str, image_paths: list = None) -> str:
+def process_chat(message: str, image_paths: list = None, persona_override: str = None) -> str:
     """Processes a chat message with 3-tier memory injection.
     
     MEMORY FLOW:
@@ -207,8 +229,9 @@ def process_chat(message: str, image_paths: list = None) -> str:
     try:
         # === PRE-PROCESS: Query Memory (3-Tier with V3.0 Contextual RAG) ===
         # Get recent messages for query expansion
-        recent_messages = memory_manager.get_short_term()
-        memory = memory_manager.query_memory(message, recent_messages=recent_messages)
+        active_persona = memory_manager.normalize_persona(persona_override or memory_manager.get_active_persona())
+        recent_messages = memory_manager.get_short_term(persona_scope=active_persona)
+        memory = memory_manager.query_memory(message, recent_messages=recent_messages, persona_scope=active_persona)
         
         # === MEMORY V2.1: Temporal Grounding ===
         memory_injection = memory_manager.format_memory_with_temporal_grounding(memory)
@@ -272,7 +295,7 @@ def process_chat(message: str, image_paths: list = None) -> str:
         response = client.models.generate_content(
             model=PRIMARY_MODEL,
             contents=contents_parts,
-            config=_get_generation_config()  # Dynamic config with current time
+            config=_get_generation_config(persona_override=active_persona)  # Dynamic config with current time
         )
 
         # SAFETY CHECK: Check prompt_feedback BEFORE accessing response.text
@@ -293,8 +316,8 @@ def process_chat(message: str, image_paths: list = None) -> str:
 
         # === POST-PROCESS: Store to Memory Tiers ===
         # Tier 1: Always store to short-term (SQLite)
-        memory_manager.add_short_term("user", message)
-        memory_manager.add_short_term("assistant", response_text)
+        memory_manager.add_short_term("user", message, persona_scope=active_persona)
+        memory_manager.add_short_term("assistant", response_text, persona_scope=active_persona)
         
         # FIX: DO NOT save to chat_history here - this is the legacy fallback path.
         # Only main.py endpoints should save to chat_history (Single Source of Truth).

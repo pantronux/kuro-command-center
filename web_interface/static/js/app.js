@@ -61,6 +61,7 @@ let chatOffset = 0;
 let isLoadingMore = false;
 let hasMoreMessages = true;
 let scrollAnchorPosition = null;
+const VALID_PERSONAS = ['consultant', 'advisor', 'chill', 'tactical', 'butler'];
 
 // ============================================
 // DOM Elements
@@ -93,6 +94,16 @@ const elements = {
     temperatureSlider: document.getElementById('temperatureSlider'),
     temperatureValue: document.getElementById('temperatureValue'),
     clearHistoryBtn: document.getElementById('clearHistoryBtn'),
+    personaAdminRefreshBtn: document.getElementById('personaAdminRefreshBtn'),
+    personaAdminStats: document.getElementById('personaAdminStats'),
+    personaAdminPreviewBtn: document.getElementById('personaAdminPreviewBtn'),
+    personaAdminApplyBtn: document.getElementById('personaAdminApplyBtn'),
+    personaAdminPreview: document.getElementById('personaAdminPreview'),
+    personaOverrideRowIds: document.getElementById('personaOverrideRowIds'),
+    personaOverrideSelect: document.getElementById('personaOverrideSelect'),
+    personaOverrideApplyBtn: document.getElementById('personaOverrideApplyBtn'),
+    personaBackupSelect: document.getElementById('personaBackupSelect'),
+    personaRestoreBtn: document.getElementById('personaRestoreBtn'),
     // Persona Toggle
     personaToggle: document.getElementById('personaToggle'),
     personaDropdown: document.getElementById('personaDropdown'),
@@ -210,6 +221,7 @@ function setupEventListeners() {
     });
     
     elements.clearHistoryBtn.addEventListener('click', clearChatHistory);
+    setupPersonaAdminControls();
     
     // Persona Toggle
     if (elements.personaToggle && elements.personaDropdown) {
@@ -306,7 +318,9 @@ async function loadMoreMessages() {
     
     try {
         // FIX: Add platform=web filter to only load web messages
-        const response = await authFetch(`${CONFIG.API_BASE}/history?limit=${CONFIG.CHAT_PAGE_SIZE}&offset=${chatOffset}&platform=web`);
+        const response = await authFetch(
+            `${CONFIG.API_BASE}/history?limit=${CONFIG.CHAT_PAGE_SIZE}&offset=${chatOffset}&platform=web&persona=${encodeURIComponent(selectedPersona)}`
+        );
         const data = await response.json();
         
         if (data.status === 'success' && data.history.length > 0) {
@@ -544,6 +558,7 @@ async function sendMessage() {
     try {
         const formData = new FormData();
         formData.append('message', message);
+        formData.append('persona', selectedPersona);
         filesToSend.forEach(file => formData.append('files', file));
         
         // STEP 2: Fetch the streaming endpoint
@@ -804,7 +819,9 @@ async function loadChatHistory() {
         isLoadingMore = false;
         
         console.log('[CHAT_HISTORY] Fetching history from backend...');
-        const response = await authFetch(`${CONFIG.API_BASE}/history?limit=${CONFIG.CHAT_PAGE_SIZE}&offset=0&platform=web`);
+        const response = await authFetch(
+            `${CONFIG.API_BASE}/history?limit=${CONFIG.CHAT_PAGE_SIZE}&offset=0&platform=web&persona=${encodeURIComponent(selectedPersona)}`
+        );
         const data = await response.json();
         console.log('[CHAT_HISTORY] Backend response:', data);
         
@@ -944,10 +961,167 @@ function closeSystemStatus() {
 // ============================================
 function openSettings() {
     elements.settingsModal.classList.remove('hidden');
+    refreshPersonaAdminStats();
 }
 
 function closeSettings() {
     elements.settingsModal.classList.add('hidden');
+}
+
+function setupPersonaAdminControls() {
+    if (elements.personaAdminRefreshBtn) {
+        elements.personaAdminRefreshBtn.addEventListener('click', refreshPersonaAdminStats);
+    }
+    if (elements.personaAdminPreviewBtn) {
+        elements.personaAdminPreviewBtn.addEventListener('click', previewPersonaReclassify);
+    }
+    if (elements.personaAdminApplyBtn) {
+        elements.personaAdminApplyBtn.addEventListener('click', applyPersonaReclassify);
+    }
+    if (elements.personaOverrideApplyBtn) {
+        elements.personaOverrideApplyBtn.addEventListener('click', applyPersonaOverride);
+    }
+    if (elements.personaRestoreBtn) {
+        elements.personaRestoreBtn.addEventListener('click', restorePersonaFromBackup);
+    }
+}
+
+async function refreshPersonaAdminStats() {
+    if (!elements.personaAdminStats) return;
+    elements.personaAdminStats.textContent = 'Loading stats...';
+    try {
+        const response = await authFetch(`${CONFIG.API_BASE}/persona/history/stats`);
+        const data = await response.json();
+        if (data.status !== 'success') throw new Error(data.message || 'Stats request failed');
+
+        const counts = data.counts || {};
+        const backups = data.backups || [];
+        const statsLines = Object.keys(counts).length
+            ? Object.entries(counts).map(([k, v]) => `${k}: ${v}`).join('\n')
+            : 'No persona rows found.';
+        elements.personaAdminStats.textContent = statsLines;
+        populateBackupOptions(backups);
+    } catch (error) {
+        elements.personaAdminStats.textContent = `Failed: ${error.message}`;
+    }
+}
+
+function populateBackupOptions(backups) {
+    if (!elements.personaBackupSelect) return;
+    elements.personaBackupSelect.innerHTML = '';
+    if (!backups || backups.length === 0) {
+        elements.personaBackupSelect.innerHTML = '<option value="">No backup loaded</option>';
+        return;
+    }
+    backups.forEach(file => {
+        const option = document.createElement('option');
+        option.value = file;
+        option.textContent = file;
+        elements.personaBackupSelect.appendChild(option);
+    });
+}
+
+async function previewPersonaReclassify() {
+    if (!elements.personaAdminPreview) return;
+    elements.personaAdminPreview.textContent = 'Running preview...';
+    try {
+        const response = await authFetch(`${CONFIG.API_BASE}/persona/history/preview?limit_turns=10`);
+        const data = await response.json();
+        if (data.status !== 'success') throw new Error(data.message || 'Preview failed');
+        const preview = data.preview || {};
+        const lines = [
+            `rows_scanned: ${preview.rows_scanned || 0}`,
+            `turns_scanned: ${preview.turns_scanned || 0}`,
+            `updates_total: ${preview.updates_total || 0}`,
+            `updates_to_advisor: ${preview.updates_to_advisor || 0}`,
+            `updates_to_consultant: ${preview.updates_to_consultant || 0}`,
+        ];
+        const sample = (preview.sample_turns || [])
+            .slice(0, 5)
+            .map(turn => `- ${turn.target} ${JSON.stringify(turn.row_ids)} :: ${turn.excerpt || ''}`);
+        elements.personaAdminPreview.textContent = [...lines, '', 'sample:', ...sample].join('\n');
+    } catch (error) {
+        elements.personaAdminPreview.textContent = `Failed: ${error.message}`;
+    }
+}
+
+async function applyPersonaReclassify() {
+    if (!confirm('Apply advisor/consultant reclassification now?')) return;
+    if (elements.personaAdminPreview) {
+        elements.personaAdminPreview.textContent = 'Applying reclassify...';
+    }
+    try {
+        const response = await authFetch(`${CONFIG.API_BASE}/persona/history/reclassify`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ apply: true })
+        });
+        const data = await response.json();
+        if (data.status !== 'success') throw new Error(data.message || 'Apply failed');
+        const result = data.result || {};
+        if (elements.personaAdminPreview) {
+            elements.personaAdminPreview.textContent = `Applied.\nupdates_total: ${result.updates_total || 0}\ncounts_after: ${JSON.stringify(result.counts_after || {}, null, 2)}`;
+        }
+        await refreshPersonaAdminStats();
+        showNotification('Persona reclassify applied', 'success');
+    } catch (error) {
+        if (elements.personaAdminPreview) {
+            elements.personaAdminPreview.textContent = `Failed: ${error.message}`;
+        }
+        showNotification(`Reclassify failed: ${error.message}`, 'error');
+    }
+}
+
+function parseRowIds(raw) {
+    return String(raw || '')
+        .split(',')
+        .map(x => Number.parseInt(x.trim(), 10))
+        .filter(Number.isInteger);
+}
+
+async function applyPersonaOverride() {
+    const rowIds = parseRowIds(elements.personaOverrideRowIds?.value);
+    const persona = elements.personaOverrideSelect?.value;
+    if (!rowIds.length) {
+        showNotification('Isi row IDs dulu untuk override', 'error');
+        return;
+    }
+    try {
+        const response = await authFetch(`${CONFIG.API_BASE}/persona/history/override`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ row_ids: rowIds, persona })
+        });
+        const data = await response.json();
+        if (data.status !== 'success') throw new Error(data.message || 'Override failed');
+        showNotification(`Override success: ${data.result?.updated_rows || 0} rows`, 'success');
+        await refreshPersonaAdminStats();
+    } catch (error) {
+        showNotification(`Override failed: ${error.message}`, 'error');
+    }
+}
+
+async function restorePersonaFromBackup() {
+    const backupFile = elements.personaBackupSelect?.value;
+    if (!backupFile) {
+        showNotification('Pilih backup file dulu', 'error');
+        return;
+    }
+    if (!confirm(`Restore persona labels from backup ${backupFile}?`)) return;
+    try {
+        const response = await authFetch(`${CONFIG.API_BASE}/persona/history/restore`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ backup_file: backupFile })
+        });
+        const data = await response.json();
+        if (data.status !== 'success') throw new Error(data.message || 'Restore failed');
+        showNotification(`Restore success: ${data.result?.restored_rows || 0} rows`, 'success');
+        await refreshPersonaAdminStats();
+        await previewPersonaReclassify();
+    } catch (error) {
+        showNotification(`Restore failed: ${error.message}`, 'error');
+    }
 }
 
 // ============================================
@@ -1083,10 +1257,42 @@ function showNotification(message, type = 'info') {
 // Persona Toggle Functions
 // ============================================
 const personaLabels = {
-    casual: '😎 Casual',
     consultant: '🎯 Consultant',
-    support: '🔧 Support'
+    advisor: '🧪 Advisor',
+    chill: '😎 Chill Wingman',
+    tactical: '🔧 Tactical Ops',
+    butler: '🛡️ Butler'
 };
+
+const personaAliases = {
+    support: 'tactical',
+    technical: 'tactical',
+    casual: 'chill',
+    adversarial_scholar: 'advisor',
+};
+
+function normalizePersona(persona) {
+    const raw = String(persona || '').trim().toLowerCase();
+    if (VALID_PERSONAS.includes(raw)) return raw;
+    if (personaAliases[raw]) return personaAliases[raw];
+    return 'consultant';
+}
+
+function getPersonaFromUrl() {
+    const params = new URLSearchParams(window.location.search);
+    const value = params.get('persona');
+    return value ? normalizePersona(value) : null;
+}
+
+function setPersonaInUrl(personaName, refresh = false) {
+    const normalized = normalizePersona(personaName);
+    const target = `/chat?persona=${encodeURIComponent(normalized)}`;
+    if (refresh) {
+        window.location.href = target;
+        return;
+    }
+    window.history.replaceState({}, '', target);
+}
 
 function updatePersonaLabel() {
     if (elements.currentPersonaLabel) {
@@ -1108,6 +1314,7 @@ async function applyPersona() {
             elements.personaDropdown.classList.add('hidden');
             showNotification(`Persona changed to ${personaLabels[selectedPersona]}`, 'success');
             localStorage.setItem('kuro-persona', selectedPersona);
+            setPersonaInUrl(selectedPersona, true);
         } else {
             showNotification('Failed to change persona: ' + data.message, 'error');
         }
@@ -1117,14 +1324,16 @@ async function applyPersona() {
 }
 
 async function loadPersona() {
+    const urlPersona = getPersonaFromUrl();
     const savedPersona = localStorage.getItem('kuro-persona');
-    if (savedPersona) {
-        selectedPersona = savedPersona;
-    }
+    selectedPersona = normalizePersona(urlPersona || savedPersona || 'consultant');
+    localStorage.setItem('kuro-persona', selectedPersona);
+    setPersonaInUrl(selectedPersona, false);
     
     updatePersonaLabel();
     
     document.querySelectorAll('.persona-option').forEach(option => {
+        option.classList.remove('bg-emerald-50', 'dark:bg-emerald-900/30');
         if (option.dataset.persona === selectedPersona) {
             option.classList.add('bg-emerald-50', 'dark:bg-emerald-900/30');
         }

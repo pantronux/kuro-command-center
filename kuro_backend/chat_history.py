@@ -14,6 +14,7 @@ import os
 from datetime import datetime
 from typing import List, Dict, Optional
 from kuro_backend.config import settings
+from kuro_backend import memory_manager
 
 logger = logging.getLogger(__name__)
 logger.propagate = False  # Prevent double-reporting to root logger
@@ -43,8 +44,22 @@ def init_db():
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        cursor.execute("PRAGMA table_info(chat_history)")
+        columns = {row[1] for row in cursor.fetchall()}
+        if "persona" not in columns:
+            cursor.execute(
+                "ALTER TABLE chat_history ADD COLUMN persona TEXT NOT NULL DEFAULT 'consultant'"
+            )
+            logger.info("chat_history migration: added persona column with consultant default")
+        cursor.execute(
+            "UPDATE chat_history SET persona = 'consultant' WHERE persona IS NULL OR TRIM(persona) = ''"
+        )
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_timestamp ON chat_history(timestamp DESC)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_platform_persona_timestamp
+            ON chat_history(platform, persona, timestamp DESC)
         """)
         conn.commit()
         logger.info(f"Chat history database initialized at {DB_PATH}")
@@ -54,15 +69,22 @@ def init_db():
         if conn:
             conn.close()
 
-def add_message(platform: str, role: str, content: str, attachments: List[str] = None):
+def add_message(
+    platform: str,
+    role: str,
+    content: str,
+    attachments: List[str] = None,
+    persona: Optional[str] = None,
+):
     """Add a message to the chat history."""
     conn = None
     try:
         conn = _get_connection()
         cursor = conn.cursor()
+        normalized_persona = memory_manager.normalize_persona(persona)
         cursor.execute(
-            "INSERT INTO chat_history (platform, role, content, attachments) VALUES (?, ?, ?, ?)",
-            (platform, role, content, json.dumps(attachments or []))
+            "INSERT INTO chat_history (platform, role, content, attachments, persona) VALUES (?, ?, ?, ?, ?)",
+            (platform, role, content, json.dumps(attachments or []), normalized_persona)
         )
         conn.commit()
     except Exception as e:
@@ -71,21 +93,27 @@ def add_message(platform: str, role: str, content: str, attachments: List[str] =
         if conn:
             conn.close()
 
-def get_history(limit: int = 50, offset: int = 0, platform: str = None) -> List[Dict]:
-    """Get recent chat history with pagination, optionally filtered by platform."""
+def get_history(
+    limit: int = 50,
+    offset: int = 0,
+    platform: str = None,
+    persona: Optional[str] = None,
+) -> List[Dict]:
+    """Get recent chat history with pagination and optional platform/persona filters."""
     conn = None
     try:
         conn = _get_connection()
         cursor = conn.cursor()
+        normalized_persona = memory_manager.normalize_persona(persona)
         if platform:
             cursor.execute(
-                "SELECT * FROM chat_history WHERE platform = ? ORDER BY timestamp DESC LIMIT ? OFFSET ?",
-                (platform, limit, offset)
+                "SELECT * FROM chat_history WHERE platform = ? AND persona = ? ORDER BY timestamp DESC LIMIT ? OFFSET ?",
+                (platform, normalized_persona, limit, offset)
             )
         else:
             cursor.execute(
-                "SELECT * FROM chat_history ORDER BY timestamp DESC LIMIT ? OFFSET ?",
-                (limit, offset)
+                "SELECT * FROM chat_history WHERE persona = ? ORDER BY timestamp DESC LIMIT ? OFFSET ?",
+                (normalized_persona, limit, offset)
             )
         rows = cursor.fetchall()
         
@@ -111,6 +139,7 @@ def get_history(limit: int = 50, offset: int = 0, platform: str = None) -> List[
             history.append({
                 "id": row["id"],
                 "platform": row["platform"],
+                "persona": row["persona"],
                 "role": row["role"],
                 "content": row["content"],
                 "attachments": attachments,
@@ -125,16 +154,20 @@ def get_history(limit: int = 50, offset: int = 0, platform: str = None) -> List[
         if conn:
             conn.close()
 
-def get_total_count(platform: str = None) -> int:
+def get_total_count(platform: str = None, persona: Optional[str] = None) -> int:
     """Get total count of messages for pagination."""
     conn = None
     try:
         conn = _get_connection()
         cursor = conn.cursor()
+        normalized_persona = memory_manager.normalize_persona(persona)
         if platform:
-            cursor.execute("SELECT COUNT(*) FROM chat_history WHERE platform = ?", (platform,))
+            cursor.execute(
+                "SELECT COUNT(*) FROM chat_history WHERE platform = ? AND persona = ?",
+                (platform, normalized_persona),
+            )
         else:
-            cursor.execute("SELECT COUNT(*) FROM chat_history")
+            cursor.execute("SELECT COUNT(*) FROM chat_history WHERE persona = ?", (normalized_persona,))
         return cursor.fetchone()[0]
     except Exception as e:
         logger.error(f"Failed to get chat history count: {e}")

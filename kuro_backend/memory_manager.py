@@ -38,6 +38,29 @@ from kuro_backend.config import settings
 logger = logging.getLogger(__name__)
 logger.propagate = False  # Prevent double-reporting to root logger
 
+# region agent log
+_DEBUG_LOG_PATH = "/home/kuro/projects/kuro/.cursor/debug-f653ac.log"
+_DEBUG_SESSION_ID = "f653ac"
+
+
+def _debug_ingest_log(run_id: str, hypothesis_id: str, location: str, message: str, data: Dict) -> None:
+    try:
+        payload = {
+            "sessionId": _DEBUG_SESSION_ID,
+            "runId": run_id,
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "message": message,
+            "data": data,
+            "timestamp": int(time.time() * 1000),
+        }
+        with open(_DEBUG_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+# endregion
+
 
 # ============================================
 # JSON Parsing Utilities
@@ -113,6 +136,14 @@ DECAY_EXEMPT_CATEGORIES = ["identity", "preference", "goal"]  # These never expi
 # Keywords that trigger memory storage
 MEMORY_KEYWORDS = ["ingat", "simpan", "jadwal", "info", "spesifikasi", "catat", "profile", "preferensi"]
 
+CANONICAL_PERSONAS = ["consultant", "advisor", "chill", "tactical", "butler"]
+PERSONA_ALIASES = {
+    "support": "tactical",
+    "adversarial_scholar": "advisor",
+    "technical": "tactical",
+    "casual": "chill",
+}
+
 # Keywords that indicate Master is sharing personal facts
 MASTER_FACT_KEYWORDS = ["saya suka", "saya tidak suka", "saya punya", "saya menggunakan",
                         "saya bekerja", "saya tinggal", "favorit saya", "hobi saya",
@@ -182,21 +213,34 @@ def update_master_profile(key: str, value: str):
 def get_active_persona() -> str:
     """Get the currently active persona."""
     profile = load_master_profile()
-    return profile.get('preferences', {}).get('persona_mode', 'consultant')
+    raw = profile.get('preferences', {}).get('persona_mode', 'consultant')
+    return normalize_persona(raw)
+
+
+def normalize_persona(persona: str) -> str:
+    """Normalize persona name to canonical enum."""
+    raw = (persona or "").strip().lower()
+    if raw in CANONICAL_PERSONAS:
+        return raw
+    if raw in PERSONA_ALIASES:
+        return PERSONA_ALIASES[raw]
+    return "consultant"
 
 def set_active_persona(persona: str) -> Dict:
     """Set the active persona and save to master profile."""
-    valid_personas = ['casual', 'consultant', 'support']
-    if persona not in valid_personas:
+    valid_personas = CANONICAL_PERSONAS + sorted(PERSONA_ALIASES.keys())
+    incoming = (persona or "").strip().lower()
+    if incoming not in valid_personas:
         return {"status": "error", "message": f"Invalid persona. Must be one of: {valid_personas}"}
+    normalized = normalize_persona(incoming)
     
     profile = load_master_profile()
     if 'preferences' not in profile:
         profile['preferences'] = {}
-    profile['preferences']['persona_mode'] = persona
+    profile['preferences']['persona_mode'] = normalized
     save_master_profile(profile)
-    logger.info(f"Active persona changed to: {persona}")
-    return {"status": "success", "persona": persona}
+    logger.info(f"Active persona changed to: {normalized}")
+    return {"status": "success", "persona": normalized}
 
 # ============================================
 # TIER 1: Short-Term Buffer (SQLite)
@@ -216,33 +260,63 @@ def init_short_term_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             role TEXT NOT NULL,
             content TEXT NOT NULL,
+            persona_scope TEXT NOT NULL DEFAULT 'consultant',
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    cursor.execute("PRAGMA table_info(short_term)")
+    columns = [row["name"] for row in cursor.fetchall()]
+    if "persona_scope" not in columns:
+        cursor.execute("ALTER TABLE short_term ADD COLUMN persona_scope TEXT NOT NULL DEFAULT 'consultant'")
     conn.commit()
     conn.close()
     logger.info("Short-term memory database initialized.")
 
-def add_short_term(role: str, content: str):
+def add_short_term(role: str, content: str, persona_scope: str = None):
     """Add interaction to short-term buffer."""
+    scope = normalize_persona(persona_scope or get_active_persona())
     conn = _get_short_term_conn()
     cursor = conn.cursor()
-    cursor.execute("INSERT INTO short_term (role, content) VALUES (?, ?)", (role, content))
+    cursor.execute(
+        "INSERT INTO short_term (role, content, persona_scope) VALUES (?, ?, ?)",
+        (role, content, scope),
+    )
     
     # Enforce limit - delete oldest if over limit
-    cursor.execute("DELETE FROM short_term WHERE id NOT IN (SELECT id FROM short_term ORDER BY id DESC LIMIT ?)", (SHORT_TERM_LIMIT,))
+    cursor.execute(
+        """
+        DELETE FROM short_term
+        WHERE persona_scope = ?
+          AND id NOT IN (
+              SELECT id FROM short_term WHERE persona_scope = ? ORDER BY id DESC LIMIT ?
+          )
+        """,
+        (scope, scope, SHORT_TERM_LIMIT),
+    )
     
     conn.commit()
     conn.close()
 
-def get_short_term() -> List[Dict]:
+def get_short_term(persona_scope: str = None) -> List[Dict]:
     """Get recent short-term memory."""
+    scope = normalize_persona(persona_scope or get_active_persona())
     conn = _get_short_term_conn()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM short_term ORDER BY id DESC LIMIT ?", (SHORT_TERM_LIMIT,))
+    cursor.execute(
+        "SELECT * FROM short_term WHERE persona_scope = ? ORDER BY id DESC LIMIT ?",
+        (scope, SHORT_TERM_LIMIT),
+    )
     rows = cursor.fetchall()
     conn.close()
-    return [{"role": r["role"], "content": r["content"], "timestamp": r["timestamp"]} for r in reversed(rows)]
+    return [
+        {
+            "role": r["role"],
+            "content": r["content"],
+            "persona_scope": r["persona_scope"],
+            "timestamp": r["timestamp"],
+        }
+        for r in reversed(rows)
+    ]
 
 def summarize_short_term() -> str:
     """Summarize short-term memory for token optimization."""
@@ -501,7 +575,7 @@ def mark_obsolete(query: str):
 # ============================================
 # Unified Memory Query Interface
 # ============================================
-def query_memory(current_message: str, recent_messages: List[Dict] = None) -> Dict[str, str]:
+def query_memory(current_message: str, recent_messages: List[Dict] = None, persona_scope: str = None) -> Dict[str, str]:
     """
     Pre-process memory before AI response.
     
@@ -510,7 +584,8 @@ def query_memory(current_message: str, recent_messages: List[Dict] = None) -> Di
     Returns formatted memory sections for prompt injection.
     """
     # Tier 1: Short-term
-    short_term_entries = get_short_term()
+    scope = normalize_persona(persona_scope or get_active_persona())
+    short_term_entries = get_short_term(persona_scope=scope)
     short_term_text = ""
     if short_term_entries:
         summaries = []
@@ -1754,8 +1829,26 @@ def _get_compliance_collection():
             logger.info(f"Compliance ChromaDB initialized at {COMPLIANCE_CHROMA_DIR}")
         except ImportError:
             logger.warning("ChromaDB not installed. Compliance knowledge base disabled.")
+            # region agent log
+            _debug_ingest_log(
+                run_id="pre_fix",
+                hypothesis_id="H6",
+                location="memory_manager.py:_get_compliance_collection:import_error",
+                message="Compliance collection unavailable due to ImportError",
+                data={"error": "chromadb_import_error", "compliance_chroma_dir": COMPLIANCE_CHROMA_DIR},
+            )
+            # endregion
         except Exception as e:
             logger.error(f"Failed to initialize compliance ChromaDB: {e}")
+            # region agent log
+            _debug_ingest_log(
+                run_id="pre_fix",
+                hypothesis_id="H6",
+                location="memory_manager.py:_get_compliance_collection:exception",
+                message="Compliance collection initialization exception",
+                data={"error": str(e)[:200], "compliance_chroma_dir": COMPLIANCE_CHROMA_DIR},
+            )
+            # endregion
     return _compliance_collection
 
 
@@ -1798,6 +1891,22 @@ def extract_pdf_text(pdf_path: str) -> Dict:
             else:
                 # Likely scanned - mark for OCR
                 scanned_pages.append(page_num)
+
+        # region agent log
+        _debug_ingest_log(
+            run_id="pre_fix",
+            hypothesis_id="H1_H3",
+            location="memory_manager.py:extract_pdf_text:post_classification",
+            message="PDF page classification completed",
+            data={
+                "filename": filename,
+                "total_pages": len(doc),
+                "text_pages": len(text_pages),
+                "scanned_pages": len(scanned_pages),
+                "scan_ratio": (len(scanned_pages) / len(doc)) if len(doc) else 0.0,
+            },
+        )
+        # endregion
         
         result["text"] = "\n\n".join(text_pages)
         
@@ -1805,6 +1914,20 @@ def extract_pdf_text(pdf_path: str) -> Dict:
         if len(scanned_pages) > len(doc) * 0.3:  # >30% scanned
             result["is_scanned"] = True
             logger.info(f"[COMPLIANCE_OCR] {filename}: {len(scanned_pages)}/{len(doc)} pages scanned, using Gemini vision")
+            # region agent log
+            _debug_ingest_log(
+                run_id="pre_fix",
+                hypothesis_id="H1_H2",
+                location="memory_manager.py:extract_pdf_text:ocr_gate",
+                message="OCR gate triggered",
+                data={
+                    "filename": filename,
+                    "scanned_pages": len(scanned_pages),
+                    "ocr_pages_selected": len(scanned_pages[:20]),
+                    "ocr_pages_truncated": max(0, len(scanned_pages) - 20),
+                },
+            )
+            # endregion
             
             # Perform OCR on scanned pages (limit to first 20 for API cost protection)
             ocr_texts = []
@@ -1824,6 +1947,21 @@ def extract_pdf_text(pdf_path: str) -> Dict:
         
         doc.close()
         logger.info(f"[COMPLIANCE_EXTRACT] {filename}: {len(result['text'])} chars, {result['page_count']} pages, {result['ocr_pages']} OCR pages")
+        # region agent log
+        _debug_ingest_log(
+            run_id="pre_fix",
+            hypothesis_id="H2_H5",
+            location="memory_manager.py:extract_pdf_text:return",
+            message="PDF extraction summary",
+            data={
+                "filename": filename,
+                "chars": len(result["text"]),
+                "page_count": result["page_count"],
+                "is_scanned": result["is_scanned"],
+                "ocr_pages": result["ocr_pages"],
+            },
+        )
+        # endregion
         
     except ImportError:
         logger.error("PyMuPDF not installed. Install with: pip install PyMuPDF")
@@ -1883,15 +2021,43 @@ Respond with ONLY the extracted text, no commentary."""
             return ""
         
         try:
-            return response.text.strip() if response.text else ""
+            text_out = response.text.strip() if response.text else ""
+            # region agent log
+            _debug_ingest_log(
+                run_id="pre_fix",
+                hypothesis_id="H4",
+                location="memory_manager.py:_ocr_page_with_gemini:success",
+                message="OCR page result",
+                data={"filename": filename, "page_num": page_num, "ocr_chars": len(text_out)},
+            )
+            # endregion
+            return text_out
         except Exception as text_err:
             if "WARNING" in str(text_err) or "Safety" in str(text_err) or "blocked" in str(text_err).lower():
                 logger.warning(f"[OCR] response.text blocked: {text_err}")
+                # region agent log
+                _debug_ingest_log(
+                    run_id="pre_fix",
+                    hypothesis_id="H4",
+                    location="memory_manager.py:_ocr_page_with_gemini:blocked",
+                    message="OCR response text blocked",
+                    data={"filename": filename, "page_num": page_num, "error": str(text_err)[:200]},
+                )
+                # endregion
                 return ""
             raise text_err
         
     except Exception as e:
         logger.error(f"OCR failed for {filename} page {page_num}: {e}")
+        # region agent log
+        _debug_ingest_log(
+            run_id="pre_fix",
+            hypothesis_id="H4",
+            location="memory_manager.py:_ocr_page_with_gemini:exception",
+            message="OCR exception",
+            data={"filename": filename, "page_num": page_num, "error": str(e)[:200]},
+        )
+        # endregion
         return ""
 
 
@@ -2133,6 +2299,15 @@ def ingest_compliance_file(pdf_path: str) -> Dict:
     """
     collection = _get_compliance_collection()
     if collection is None:
+        # region agent log
+        _debug_ingest_log(
+            run_id="pre_fix",
+            hypothesis_id="H6",
+            location="memory_manager.py:ingest_compliance_file:no_collection",
+            message="Ingestion aborted before extraction because collection unavailable",
+            data={"pdf_path": pdf_path, "filename": os.path.basename(pdf_path)},
+        )
+        # endregion
         return {"success": False, "reason": "Compliance ChromaDB unavailable"}
     
     filename = os.path.basename(pdf_path)
@@ -2140,6 +2315,21 @@ def ingest_compliance_file(pdf_path: str) -> Dict:
     try:
         # Step 1: Extract text (multimodal if needed)
         extraction = extract_pdf_text(pdf_path)
+        # region agent log
+        _debug_ingest_log(
+            run_id="pre_fix",
+            hypothesis_id="H5",
+            location="memory_manager.py:ingest_compliance_file:after_extraction",
+            message="Ingestion extraction output",
+            data={
+                "filename": filename,
+                "chars": len(extraction.get("text", "")),
+                "is_scanned": extraction.get("is_scanned", False),
+                "ocr_pages": extraction.get("ocr_pages", 0),
+                "page_count": extraction.get("page_count", 0),
+            },
+        )
+        # endregion
         
         if not extraction["text"]:
             return {"success": False, "reason": "No text extracted from PDF"}
@@ -2149,6 +2339,15 @@ def ingest_compliance_file(pdf_path: str) -> Dict:
         
         # Step 3: Chunk with compliance-specific prefix
         chunks = chunk_compliance_document(extraction["text"], context, filename)
+        # region agent log
+        _debug_ingest_log(
+            run_id="pre_fix",
+            hypothesis_id="H5",
+            location="memory_manager.py:ingest_compliance_file:after_chunking",
+            message="Ingestion chunking output",
+            data={"filename": filename, "chunks": len(chunks), "iso_name": context.get("iso_name", "Unknown")},
+        )
+        # endregion
         
         if not chunks:
             return {"success": False, "reason": "No chunks created"}
