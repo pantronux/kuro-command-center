@@ -242,6 +242,25 @@ def set_active_persona(persona: str) -> Dict:
     logger.info(f"Active persona changed to: {normalized}")
     return {"status": "success", "persona": normalized}
 
+
+def set_runtime_context_value(key: str, value: str) -> None:
+    """Persist lightweight runtime context in master profile preferences."""
+    profile = load_master_profile()
+    preferences = profile.setdefault("preferences", {})
+    runtime_context = preferences.setdefault("runtime_context", {})
+    runtime_context[key] = value
+    save_master_profile(profile)
+
+
+def get_runtime_context_value(key: str, default: str = "") -> str:
+    """Fetch runtime context value from master profile preferences."""
+    profile = load_master_profile()
+    return (
+        profile.get("preferences", {})
+        .get("runtime_context", {})
+        .get(key, default)
+    )
+
 # ============================================
 # TIER 1: Short-Term Buffer (SQLite)
 # ============================================

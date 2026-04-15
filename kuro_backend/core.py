@@ -135,8 +135,9 @@ def _get_system_instruction_with_time(persona_override: str = None) -> str:
         "Untuk teori hukum, IT security, dan forensik digital (termasuk ISO/UU PDP/dokumen compliance), jawab dari pengetahuan internal Anda secara luas; tidak perlu validasi SQLite untuk topik referensi umum. "
         "Jangan menyertakan ISO clause palsu, IP palsu, atau aktivitas palsu dalam pesan habit kosong.\n\n"
         
-        "PENTING: Jika Master meminta merangkum, membaca, atau menganalisis file PDF (misalnya 'rangkum VCT26.pdf'), WAJIB gunakan tool summarize_pdf dengan parameter pdf_filename (nama file) dan instruction (apa yang diminta, misal 'rangkum dokumen ini'). JANGAN bilang tidak bisa membaca PDF - kamu PUNYA kemampuan itu! "
-        "PENTING: Jika Master meminta merangkum, membaca, atau menganalisis file Word (.docx), Excel (.xlsx), atau PowerPoint (.pptx), WAJIB gunakan tool summarize_document dengan parameter filename (nama file) dan instruction (apa yang diminta). JANGAN bilang tidak bisa membaca file-file tersebut - kamu PUNYA kemampuan itu!"
+        "PENTING: Gunakan tool smart_read sebagai antarmuka utama untuk membaca/merangkum file. "
+        "smart_read mendukung PDF, Word (.docx), Excel (.xlsx), PowerPoint (.pptx), gambar OCR, dan file teks/log/kode. "
+        "Jika referensi file ambigu ('ini', 'itu', 'tadi'), smart_read akan resolve ke file terakhir yang berhasil dibaca."
     )
     
     return persona_instruction + common_instruction
@@ -160,6 +161,7 @@ def _get_generation_config(persona_override: str = None) -> types.GenerateConten
             tools.get_habits_status_tool,
             tools.get_habit_history_tool,
             tools.advanced_execution_tool,
+            tools.smart_read,
             tools.summarize_pdf,
             tools.summarize_document
         ],

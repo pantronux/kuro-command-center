@@ -14,12 +14,24 @@ const CONFIG = {
         'image/': 'image',
         'video/': 'video',
         'application/pdf': 'pdf',
+        'application/msword': 'doc',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+        'application/vnd.ms-excel': 'xls',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+        'application/vnd.ms-powerpoint': 'ppt',
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'pptx',
+        'application/json': 'json',
+        'application/x-yaml': 'yaml',
         'text/plain': 'text',
         'text/markdown': 'markdown',
         'text/x-python': 'code',
         'text/csv': 'csv',
     },
-    ALLOWED_EXTENSIONS: ['.txt', '.md', '.py', '.csv'],
+    ALLOWED_EXTENSIONS: [
+        '.txt', '.md', '.py', '.csv', '.log',
+        '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
+        '.json', '.yaml', '.yml'
+    ],
 };
 
 // ============================================

@@ -27,6 +27,7 @@ from kuro_backend.tools.base_tools import (
     EMPTY_HABIT_FACTUAL_MESSAGE,
     summarize_pdf,
     summarize_document,
+    smart_read,
     read_docx_content,
     read_xlsx_content,
     read_pptx_content,

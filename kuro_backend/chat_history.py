@@ -71,6 +71,41 @@ def init_db():
             ON chat_history(platform, role, request_id)
             WHERE request_id IS NOT NULL
         """)
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS uploaded_file_integrity (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                request_id TEXT,
+                platform TEXT NOT NULL DEFAULT 'web',
+                persona TEXT NOT NULL DEFAULT 'consultant',
+                original_filename TEXT NOT NULL,
+                stored_filename TEXT NOT NULL,
+                stored_path TEXT NOT NULL,
+                content_type TEXT NOT NULL DEFAULT '',
+                size_bytes INTEGER NOT NULL DEFAULT 0,
+                sha256 TEXT NOT NULL,
+                uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_uploaded_integrity_stored_filename
+            ON uploaded_file_integrity(stored_filename)
+            """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_uploaded_integrity_sha256
+            ON uploaded_file_integrity(sha256)
+            """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_uploaded_integrity_request_id
+            ON uploaded_file_integrity(request_id)
+            """
+        )
         conn.commit()
         logger.info(f"Chat history database initialized at {DB_PATH}")
     except Exception as e:
@@ -201,6 +236,95 @@ def clear_history(platform: str = None):
         logger.info(f"Chat history cleared (platform: {platform or 'all'})")
     except Exception as e:
         logger.error(f"Failed to clear chat history: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+
+def record_uploaded_file_integrity(
+    request_id: Optional[str],
+    platform: str,
+    persona: Optional[str],
+    original_filename: str,
+    stored_filename: str,
+    stored_path: str,
+    content_type: str,
+    size_bytes: int,
+    sha256: str,
+) -> None:
+    """Persist immutable upload integrity metadata for chain-of-custody checks."""
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        normalized_persona = memory_manager.normalize_persona(persona)
+        cursor.execute(
+            """
+            INSERT INTO uploaded_file_integrity (
+                request_id, platform, persona, original_filename, stored_filename,
+                stored_path, content_type, size_bytes, sha256
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                request_id,
+                platform or "web",
+                normalized_persona,
+                original_filename,
+                stored_filename,
+                stored_path,
+                content_type or "",
+                int(size_bytes or 0),
+                sha256,
+            ),
+        )
+        conn.commit()
+    except Exception as e:
+        logger.error("Failed to record upload integrity metadata: %s", e)
+    finally:
+        if conn:
+            conn.close()
+
+
+def get_uploaded_file_integrity(
+    stored_filename: Optional[str] = None,
+    sha256: Optional[str] = None,
+    request_id: Optional[str] = None,
+    limit: int = 100,
+) -> List[Dict]:
+    """Query upload integrity records for verification workflows."""
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        filters = []
+        params: List[object] = []
+        if stored_filename:
+            filters.append("stored_filename = ?")
+            params.append(stored_filename)
+        if sha256:
+            filters.append("sha256 = ?")
+            params.append(sha256)
+        if request_id:
+            filters.append("request_id = ?")
+            params.append(request_id)
+
+        where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
+        params.append(limit)
+        cursor.execute(
+            f"""
+            SELECT * FROM uploaded_file_integrity
+            {where_clause}
+            ORDER BY uploaded_at DESC
+            LIMIT ?
+            """,
+            params,
+        )
+        rows = cursor.fetchall()
+        return [dict(r) for r in rows]
+    except Exception as e:
+        logger.error("Failed to query upload integrity metadata: %s", e)
+        return []
     finally:
         if conn:
             conn.close()

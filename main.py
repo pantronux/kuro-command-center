@@ -1,9 +1,11 @@
 import warnings
+import hashlib
 import logging
 import logging.handlers
 import asyncio
 import json
 import os
+import random
 import signal
 import sys
 import threading
@@ -341,6 +343,105 @@ app.mount("/static", StaticFiles(directory=os.path.join(WEB_DIR, "static")), nam
 UPLOAD_DIR = tools.UPLOAD_DIR
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+_DOC_EXTENSIONS = {
+    ".pdf", ".csv", ".txt", ".md", ".rtf", ".doc", ".docx",
+    ".xls", ".xlsx", ".ppt", ".pptx", ".json", ".yaml", ".yml",
+}
+_LOG_EXTENSIONS = {".log"}
+
+
+def _slugify_filename_base(filename: str) -> tuple[str, str]:
+    """Normalize original filename into safe slug base and extension."""
+    safe_name = (filename or "").strip()
+    if not safe_name:
+        return "file", ""
+    base, ext = os.path.splitext(safe_name)
+    slug_base = re.sub(r"[^A-Za-z0-9]+", "_", base).strip("_").lower()
+    return (slug_base or "file"), ext.lower()
+
+
+def _resolve_upload_subdir(content_type: str, extension: str) -> str:
+    """Route upload into a category folder."""
+    ctype = (content_type or "").lower()
+    ext = (extension or "").lower()
+    if ctype.startswith("image/"):
+        return "images"
+    if ext in _LOG_EXTENSIONS or "log" in ctype:
+        return "logs"
+    if ctype.startswith("text/") or ext in _DOC_EXTENSIONS or ctype in {
+        "application/pdf",
+        "application/msword",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.ms-excel",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.ms-powerpoint",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    }:
+        return "docs"
+    return "misc"
+
+
+def _build_unique_filename(original_name: str, timestamp: str, random_suffix: str = "") -> str:
+    """Build storage filename with optional random suffix failsafe."""
+    slug_base, ext = _slugify_filename_base(original_name)
+    suffix = f"_{random_suffix}" if random_suffix else ""
+    return f"{slug_base}_{timestamp}{suffix}{ext}"
+
+
+async def save_upload_file(file: UploadFile) -> Dict[str, str]:
+    """
+    Save uploaded file with deterministic unique filename and category folder.
+    Format: {slugified_original}_{YYYYMMDD_HHMMSS}.{ext}
+    Failsafe: append random 4-digit suffix on collision.
+    """
+    original_name = (file.filename or "").strip() or "file"
+    _, ext = _slugify_filename_base(original_name)
+    subdir = _resolve_upload_subdir(file.content_type or "", ext)
+    target_dir = os.path.join(UPLOAD_DIR, subdir)
+    os.makedirs(target_dir, exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    unique_name = _build_unique_filename(original_name, timestamp)
+    target_path = os.path.join(target_dir, unique_name)
+    collision_used = False
+
+    if os.path.exists(target_path):
+        collision_used = True
+        # Very rare same-second collision; use 4-digit random suffix as failsafe.
+        for _ in range(10):
+            suffix = f"{random.randint(1000, 9999)}"
+            unique_name = _build_unique_filename(original_name, timestamp, random_suffix=suffix)
+            target_path = os.path.join(target_dir, unique_name)
+            if not os.path.exists(target_path):
+                break
+
+    content = await file.read()
+    with open(target_path, "wb") as f:
+        f.write(content)
+    sha256_hash = hashlib.sha256(content).hexdigest()
+    size_bytes = len(content)
+
+    logger.info(
+        "Upload saved: original=%s stored=%s subdir=%s collision_failsafe=%s sha256=%s size_bytes=%s",
+        original_name,
+        unique_name,
+        subdir,
+        collision_used,
+        sha256_hash,
+        size_bytes,
+    )
+
+    return {
+        "original_filename": original_name,
+        "stored_filename": unique_name,
+        "stored_path": target_path,
+        "stored_dir": target_dir,
+        "category": subdir,
+        "content_type": file.content_type or "",
+        "sha256": sha256_hash,
+        "size_bytes": size_bytes,
+    }
+
 # --- Routes ---
 # Public API routes (no auth required)
 PUBLIC_API_ROUTES = ["/api/login", "/api/auth/verify", "/api/auth/stats", "/api/auth/logout"]
@@ -466,31 +567,51 @@ async def chat_endpoint(
         
         for file in files:
             if file.filename:
-                file_path = os.path.join(UPLOAD_DIR, file.filename)
-                with open(file_path, "wb") as f:
-                    content = await file.read()
-                    f.write(content)
+                saved_file = await save_upload_file(file)
+                file_path = saved_file["stored_path"]
+                stored_filename = saved_file["stored_filename"]
+                chat_history.record_uploaded_file_integrity(
+                    request_id=request_id,
+                    platform="web",
+                    persona=resolved_persona,
+                    original_filename=saved_file["original_filename"],
+                    stored_filename=stored_filename,
+                    stored_path=file_path,
+                    content_type=saved_file["content_type"],
+                    size_bytes=saved_file["size_bytes"],
+                    sha256=saved_file["sha256"],
+                )
                 
                 # Check if it's an image for vision processing
                 if file.content_type and file.content_type.startswith("image/"):
                     image_paths.append(file_path)
-                    file_attachments.append({"type": "image", "filename": file.filename, "path": file_path})
+                    file_attachments.append({
+                        "type": "image",
+                        "original_filename": saved_file["original_filename"],
+                        "stored_filename": stored_filename,
+                        "path": file_path,
+                    })
                 else:
-                    # Use universal_read to extract text from PDF, text files, etc.
-                    read_result = tools.universal_read(file_path, max_chars=10000)
-                    if read_result.get("content"):
-                        file_contents.append(f"\n--- File: {file.filename} ---\n{read_result['content']}")
+                    # Use smart_read facade for Office/PDF/text/log files
+                    read_result = tools.smart_read(file_ref=file_path, instruction="ekstrak konten utama file ini", max_chars=10000)
+                    parsed_content = read_result.get("summary") or read_result.get("content")
+                    if parsed_content:
+                        file_contents.append(f"\n--- File: {saved_file['original_filename']} ---\n{parsed_content}")
                         
                         # Store PDF content in ChromaDB for semantic search
-                        if read_result.get("format") == "pdf":
-                            from kuro_backend import memory_manager
+                        if (read_result.get("file_type") or "").lower().startswith("pdf"):
                             memory_manager.add_long_term(
-                                f"PDF Document: {file.filename}\nContent: {read_result['content'][:5000]}",
-                                metadata={"type": "pdf", "filename": file.filename, "path": file_path}
+                                f"PDF Document: {stored_filename}\nContent: {parsed_content[:5000]}",
+                                metadata={"type": "pdf", "filename": stored_filename, "path": file_path}
                             )
-                            logger.info(f"Stored PDF content in ChromaDB: {file.filename}")
+                            logger.info(f"Stored PDF content in ChromaDB: {stored_filename}")
                     
-                    file_attachments.append({"type": "file", "filename": file.filename})
+                    file_attachments.append({
+                        "type": "file",
+                        "original_filename": saved_file["original_filename"],
+                        "stored_filename": stored_filename,
+                        "path": file_path,
+                    })
                 
                 logger.info(f"File saved: {file_path}")
         
@@ -504,7 +625,7 @@ async def chat_endpoint(
             "web",
             "user",
             message,
-            [f["filename"] for f in file_attachments],
+            [f["stored_filename"] for f in file_attachments],
             persona=resolved_persona,
             request_id=request_id,
         )
@@ -562,20 +683,41 @@ async def chat_stream_endpoint(
             
             for file in files:
                 if file.filename:
-                    file_path = os.path.join(UPLOAD_DIR, file.filename)
-                    with open(file_path, "wb") as f:
-                        content = await file.read()
-                        f.write(content)
+                    saved_file = await save_upload_file(file)
+                    file_path = saved_file["stored_path"]
+                    stored_filename = saved_file["stored_filename"]
+                    chat_history.record_uploaded_file_integrity(
+                        request_id=request_id,
+                        platform="web",
+                        persona=resolved_persona,
+                        original_filename=saved_file["original_filename"],
+                        stored_filename=stored_filename,
+                        stored_path=file_path,
+                        content_type=saved_file["content_type"],
+                        size_bytes=saved_file["size_bytes"],
+                        sha256=saved_file["sha256"],
+                    )
                     
                     if file.content_type and file.content_type.startswith("image/"):
                         image_paths.append(file_path)
                         # FIX: Store image metadata separately, don't send raw metadata in text chunks
-                        file_attachments.append({"type": "image", "filename": file.filename})
+                        file_attachments.append({
+                            "type": "image",
+                            "original_filename": saved_file["original_filename"],
+                            "stored_filename": stored_filename,
+                            "path": file_path,
+                        })
                     else:
-                        read_result = tools.universal_read(file_path, max_chars=10000)
-                        if read_result.get("content"):
-                            file_contents.append(f"\n--- File: {file.filename} ---\n{read_result['content']}")
-                        file_attachments.append({"type": "file", "filename": file.filename})
+                        read_result = tools.smart_read(file_ref=file_path, instruction="ekstrak konten utama file ini", max_chars=10000)
+                        parsed_content = read_result.get("summary") or read_result.get("content")
+                        if parsed_content:
+                            file_contents.append(f"\n--- File: {saved_file['original_filename']} ---\n{parsed_content}")
+                        file_attachments.append({
+                            "type": "file",
+                            "original_filename": saved_file["original_filename"],
+                            "stored_filename": stored_filename,
+                            "path": file_path,
+                        })
             
             # Build enhanced message - image paths are passed separately to LangGraph
             # Image metadata is NOT injected into the text message to prevent raw metadata in chunks
@@ -588,7 +730,7 @@ async def chat_stream_endpoint(
                 "web",
                 "user",
                 message,
-                [f["filename"] for f in file_attachments],
+                [f["stored_filename"] for f in file_attachments],
                 persona=resolved_persona,
                 request_id=request_id,
             )
@@ -1117,6 +1259,76 @@ async def get_habits():
     """Get all daily habits (Pydantic-validated; same data path as Telegram/schedulers)."""
     habits = core_data.list_habits_validated()
     return {"status": "success", "habits": habits}
+
+
+@app.post("/api/habits")
+async def create_habit(
+    title: str = Form(...),
+    scheduled_time: str = Form(...),
+    category: str = Form("General"),
+):
+    """Create a new habit via single service gateway (with revision bump)."""
+    try:
+        habit_id = core_data.add_habit_svc(
+            title=title,
+            scheduled_time=scheduled_time,
+            category=category,
+        )
+        return {"status": "success", "habit_id": habit_id}
+    except Exception as e:
+        logger.error("Error creating habit: %s", e)
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "message": str(e)},
+        )
+
+
+@app.put("/api/habits/{habit_id}")
+async def update_habit(
+    habit_id: int,
+    title: Optional[str] = Form(None),
+    scheduled_time: Optional[str] = Form(None),
+    category: Optional[str] = Form(None),
+    target_per_month: Optional[int] = Form(None),
+    target_per_week: Optional[int] = Form(None),
+):
+    """Update a habit via service gateway (with revision bump)."""
+    try:
+        updates = {
+            "title": title,
+            "scheduled_time": scheduled_time,
+            "category": category,
+            "target_per_month": target_per_month,
+            "target_per_week": target_per_week,
+        }
+        filtered_updates = {k: v for k, v in updates.items() if v is not None}
+        if not filtered_updates:
+            return JSONResponse(
+                status_code=400,
+                content={"status": "error", "message": "No update fields provided"},
+            )
+        core_data.update_habit_svc(habit_id, **filtered_updates)
+        return {"status": "success", "habit_id": habit_id}
+    except Exception as e:
+        logger.error("Error updating habit %s: %s", habit_id, e)
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "message": str(e)},
+        )
+
+
+@app.delete("/api/habits/{habit_id}")
+async def delete_habit(habit_id: int):
+    """Delete a habit via service gateway (with revision bump)."""
+    try:
+        core_data.delete_habit_svc(habit_id)
+        return {"status": "success", "habit_id": habit_id}
+    except Exception as e:
+        logger.error("Error deleting habit %s: %s", habit_id, e)
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "message": str(e)},
+        )
 
 @app.get("/api/habits/stats")
 async def get_habits_stats():

@@ -10,6 +10,7 @@ PHASE 1 Fixes [2026-04-05]:
 - Physical Validation: os.path.exists() checks before file operations
 """
 import asyncio
+import base64
 import json
 import logging
 import os
@@ -54,6 +55,7 @@ IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'}
 DOCX_EXTENSIONS = {'.docx'}
 XLSX_EXTENSIONS = {'.xlsx', '.xls'}
 PPTX_EXTENSIONS = {'.pptx', '.ppt'}
+CONTEXTUAL_FILE_REFERENCES = {"ini", "itu", "tadi", "tersebut", "file ini", "file itu", "dokumen ini", "dokumen itu"}
 
 # ============================================
 # FILE LISTING UTILITY (Reality Check)
@@ -404,6 +406,263 @@ def universal_read(file_path: str, max_chars: int = 5000) -> Dict:
         result["error"] = f"Read error: {e}"
         logger.exception(f"Error reading {file_path}: {e}")
         return result
+
+
+def _run_instruction_on_text(
+    instruction: str,
+    extracted_text: str,
+    source_label: str,
+    max_chars: int = 40000,
+) -> Dict:
+    """Process extracted text with Gemini based on user instruction."""
+    from kuro_backend.core import client
+    from google.genai import types
+    from kuro_backend.config import settings
+
+    trimmed_text = (extracted_text or "")[:max_chars]
+    if not trimmed_text.strip():
+        return {"success": False, "error": "File tidak mengandung teks yang bisa diproses."}
+
+    prompt = f"""{instruction}
+
+Berikut adalah konten dari {source_label}:
+{trimmed_text}
+
+Berikan jawaban terstruktur dan jelas sesuai instruksi."""
+
+    try:
+        response = client.models.generate_content(
+            model=settings.MODEL_NAME,
+            contents=prompt,
+            config=types.GenerateContentConfig(temperature=0.2),
+        )
+        if hasattr(response, "prompt_feedback") and response.prompt_feedback:
+            block_reason = getattr(response.prompt_feedback, "block_reason", "UNKNOWN")
+            return {"success": False, "error": f"Content blocked by safety filter: {block_reason}"}
+        return {"success": True, "output": response.text if response.text else trimmed_text}
+    except Exception as exc:
+        logger.error(f"Failed to process extracted text with instruction: {exc}")
+        return {"success": False, "error": f"Gagal memproses instruksi: {exc}"}
+
+
+def _extract_image_text_with_vision(image_path: str, instruction: str = "") -> Dict:
+    """Extract text/insights from image using Gemini vision."""
+    from kuro_backend.core import client
+    from google.genai import types
+    from kuro_backend.config import settings
+
+    if not os.path.exists(image_path):
+        return {"success": False, "error": f"File not found: {image_path}"}
+
+    ext = os.path.splitext(image_path)[1].lower()
+    mime_map = {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".gif": "image/gif",
+        ".webp": "image/webp",
+        ".bmp": "image/bmp",
+    }
+    mime_type = mime_map.get(ext, "image/jpeg")
+    effective_instruction = instruction or "Ekstrak semua teks yang terlihat dari gambar ini secara akurat."
+
+    try:
+        with open(image_path, "rb") as f:
+            image_data = base64.b64encode(f.read()).decode("utf-8")
+
+        response = client.models.generate_content(
+            model=settings.MODEL_NAME,
+            contents=[
+                types.Part(text=effective_instruction),
+                types.Part(
+                    inline_data=types.Blob(
+                        mime_type=mime_type,
+                        data=image_data,
+                    )
+                ),
+            ],
+            config=types.GenerateContentConfig(temperature=0.0),
+        )
+        if hasattr(response, "prompt_feedback") and response.prompt_feedback:
+            block_reason = getattr(response.prompt_feedback, "block_reason", "UNKNOWN")
+            return {"success": False, "error": f"OCR blocked by safety filter: {block_reason}"}
+        return {
+            "success": True,
+            "content": response.text or "",
+            "format": "image_ocr",
+            "ocr_engine": "gemini_vision",
+        }
+    except Exception as exc:
+        logger.error(f"Image OCR failed for {image_path}: {exc}")
+        return {"success": False, "error": f"Gagal OCR gambar: {exc}"}
+
+
+def _resolve_smart_read_path(file_ref: str) -> Dict:
+    """Resolve explicit or contextual file references."""
+    from kuro_backend import memory_manager
+
+    requested = (file_ref or "").strip()
+    normalized = requested.lower()
+    if not requested or normalized in CONTEXTUAL_FILE_REFERENCES:
+        last_accessed = memory_manager.get_runtime_context_value("last_accessed_file", "")
+        if not last_accessed:
+            return {
+                "ok": False,
+                "error": "Context unresolved: sebutkan nama/path file dulu agar saya bisa melanjutkan.",
+                "resolved_by": "context_missing",
+            }
+        return {"ok": True, "path": last_accessed, "resolved_by": "context"}
+
+    explicit_path = os.path.abspath(requested)
+    if os.path.exists(explicit_path):
+        return {"ok": True, "path": explicit_path, "resolved_by": "explicit"}
+
+    upload_candidate = os.path.join(UPLOAD_DIR, requested)
+    if os.path.exists(upload_candidate):
+        return {"ok": True, "path": upload_candidate, "resolved_by": "search"}
+
+    for root, _, files in os.walk(UPLOAD_DIR):
+        for filename in files:
+            if requested.lower() in filename.lower():
+                return {
+                    "ok": True,
+                    "path": os.path.join(root, filename),
+                    "resolved_by": "search",
+                }
+
+    return {
+        "ok": False,
+        "error": f"File not found: {requested}",
+        "resolved_by": "not_found",
+    }
+
+
+def smart_read(file_ref: str = "", instruction: str = "rangkum dokumen ini", max_chars: int = 15000) -> Dict:
+    """
+    Unified file reading facade with context resolution.
+    Supports Office, PDF, image OCR, and plain text/log/code files.
+    """
+    from kuro_backend import memory_manager
+
+    resolved = _resolve_smart_read_path(file_ref)
+    if not resolved.get("ok"):
+        logger.warning(
+            "[SMART_READ] unresolved: resolved_by=%s file_ref=%s",
+            resolved.get("resolved_by"),
+            file_ref,
+        )
+        return {"success": False, "error": resolved.get("error"), "resolved_by": resolved.get("resolved_by")}
+
+    file_path = resolved["path"]
+    ext = os.path.splitext(file_path)[1].lower()
+    resolved_by = resolved.get("resolved_by", "explicit")
+    logger.info("[SMART_READ] start: path=%s resolved_by=%s", file_path, resolved_by)
+
+    try:
+        if ext in PDF_EXTENSIONS:
+            if os.path.abspath(file_path).startswith(os.path.abspath(UPLOAD_DIR)):
+                result = summarize_pdf(os.path.basename(file_path), instruction=instruction)
+                engine_used = "summarize_pdf"
+            else:
+                extracted = read_pdf_content(file_path, max_pages=50, max_chars=max_chars)
+                if extracted.get("error"):
+                    return {"success": False, "error": extracted["error"], "fallback_reason": "pdf_parse_failed"}
+                processed = _run_instruction_on_text(instruction, extracted.get("content", ""), f"PDF file {os.path.basename(file_path)}")
+                if not processed.get("success"):
+                    return processed
+                result = {
+                    "success": True,
+                    "filename": os.path.basename(file_path),
+                    "file_type": "PDF",
+                    "summary": processed["output"],
+                }
+                engine_used = "read_pdf_content+llm"
+        elif ext in DOCX_EXTENSIONS:
+            extracted = read_docx_content(file_path, max_chars=max_chars)
+            if extracted.get("error"):
+                return {"success": False, "error": extracted["error"], "fallback_reason": "dependency_missing_or_parse_failed"}
+            processed = _run_instruction_on_text(instruction, extracted.get("content", ""), f"Word file {os.path.basename(file_path)}")
+            if not processed.get("success"):
+                return processed
+            result = {
+                "success": True,
+                "filename": os.path.basename(file_path),
+                "file_type": "Word (.docx)",
+                "summary": processed["output"],
+            }
+            engine_used = "read_docx_content+llm"
+        elif ext in XLSX_EXTENSIONS:
+            extracted = read_xlsx_content(file_path, max_chars=max_chars)
+            if extracted.get("error"):
+                return {"success": False, "error": extracted["error"], "fallback_reason": "dependency_missing_or_parse_failed"}
+            processed = _run_instruction_on_text(instruction, extracted.get("content", ""), f"Excel file {os.path.basename(file_path)}")
+            if not processed.get("success"):
+                return processed
+            result = {
+                "success": True,
+                "filename": os.path.basename(file_path),
+                "file_type": "Excel (.xlsx)",
+                "summary": processed["output"],
+            }
+            engine_used = "read_xlsx_content+llm"
+        elif ext in PPTX_EXTENSIONS:
+            extracted = read_pptx_content(file_path, max_chars=max_chars)
+            if extracted.get("error"):
+                return {"success": False, "error": extracted["error"], "fallback_reason": "dependency_missing_or_parse_failed"}
+            processed = _run_instruction_on_text(instruction, extracted.get("content", ""), f"PowerPoint file {os.path.basename(file_path)}")
+            if not processed.get("success"):
+                return processed
+            result = {
+                "success": True,
+                "filename": os.path.basename(file_path),
+                "file_type": "PowerPoint (.pptx)",
+                "summary": processed["output"],
+            }
+            engine_used = "read_pptx_content+llm"
+        elif ext in IMAGE_EXTENSIONS:
+            ocr_result = _extract_image_text_with_vision(file_path, instruction=instruction)
+            if not ocr_result.get("success"):
+                return ocr_result
+            result = {
+                "success": True,
+                "filename": os.path.basename(file_path),
+                "file_type": "Image",
+                "summary": ocr_result.get("content", ""),
+                "ocr_engine": ocr_result.get("ocr_engine"),
+            }
+            engine_used = "vision_ocr"
+        else:
+            raw_result = universal_read(file_path, max_chars=max_chars)
+            if raw_result.get("error"):
+                return {"success": False, "error": raw_result["error"], "fallback_reason": "universal_read_failed"}
+            result = {
+                "success": True,
+                "filename": os.path.basename(file_path),
+                "file_type": raw_result.get("format", "text"),
+                "summary": raw_result.get("content", ""),
+            }
+            engine_used = "universal_read"
+
+        if result.get("success"):
+            memory_manager.set_runtime_context_value("last_accessed_file", file_path)
+        result["resolved_by"] = resolved_by
+        result["engine_used"] = engine_used
+        result["source_path"] = file_path
+        logger.info(
+            "[SMART_READ] done: resolved_by=%s file_type=%s engine_used=%s",
+            resolved_by,
+            ext or "no_ext",
+            engine_used,
+        )
+        return result
+    except Exception as exc:
+        logger.exception("[SMART_READ] unexpected error: %s", exc)
+        return {
+            "success": False,
+            "error": f"Smart read failed: {exc}",
+            "resolved_by": resolved_by,
+            "fallback_reason": "unexpected_exception",
+        }
 
 
 def parse_log_content(content: str) -> List[Dict]:

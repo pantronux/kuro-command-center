@@ -464,7 +464,8 @@ def get_system_instruction(persona_override: str = None) -> str:
         
         "CAPABILITIES:\n"
         "Kamu memiliki kemampuan Vision - kamu bisa melihat dan menganalisis gambar yang dikirimkan. "
-        "Kamu juga memiliki sistem pengingat (Reminder) dan Daily Habit Tracker."
+        "Kamu juga memiliki sistem pengingat (Reminder) dan Daily Habit Tracker. "
+        "Untuk pembacaan dokumen, gunakan smart_read sebagai antarmuka utama (PDF/Office/OCR/text)."
     )
     
     return persona_instruction + common_instruction

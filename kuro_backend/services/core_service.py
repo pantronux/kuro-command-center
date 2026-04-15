@@ -106,13 +106,43 @@ def get_data_revision() -> int:
         conn.close()
 
 
-def _resolve_reminder_db_path() -> str:
-    for key in ("KURO_REMINDERS_DB_PATH", "KURO_REMINDERS_DB"):
+def _resolve_db_path_with_env(
+    env_keys: tuple[str, ...],
+    default_filename: str,
+    db_label: str,
+) -> str:
+    """Resolve DB path with explicit env precedence and startup diagnostics."""
+    for key in env_keys:
         raw = os.getenv(key)
-        if raw:
-            p = os.path.expanduser(raw.strip())
-            return os.path.abspath(p if os.path.isabs(p) else os.path.join(PROJECT_ROOT, p))
-    return os.path.abspath(os.path.join(PROJECT_ROOT, "kuro_reminders.db"))
+        if not raw:
+            continue
+        candidate = raw.strip()
+        if not candidate:
+            logger.warning("[DB_PATH] %s ignored empty value for env %s", db_label, key)
+            continue
+        expanded = os.path.expanduser(candidate)
+        resolved = os.path.abspath(
+            expanded if os.path.isabs(expanded) else os.path.join(PROJECT_ROOT, expanded)
+        )
+        logger.info("[DB_PATH] %s resolved from %s -> %s", db_label, key, resolved)
+        return resolved
+
+    fallback = os.path.abspath(os.path.join(PROJECT_ROOT, default_filename))
+    logger.warning(
+        "[DB_PATH] %s using fallback path %s (env keys missing: %s)",
+        db_label,
+        fallback,
+        ", ".join(env_keys),
+    )
+    return fallback
+
+
+def _resolve_reminder_db_path() -> str:
+    return _resolve_db_path_with_env(
+        ("KURO_REMINDERS_DB_PATH", "KURO_REMINDERS_DB"),
+        "kuro_reminders.db",
+        "reminders",
+    )
 
 
 REMINDER_DB_PATH = _resolve_reminder_db_path()
@@ -385,12 +415,11 @@ def get_reminder_stats() -> Dict:
 
 
 def _resolve_habits_db_path() -> str:
-    for key in ("KURO_HABITS_DB_PATH", "KURO_HABITS_DB"):
-        raw = os.getenv(key)
-        if raw:
-            p = os.path.expanduser(raw.strip())
-            return os.path.abspath(p if os.path.isabs(p) else os.path.join(PROJECT_ROOT, p))
-    return os.path.abspath(os.path.join(PROJECT_ROOT, "kuro_habits.db"))
+    return _resolve_db_path_with_env(
+        ("KURO_HABITS_DB_PATH", "KURO_HABITS_DB"),
+        "kuro_habits.db",
+        "habits",
+    )
 
 
 HABITS_DB_PATH = _resolve_habits_db_path()
@@ -1151,6 +1180,11 @@ def fetch_habit_activity_snapshot(days: int = 30) -> Dict[str, Any]:
 
 
 def init_all_databases() -> None:
+    logger.info(
+        "[DB_PATH] Active SQLite files -> reminders=%s habits=%s",
+        REMINDER_DB_PATH,
+        HABITS_DB_PATH,
+    )
     _init_reminders_schema()
     _init_habits_schema()
     _migrate_habit_constraints()
@@ -1233,6 +1267,16 @@ def delete_reminder_svc(reminder_id: int) -> None:
 
 def mark_reminder_completed_svc(reminder_id: int) -> None:
     mark_completed(reminder_id)
+    bump_data_revision()
+
+
+def mark_notified_10m_svc(reminder_id: int) -> None:
+    mark_notified_10m(reminder_id)
+    bump_data_revision()
+
+
+def mark_notified_event_svc(reminder_id: int) -> None:
+    mark_notified_event(reminder_id)
     bump_data_revision()
 
 

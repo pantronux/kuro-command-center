@@ -39,11 +39,11 @@ def delete_reminder(reminder_id: int) -> None:
 
 
 def mark_notified_10m(reminder_id: int) -> None:
-    cs.mark_notified_10m(reminder_id)
+    cs.mark_notified_10m_svc(reminder_id)
 
 
 def mark_notified_event(reminder_id: int) -> None:
-    cs.mark_notified_event(reminder_id)
+    cs.mark_notified_event_svc(reminder_id)
 
 
 def mark_reminder_completed(reminder_id: int) -> None:

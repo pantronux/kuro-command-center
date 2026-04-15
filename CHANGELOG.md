@@ -1,8 +1,87 @@
-# Kuro AI V5.0 Official - Changelog
+# Kuro AI V5.1 Official - Changelog
 
 **Release Date:** 2026-04-15
-**Version:** 5.0.0
-**Codename:** "Integration & Data Integrity Hardening"
+**Version:** 5.1.0
+**Codename:** "Upload Integrity, Sync Reliability & Smart Read Unification"
+
+---
+
+## V5.1.0 - Upload Integrity, Sync Reliability & Smart Read Unification (2026-04-15)
+
+### Major Upgrade: File Lifecycle Hardening + Dashboard Data Sync
+
+#### 1. Smart Read Flow Unification
+- **Unified facade**: Introduced `smart_read(...)` as the primary file-reading entrypoint.
+- **Format routing**:
+  - PDF -> PDF engine + instruction processing
+  - DOCX/XLSX/PPTX -> native parser + LLM processing
+  - Images -> Vision OCR extraction path
+  - Text/log/code -> `universal_read` fallback
+- **Context resolution**: Added contextual resolution for references like `ini/itu/tadi` using `last_accessed_file`.
+- **Prompt alignment**: System instructions in core/langgraph now point to `smart_read` as canonical interface.
+
+#### 2. Habits & Reminders Synchronization Hardening
+- **Habits write APIs restored**:
+  - `POST /api/habits`
+  - `PUT /api/habits/{habit_id}`
+  - `DELETE /api/habits/{habit_id}`
+- **Reminder mutation consistency**:
+  - Added `mark_notified_10m_svc(...)`
+  - Added `mark_notified_event_svc(...)`
+  - Wrapper now routes notified mutations via svc path to guarantee revision bump.
+- **DB path diagnostics**: Added explicit DB path resolution logging and fallback warnings to reduce cross-process path drift risk.
+
+#### 3. Dynamic Upload Filename Refactor (Anti-Overwrite)
+- **Unique filename policy**:
+  - Format: `{slugified_original}_{YYYYMMDD_HHMMSS}.{ext}`
+  - Collision failsafe: append random 4-digit suffix on same-second duplicates.
+- **Category-based storage**:
+  - `images/`, `docs/`, `logs/`, `misc/` under upload root.
+- **Metadata consistency**:
+  - Chat attachments now persist `stored_filename` (unique server filename), not raw client filename.
+- **Frontend alignment**:
+  - Attach/drag-drop/paste still uses same UX.
+  - Allowed types extended to include `.log`, Office files, and structured text extensions.
+
+#### 4. SHA-256 Integrity Logging for Uploads
+- **New integrity table**: `uploaded_file_integrity` in chat history SQLite.
+- **Stored metadata**:
+  - `request_id`, `platform`, `persona`
+  - `original_filename`, `stored_filename`, `stored_path`
+  - `content_type`, `size_bytes`, `sha256`, `uploaded_at`
+- **Automatic checksum generation**:
+  - SHA-256 computed at upload save time (without rereading file).
+  - Persisted for both `/api/chat` and `/api/chat/stream` upload paths.
+- **Verification helpers**:
+  - Added internal APIs to record/query integrity metadata from `chat_history` module.
+
+#### 5. Test Coverage Added/Updated
+- **NEW**: `tests/test_smart_read_flow.py`
+- **NEW**: `tests/test_sync_revision_contract.py`
+- **NEW**: `tests/test_upload_filename_generation.py`
+- **Regression status**: Core targeted suites pass for smart_read, sync revision, upload uniqueness, and integrity logging paths.
+
+#### 6. Bug & Scheduled Improvements
+- **Known issue (active)**: Image analysis still inconsistent for single and multiple image scenarios in chat flow.
+- **Known issue (active)**: Prompting Kuro using explicit local image path references is not consistently resolved/executed.
+- **Scheduled improvement**:
+  - Harden multi-image orchestration and response quality controls.
+  - Add deterministic image-path resolver and stricter validation before analysis.
+  - Consider optional quota-aware batching strategy for image-heavy requests.
+
+#### Files Changed (V5.1.0)
+- **MODIFIED**: `kuro_backend/tools/base_tools.py`
+- **MODIFIED**: `kuro_backend/core.py`
+- **MODIFIED**: `kuro_backend/langgraph_core.py`
+- **MODIFIED**: `kuro_backend/services/core_service.py`
+- **MODIFIED**: `kuro_backend/reminder_service.py`
+- **MODIFIED**: `kuro_backend/chat_history.py`
+- **MODIFIED**: `main.py`
+- **MODIFIED**: `web_interface/templates/index.html`
+- **MODIFIED**: `web_interface/static/js/app.js`
+- **NEW**: `tests/test_smart_read_flow.py`
+- **NEW**: `tests/test_sync_revision_contract.py`
+- **NEW**: `tests/test_upload_filename_generation.py`
 
 ---
 
