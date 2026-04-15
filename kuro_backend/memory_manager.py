@@ -575,7 +575,12 @@ def mark_obsolete(query: str):
 # ============================================
 # Unified Memory Query Interface
 # ============================================
-def query_memory(current_message: str, recent_messages: List[Dict] = None, persona_scope: str = None) -> Dict[str, str]:
+def query_memory(
+    current_message: str,
+    recent_messages: List[Dict] = None,
+    persona_scope: str = None,
+    include_compliance: bool = True,
+) -> Dict[str, str]:
     """
     Pre-process memory before AI response.
     
@@ -612,7 +617,7 @@ def query_memory(current_message: str, recent_messages: List[Dict] = None, perso
     msg_lower = current_message.lower()
     is_compliance_query = any(kw in msg_lower for kw in compliance_keywords)
     
-    if is_compliance_query:
+    if include_compliance and is_compliance_query:
         # Boosted search: get more results for compliance queries
         compliance_results = search_compliance_base(current_message, top_k=8)
         if compliance_results:
@@ -749,12 +754,13 @@ def apply_memory_decay() -> List[str]:
     return outdated_ids
 
 
-def summarize_conversation_to_chroma():
+def summarize_conversation_to_chroma(persona_scope: str = None):
     """
     Conversation Summarization: When short-term buffer is full,
     summarize the conversation and store to ChromaDB for long-term retention.
     """
-    entries = get_short_term()
+    scope = normalize_persona(persona_scope or get_active_persona())
+    entries = get_short_term(persona_scope=scope)
     
     if len(entries) < CONVERSATION_SUMMARY_THRESHOLD:
         return False
@@ -772,7 +778,8 @@ def summarize_conversation_to_chroma():
         add_long_term(summary, metadata={
             "type": "conversation_summary",
             "interaction_count": len(entries),
-            "source": "auto_summary"
+            "source": "auto_summary",
+            "persona_scope": scope,
         })
         
         logger.info(f"Conversation summarized: {len(entries)} interactions stored to ChromaDB")

@@ -36,8 +36,23 @@ function logout() {
         .catch(() => { window.location.href = '/login'; });
 }
 
+function getChatSessionId() {
+    const key = 'kuro_chat_session_id';
+    let sessionId = localStorage.getItem(key);
+    if (sessionId) return sessionId;
+    if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+        sessionId = window.crypto.randomUUID();
+    } else {
+        sessionId = `sess_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
+    }
+    localStorage.setItem(key, sessionId);
+    return sessionId;
+}
+
 async function authFetch(url, options = {}) {
     options.credentials = options.credentials || 'include';
+    options.headers = options.headers || {};
+    options.headers['X-Chat-Session'] = getChatSessionId();
     const response = await fetch(url, options);
     
     if (response.status === 401) {
@@ -143,7 +158,6 @@ document.addEventListener('DOMContentLoaded', () => {
     setupEventListeners();
     setupAutoResize();
     setupInfiniteScroll();
-    loadChatHistory();
     updateUserInfo();
 });
 
@@ -531,9 +545,6 @@ async function sendMessage() {
     selectedFiles = [];
     updateFilePreview();
     
-    // Show typing indicator
-    showTypingIndicator();
-    
     // STEP 1: Create ONE empty chat bubble for Kuro and insert into DOM
     const aiMessageDiv = document.createElement('div');
     aiMessageDiv.className = 'flex items-start gap-3 message-enter';
@@ -554,6 +565,21 @@ async function sendMessage() {
     let botMessage = '';
     let buffer = '';
     let streamStarted = false;
+    let pendingRender = '';
+    let renderTimer = null;
+    let wasPinnedToBottom = true;
+    let streamMeta = null;
+    let streamHadError = false;
+
+    const flushStreamingRender = () => {
+        if (!pendingRender) return;
+        botMessage += pendingRender;
+        pendingRender = '';
+        streamingContent.textContent = botMessage;
+        if (wasPinnedToBottom) {
+            scrollToBottom();
+        }
+    };
     
     try {
         const formData = new FormData();
@@ -562,7 +588,7 @@ async function sendMessage() {
         filesToSend.forEach(file => formData.append('files', file));
         
         // STEP 2: Fetch the streaming endpoint
-        const response = await fetch(`${CONFIG.API_BASE}/chat/stream`, {
+        const response = await authFetch(`${CONFIG.API_BASE}/chat/stream`, {
             method: 'POST',
             body: formData,
             credentials: 'include',
@@ -585,6 +611,7 @@ async function sendMessage() {
             if (done) break;
             
             buffer += decoder.decode(value, { stream: true });
+            buffer = buffer.replace(/\r\n/g, '\n');
             const events = buffer.split('\n\n');
             buffer = events.pop(); // Save incomplete event to buffer
             
@@ -592,15 +619,16 @@ async function sendMessage() {
                 // Parse SSE event: extract event: and data: lines
                 const lines = event.split('\n');
                 let eventType = 'chunk'; // Default event type
-                let dataStr = null;
+                const dataParts = [];
                 
                 for (const line of lines) {
                     if (line.startsWith('event: ')) {
                         eventType = line.substring(7).trim();
                     } else if (line.startsWith('data: ')) {
-                        dataStr = line.substring(6).trim();
+                        dataParts.push(line.substring(6));
                     }
                 }
+                const dataStr = dataParts.join('\n').trim();
                 
                 if (!dataStr) continue;
                 if (dataStr === '[DONE]') continue;
@@ -611,24 +639,44 @@ async function sendMessage() {
                     
                     if (eventType === 'chunk' && piece != null && piece !== '') {
                         if (!streamStarted) {
-                            removeTypingIndicator();
                             streamStarted = true;
                         }
-                        // Prefer plain text while streaming so half-open markdown does not blank the bubble
-                        botMessage += piece;
-                        streamingContent.textContent = botMessage;
-                        elements.chatContainer.scrollTop = elements.chatContainer.scrollHeight;
-                    } else if (eventType === 'complete' && data.response) {
+                        wasPinnedToBottom = isNearBottom();
+                        pendingRender += piece;
+                        if (!renderTimer) {
+                            renderTimer = setTimeout(() => {
+                                flushStreamingRender();
+                                renderTimer = null;
+                            }, 50);
+                        }
+                    } else if (eventType === 'complete' && (data.response || data?.data?.response)) {
+                        if (renderTimer) {
+                            clearTimeout(renderTimer);
+                            renderTimer = null;
+                        }
+                        flushStreamingRender();
                         // Complete event: DO NOT create a new bubble.
                         // Only use for final markdown rendering and syntax highlighting.
                         // The bubble already exists from the chunk events above.
-                        botMessage = data.response; // Use the complete response for consistency
+                        botMessage = data.response || data?.data?.response; // Use the complete response for consistency
                         streamingContent.innerHTML = marked.parse(botMessage);
                         streamingContent.classList.add('markdown-content');
-                        hljs.highlightAll();
-                        elements.chatContainer.scrollTop = elements.chatContainer.scrollHeight;
+                        highlightInContainer(streamingContent);
+                        streamMeta = data.meta || null;
+                        if (streamMeta?.ttfb_ms || streamMeta?.total_ms) {
+                            const metaInfo = document.createElement('div');
+                            metaInfo.className = 'text-[10px] text-gray-400 mt-2';
+                            metaInfo.textContent = `TTFB ${streamMeta.ttfb_ms ?? '-'} ms | Total ${streamMeta.total_ms ?? '-'} ms`;
+                            streamingContent.appendChild(metaInfo);
+                        }
+                        if (wasPinnedToBottom) {
+                            scrollToBottom();
+                        }
                     } else if (eventType === 'error' && data.error) {
+                        streamHadError = true;
                         streamingContent.innerHTML = `<span style="color:red">Error: ${escapeHtml(data.error)}</span>`;
+                    } else if (eventType === 'meta') {
+                        streamMeta = data;
                     }
                 } catch (e) {
                     console.error("JSON Parse Error on event:", dataStr);
@@ -636,20 +684,23 @@ async function sendMessage() {
             }
         }
         
-        if (!streamStarted) {
-            removeTypingIndicator();
+        if (renderTimer) {
+            clearTimeout(renderTimer);
+            renderTimer = null;
         }
+        flushStreamingRender();
         
         // Final render (fallback if complete event wasn't received)
-        if (botMessage) {
+        if (botMessage && !streamHadError) {
             streamingContent.innerHTML = marked.parse(botMessage);
-            hljs.highlightAll();
+            highlightInContainer(streamingContent);
         }
-        elements.chatContainer.scrollTop = elements.chatContainer.scrollHeight;
+        if (wasPinnedToBottom) {
+            scrollToBottom();
+        }
         
     } catch (error) {
         console.error('Chat error:', error);
-        removeTypingIndicator();
         // Error handling with recovery - show red text in the SAME bubble
         if (streamingContent) {
             // If we already have partial content, show it with error notice
@@ -674,6 +725,19 @@ function scrollToBottom() {
     if (elements.chatContainer) {
         elements.chatContainer.scrollTop = elements.chatContainer.scrollHeight;
     }
+}
+
+function isNearBottom(threshold = 80) {
+    if (!elements.chatContainer) return true;
+    const remaining = elements.chatContainer.scrollHeight - elements.chatContainer.scrollTop - elements.chatContainer.clientHeight;
+    return remaining < threshold;
+}
+
+function highlightInContainer(container) {
+    if (!container) return;
+    container.querySelectorAll('pre code').forEach(block => {
+        hljs.highlightElement(block);
+    });
 }
 
 function addMessageToChat(role, content, files = []) {
@@ -1288,7 +1352,7 @@ function setPersonaInUrl(personaName, refresh = false) {
     const normalized = normalizePersona(personaName);
     const target = `/chat?persona=${encodeURIComponent(normalized)}`;
     if (refresh) {
-        window.location.href = target;
+        window.history.replaceState({}, '', target);
         return;
     }
     window.history.replaceState({}, '', target);
@@ -1315,6 +1379,7 @@ async function applyPersona() {
             showNotification(`Persona changed to ${personaLabels[selectedPersona]}`, 'success');
             localStorage.setItem('kuro-persona', selectedPersona);
             setPersonaInUrl(selectedPersona, true);
+            await loadChatHistory();
         } else {
             showNotification('Failed to change persona: ' + data.message, 'error');
         }
@@ -1338,6 +1403,7 @@ async function loadPersona() {
             option.classList.add('bg-emerald-50', 'dark:bg-emerald-900/30');
         }
     });
+    await loadChatHistory();
 }
 
 // ============================================

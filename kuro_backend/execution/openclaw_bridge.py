@@ -7,6 +7,7 @@ import asyncio
 import logging
 import os
 import threading
+import time
 import uuid
 from typing import Any, Dict, Optional
 
@@ -19,6 +20,7 @@ DEFAULT_OPENCLAW_BASE_URL = "http://localhost:8000"
 DEFAULT_OPENCLAW_EXECUTE_PATH = "/execute"
 DEFAULT_OPENCLAW_TIMEOUT_SECONDS = 45.0
 OPENCLAW_CIRCUIT_BREAKER_THRESHOLD = 3
+OPENCLAW_CIRCUIT_BREAKER_COOLDOWN_SECONDS = 30.0
 OPENCLAW_UNAVAILABLE_FEEDBACK = (
     "Maaf Master, otot eksekusi (OpenClaw) sedang tidak tersedia. "
     "Saya akan tetap mencatat instruksi ini di memori sementara."
@@ -26,6 +28,8 @@ OPENCLAW_UNAVAILABLE_FEEDBACK = (
 _circuit_breaker_lock = threading.Lock()
 _consecutive_unavailable_failures = 0
 _circuit_open = False
+_circuit_opened_at = 0.0
+_half_open_probe_inflight = False
 _DANGEROUS_COMMAND_KEYWORDS = (
     "shutdown",
     "poweroff",
@@ -53,25 +57,60 @@ def _extract_command_for_safety_check(params: Dict[str, Any]) -> Optional[str]:
     return None
 
 
+def _normalize_execution_mode(params: Dict[str, Any]) -> str:
+    mode = str(params.get("execution_mode", "mutating")).strip().lower()
+    return "readonly" if mode == "readonly" else "mutating"
+
+
 def _record_availability_failure() -> int:
-    global _consecutive_unavailable_failures, _circuit_open
+    global _consecutive_unavailable_failures, _circuit_open, _circuit_opened_at, _half_open_probe_inflight
     with _circuit_breaker_lock:
         _consecutive_unavailable_failures += 1
         if _consecutive_unavailable_failures >= OPENCLAW_CIRCUIT_BREAKER_THRESHOLD:
             _circuit_open = True
+            _circuit_opened_at = time.monotonic()
+            _half_open_probe_inflight = False
         return _consecutive_unavailable_failures
 
 
 def _reset_circuit_breaker() -> None:
-    global _consecutive_unavailable_failures, _circuit_open
+    global _consecutive_unavailable_failures, _circuit_open, _circuit_opened_at, _half_open_probe_inflight
     with _circuit_breaker_lock:
         _consecutive_unavailable_failures = 0
         _circuit_open = False
+        _circuit_opened_at = 0.0
+        _half_open_probe_inflight = False
 
 
 def _is_circuit_open() -> bool:
     with _circuit_breaker_lock:
         return _circuit_open
+
+
+def _try_begin_half_open_probe() -> bool:
+    global _half_open_probe_inflight
+    with _circuit_breaker_lock:
+        if not _circuit_open:
+            return True
+        now = time.monotonic()
+        cooldown_ok = (now - _circuit_opened_at) >= OPENCLAW_CIRCUIT_BREAKER_COOLDOWN_SECONDS
+        if not cooldown_ok or _half_open_probe_inflight:
+            return False
+        # Atomic transition: claim single half-open probe slot here.
+        _half_open_probe_inflight = True
+        return True
+
+
+def _finish_half_open_probe(success: bool) -> None:
+    global _half_open_probe_inflight, _circuit_open, _circuit_opened_at
+    with _circuit_breaker_lock:
+        _half_open_probe_inflight = False
+        if success:
+            _circuit_open = False
+            _circuit_opened_at = 0.0
+        else:
+            _circuit_open = True
+            _circuit_opened_at = time.monotonic()
 
 
 def _build_circuit_open_response(request_id: str, raw_error: Optional[str] = None) -> Dict[str, Any]:
@@ -144,10 +183,20 @@ async def execute_openclaw_skill(
     request_id = str(uuid.uuid4())
     normalized_params = params if isinstance(params, dict) else {"payload": params}
     command_candidate = _extract_command_for_safety_check(normalized_params)
+    execution_mode = _normalize_execution_mode(normalized_params)
 
-    if _is_circuit_open():
+    if _is_circuit_open() and not _try_begin_half_open_probe():
         logger.warning("[OPENCLAW] Circuit open; skipping request request_id=%s", request_id)
         return _build_circuit_open_response(request_id, raw_error="circuit_open")
+
+    if execution_mode != "readonly" and command_candidate is None:
+        return {
+            "success": False,
+            "error": "Eksekusi ditolak: execution_mode mutating wajib menyertakan command/task_description eksplisit.",
+            "status_code": None,
+            "request_id": request_id,
+            "raw_response": None,
+        }
 
     if command_candidate is not None:
         # Keep exact model-sent command for incident/audit traces.
@@ -171,6 +220,7 @@ async def execute_openclaw_skill(
         "params": normalized_params,
         "request_id": request_id,
         "source": "kuro_openclaw_bridge",
+        "execution_mode": execution_mode,
     }
 
     def _post() -> Dict[str, Any]:
@@ -194,6 +244,7 @@ async def execute_openclaw_skill(
     try:
         result = await asyncio.to_thread(_post)
     except requests.Timeout:
+        _finish_half_open_probe(False)
         failures = _record_availability_failure()
         logger.warning(
             "[OPENCLAW] Timeout request_id=%s endpoint=%s failures=%s",
@@ -220,6 +271,7 @@ async def execute_openclaw_skill(
             },
         }
     except requests.ConnectionError as exc:
+        _finish_half_open_probe(False)
         failures = _record_availability_failure()
         logger.error("[OPENCLAW] Connection failed request_id=%s failures=%s error=%s", request_id, failures, exc)
         if failures >= OPENCLAW_CIRCUIT_BREAKER_THRESHOLD:
@@ -238,6 +290,7 @@ async def execute_openclaw_skill(
             },
         }
     except requests.RequestException as exc:
+        _finish_half_open_probe(False)
         logger.error("[OPENCLAW] Request failed request_id=%s error=%s", request_id, exc)
         return {
             "success": False,
@@ -247,6 +300,7 @@ async def execute_openclaw_skill(
             "raw_response": None,
         }
     except Exception as exc:
+        _finish_half_open_probe(False)
         logger.exception("[OPENCLAW] Unexpected error request_id=%s", request_id)
         return {
             "success": False,
@@ -261,6 +315,7 @@ async def execute_openclaw_skill(
     ok = bool(result.get("ok"))
 
     if not ok:
+        _finish_half_open_probe(False)
         return {
             "success": False,
             "error": f"OpenClaw returned HTTP {status_code}",
@@ -269,6 +324,7 @@ async def execute_openclaw_skill(
             "raw_response": body,
         }
 
+    _finish_half_open_probe(True)
     _reset_circuit_breaker()
     return {
         "success": True,

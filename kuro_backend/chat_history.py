@@ -51,6 +51,11 @@ def init_db():
                 "ALTER TABLE chat_history ADD COLUMN persona TEXT NOT NULL DEFAULT 'consultant'"
             )
             logger.info("chat_history migration: added persona column with consultant default")
+        if "request_id" not in columns:
+            cursor.execute(
+                "ALTER TABLE chat_history ADD COLUMN request_id TEXT"
+            )
+            logger.info("chat_history migration: added request_id column")
         cursor.execute(
             "UPDATE chat_history SET persona = 'consultant' WHERE persona IS NULL OR TRIM(persona) = ''"
         )
@@ -60,6 +65,11 @@ def init_db():
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_platform_persona_timestamp
             ON chat_history(platform, persona, timestamp DESC)
+        """)
+        cursor.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_platform_role_request_id
+            ON chat_history(platform, role, request_id)
+            WHERE request_id IS NOT NULL
         """)
         conn.commit()
         logger.info(f"Chat history database initialized at {DB_PATH}")
@@ -75,6 +85,7 @@ def add_message(
     content: str,
     attachments: List[str] = None,
     persona: Optional[str] = None,
+    request_id: Optional[str] = None,
 ):
     """Add a message to the chat history."""
     conn = None
@@ -83,8 +94,8 @@ def add_message(
         cursor = conn.cursor()
         normalized_persona = memory_manager.normalize_persona(persona)
         cursor.execute(
-            "INSERT INTO chat_history (platform, role, content, attachments, persona) VALUES (?, ?, ?, ?, ?)",
-            (platform, role, content, json.dumps(attachments or []), normalized_persona)
+            "INSERT OR IGNORE INTO chat_history (platform, role, content, attachments, persona, request_id) VALUES (?, ?, ?, ?, ?, ?)",
+            (platform, role, content, json.dumps(attachments or []), normalized_persona, request_id)
         )
         conn.commit()
     except Exception as e:

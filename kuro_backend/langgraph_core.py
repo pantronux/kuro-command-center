@@ -13,6 +13,10 @@ import json
 import re
 import uuid
 import time
+import queue
+import threading
+import secrets
+import hashlib
 from typing import TypedDict, List, Optional, Dict, Any, Annotated, AsyncGenerator, Iterator
 from datetime import datetime
 
@@ -63,13 +67,22 @@ OPENCLAW_READONLY_KEYWORDS = [
     "nist",
     "iso",
 ]
-APPROVAL_YES_TOKEN = "y"
-_approval_lock = asyncio.Lock()
-_pending_tool_approval: Optional[Dict[str, Any]] = None
+_approval_lock = threading.Lock()
+_pending_tool_approval: Dict[str, Dict[str, Any]] = {}
+_post_response_queue: "queue.Queue[Dict[str, Any]]" = queue.Queue()
+_post_response_worker_started = False
+_TRUE_TOKEN_STREAMING_ENABLED = (
+    os.getenv("KURO_TRUE_TOKEN_STREAMING", "1").strip().lower() in {"1", "true", "yes", "on"}
+)
 
 
-def _is_approval_yes(user_input: str) -> bool:
-    return (user_input or "").strip().lower() == APPROVAL_YES_TOKEN
+def _parse_approval_token(user_input: str) -> Optional[str]:
+    text = (user_input or "").strip().lower()
+    if text.startswith("approve "):
+        parts = text.split(maxsplit=1)
+        if len(parts) == 2 and parts[1].strip():
+            return parts[1].strip()
+    return None
 
 
 def _contains_destructive_keyword(text: str) -> bool:
@@ -77,28 +90,61 @@ def _contains_destructive_keyword(text: str) -> bool:
     return any(keyword in lowered for keyword in DESTRUCTIVE_KEYWORDS)
 
 
-async def _set_pending_approval(tool_name: str, args: Dict[str, Any], reason: str) -> None:
-    global _pending_tool_approval
-    async with _approval_lock:
-        _pending_tool_approval = {
+def _set_pending_approval(
+    scope_key: str,
+    tool_name: str,
+    args: Dict[str, Any],
+    reason: str,
+    trace_id: str = "",
+) -> str:
+    nonce = secrets.token_hex(4)
+    payload_hash = hashlib.sha256(
+        json.dumps({"tool": tool_name, "args": args}, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    with _approval_lock:
+        _pending_tool_approval[scope_key] = {
             "tool": tool_name,
             "args": args,
             "reason": reason,
             "created_at": datetime.now().isoformat(),
+            "nonce": nonce,
+            "payload_hash": payload_hash,
+            "expires_at": (datetime.now().timestamp() + 600.0),
+            "trace_id": trace_id,
         }
+    logger.info(
+        "[HITL_AUDIT] requested trace_id=%s scope=%s tool=%s nonce=%s payload_hash=%s",
+        trace_id,
+        scope_key,
+        tool_name,
+        nonce,
+        payload_hash,
+    )
+    return nonce
 
 
-async def _get_pending_approval() -> Optional[Dict[str, Any]]:
-    async with _approval_lock:
-        if not _pending_tool_approval:
+def _get_pending_approval(scope_key: str) -> Optional[Dict[str, Any]]:
+    with _approval_lock:
+        pending = _pending_tool_approval.get(scope_key)
+        if not pending:
             return None
-        return dict(_pending_tool_approval)
+        if pending.get("expires_at", 0.0) < datetime.now().timestamp():
+            _pending_tool_approval.pop(scope_key, None)
+            return None
+        return dict(pending)
 
 
-async def _clear_pending_approval() -> None:
-    global _pending_tool_approval
-    async with _approval_lock:
-        _pending_tool_approval = None
+def _clear_pending_approval(scope_key: str) -> None:
+    with _approval_lock:
+        pending = _pending_tool_approval.pop(scope_key, None)
+    if pending:
+        logger.info(
+            "[HITL_AUDIT] cleared trace_id=%s scope=%s tool=%s nonce=%s",
+            pending.get("trace_id", ""),
+            scope_key,
+            pending.get("tool"),
+            pending.get("nonce"),
+        )
 
 
 def _render_pending_approval_message(pending: Dict[str, Any]) -> str:
@@ -108,34 +154,182 @@ def _render_pending_approval_message(pending: Dict[str, Any]) -> str:
         "[HITL APPROVAL REQUIRED]\n"
         f"{reason}\n"
         f"Tool `{tool_name}` belum dieksekusi.\n"
-        f"Ketik '{APPROVAL_YES_TOKEN}' untuk lanjut, atau perintah lain untuk batal."
+        f"Ketik 'approve {pending.get('nonce', '')}' untuk lanjut, atau perintah lain untuk batal."
     )
 
 
-async def _maybe_handle_pending_approval(user_input: str) -> Optional[str]:
-    pending = await _get_pending_approval()
+def _maybe_handle_pending_approval(user_input: str, scope_key: str) -> Optional[str]:
+    pending = _get_pending_approval(scope_key)
     if not pending:
         return None
 
-    if not _is_approval_yes(user_input):
+    token = _parse_approval_token(user_input)
+    if not token:
+        cancel_token = (user_input or "").strip().lower()
+        if cancel_token in {"cancel", "batal", "no", "n", "tidak"}:
+            logger.info(
+                "[HITL_AUDIT] cancelled trace_id=%s scope=%s tool=%s",
+                pending.get("trace_id", ""),
+                scope_key,
+                pending.get("tool"),
+            )
+            _clear_pending_approval(scope_key)
+            return "Approval dibatalkan. Tool tidak dieksekusi."
         return _render_pending_approval_message(pending)
+    if token != str(pending.get("nonce", "")):
+        logger.warning(
+            "[HITL_AUDIT] approval token mismatch trace_id=%s scope=%s token=%s",
+            pending.get("trace_id", ""),
+            scope_key,
+            token,
+        )
+        return _render_pending_approval_message(pending)
+
+    expected_hash = str(pending.get("payload_hash", ""))
+    actual_hash = hashlib.sha256(
+        json.dumps(
+            {"tool": pending.get("tool"), "args": pending.get("args", {})},
+            ensure_ascii=False,
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
+    if expected_hash and expected_hash != actual_hash:
+        logger.error(
+            "[HITL_AUDIT] payload hash mismatch trace_id=%s scope=%s expected=%s actual=%s",
+            pending.get("trace_id", ""),
+            scope_key,
+            expected_hash,
+            actual_hash,
+        )
+        _clear_pending_approval(scope_key)
+        return "Approval ditolak karena payload berubah. Silakan kirim ulang instruksi."
 
     tool_name = pending.get("tool")
     args = pending.get("args", {})
     try:
         tool_result = _execute_tool(tool_name, args)
     finally:
-        await _clear_pending_approval()
+        _clear_pending_approval(scope_key)
+    logger.info(
+        "[HITL_AUDIT] executed trace_id=%s scope=%s tool=%s status=%s",
+        pending.get("trace_id", ""),
+        scope_key,
+        tool_name,
+        tool_result.get("status"),
+    )
 
     if tool_result.get("status") == "success":
         return (
-            f"Approval diterima ('{APPROVAL_YES_TOKEN}'). "
+            "Approval nonce diterima. "
             f"Tool `{tool_name}` berhasil dieksekusi.\nHasil: {tool_result.get('result')}"
         )
     return (
-        f"Approval diterima ('{APPROVAL_YES_TOKEN}'), tetapi eksekusi `{tool_name}` gagal: "
+        f"Approval nonce diterima, tetapi eksekusi `{tool_name}` gagal: "
         f"{tool_result.get('message', 'unknown error')}"
     )
+
+
+def _post_response_worker_loop() -> None:
+    while True:
+        task = _post_response_queue.get()
+        try:
+            kind = task.get("kind")
+            if kind == "memory_write":
+                user_input = task.get("user_input", "")
+                final_response = task.get("final_response", "")
+                persona_scope = task.get("persona_scope")
+                memory_manager.add_long_term_v2(f"User: {user_input}\nKuro: {final_response}")
+                memory_manager.summarize_conversation_to_chroma(persona_scope=persona_scope)
+                memory_manager.detect_and_save_master_facts(user_input, final_response)
+            elif kind == "mem0_extract":
+                user_input = task.get("user_input", "")
+                final_response = task.get("final_response", "")
+                memories_to_store = perpetual_memory.perpetual_memory.extract_personal_info(
+                    user_input,
+                    final_response,
+                )
+                if memories_to_store and isinstance(memories_to_store, list):
+                    perpetual_memory.perpetual_memory.store_memories(memories_to_store)
+        except Exception as exc:
+            logger.error("[POST_RESPONSE_WORKER] Task failed kind=%s error=%s", task.get("kind"), exc)
+        finally:
+            _post_response_queue.task_done()
+
+
+def _start_post_response_worker_once() -> None:
+    global _post_response_worker_started
+    if _post_response_worker_started:
+        return
+    worker = threading.Thread(target=_post_response_worker_loop, daemon=True)
+    worker.start()
+    _post_response_worker_started = True
+
+
+def _enqueue_post_response_task(task: Dict[str, Any]) -> None:
+    _start_post_response_worker_once()
+    _post_response_queue.put(task)
+
+
+def _persist_short_term_and_enqueue_writes(user_input: str, response_text: str, persona_mode: str) -> None:
+    memory_manager.add_short_term("user", user_input, persona_scope=persona_mode)
+    memory_manager.add_short_term("assistant", response_text, persona_scope=persona_mode)
+    _enqueue_post_response_task(
+        {
+            "kind": "memory_write",
+            "user_input": user_input,
+            "final_response": response_text,
+            "persona_scope": persona_mode,
+        }
+    )
+    _enqueue_post_response_task(
+        {
+            "kind": "mem0_extract",
+            "user_input": user_input,
+            "final_response": response_text,
+        }
+    )
+
+
+async def _stream_direct_llm_chunks(system_prompt: str, full_message: str) -> AsyncGenerator[str, None]:
+    """
+    Real token streaming bridge from blocking Gemini iterator into async generator.
+    """
+    from google import genai
+    from google.genai import types
+
+    loop = asyncio.get_running_loop()
+    chunk_queue: asyncio.Queue = asyncio.Queue()
+
+    def _worker() -> None:
+        try:
+            client = genai.Client(api_key=settings.GEMINI_API_KEY)
+            stream = client.models.generate_content_stream(
+                model=PRIMARY_MODEL,
+                contents=full_message,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_prompt,
+                    temperature=0.2,
+                    top_p=0.8,
+                ),
+            )
+            for event in stream:
+                chunk = getattr(event, "text", None)
+                if chunk:
+                    loop.call_soon_threadsafe(chunk_queue.put_nowait, ("chunk", str(chunk)))
+            loop.call_soon_threadsafe(chunk_queue.put_nowait, ("done", None))
+        except Exception as exc:
+            loop.call_soon_threadsafe(chunk_queue.put_nowait, ("error", str(exc)))
+
+    threading.Thread(target=_worker, daemon=True).start()
+
+    while True:
+        kind, payload = await chunk_queue.get()
+        if kind == "chunk":
+            yield payload
+        elif kind == "done":
+            return
+        else:
+            raise RuntimeError(payload or "direct token stream failed")
 
 # ============================================
 # AGENT STATE DEFINITION (The Memory)
@@ -173,6 +367,8 @@ class KuroState(TypedDict):
     mem0_retrieved_memories: List[Dict]
     tool_execution_result: Optional[Dict]
     requires_approval: bool
+    _approval_scope: str
+    _trace_id: str
 
 
 # ============================================
@@ -418,24 +614,14 @@ def memory_extraction_node(state: KuroState) -> Dict[str, Any]:
         return {}
 
     with observability.trace_node("memory_extraction_node"):
-        try:
-            # 2. Ekstraksi dengan konteks penuh (Input + Output)
-            memories_to_store = perpetual_memory.perpetual_memory.extract_personal_info(
-                user_input, 
-                final_response
-            )
-            
-            # 3. Validasi sebelum Store
-            if memories_to_store and isinstance(memories_to_store, list):
-                perpetual_memory.perpetual_memory.store_memories(memories_to_store)
-                logger.info(f"[MEM0_EXTRACTION] Stored {len(memories_to_store)} memories.")
-            else:
-                logger.info("[MEM0_EXTRACTION] No memories to store from this exchange.")
-            
-            return {}
-        except Exception as e:
-            logger.error(f"[MEM0_EXTRACTION] Failed to store memories: {e}")
-            return {}
+        _enqueue_post_response_task(
+            {
+                "kind": "mem0_extract",
+                "user_input": user_input,
+                "final_response": final_response,
+            }
+        )
+        return {}
 
 
 
@@ -606,6 +792,7 @@ def response_node(state: KuroState) -> Dict[str, Any]:
             user_input,
             recent_messages=recent_messages,
             persona_scope=persona_mode,
+            include_compliance=not bool(compliance_data),
         )
         memory_injection = memory_manager.format_memory_with_temporal_grounding(memory)
         
@@ -651,7 +838,7 @@ def response_node(state: KuroState) -> Dict[str, Any]:
                 tool_context = (
                     f"\n\n[HITL APPROVAL REQUIRED]\n"
                     f"{tool_result.get('message', 'Approval needed for tool execution.')}\n\n"
-                    f"Ask user to reply exactly '{APPROVAL_YES_TOKEN}' to proceed."
+                    "Ask user to reply exactly with `approve <nonce>` to proceed."
                 )
                 message_parts.append(tool_context)
             elif tool_result["status"] == "error":
@@ -720,21 +907,28 @@ def response_node(state: KuroState) -> Dict[str, Any]:
             # Don't expose raw exception to user - use generic error message
             if response_text is None:
                     response_text = "Maaf, Pantronux. Terjadi kesalahan saat menghasilkan respons. Silakan coba lagi."
-            
-            # V5.0: Guardrails validation removed. Response goes directly to memory.
-            # Store to memory (preserve existing memory flow)
+
+        # Canonical served response must match persisted response for integrity.
+        response_text = sniper_pipeline.sniper_postprocess_output(user_input, response_text)
+
+        # Store to memory (preserve existing memory flow)
         memory_manager.add_short_term("user", user_input, persona_scope=persona_mode)
         memory_manager.add_short_term("assistant", response_text, persona_scope=persona_mode)
-        memory_manager.add_long_term_v2(f"User: {user_input}\nKuro: {response_text}")
         
         # FIX: DO NOT save to chat_history here - it's saved in the streaming/non-streaming
         # entry points to prevent duplicate database inserts (3-bubble bug).
         # chat_history.add_message("web", "user", user_input)
         # chat_history.add_message("web", "assistant", response_text)
         
-        # Memory summarization and auto-save
-        memory_manager.summarize_conversation_to_chroma()
-        memory_manager.detect_and_save_master_facts(user_input, response_text)
+        # Offload heavy writes out of request critical path.
+        _enqueue_post_response_task(
+            {
+                "kind": "memory_write",
+                "user_input": user_input,
+                "final_response": response_text,
+                "persona_scope": persona_mode,
+            }
+        )
         
         logger.info(f"[RESPONSE] Generated response ({len(response_text)} chars)")
         
@@ -797,15 +991,15 @@ If no tool is appropriate, respond with: {{"tool": null, "reason": "explanation"
 
 POLICY:
 - Use advanced_execution_tool for complex execution tasks.
-- If task is read-only (search/analyze/mapping), include args.read_only=true.
-- If task can modify/delete/format/reboot system state, still route to advanced_execution_tool but include args.read_only=false.
+- If task is read-only (search/analyze/mapping), include args.execution_mode=\"readonly\".
+- If task can modify/delete/format/reboot system state, include args.execution_mode=\"mutating\".
 
 Examples:
 - "Buatkan excel audit" -> {{"tool": "manage_files", "args": {{"action": "list"}}}}
 - "List file di exports" -> {{"tool": "manage_files", "args": {{"action": "list"}}}}
 - "Buat laporan audit" -> {{"tool": "generate_report_template", "args": {{"template_type": "audit_findings", "filename": "audit_report.md"}}}}
 - "Kuro tolong bersihkan log lama di Proxmox pake OpenClaw" -> {{"tool": "advanced_execution_tool", "args": {{"task_description": "bersihkan log lama di Proxmox", "skill_name": "general_execution"}}}}
-- "Cari paper terbaru digital forensics on AI" -> {{"tool": "advanced_execution_tool", "args": {{"task_description": "cari paper terbaru digital forensics on AI", "skill_name": "general_execution", "read_only": true}}}}
+- "Cari paper terbaru digital forensics on AI" -> {{"tool": "advanced_execution_tool", "args": {{"task_description": "cari paper terbaru digital forensics on AI", "skill_name": "general_execution", "execution_mode": "readonly"}}}}
 
 TOOL CALL:"""
             
@@ -849,12 +1043,15 @@ TOOL CALL:"""
 
             high_risk_text = f"{user_input} {json.dumps(args, ensure_ascii=False)}"
             openclaw_risky = tool_name == "advanced_execution_tool" and _contains_destructive_keyword(high_risk_text)
-            openclaw_read_only_flag = bool(args.get("read_only")) if tool_name == "advanced_execution_tool" else False
-            openclaw_read_only_by_keyword = (
-                tool_name == "advanced_execution_tool"
-                and any(keyword in high_risk_text.lower() for keyword in OPENCLAW_READONLY_KEYWORDS)
-            )
-            openclaw_read_only = openclaw_read_only_flag or openclaw_read_only_by_keyword
+            if tool_name == "advanced_execution_tool":
+                if args.get("read_only") is True and "execution_mode" not in args:
+                    args["execution_mode"] = "readonly"
+                execution_mode = str(args.get("execution_mode", "mutating")).strip().lower()
+                args["execution_mode"] = "readonly" if execution_mode == "readonly" else "mutating"
+            else:
+                execution_mode = "mutating"
+            openclaw_read_only_flag = execution_mode == "readonly" if tool_name == "advanced_execution_tool" else False
+            openclaw_read_only = openclaw_read_only_flag
             openclaw_requires_approval = (
                 tool_name == "advanced_execution_tool"
                 and not openclaw_read_only
@@ -869,19 +1066,26 @@ TOOL CALL:"""
             
             if requires_approval:
                 logger.info(f"[TOOL_NODE] HITL interrupt required for {tool_name}:{action}")
+                approval_scope = state.get("_approval_scope", "default")
                 reason = (
                     "Perintah berisiko/destruktif terdeteksi. "
-                    f"Balas '{APPROVAL_YES_TOKEN}' jika Master mengizinkan eksekusi."
+                    "Kirim approval nonce untuk melanjutkan."
                     if openclaw_risky
                     else (
                         "Aksi advanced_execution_tool non-read-only membutuhkan persetujuan Master. "
-                        f"Balas '{APPROVAL_YES_TOKEN}' untuk lanjut."
+                        "Kirim approval nonce untuk lanjut."
                         if openclaw_requires_approval
                         else "Aksi tulis/generate membutuhkan persetujuan Master."
                     )
                 )
                 # Persist pending action; execution is strictly blocked until approval token is received.
-                asyncio.run(_set_pending_approval(tool_name, args, reason))
+                nonce = _set_pending_approval(
+                    approval_scope,
+                    tool_name,
+                    args,
+                    reason,
+                    trace_id=state.get("_trace_id", ""),
+                )
                 if span:
                     span.set_attribute("tool_node.requires_approval", True)
                     span.set_attribute("tool_node.tool_name", tool_name)
@@ -890,7 +1094,7 @@ TOOL CALL:"""
                         "status": "pending_approval",
                         "tool": tool_name,
                         "args": args,
-                        "message": reason,
+                        "message": f"{reason} Balas: approve {nonce}",
                     },
                     "requires_approval": True,
                     "next_step": "response_node"  # Go to response to ask for approval
@@ -1105,6 +1309,9 @@ async def process_chat_with_graph_stream(
     message: str,
     image_paths: list = None,
     persona_override: str = None,
+    stream_metrics: Optional[Dict[str, Any]] = None,
+    approval_scope: str = "default",
+    trace_id: str = "",
 ) -> AsyncGenerator[str, None]:
     """
     V5.3 STREAMING: Graph runs in asyncio.to_thread (sync stream) so the event loop can serve SSE.
@@ -1123,12 +1330,16 @@ async def process_chat_with_graph_stream(
     response_text = ""
 
     try:
-        approval_response = await _maybe_handle_pending_approval(message)
+        stage_started = time.perf_counter()
+        approval_response = _maybe_handle_pending_approval(message, approval_scope)
         if approval_response is not None:
             yield approval_response
             return
 
+        guard_in_started = time.perf_counter()
         blocked = await sniper_pipeline.sniper_validate_and_maybe_block_input_async(message)
+        if stream_metrics is not None:
+            stream_metrics["guardrail_input_ms"] = round((time.perf_counter() - guard_in_started) * 1000, 2)
         if blocked:
             logger.debug("[SNIPER] Input blocked before graph invoke (stream)")
             yield blocked
@@ -1137,6 +1348,51 @@ async def process_chat_with_graph_stream(
         persona_mode = memory_manager.normalize_persona(
             persona_override or memory_manager.get_active_persona()
         )
+        can_use_true_stream = (
+            _TRUE_TOKEN_STREAMING_ENABLED
+            and not image_paths
+            and sniper_pipeline.is_low_risk_stream_candidate(message)
+        )
+        if stream_metrics is not None:
+            stream_metrics["stream_mode"] = "true_token_fastpath" if can_use_true_stream else "graph_collect_chunked"
+
+        if can_use_true_stream:
+            fastpath_started = time.perf_counter()
+            recent_messages = memory_manager.get_short_term(persona_scope=persona_mode)
+            memory_started = time.perf_counter()
+            memory = memory_manager.query_memory(
+                message,
+                recent_messages=recent_messages,
+                persona_scope=persona_mode,
+                include_compliance=True,
+            )
+            if stream_metrics is not None:
+                stream_metrics["memory_query_ms"] = round((time.perf_counter() - memory_started) * 1000, 2)
+            memory_injection = memory_manager.format_memory_with_temporal_grounding(memory)
+            full_message = f"{message}{memory_injection}"
+            system_prompt = get_system_instruction(persona_override=persona_mode)
+
+            emitted = 0
+            response_acc: List[str] = []
+            stream_llm_started = time.perf_counter()
+            async for live_chunk in _stream_direct_llm_chunks(system_prompt, full_message):
+                response_acc.append(live_chunk)
+                emitted += 1
+                yield live_chunk
+            if stream_metrics is not None:
+                stream_metrics["llm_stream_ms"] = round((time.perf_counter() - stream_llm_started) * 1000, 2)
+                stream_metrics["sse_chunk_count"] = float(emitted)
+
+            response_text = "".join(response_acc).strip()
+            if not response_text:
+                response_text = "Maaf, Pantronux. Respons model kosong setelah streaming."
+                yield response_text
+                emitted += 1
+            _persist_short_term_and_enqueue_writes(message, response_text, persona_mode)
+            if stream_metrics is not None:
+                stream_metrics["response_chars"] = float(len(response_text))
+                stream_metrics["stream_total_ms"] = round((time.perf_counter() - fastpath_started) * 1000, 2)
+            return
         
         initial_state = {
             "messages": [{"role": "user", "content": message}],
@@ -1152,7 +1408,9 @@ async def process_chat_with_graph_stream(
             "mem0_retrieved_memories": [],
             "tool_execution_result": {},
             "requires_approval": False,
-            "_session_id": session_id
+            "_session_id": session_id,
+            "_approval_scope": approval_scope,
+            "_trace_id": trace_id,
         }
         
         thread_id = f"kuro_stream_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{session_id[:8]}"
@@ -1160,9 +1418,12 @@ async def process_chat_with_graph_stream(
         
         logger.debug("[LANGGRAPH_STREAM] graph invoke (thread offload) preview=%.50s", message)
 
+        graph_started = time.perf_counter()
         raw_model_response = await asyncio.to_thread(
             _sync_stream_collect_final_response, initial_state, config
         )
+        if stream_metrics is not None:
+            stream_metrics["graph_collect_ms"] = round((time.perf_counter() - graph_started) * 1000, 2)
         if raw_model_response is None:
             raw_model_response = ""
         logger.debug(
@@ -1170,9 +1431,9 @@ async def process_chat_with_graph_stream(
             len(raw_model_response),
         )
 
-        response_text = await sniper_pipeline.sniper_postprocess_output_async(
-            message, raw_model_response
-        )
+        response_text = raw_model_response
+        if stream_metrics is not None:
+            stream_metrics["guardrail_output_ms"] = 0.0
         if response_text is None:
             response_text = ""
         if not str(response_text).strip():
@@ -1197,11 +1458,16 @@ async def process_chat_with_graph_stream(
                 else:
                     await asyncio.sleep(0.012)
             logger.debug("[LANGGRAPH_STREAM] yielded total_chars=%s", len(response_text))
+            if stream_metrics is not None:
+                stream_metrics["response_chars"] = float(len(response_text))
+                stream_metrics["sse_chunk_count"] = float(len(full_response))
 
         # Memory: response_node already persists short/long-term; avoid duplicate writes here.
         # chat_history: main.py /api/chat/stream adds assistant message after the generator finishes.
 
         logger.debug("[LANGGRAPH_STREAM] streaming complete chars=%s", len(response_text))
+        if stream_metrics is not None:
+            stream_metrics["stream_total_ms"] = round((time.perf_counter() - stage_started) * 1000, 2)
         
     except Exception as e:
         logger.exception(f"[LANGGRAPH_STREAM] Streaming failed: {e}")
@@ -1308,7 +1574,13 @@ async def process_pdf_with_thinking(
 # MAIN ENTRY POINT (Backward Compatible)
 # ============================================
 
-def process_chat_with_graph(message: str, image_paths: list = None, persona_override: str = None) -> str:
+def process_chat_with_graph(
+    message: str,
+    image_paths: list = None,
+    persona_override: str = None,
+    approval_scope: str = "sync_default",
+    trace_id: str = "",
+) -> str:
     """
     Process chat message using LangGraph state machine.
     Backward compatible with existing process_chat() signature.
@@ -1324,7 +1596,7 @@ def process_chat_with_graph(message: str, image_paths: list = None, persona_over
     session_id = str(uuid.uuid4())
     
     try:
-        approval_response = asyncio.run(_maybe_handle_pending_approval(message))
+        approval_response = _maybe_handle_pending_approval(message, approval_scope)
         if approval_response is not None:
             return approval_response
 
@@ -1353,7 +1625,9 @@ def process_chat_with_graph(message: str, image_paths: list = None, persona_over
             "mem0_retrieved_memories": [],
             "tool_execution_result": {},
             "requires_approval": False,
-            "_session_id": session_id  # Internal field for observability
+            "_session_id": session_id,  # Internal field for observability
+            "_approval_scope": approval_scope,
+            "_trace_id": trace_id,
         }
 
         # Create unique thread ID for persistence
@@ -1368,23 +1642,13 @@ def process_chat_with_graph(message: str, image_paths: list = None, persona_over
         response = final_state.get("final_response", "")
         
         if not response:
-            logger.warning("[LANGGRAPH] Empty response from graph, falling back")
-            # Fallback to original process_chat
-            from kuro_backend.core import process_chat as original_process_chat
-            response = original_process_chat(message, image_paths, persona_override=persona_mode)
-
-        response = sniper_pipeline.sniper_postprocess_output(message, response)
+            logger.warning("[LANGGRAPH] Empty response from graph")
+            return "Maaf, Pantronux. Respons tidak tersedia untuk saat ini. Mohon ulangi instruksi."
         return response
         
     except Exception as e:
         logger.exception(f"[LANGGRAPH] Graph invocation failed: {e}")
-        # Fallback to original process_chat
-        try:
-            from kuro_backend.core import process_chat as original_process_chat
-            return original_process_chat(message, image_paths, persona_override=persona_mode)
-        except Exception as fallback_error:
-            logger.critical(f"[LANGGRAPH] Fallback also failed: {fallback_error}")
-            return "Maaf, Pantronux. Kuro mengalami kendala sistem. Silakan coba lagi."
+        return "Maaf, Pantronux. Kuro mengalami kendala sistem. Silakan coba lagi."
 
 
 # ============================================

@@ -8,9 +8,11 @@ import signal
 import sys
 import threading
 import time
+import uuid
+import re
 import psutil
 import uvicorn
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 from datetime import datetime, timedelta
 from fastapi import FastAPI, UploadFile, File, Form, Request, Depends, HTTPException, status
 from fastapi.staticfiles import StaticFiles
@@ -114,6 +116,8 @@ ADMIN_PASSWORD_HASH = os.getenv("ADMIN_PASSWORD_HASH", "")
 
 # Cookie name for JWT token
 COOKIE_NAME = "kuro_access_token"
+CHAT_SESSION_HEADER = "X-Chat-Session"
+_CHAT_SESSION_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{8,128}$")
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verify a plain password against a bcrypt hash."""
@@ -154,6 +158,25 @@ def validate_token(token: str) -> Optional[Dict]:
     except JWTError:
         pass
     return None
+
+
+def api_success(data: Any = None, trace_id: Optional[str] = None, **extra: Any) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {"status": "success", "data": data, "error": None, "trace_id": trace_id}
+    payload.update(extra)
+    return payload
+
+
+def api_error(error: str, trace_id: Optional[str] = None, **extra: Any) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {"status": "error", "data": None, "error": error, "trace_id": trace_id}
+    payload.update(extra)
+    return payload
+
+
+def _resolve_chat_session_id(request: Request) -> str:
+    raw = (request.headers.get(CHAT_SESSION_HEADER) or "").strip()
+    if raw and _CHAT_SESSION_PATTERN.match(raw):
+        return raw
+    return f"fallback_{request.client.host}_default"
 
 # --- FastAPI App ---
 app = FastAPI(title="Kuro AI Web Dashboard")
@@ -361,7 +384,7 @@ async def auth_middleware(request: Request, call_next):
             logger.info(f"API auth failed for {request.client.host} on {path}")
             return JSONResponse(
                 status_code=401,
-                content={"success": False, "error": "Authentication required. Please log in."}
+                content=api_error("Authentication required. Please log in.")
             )
     
     return await call_next(request)
@@ -401,19 +424,24 @@ async def get_chat_history(limit: int = 20, offset: int = 0, platform: str = Non
         persona=resolved_persona,
     )
     total = chat_history.get_total_count(platform=platform, persona=resolved_persona)
-    return {
-        "history": history,
-        "status": "success",
-        "persona": resolved_persona,
-        "total": total,
-        "has_more": offset + len(history) < total
-    }
+    return api_success(
+        data={
+            "history": history,
+            "persona": resolved_persona,
+            "total": total,
+            "has_more": offset + len(history) < total,
+        },
+        history=history,
+        persona=resolved_persona,
+        total=total,
+        has_more=offset + len(history) < total,
+    )
 
 @app.delete("/api/history")
 async def clear_chat_history():
     """Clear all chat history."""
     chat_history.clear_history()
-    return {"status": "success", "message": "Chat history cleared"}
+    return api_success(data={"message": "Chat history cleared"}, message="Chat history cleared")
 
 @app.post("/api/chat")
 async def chat_endpoint(
@@ -424,9 +452,12 @@ async def chat_endpoint(
 ):
     """Handle chat requests from the web interface with vision and file reading support. (Non-streaming fallback)"""
     try:
+        trace_id = f"chat_{uuid.uuid4().hex}"
         resolved_persona = memory_manager.normalize_persona(
             persona or request.query_params.get("persona") or memory_manager.get_active_persona()
         )
+        request_id = f"web_{uuid.uuid4().hex}"
+        session_scope = _resolve_chat_session_id(request)
 
         # Save and process uploaded files
         image_paths = []
@@ -475,6 +506,7 @@ async def chat_endpoint(
             message,
             [f["filename"] for f in file_attachments],
             persona=resolved_persona,
+            request_id=request_id,
         )
         
         # Process with AI core using LangGraph (with vision if images uploaded)
@@ -482,16 +514,22 @@ async def chat_endpoint(
             enhanced_message,
             image_paths=image_paths if image_paths else None,
             persona_override=resolved_persona,
+            approval_scope=f"web:{session_scope}:{resolved_persona}",
+            trace_id=trace_id,
         )
         
         # Save AI response to chat history
-        chat_history.add_message("web", "assistant", response, persona=resolved_persona)
+        chat_history.add_message("web", "assistant", response, persona=resolved_persona, request_id=request_id)
         
-        return {"response": response, "status": "success"}
+        return api_success(
+            data={"response": response},
+            trace_id=trace_id,
+            response=response,  # backward compatibility for current frontend
+        )
         
     except Exception as e:
         logger.exception(f"Error in chat endpoint: {e}")
-        return {"response": f"Maaf, Pantronux. Terjadi kesalahan: {e}", "status": "error"}
+        return api_error(f"Maaf, Pantronux. Terjadi kesalahan: {e}")
 
 
 @app.post("/api/chat/stream")
@@ -506,7 +544,14 @@ async def chat_stream_endpoint(
     
     async def event_generator():
         """Generate SSE events for streaming response."""
+        request_started = time.perf_counter()
+        trace_id = f"chatstream_{uuid.uuid4().hex}"
+        request_id = trace_id
+        first_chunk_ms = None
+        stream_metrics: Dict[str, Any] = {}
         try:
+            yield f"event: meta\ndata: {json.dumps({'trace_id': trace_id, 'phase': 'started'}, ensure_ascii=False)}\n\n"
+            session_scope = _resolve_chat_session_id(request)
             resolved_persona = memory_manager.normalize_persona(
                 persona or request.query_params.get("persona") or memory_manager.get_active_persona()
             )
@@ -545,6 +590,7 @@ async def chat_stream_endpoint(
                 message,
                 [f["filename"] for f in file_attachments],
                 persona=resolved_persona,
+                request_id=request_id,
             )
             
             # V5.0: Stream response - no guardrail overhead, direct LLM response
@@ -554,20 +600,55 @@ async def chat_stream_endpoint(
                 enhanced_message,
                 image_paths=image_paths if image_paths else None,
                 persona_override=resolved_persona,
+                stream_metrics=stream_metrics,
+                approval_scope=f"web:{session_scope}:{resolved_persona}",
+                trace_id=trace_id,
             ):
                 full_response.append(chunk)
+                if first_chunk_ms is None:
+                    first_chunk_ms = round((time.perf_counter() - request_started) * 1000, 2)
                 # SSE: UI accepts `text` (preferred) or `chunk`; ensure_ascii=False for Indonesian / markdown
                 payload = json.dumps({"text": chunk, "chunk": chunk}, ensure_ascii=False)
                 yield f"event: chunk\ndata: {payload}\n\n"
             
             # Send completion event
             response_text = "".join(full_response)
-            chat_history.add_message("web", "assistant", response_text, persona=resolved_persona)
-            yield f"event: complete\ndata: {json.dumps({'response': response_text}, ensure_ascii=False)}\n\n"
+            chat_history.add_message(
+                "web",
+                "assistant",
+                response_text,
+                persona=resolved_persona,
+                request_id=request_id,
+            )
+            total_ms = round((time.perf_counter() - request_started) * 1000, 2)
+            observability.record_latency_metric("chat_stream_total_ms", total_ms)
+            if first_chunk_ms is not None:
+                observability.record_latency_metric("chat_stream_ttfb_ms", first_chunk_ms)
+            if stream_metrics.get("guardrail_input_ms") is not None:
+                observability.record_latency_metric("chat_stream_guardrail_input_ms", stream_metrics["guardrail_input_ms"])
+            if stream_metrics.get("guardrail_output_ms") is not None:
+                observability.record_latency_metric("chat_stream_guardrail_output_ms", stream_metrics["guardrail_output_ms"])
+            if stream_metrics.get("graph_collect_ms") is not None:
+                observability.record_latency_metric("chat_stream_graph_collect_ms", stream_metrics["graph_collect_ms"])
+            if stream_metrics.get("sse_chunk_count") is not None:
+                observability.record_latency_metric("chat_stream_sse_chunk_count", stream_metrics["sse_chunk_count"])
+
+            complete_payload = api_success(
+                data={"response": response_text},
+                trace_id=trace_id,
+                response=response_text,  # backward compatibility
+                meta={
+                    "trace_id": trace_id,
+                    "ttfb_ms": first_chunk_ms,
+                    "total_ms": total_ms,
+                    "timings": stream_metrics,
+                },
+            )
+            yield f"event: complete\ndata: {json.dumps(complete_payload, ensure_ascii=False)}\n\n"
             
         except Exception as e:
             logger.exception(f"Error in streaming endpoint: {e}")
-            yield f"event: error\ndata: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+            yield f"event: error\ndata: {json.dumps(api_error(str(e), trace_id=trace_id), ensure_ascii=False)}\n\n"
     
     return StreamingResponse(
         event_generator(),
@@ -582,26 +663,23 @@ async def chat_stream_endpoint(
 @app.get("/api/system-status")
 async def system_status():
     """Get real-time system status."""
-    return {"status": "success", "data": tools.get_system_status()}
+    return api_success(data=tools.get_system_status())
 
 @app.get("/api/log-storage")
 async def log_storage():
     """Get log storage usage information."""
     usage = get_log_storage_usage()
-    return {"status": "success", "data": usage}
+    return api_success(data=usage)
 
 @app.get("/api/proxmox-status")
 async def proxmox_status():
     """Get Proxmox infrastructure status."""
-    return {"status": "success", "data": tools.check_proxmox_infrastructure()}
+    return api_success(data=tools.check_proxmox_infrastructure())
 
 @app.get("/api/health")
 async def health_check():
     """Health check endpoint."""
-    return {
-        "status": "healthy",
-        "memory_stats": memory_manager.get_memory_stats()
-    }
+    return api_success(data={"health": "healthy", "memory_stats": memory_manager.get_memory_stats()})
 
 @app.get("/api/observability/status")
 async def observability_status():
@@ -638,6 +716,15 @@ async def token_usage(session_id: str = None):
                 "total_tokens_all_sessions": total_tokens,
             }
         }
+
+
+@app.get("/api/observability/latency")
+async def latency_metrics():
+    """Get aggregated latency metrics snapshot."""
+    return {
+        "status": "success",
+        "data": observability.get_latency_metrics_snapshot(),
+    }
 
 @app.get("/api/observability/cleanup")
 async def cleanup_observability():
@@ -1554,7 +1641,28 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         telegram_persona = route_telegram_persona(message_text)
-        response_text = process_chat_with_graph(message_text, persona_override=telegram_persona)
+        telegram_request_id = f"telegram_{uuid.uuid4().hex}"
+        telegram_trace_id = f"telegram_chat_{uuid.uuid4().hex}"
+        chat_history.add_message(
+            "telegram",
+            "user",
+            message_text,
+            persona=telegram_persona,
+            request_id=telegram_request_id,
+        )
+        response_text = process_chat_with_graph(
+            message_text,
+            persona_override=telegram_persona,
+            approval_scope=f"telegram:{settings.TELEGRAM_CHAT_ID}:{telegram_persona}",
+            trace_id=telegram_trace_id,
+        )
+        chat_history.add_message(
+            "telegram",
+            "assistant",
+            response_text,
+            persona=telegram_persona,
+            request_id=telegram_request_id,
+        )
 
         if len(response_text) > 4096:
             for i in range(0, len(response_text), 4000):

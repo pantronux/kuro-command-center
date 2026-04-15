@@ -1671,6 +1671,7 @@ def advanced_execution_tool(
     task_description: str,
     params: Optional[Dict] = None,
     skill_name: str = "general_execution",
+    execution_mode: str = "mutating",
 ) -> Dict:
     """
     Delegate advanced operational/system tasks to OpenClaw daemon.
@@ -1687,17 +1688,17 @@ def advanced_execution_tool(
             "error": "task_description wajib diisi untuk advanced_execution_tool.",
         }
 
+    normalized_mode = "readonly" if str(execution_mode).strip().lower() == "readonly" else "mutating"
     payload = {
         "task_description": task,
+        "execution_mode": normalized_mode,
         **(params or {}),
     }
 
     try:
-        from kuro_backend.execution.openclaw_bridge import execute_openclaw_skill
+        from kuro_backend.execution.service import execute_openclaw_skill_sync
 
-        execution_result = _run_async_coro_sync(
-            execute_openclaw_skill(skill_name=skill_name, params=payload)
-        )
+        execution_result = execute_openclaw_skill_sync(skill_name=skill_name, payload=payload)
     except Exception as exc:
         logger.exception("[OPENCLAW_TOOL] Bridge execution failed: %s", exc)
         return {

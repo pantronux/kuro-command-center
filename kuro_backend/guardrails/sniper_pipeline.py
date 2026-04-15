@@ -310,12 +310,35 @@ def sniper_precheck_or_block(message: str) -> Optional[str]:
     return precheck_jailbreak(message)
 
 
+def _is_low_risk_fast_path(ctx: dict, message: str) -> bool:
+    """
+    Budget-based fast path:
+    - command/general knowledge already bypasses expensive checks
+    - very short conversational prompts skip additional LLM self-check passes
+    """
+    if ctx.get("is_command_intent") or ctx.get("is_general_compliance_knowledge"):
+        return True
+    msg = (message or "").strip().lower()
+    if len(msg) <= 24 and not ctx.get("should_fact_check"):
+        return True
+    return False
+
+
+def is_low_risk_stream_candidate(message: str) -> bool:
+    """
+    Public helper for orchestration layer to decide whether true token streaming
+    can bypass heavy output post-processing safely.
+    """
+    ctx = sniper_ctx.build_sniper_context(message)
+    return _is_low_risk_fast_path(ctx, message)
+
+
 def sniper_validate_and_maybe_block_input(message: str) -> Optional[str]:
     hit = sniper_precheck_or_block(message)
     if hit:
         return hit
     ctx = sniper_ctx.build_sniper_context(message)
-    bypass = bool(ctx.get("is_command_intent") or ctx.get("is_general_compliance_knowledge"))
+    bypass = _is_low_risk_fast_path(ctx, message)
     bypass_reason = (
         "command" if ctx.get("is_command_intent") else "general_knowledge" if ctx.get("is_general_compliance_knowledge") else ""
     )
@@ -367,7 +390,7 @@ async def sniper_validate_and_maybe_block_input_async(message: str) -> Optional[
     if hit:
         return hit
     ctx = sniper_ctx.build_sniper_context(message)
-    bypass = bool(ctx.get("is_command_intent") or ctx.get("is_general_compliance_knowledge"))
+    bypass = _is_low_risk_fast_path(ctx, message)
     bypass_reason = (
         "command" if ctx.get("is_command_intent") else "general_knowledge" if ctx.get("is_general_compliance_knowledge") else ""
     )
@@ -385,6 +408,12 @@ async def sniper_postprocess_output_async(user_message: str, assistant_message: 
     if not assistant_message:
         return assistant_message
     ctx = sniper_ctx.build_sniper_context(user_message)
+    if _is_low_risk_fast_path(ctx, user_message):
+        if ctx.get("is_general_compliance_knowledge") and not _assistant_looks_like_tool_mutation_confirmation(
+            assistant_message
+        ):
+            return _ensure_kuro_analysis_prefix(assistant_message)
+        return assistant_message
     if not ctx.get("should_fact_check") and (
         ctx.get("is_command_intent") or ctx.get("is_general_compliance_knowledge")
     ):

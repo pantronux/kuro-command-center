@@ -1,3 +1,78 @@
+# Kuro AI V5.0 Official - Changelog
+
+**Release Date:** 2026-04-15
+**Version:** 5.0.0
+**Codename:** "Integration & Data Integrity Hardening"
+
+---
+
+## V5.0.0 - Integration & Data Integrity Hardening (2026-04-15)
+
+### Major Upgrade: Cross-System Integrity, Approval Security, and SSE Contract Reliability
+
+#### 1. HITL Approval Security Hardening (P0)
+- **Session-scoped state**: Pending approval is now isolated by `approval_scope` (web session + persona), replacing global cross-request state behavior.
+- **Nonce-only confirmation**: Approval now requires `approve <nonce>` (plain `y` removed).
+- **Payload integrity**: Pending approval stores `payload_hash` and verifies hash before tool execution.
+- **TTL enforcement**: Approval request expires automatically after 10 minutes.
+- **Audit lifecycle**: Added explicit logs for `requested`, `token mismatch`, `cancelled`, `executed`, and `cleared` with `trace_id` correlation.
+- **Safe fallback policy**: Graph failure path no longer routes risky requests into legacy auto-tool execution.
+
+#### 2. Persona & Memory Data Integrity (P1)
+- **Persona-scoped async jobs**: Background memory tasks now carry explicit `persona_scope`.
+- **Summary scope consistency**: `summarize_conversation_to_chroma()` accepts persona scope and tags summary metadata with persona provenance.
+- **Served vs stored response consistency**: Canonical response persistence is aligned with served response flow.
+- **Chat idempotency key**:
+  - Added `request_id` column to `chat_history` (migration-safe).
+  - Added unique partial index `(platform, role, request_id)` for dedup on retry/reconnect.
+  - Write path now uses `INSERT OR IGNORE`.
+- **Platform parity**: Telegram user/assistant turns now persist to `chat_history` with persona tagging and request id.
+
+#### 3. OpenClaw Execution Reliability (P2)
+- **Circuit breaker recovery**: Refined to `closed/open/half-open` behavior with cooldown and probe recovery.
+- **Atomic half-open probe claim**: Eliminates race risk where concurrent requests could run multiple probes.
+- **Typed execution policy**: Introduced and enforced `execution_mode: readonly|mutating`.
+- **Mutating safety requirement**: Mutating execution requires explicit command/task payload.
+- **Router/schema alignment**: Tool routing prompt and callable signature now consistently use `execution_mode`.
+
+#### 4. API & SSE Contract Hardening (P3)
+- **Unified envelope adoption**: Introduced API envelope helper (`status`, `data`, `error`, `trace_id`) and applied to critical chat/system endpoints with backward-compatible legacy fields where needed.
+- **Auth-aware stream request**: Frontend stream now uses `authFetch` and follows same 401 behavior as non-stream APIs.
+- **Session continuity header**: Frontend now sends `X-Chat-Session`; backend validates and uses it for approval scoping.
+- **SSE parser robustness**:
+  - CRLF normalization (`\r\n` safe).
+  - Multi-line `data:` merge support.
+  - Terminal error preservation (error event not overwritten by fallback render).
+- **Streaming complete envelope**: `complete` and `error` SSE events now carry contract-aligned payload structure.
+
+#### 5. Contract Test Coverage
+- **NEW**: `tests/test_api_sse_contract.py`
+  - Validates event order: `meta -> chunk* -> complete`.
+  - Validates terminal `error` event structure.
+- **NEW**: `tests/test_approval_integrity.py`
+  - Validates nonce mismatch rejection behavior.
+  - Validates cancellation clears pending approval.
+
+#### 6. Technical Notes & Documentation
+- **NEW**: `INTEGRATION_HARDENING_DETAILS.md` with:
+  - P0-P3 implementation details
+  - session scope design
+  - verification checklist and commands
+
+#### Files Changed (V5.0.0)
+- **MODIFIED**: `kuro_backend/langgraph_core.py` - nonce approval, scoped state, payload hash validation, trace-aware audit, safe fallback alignment
+- **MODIFIED**: `kuro_backend/chat_history.py` - request_id migration, idempotent insert/index
+- **MODIFIED**: `kuro_backend/memory_manager.py` - persona-scoped summary call path
+- **MODIFIED**: `kuro_backend/execution/openclaw_bridge.py` - half-open recovery, atomic probe, typed execution policy
+- **MODIFIED**: `kuro_backend/tools/base_tools.py` - `execution_mode` signature and payload propagation
+- **MODIFIED**: `main.py` - session header handling, envelope helper adoption, trace/request id propagation
+- **MODIFIED**: `web_interface/static/js/app.js` - auth-aware stream, session header, SSE parser hardening
+- **NEW**: `tests/test_api_sse_contract.py` - SSE contract tests
+- **NEW**: `tests/test_approval_integrity.py` - approval integrity tests
+- **NEW**: `INTEGRATION_HARDENING_DETAILS.md` - hardening detail documentation
+
+---
+
 # Kuro AI V4.9 Official - Changelog
 
 **Release Date:** 2026-04-06

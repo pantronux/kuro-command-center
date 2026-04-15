@@ -65,6 +65,7 @@ _phoenix_session = None
 _tracer = None
 _token_tracker = {}
 _phoenix_app = None
+_latency_metrics: Dict[str, Dict[str, float]] = {}
 
 # ============================================
 # PHOENIX SERVER INITIALIZATION
@@ -307,6 +308,55 @@ def cleanup_old_sessions(max_age_hours: int = 24):
     
     if sessions_to_remove:
         logger.info(f"[OBSERVABILITY] Cleaned up {len(sessions_to_remove)} old sessions")
+
+
+def record_latency_metric(metric_name: str, value_ms: float):
+    """
+    Record lightweight in-memory latency metric aggregates.
+    Useful for quick operational checks without external TSDB.
+    """
+    try:
+        key = str(metric_name or "").strip()
+        if not key:
+            return
+        value = float(value_ms)
+    except (TypeError, ValueError):
+        return
+
+    bucket = _latency_metrics.get(key)
+    if bucket is None:
+        bucket = {
+            "count": 0.0,
+            "sum_ms": 0.0,
+            "min_ms": value,
+            "max_ms": value,
+            "last_ms": value,
+        }
+        _latency_metrics[key] = bucket
+
+    bucket["count"] += 1.0
+    bucket["sum_ms"] += value
+    bucket["last_ms"] = value
+    if value < bucket["min_ms"]:
+        bucket["min_ms"] = value
+    if value > bucket["max_ms"]:
+        bucket["max_ms"] = value
+
+
+def get_latency_metrics_snapshot() -> Dict[str, Dict[str, float]]:
+    """Return aggregated latency metrics with average."""
+    snapshot: Dict[str, Dict[str, float]] = {}
+    for name, bucket in _latency_metrics.items():
+        count = max(1.0, float(bucket.get("count", 0.0)))
+        avg = float(bucket.get("sum_ms", 0.0)) / count
+        snapshot[name] = {
+            "count": float(bucket.get("count", 0.0)),
+            "avg_ms": round(avg, 2),
+            "min_ms": round(float(bucket.get("min_ms", 0.0)), 2),
+            "max_ms": round(float(bucket.get("max_ms", 0.0)), 2),
+            "last_ms": round(float(bucket.get("last_ms", 0.0)), 2),
+        }
+    return snapshot
 
 
 # ============================================
