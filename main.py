@@ -38,6 +38,7 @@ from kuro_backend.config import settings
 from kuro_backend.core import process_chat
 from kuro_backend.langgraph_core import process_chat_with_graph, process_chat_with_graph_stream
 from kuro_backend import memory_manager
+from kuro_backend import memory_coordinator
 from kuro_backend import chat_history
 from kuro_backend import tools
 from kuro_backend import compliance_db
@@ -619,7 +620,12 @@ async def chat_endpoint(
         enhanced_message = message
         if file_contents:
             enhanced_message += "\n\n[Attached Files Content:]\n" + "\n".join(file_contents)
-        
+        att_idx = memory_coordinator.format_same_turn_attachment_index(file_attachments)
+        if att_idx:
+            enhanced_message += "\n\n" + att_idx
+        if image_paths:
+            memory_manager.set_runtime_context_value("last_accessed_file", image_paths[-1])
+
         # Save user message to chat history
         chat_history.add_message(
             "web",
@@ -724,7 +730,12 @@ async def chat_stream_endpoint(
             enhanced_message = message
             if file_contents:
                 enhanced_message += "\n\n[Attached Files Content:]\n" + "\n".join(file_contents)
-            
+            att_idx = memory_coordinator.format_same_turn_attachment_index(file_attachments)
+            if att_idx:
+                enhanced_message += "\n\n" + att_idx
+            if image_paths:
+                memory_manager.set_runtime_context_value("last_accessed_file", image_paths[-1])
+
             # Save user message
             chat_history.add_message(
                 "web",
@@ -1269,10 +1280,13 @@ async def create_habit(
 ):
     """Create a new habit via single service gateway (with revision bump)."""
     try:
-        habit_id = core_data.add_habit_svc(
+        from kuro_backend import memory_coordinator as _mem_coord
+
+        habit_id = _mem_coord.habit_create(
             title=title,
             scheduled_time=scheduled_time,
             category=category,
+            source="web_api",
         )
         return {"status": "success", "habit_id": habit_id}
     except Exception as e:
@@ -1307,7 +1321,9 @@ async def update_habit(
                 status_code=400,
                 content={"status": "error", "message": "No update fields provided"},
             )
-        core_data.update_habit_svc(habit_id, **filtered_updates)
+        from kuro_backend import memory_coordinator as _mem_coord
+
+        _mem_coord.habit_update(habit_id, source="web_api", **filtered_updates)
         return {"status": "success", "habit_id": habit_id}
     except Exception as e:
         logger.error("Error updating habit %s: %s", habit_id, e)
@@ -1321,7 +1337,9 @@ async def update_habit(
 async def delete_habit(habit_id: int):
     """Delete a habit via service gateway (with revision bump)."""
     try:
-        core_data.delete_habit_svc(habit_id)
+        from kuro_backend import memory_coordinator as _mem_coord
+
+        _mem_coord.habit_delete(habit_id, source="web_api")
         return {"status": "success", "habit_id": habit_id}
     except Exception as e:
         logger.error("Error deleting habit %s: %s", habit_id, e)

@@ -1,3 +1,69 @@
+# Kuro AI V5.2 Official - Changelog
+
+**Release Date:** 2026-04-16
+**Version:** 5.2.0
+**Codename:** "Unified Memory Coordinator & Deictic Vision Grounding"
+
+---
+
+## V5.2.0 - Unified Memory Coordinator & Deictic Vision Grounding (2026-04-16)
+
+### Major Upgrade: Single Memory Orchestration + Image Context Reliability
+
+#### 1. Unified Memory Coordinator Rollout
+- **New orchestration module**: `kuro_backend/memory_coordinator.py` as centralized surface for:
+  - Habit mutation routing (`habit_create`, `habit_update`, `habit_delete`)
+  - OpenClaw revision bump policy (`apply_openclaw_execution_result`)
+  - LLM read bundle (`build_context_for_llm`)
+  - Post-response workers (`execute_memory_write_task`, `execute_mem0_extract_task`)
+- **Contract entrypoint added**: `record_mutation(...)` for domain-based mutation dispatch (`habits`, `long_term`, `mem0`) with forward-compatible idempotency key slot.
+
+#### 2. Strong Consistency for Habits + OpenClaw
+- **API write path centralized**: `POST/PUT/DELETE /api/habits` in `main.py` now routes through `memory_coordinator` gateway.
+- **OpenClaw SSoT sync centralized**: revision bump decision moved behind coordinator policy so `touched_habits`/`touched_reminders` and `harvest_gemini_share` are handled consistently.
+- **Invariant preserved**: canonical write via `*_svc` paths retains bump-after-commit behavior.
+
+#### 3. Deictic Grounding for "ini/itu/tadi"
+- **New grounding helpers** in coordinator:
+  - `build_referent_grounding_block(...)`
+  - `format_same_turn_attachment_index(...)`
+  - `user_message_looks_deictic(...)`
+- **Prompt grounding blocks** now include:
+  - `[ATTACHMENT_ORDER_THIS_REQUEST]` (same-turn deterministic ordering from upload metadata)
+  - `[RECENT_ATTACHMENTS_GROUNDING]` (recent user attachment history for referent resolution)
+- **Path-aware context bridge**: `apply_path_tokens_to_runtime(...)` resolves explicit image path/basename references via integrity metadata and updates `last_accessed_file`.
+
+#### 4. LangGraph Vision Path Fixed
+- **`response_node` now multimodal**: image paths are converted to Gemini `inline_data` parts (aligned with legacy `core.process_chat` behavior).
+- **Fast-stream parity improved**: same coordinator read bundle and referent grounding are used in true-token fast path text context.
+- **Multi-image consistency improved**: deterministic attachment ordering is injected so "gambar pertama/kedua" mapping is stable.
+
+#### 5. Observability + Test Coverage
+- **Phoenix attributes added** for coordinator read-layer grounding (`memory.domain`, `memory.source`, `memory.ok`, optional `memory.revision_after`).
+- **NEW tests**:
+  - `tests/test_memory_coordinator_contract.py`
+  - `tests/test_referent_grounding.py`
+- **Regression status**: full suite passes (`31 passed`) after coordinator + grounding + vision changes.
+
+#### 6. Known Issues Status Update
+- **Mitigated**: inconsistent image analysis path between LangGraph and legacy core.
+- **Mitigated**: frequent deictic confusion for image/file references (`ini/itu`) via attachment grounding blocks.
+- **Partially open**:
+  - Optional quota-aware batching for very large multi-image requests.
+  - Edge-case path normalization when user references files outside upload integrity scope.
+
+#### Files Changed (V5.2.0)
+- **MODIFIED**: `kuro_backend/memory_coordinator.py`
+- **MODIFIED**: `kuro_backend/langgraph_core.py`
+- **MODIFIED**: `main.py`
+- **MODIFIED**: `kuro_backend/tools/base_tools.py`
+- **MODIFIED**: `tests/test_sync_revision_contract.py`
+- **NEW**: `tests/test_memory_coordinator_contract.py`
+- **NEW**: `tests/test_referent_grounding.py`
+- **MODIFIED**: `CHANGELOG.md`
+
+---
+
 # Kuro AI V5.1 Official - Changelog
 
 **Release Date:** 2026-04-15
@@ -62,11 +128,10 @@
 - **Regression status**: Core targeted suites pass for smart_read, sync revision, upload uniqueness, and integrity logging paths.
 
 #### 6. Bug & Scheduled Improvements
-- **Known issue (active)**: Image analysis still inconsistent for single and multiple image scenarios in chat flow.
-- **Known issue (active)**: Prompting Kuro using explicit local image path references is not consistently resolved/executed.
+- **Mitigated (2026-04-16)**: LangGraph `response_node` now sends `image_paths` to Gemini as `inline_data` parts (aligned with legacy `core.process_chat`), with ordered `[ATTACHMENT_ORDER_THIS_REQUEST]` injected from `main.py` and `[RECENT_ATTACHMENTS_GROUNDING]` from `memory_coordinator` for deictic resolution (`ini`/`itu`/attachments). `last_accessed_file` is set on web upload and when user messages contain resolvable paths/basenames (integrity-backed).
+- **Remaining / follow-up**: Optional quota-aware batching for very large multi-image requests; edge cases if clients send unusual paths outside upload integrity.
 - **Scheduled improvement**:
-  - Harden multi-image orchestration and response quality controls.
-  - Add deterministic image-path resolver and stricter validation before analysis.
+  - Further harden multi-image orchestration and response quality controls if product needs stricter caps.
   - Consider optional quota-aware batching strategy for image-heavy requests.
 
 #### Files Changed (V5.1.0)

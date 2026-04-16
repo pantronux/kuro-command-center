@@ -34,6 +34,7 @@ if "phoenix" not in sys.modules:
     sys.modules["phoenix"] = fake_phoenix
 
 import main
+from kuro_backend import memory_coordinator
 from kuro_backend import reminder_service
 from kuro_backend.services import core_service
 
@@ -43,29 +44,32 @@ def _auth_client(monkeypatch) -> TestClient:
     return TestClient(main.app)
 
 
-def test_habit_write_endpoints_use_service_gateway(monkeypatch):
+def test_habit_write_endpoints_use_memory_coordinator_gateway(monkeypatch):
     calls = {"add": 0, "update": 0, "delete": 0}
 
-    def _add_habit_svc(title: str, scheduled_time: str, category: str = "General"):
+    def _habit_create(title: str, scheduled_time: str, category: str = "General", source: str = ""):
         calls["add"] += 1
         assert title == "Gym"
         assert scheduled_time == "15:00"
         assert category == "Health"
+        assert source == "web_api"
         return 99
 
-    def _update_habit_svc(habit_id: int, **kwargs):
+    def _habit_update(habit_id: int, source: str = "", **kwargs):
         calls["update"] += 1
         assert habit_id == 99
+        assert source == "web_api"
         assert kwargs["title"] == "Gym Updated"
         assert kwargs["target_per_week"] == 4
 
-    def _delete_habit_svc(habit_id: int):
+    def _habit_delete(habit_id: int, source: str = ""):
         calls["delete"] += 1
         assert habit_id == 99
+        assert source == "web_api"
 
-    monkeypatch.setattr(main.core_data, "add_habit_svc", _add_habit_svc)
-    monkeypatch.setattr(main.core_data, "update_habit_svc", _update_habit_svc)
-    monkeypatch.setattr(main.core_data, "delete_habit_svc", _delete_habit_svc)
+    monkeypatch.setattr(memory_coordinator, "habit_create", _habit_create)
+    monkeypatch.setattr(memory_coordinator, "habit_update", _habit_update)
+    monkeypatch.setattr(memory_coordinator, "habit_delete", _habit_delete)
 
     client = _auth_client(monkeypatch)
     cookies = {main.COOKIE_NAME: "Bearer dummy"}

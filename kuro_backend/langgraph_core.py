@@ -32,6 +32,7 @@ from kuro_backend.services import core_service as core_data
 from kuro_backend import habit_service
 from kuro_backend import tools as kuro_tools
 from kuro_backend import perpetual_memory
+from kuro_backend import memory_coordinator
 from kuro_backend import observability
 from kuro_backend.guardrails import sniper_pipeline
 
@@ -238,18 +239,13 @@ def _post_response_worker_loop() -> None:
                 user_input = task.get("user_input", "")
                 final_response = task.get("final_response", "")
                 persona_scope = task.get("persona_scope")
-                memory_manager.add_long_term_v2(f"User: {user_input}\nKuro: {final_response}")
-                memory_manager.summarize_conversation_to_chroma(persona_scope=persona_scope)
-                memory_manager.detect_and_save_master_facts(user_input, final_response)
+                memory_coordinator.execute_memory_write_task(
+                    user_input, final_response, persona_scope or memory_manager.get_active_persona()
+                )
             elif kind == "mem0_extract":
                 user_input = task.get("user_input", "")
                 final_response = task.get("final_response", "")
-                memories_to_store = perpetual_memory.perpetual_memory.extract_personal_info(
-                    user_input,
-                    final_response,
-                )
-                if memories_to_store and isinstance(memories_to_store, list):
-                    perpetual_memory.perpetual_memory.store_memories(memories_to_store)
+                memory_coordinator.execute_mem0_extract_task(user_input, final_response)
         except Exception as exc:
             logger.error("[POST_RESPONSE_WORKER] Task failed kind=%s error=%s", task.get("kind"), exc)
         finally:
@@ -787,28 +783,29 @@ def response_node(state: KuroState) -> Dict[str, Any]:
     trace_attrs = observability.add_client_label(trace_attrs, user_input)
     
     with observability.trace_node("response_node", trace_attrs) as span:
-        # Build memory injection
-        recent_messages = memory_manager.get_short_term(persona_scope=persona_mode)
-        memory = memory_manager.query_memory(
+        memory_coordinator.apply_path_tokens_to_runtime(user_input, persona_mode)
+        ctx = memory_coordinator.build_context_for_llm(
             user_input,
-            recent_messages=recent_messages,
-            persona_scope=persona_mode,
-            include_compliance=not bool(compliance_data),
+            persona_mode,
+            compliance_data=compliance_data or None,
+            mem0_retrieved_memories=mem0_memories or None,
         )
-        memory_injection = memory_manager.format_memory_with_temporal_grounding(memory)
-        
+        memory_injection = ctx["memory_injection"]
+        mem0_context_block = ctx.get("mem0_context_block")
+        referent_block = ctx.get("referent_grounding_block")
+
         # Build system prompt
         system_prompt = get_system_instruction(persona_override=persona_mode)
-        
+
         # Build user message with context injection
         message_parts = [user_input]
-        
-        # === MEM0 PERPETUAL MEMORY INJECTION ===
-        if mem0_memories:
-            mem0_context = perpetual_memory.perpetual_memory.format_memories_for_context(mem0_memories)
-            if mem0_context:
-                message_parts.append(f"\n\n[USER_CONTEXT - PERPETUAL MEMORY]\n{mem0_context}")
-                logger.info(f"[MEM0] Injected {len(mem0_memories)} memories into context")
+
+        if referent_block:
+            message_parts.append("\n\n" + referent_block)
+
+        if mem0_context_block:
+            message_parts.append(f"\n\n[USER_CONTEXT - PERPETUAL MEMORY]\n{mem0_context_block}")
+            logger.info("[MEM0] Injected %s memories into context", len(mem0_memories or []))
         
         # Add compliance context if available
         if compliance_data:
@@ -851,7 +848,10 @@ def response_node(state: KuroState) -> Dict[str, Any]:
         
         # Build final message
         full_message = "\n".join(message_parts)
-        
+        contents_parts = memory_coordinator.build_gemini_contents_parts(
+            full_message, image_paths if image_paths else None
+        )
+
         # Generate response using direct google-genai SDK (more reliable)
         response_text = None  # Initialize to detect if generation fails
         try:
@@ -862,7 +862,7 @@ def response_node(state: KuroState) -> Dict[str, Any]:
             
             response = genai_client.models.generate_content(
                 model=PRIMARY_MODEL,
-                contents=full_message,
+                contents=contents_parts,
                 config=types.GenerateContentConfig(
                     system_instruction=system_prompt,
                     temperature=0.2,
@@ -1001,6 +1001,7 @@ Examples:
 - "Buat laporan audit" -> {{"tool": "generate_report_template", "args": {{"template_type": "audit_findings", "filename": "audit_report.md"}}}}
 - "Kuro tolong bersihkan log lama di Proxmox pake OpenClaw" -> {{"tool": "advanced_execution_tool", "args": {{"task_description": "bersihkan log lama di Proxmox", "skill_name": "general_execution"}}}}
 - "Cari paper terbaru digital forensics on AI" -> {{"tool": "advanced_execution_tool", "args": {{"task_description": "cari paper terbaru digital forensics on AI", "skill_name": "general_execution", "execution_mode": "readonly"}}}}
+- "Kuro, pelajari materi dari link Gemini share ini dan masukkan ke library riset gue. https://gemini.google.com/share/abc123" -> {{"tool": "advanced_execution_tool", "args": {{"task_description": "Kuro, pelajari materi dari link Gemini share ini dan masukkan ke library riset gue. https://gemini.google.com/share/abc123", "skill_name": "harvest_gemini_share", "params": {{"share_url": "https://gemini.google.com/share/abc123"}}, "execution_mode": "mutating"}}}}
 
 TOOL CALL:"""
             
@@ -1359,18 +1360,25 @@ async def process_chat_with_graph_stream(
 
         if can_use_true_stream:
             fastpath_started = time.perf_counter()
-            recent_messages = memory_manager.get_short_term(persona_scope=persona_mode)
+            memory_coordinator.apply_path_tokens_to_runtime(message, persona_mode)
             memory_started = time.perf_counter()
-            memory = memory_manager.query_memory(
+            ctx = memory_coordinator.build_context_for_llm(
                 message,
-                recent_messages=recent_messages,
-                persona_scope=persona_mode,
-                include_compliance=True,
+                persona_mode,
+                compliance_data=None,
+                mem0_retrieved_memories=None,
             )
             if stream_metrics is not None:
                 stream_metrics["memory_query_ms"] = round((time.perf_counter() - memory_started) * 1000, 2)
-            memory_injection = memory_manager.format_memory_with_temporal_grounding(memory)
-            full_message = f"{message}{memory_injection}"
+            memory_injection = ctx["memory_injection"]
+            mem0_block = ctx.get("mem0_context_block") or ""
+            ref_block = ctx.get("referent_grounding_block") or ""
+            if mem0_block:
+                memory_injection = f"\n\n[USER_CONTEXT - PERPETUAL MEMORY]\n{mem0_block}{memory_injection}"
+            prefix = message
+            if ref_block:
+                prefix = f"{message}\n\n{ref_block}"
+            full_message = f"{prefix}{memory_injection}"
             system_prompt = get_system_instruction(persona_override=persona_mode)
 
             emitted = 0

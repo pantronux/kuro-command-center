@@ -1926,6 +1926,77 @@ def _run_async_coro_sync(coro):
     return result_holder["value"]
 
 
+GEMINI_SHARE_URL_PATTERN = re.compile(
+    r"https://gemini\.google\.com/share/[^\s)]+", re.IGNORECASE
+)
+GEMINI_HARVEST_SKILL_NAME = "harvest_gemini_share"
+GEMINI_SHARE_BLOCKED_USER_MESSAGE = (
+    "Master, akses ke link Gemini ini tersumbat (Timeout/Bot Protection). "
+    "Mohon cek kembali atau berikan file PDF-nya saja."
+)
+
+
+def extract_gemini_share_url(text: str) -> Optional[str]:
+    """Return first Gemini share URL in text, or None."""
+    if not text:
+        return None
+    m = GEMINI_SHARE_URL_PATTERN.search(text)
+    if not m:
+        return None
+    return m.group(0).rstrip(".,;]")
+
+
+def task_suggests_gemini_harvest(task: str) -> bool:
+    """Heuristic: user wants research library ingest from a Gemini share link."""
+    t = (task or "").lower()
+    keys = (
+        "library riset",
+        "masukkan",
+        "pelajari",
+        "gemini share",
+        "link gemini",
+        "share ini",
+        "riset",
+    )
+    return any(k in t for k in keys)
+
+
+def resolve_harvest_gemini_routing(
+    task: str,
+    skill_name: str,
+    params: Optional[Dict],
+) -> Tuple[str, Dict]:
+    """
+    If task contains a Gemini share URL and ingest intent, route to harvest_gemini_share.
+    Ensures share_url is present in params when using that skill.
+    """
+    merged = dict(params or {})
+    url = merged.get("share_url") or merged.get("url") or extract_gemini_share_url(task)
+    skill = (skill_name or "general_execution").strip() or "general_execution"
+
+    if url and isinstance(url, str):
+        url = url.strip()
+        if skill in ("general_execution",) and task_suggests_gemini_harvest(task):
+            skill = GEMINI_HARVEST_SKILL_NAME
+        if skill == GEMINI_HARVEST_SKILL_NAME:
+            merged.setdefault("share_url", url)
+
+    return skill, merged
+
+
+def _openclaw_body_implies_blocked_or_timeout(raw: Dict, execution_error: Optional[str]) -> bool:
+    if raw.get("error_code") == "blocked_or_timeout":
+        return True
+    if raw.get("user_message") == GEMINI_SHARE_BLOCKED_USER_MESSAGE:
+        return True
+    blob = " ".join(
+        str(x).lower()
+        for x in (raw.get("detail"), raw.get("error"), execution_error)
+        if x
+    )
+    return "timeout" in blob or "blocked_or_timeout" in blob or "bot" in blob
+
+
 def advanced_execution_tool(
     task_description: str,
     params: Optional[Dict] = None,
@@ -1947,6 +2018,8 @@ def advanced_execution_tool(
             "error": "task_description wajib diisi untuk advanced_execution_tool.",
         }
 
+    skill_name, params = resolve_harvest_gemini_routing(task, skill_name, params)
+
     normalized_mode = "readonly" if str(execution_mode).strip().lower() == "readonly" else "mutating"
     payload = {
         "task_description": task,
@@ -1960,6 +2033,17 @@ def advanced_execution_tool(
         execution_result = execute_openclaw_skill_sync(skill_name=skill_name, payload=payload)
     except Exception as exc:
         logger.exception("[OPENCLAW_TOOL] Bridge execution failed: %s", exc)
+        err_msg = str(exc).lower()
+        if skill_name == GEMINI_HARVEST_SKILL_NAME and (
+            "timeout" in err_msg or "timed out" in err_msg
+        ):
+            return {
+                "success": False,
+                "error": GEMINI_SHARE_BLOCKED_USER_MESSAGE,
+                "message": GEMINI_SHARE_BLOCKED_USER_MESSAGE,
+                "skill_name": skill_name,
+                "task_description": task,
+            }
         return {
             "success": False,
             "error": f"OpenClaw bridge error: {exc}",
@@ -1971,25 +2055,24 @@ def advanced_execution_tool(
     if not isinstance(raw, dict):
         raw = {"raw": raw}
 
-    # SSoT integrity rule: if OpenClaw touched reminders/habits (or requests sync), bump revision.
-    should_bump_revision = bool(
-        raw.get("touched_habits")
-        or raw.get("touched_reminders")
-        or raw.get("ssot_bump_required")
-        or raw.get("data_mutation")
+    # Daemon may return HTTP 200 with ok=false in JSON body
+    if raw.get("ok") is False:
+        success = False
+
+    bridge_err = execution_result.get("error")
+    if skill_name == GEMINI_HARVEST_SKILL_NAME and not success:
+        if _openclaw_body_implies_blocked_or_timeout(raw, bridge_err if isinstance(bridge_err, str) else None):
+            execution_result = dict(execution_result)
+            execution_result["error"] = GEMINI_SHARE_BLOCKED_USER_MESSAGE
+
+    from kuro_backend import memory_coordinator as _mem_coord
+
+    bump_meta = _mem_coord.apply_openclaw_execution_result(
+        success=success, skill_name=skill_name, raw=raw
     )
-
-    revision_bumped = False
-    revision_bump_error = None
-    if success and should_bump_revision:
-        try:
-            from kuro_backend.services import core_service
-
-            core_service.bump_data_revision()
-            revision_bumped = True
-        except Exception as exc:
-            revision_bump_error = str(exc)
-            logger.exception("[OPENCLAW_TOOL] Failed to bump SSoT revision: %s", exc)
+    should_bump_revision = bool(bump_meta.get("should_bump_revision"))
+    revision_bumped = bool(bump_meta.get("revision_bumped"))
+    revision_bump_error = bump_meta.get("revision_error")
 
     message = "Tugas berhasil didelegasikan ke OpenClaw."
     memory_fallback_required = bool(execution_result.get("memory_fallback_required"))
@@ -2014,6 +2097,10 @@ def advanced_execution_tool(
 
     if not success:
         message = "Eksekusi OpenClaw gagal."
+        if skill_name == GEMINI_HARVEST_SKILL_NAME and _openclaw_body_implies_blocked_or_timeout(
+            raw, bridge_err if isinstance(bridge_err, str) else None
+        ):
+            message = GEMINI_SHARE_BLOCKED_USER_MESSAGE
         if memory_fallback_required:
             message = execution_result.get("error") or message
             if memory_fallback_saved:
@@ -2042,6 +2129,12 @@ def advanced_execution_tool(
             "error": memory_fallback_error,
         },
     }
-    if not success and execution_result.get("error"):
-        response["error"] = execution_result.get("error")
+    if not success:
+        err_out = execution_result.get("error")
+        if skill_name == GEMINI_HARVEST_SKILL_NAME and _openclaw_body_implies_blocked_or_timeout(
+            raw, err_out if isinstance(err_out, str) else None
+        ):
+            response["error"] = GEMINI_SHARE_BLOCKED_USER_MESSAGE
+        elif err_out:
+            response["error"] = err_out
     return response

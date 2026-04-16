@@ -11,6 +11,7 @@ OPTIONS:
     --stats             Show current compliance database statistics only
     --clear             Clear existing compliance database before ingestion
     --dry-run           List files that would be processed without ingesting
+    --force-reindex     Reindex all files even if already indexed
 
 SECURITY:
     - This script ONLY reads from the specified directory
@@ -187,7 +188,7 @@ def clear_database():
         return False
 
 
-def rebuild(directory, clear_first=False):
+def rebuild(directory, clear_first=False, force_reindex=False):
     """Run full rebuild process."""
     print_header()
     
@@ -212,7 +213,10 @@ def rebuild(directory, clear_first=False):
     print("[INGEST] Starting batch ingestion...")
     print("-" * 40)
     
-    result = memory_manager.ingest_compliance_base(directory)
+    result = memory_manager.ingest_compliance_base(
+        directory_path=directory,
+        skip_existing=not force_reindex,
+    )
     
     # Print results
     print()
@@ -222,7 +226,9 @@ def rebuild(directory, clear_first=False):
     
     if result.get("success"):
         print(f"  Status: SUCCESS")
-        print(f"  Files Processed: {result['files_processed']}/{result['files_found']}")
+        print(f"  Files Found: {result['files_found']}")
+        print(f"  Files Processed: {result['files_processed']}")
+        print(f"  Files Skipped: {result.get('files_skipped', 0)}")
         print(f"  Total Chunks: {result['total_chunks']}")
         print(f"  ISO Standards: {len(result['iso_standards'])}")
         
@@ -235,6 +241,11 @@ def rebuild(directory, clear_first=False):
                 if doc.get("summary"):
                     print(f"      Summary: {doc['summary'][:100]}...")
                 print()
+
+        if result.get("skipped_files"):
+            print(f"\n  Skipped Existing Files ({len(result['skipped_files'])}):")
+            for skipped in result["skipped_files"]:
+                print(f"    ↷ {skipped}")
         
         if result.get("errors"):
             print(f"\n  Errors ({len(result['errors'])}):")
@@ -274,6 +285,11 @@ def main():
         action="store_true",
         help="List files that would be processed without ingesting"
     )
+    parser.add_argument(
+        "--force-reindex",
+        action="store_true",
+        help="Reindex all files even if already indexed"
+    )
     
     args = parser.parse_args()
     
@@ -290,7 +306,7 @@ def main():
     if not preflight_dependency_check():
         return
     
-    rebuild(args.directory, args.clear)
+    rebuild(args.directory, args.clear, args.force_reindex)
 
 
 if __name__ == "__main__":

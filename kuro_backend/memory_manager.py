@@ -1878,6 +1878,23 @@ def _get_compliance_collection():
     return _compliance_collection
 
 
+def _compliance_env_page_limit(env_var: str) -> Optional[int]:
+    """
+    Optional cap for compliance PDF ingest (classification / text pass or OCR pass).
+    Unset -> None (no cap). Non-positive int -> None (no cap). Positive -> max pages.
+    """
+    raw = os.environ.get(env_var, "").strip()
+    if not raw:
+        return None
+    try:
+        n = int(raw, 10)
+    except ValueError:
+        return None
+    if n <= 0:
+        return None
+    return n
+
+
 def extract_pdf_text(pdf_path: str) -> Dict:
     """
     V3.1 MULTIMODAL INGESTION - Step A: Extract text from PDF.
@@ -1885,6 +1902,10 @@ def extract_pdf_text(pdf_path: str) -> Dict:
     
     For scanned PDFs, uses Gemini 3 Flash multimodal vision for OCR.
     For text PDFs, uses standard extraction with Gemini verification.
+
+    Optional env caps (unset = no limit on that axis):
+    - KURO_COMPLIANCE_PDF_MAX_PAGES: max pages to classify and extract native text from.
+    - KURO_COMPLIANCE_OCR_MAX_PAGES: max scanned-index pages to OCR (cost control).
     
     Returns dict with: text, is_scanned, page_count, filename
     """
@@ -1906,8 +1927,11 @@ def extract_pdf_text(pdf_path: str) -> Dict:
         # First pass: try standard text extraction
         text_pages = []
         scanned_pages = []
-        
-        for page_num in range(min(len(doc), 100)):  # Max 100 pages for RAM protection
+
+        pdf_cap = _compliance_env_page_limit("KURO_COMPLIANCE_PDF_MAX_PAGES")
+        classify_upto = len(doc) if pdf_cap is None else min(len(doc), pdf_cap)
+
+        for page_num in range(classify_upto):
             page = doc[page_num]
             text = page.get_text("text")
             
@@ -1927,9 +1951,11 @@ def extract_pdf_text(pdf_path: str) -> Dict:
             data={
                 "filename": filename,
                 "total_pages": len(doc),
+                "pages_classified": classify_upto,
+                "pages_not_classified": max(0, len(doc) - classify_upto),
                 "text_pages": len(text_pages),
                 "scanned_pages": len(scanned_pages),
-                "scan_ratio": (len(scanned_pages) / len(doc)) if len(doc) else 0.0,
+                "scan_ratio": (len(scanned_pages) / classify_upto) if classify_upto else 0.0,
             },
         )
         # endregion
@@ -1937,9 +1963,12 @@ def extract_pdf_text(pdf_path: str) -> Dict:
         result["text"] = "\n\n".join(text_pages)
         
         # If significant pages are scanned, use multimodal OCR
-        if len(scanned_pages) > len(doc) * 0.3:  # >30% scanned
+        scanned_basis = classify_upto if classify_upto else len(doc)
+        if len(scanned_pages) > scanned_basis * 0.3:  # >30% scanned among classified pages
             result["is_scanned"] = True
             logger.info(f"[COMPLIANCE_OCR] {filename}: {len(scanned_pages)}/{len(doc)} pages scanned, using Gemini vision")
+            ocr_cap = _compliance_env_page_limit("KURO_COMPLIANCE_OCR_MAX_PAGES")
+            scanned_for_ocr = scanned_pages if ocr_cap is None else scanned_pages[:ocr_cap]
             # region agent log
             _debug_ingest_log(
                 run_id="pre_fix",
@@ -1949,20 +1978,35 @@ def extract_pdf_text(pdf_path: str) -> Dict:
                 data={
                     "filename": filename,
                     "scanned_pages": len(scanned_pages),
-                    "ocr_pages_selected": len(scanned_pages[:20]),
-                    "ocr_pages_truncated": max(0, len(scanned_pages) - 20),
+                    "ocr_max_pages_env": ocr_cap,
+                    "ocr_pages_selected": len(scanned_for_ocr),
+                    "ocr_pages_truncated": max(0, len(scanned_pages) - len(scanned_for_ocr)),
                 },
             )
             # endregion
             
-            # Perform OCR on scanned pages (limit to first 20 for API cost protection)
+            # Perform OCR on scanned pages (optional cap via KURO_COMPLIANCE_OCR_MAX_PAGES for cost control)
             ocr_texts = []
-            for page_num in scanned_pages[:20]:
+            for page_num in scanned_for_ocr:
                 page = doc[page_num]
                 pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))  # 2x resolution for better OCR
                 img_bytes = pix.tobytes("png")
                 
-                ocr_text = _ocr_page_with_gemini(img_bytes, filename, page_num + 1)
+                ocr_text = _ocr_page_with_gemini(img_bytes, filename, page_num + 1, attempt=1)
+                if not ocr_text:
+                    # Retry empty OCR once with higher render resolution to recover faint scans.
+                    pix_retry = page.get_pixmap(matrix=fitz.Matrix(3, 3))
+                    img_bytes_retry = pix_retry.tobytes("png")
+                    # region agent log
+                    _debug_ingest_log(
+                        run_id="pre_fix",
+                        hypothesis_id="H7_H8",
+                        location="memory_manager.py:extract_pdf_text:ocr_retry",
+                        message="Retrying empty OCR page with higher resolution",
+                        data={"filename": filename, "page_num": page_num + 1, "first_attempt_chars": 0},
+                    )
+                    # endregion
+                    ocr_text = _ocr_page_with_gemini(img_bytes_retry, filename, page_num + 1, attempt=2)
                 if ocr_text:
                     ocr_texts.append(ocr_text)
                     result["ocr_pages"] += 1
@@ -1997,7 +2041,7 @@ def extract_pdf_text(pdf_path: str) -> Dict:
     return result
 
 
-def _ocr_page_with_gemini(img_bytes: bytes, filename: str, page_num: int) -> str:
+def _ocr_page_with_gemini(img_bytes: bytes, filename: str, page_num: int, attempt: int = 1) -> str:
     """
     V3.1 MULTIMODAL OCR: Use Gemini 3 Flash vision to extract text from a page image.
     Maintains exact clause numbering and table structure.
@@ -2054,9 +2098,19 @@ Respond with ONLY the extracted text, no commentary."""
                 hypothesis_id="H4",
                 location="memory_manager.py:_ocr_page_with_gemini:success",
                 message="OCR page result",
-                data={"filename": filename, "page_num": page_num, "ocr_chars": len(text_out)},
+                data={"filename": filename, "page_num": page_num, "attempt": attempt, "ocr_chars": len(text_out)},
             )
             # endregion
+            if not text_out:
+                # region agent log
+                _debug_ingest_log(
+                    run_id="pre_fix",
+                    hypothesis_id="H7",
+                    location="memory_manager.py:_ocr_page_with_gemini:empty",
+                    message="OCR returned empty text",
+                    data={"filename": filename, "page_num": page_num, "attempt": attempt},
+                )
+                # endregion
             return text_out
         except Exception as text_err:
             if "WARNING" in str(text_err) or "Safety" in str(text_err) or "blocked" in str(text_err).lower():
@@ -2422,7 +2476,7 @@ def ingest_compliance_file(pdf_path: str) -> Dict:
         return {"success": False, "reason": str(e)}
 
 
-def ingest_compliance_base(directory_path: str = None) -> Dict:
+def ingest_compliance_base(directory_path: str = None, skip_existing: bool = True) -> Dict:
     """
     V3.1 BATCH INGESTION: Process all compliance documents in directory.
     
@@ -2430,6 +2484,7 @@ def ingest_compliance_base(directory_path: str = None) -> Dict:
     RAM PROTECTION: Processes 2 files per batch with 3-second delay.
     
     Returns dict with batch ingestion results.
+    If skip_existing is True, files already indexed in compliance collection are skipped.
     """
     target_dir = directory_path or COMPLIANCE_DOC_DIR
     
@@ -2454,11 +2509,26 @@ def ingest_compliance_base(directory_path: str = None) -> Dict:
         "directory": target_dir,
         "files_found": len(pdf_files),
         "files_processed": 0,
+        "files_skipped": 0,
         "total_chunks": 0,
         "iso_standards": [],
         "errors": [],
-        "documents": []
+        "documents": [],
+        "skipped_files": []
     }
+
+    existing_source_files = set()
+    if skip_existing:
+        collection = _get_compliance_collection()
+        if collection is not None:
+            try:
+                indexed_docs = collection.get(include=["metadatas"])
+                for meta in indexed_docs.get("metadatas", []) if indexed_docs else []:
+                    if meta and meta.get("source_file"):
+                        existing_source_files.add(meta["source_file"])
+                logger.info(f"[COMPLIANCE_BATCH] Existing indexed source files: {len(existing_source_files)}")
+            except Exception as e:
+                logger.warning(f"[COMPLIANCE_BATCH] Failed to load existing indexed files: {e}")
     
     # Process in batches of 2 (RAM protection for large PDFs)
     batch_size = 2
@@ -2471,6 +2541,12 @@ def ingest_compliance_base(directory_path: str = None) -> Dict:
         logger.info(f"[COMPLIANCE_BATCH] Processing batch {batch_num}: {len(batch)} files")
         
         for pdf_path in batch:
+            source_file = os.path.basename(pdf_path)
+            if skip_existing and source_file in existing_source_files:
+                results["files_skipped"] += 1
+                results["skipped_files"].append(source_file)
+                logger.info(f"[COMPLIANCE_BATCH] ↷ Skipped existing: {source_file}")
+                continue
             try:
                 result = ingest_compliance_file(pdf_path)
                 
@@ -2485,27 +2561,31 @@ def ingest_compliance_base(directory_path: str = None) -> Dict:
                         "pages": result.get("page_count", 0),
                         "summary": result.get("summary", "")
                     })
+                    existing_source_files.add(result["filename"])
                     logger.info(f"[COMPLIANCE_BATCH] ✓ {result['filename']}: {result['chunks_created']} chunks")
                 else:
                     results["errors"].append({
-                        "file": os.path.basename(pdf_path),
+                        "file": source_file,
                         "error": result["reason"]
                     })
-                    logger.error(f"[COMPLIANCE_BATCH] ✗ {os.path.basename(pdf_path)}: {result['reason']}")
+                    logger.error(f"[COMPLIANCE_BATCH] ✗ {source_file}: {result['reason']}")
                 
             except Exception as e:
                 results["errors"].append({
-                    "file": os.path.basename(pdf_path),
+                    "file": source_file,
                     "error": str(e)
                 })
-                logger.error(f"[COMPLIANCE_BATCH] ✗ {os.path.basename(pdf_path)}: {e}")
+                logger.error(f"[COMPLIANCE_BATCH] ✗ {source_file}: {e}")
         
         # Delay between batches (RAM protection)
         if i + batch_size < len(pdf_files):
             logger.info(f"[COMPLIANCE_BATCH] Waiting {batch_delay}s before next batch (RAM protection)...")
             time.sleep(batch_delay)
     
-    logger.info(f"[COMPLIANCE_BATCH] Complete: {results['files_processed']}/{results['files_found']} files, {results['total_chunks']} chunks")
+    logger.info(
+        f"[COMPLIANCE_BATCH] Complete: {results['files_processed']} processed, "
+        f"{results['files_skipped']} skipped, {results['files_found']} found, {results['total_chunks']} chunks"
+    )
     
     return results
 
