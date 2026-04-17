@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Kuro AI - Reminders</title>
+    <link rel="icon" type="image/x-icon" href="/profile/favicon.ico">
+    <link rel="apple-touch-icon" href="/profile/kuro_avatar.png">
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
     <link rel="stylesheet" href="/static/css/style.css">
@@ -80,6 +82,16 @@
             from { transform: translateX(100%); opacity: 0; }
             to { transform: translateX(0); opacity: 1; }
         }
+
+        /* Kuro V6.0 Sovereign HUD/Research/Cinema themes */
+        html { transition: background 250ms ease, color 250ms ease; }
+        html.theme-hud { background: #02070f !important; color: #7dd3fc; }
+        html.theme-hud body { background: radial-gradient(circle at 20% 20%, rgba(34,211,238,0.15), transparent 60%), #02070f !important; color: #7dd3fc !important; }
+        html.theme-hud [class*="bg-white"], html.theme-hud [class*="bg-gray-"] { background-color: rgba(2,7,15,0.85) !important; color: #7dd3fc !important; }
+        html.theme-research { background: #f5e7c2 !important; color: #7c2d12; }
+        html.theme-research body { background: linear-gradient(180deg,#fef3c7 0%, #f5e7c2 100%) !important; color: #7c2d12 !important; }
+        html.theme-cinema { background: #0a0a0a !important; color: #d1c6b0; }
+        html.theme-cinema body { background: #0a0a0a !important; color: #d1c6b0 !important; }
     </style>
 </head>
 <body class="bg-gray-50 dark:bg-gray-900 min-h-screen transition-colors duration-300">
@@ -245,7 +257,16 @@
             dashboardWs.onmessage = async (ev) => {
                 try {
                     const msg = JSON.parse(ev.data);
-                    if (msg.type === 'REFRESH_NOW') await onDashboardSyncPush(msg.revision);
+                    if (msg.type === 'REFRESH_NOW') {
+                        await onDashboardSyncPush(msg.revision);
+                    } else if (msg.type === 'UI_COMMAND' && msg.command) {
+                        const root = document.documentElement;
+                        ['theme-hud','theme-research','theme-cinema'].forEach(c => root.classList.remove(c));
+                        if (msg.command === 'HUD_MODE') root.classList.add('theme-hud');
+                        else if (msg.command === 'RESEARCH_MODE') root.classList.add('theme-research');
+                        else if (msg.command === 'CINEMA_MODE') root.classList.add('theme-cinema');
+                        try { localStorage.setItem('kuro-ui-mode', msg.command); } catch (_) {}
+                    }
                 } catch (e) { console.warn('dashboard ws message', e); }
             };
             dashboardWs.onclose = () => {

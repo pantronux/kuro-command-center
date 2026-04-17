@@ -1,5 +1,5 @@
 """
-Kuro AI V5.5 Official - Memory Manager [2026-04-17]
+Kuro AI V6.0 Sovereign - Memory Manager [2026-04-17]
 ================================================================================
 Kuro Cognitive Memory Engine V3.0 - Contextual RAG Architecture
 TIER 1: Short-Term Buffer (SQLite) - Last 20 interactions
@@ -300,6 +300,64 @@ def init_short_term_db():
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    # Persona-Aware Context Management (V5.5) — structured JSON summary
+    # alongside the legacy plain-text fallback.
+    cursor.execute("PRAGMA table_info(short_term_summaries)")
+    summary_cols = [row["name"] for row in cursor.fetchall()]
+    if "summary_json" not in summary_cols:
+        cursor.execute(
+            "ALTER TABLE short_term_summaries ADD COLUMN summary_json TEXT NOT NULL DEFAULT '{}'"
+        )
+
+    # Append-only durability ledger. Stores per-persona extraction records
+    # (novelty_points, technical_specs, decisions, ...) so summarization can
+    # NEVER cause data loss — even when the compressed summary is trimmed or
+    # overwritten, these rows persist for PhD research audit.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS research_ledger (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            persona_scope TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            content TEXT NOT NULL,
+            source_entry_id INTEGER,
+            schema_v INTEGER NOT NULL DEFAULT 1,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_research_ledger_persona_kind "
+        "ON research_ledger (persona_scope, kind)"
+    )
+
+    # Autonomous Memory Dreaming (V5.5) — advisory lease, cycle audit log,
+    # and proactive notification dedup table.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS dreaming_locks (
+            name TEXT PRIMARY KEY,
+            leased_by TEXT NOT NULL,
+            lease_expires_at DATETIME NOT NULL
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS dreaming_cycles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            started_at DATETIME NOT NULL,
+            finished_at DATETIME,
+            status TEXT NOT NULL,
+            findings_count INTEGER NOT NULL DEFAULT 0,
+            enriched_count INTEGER NOT NULL DEFAULT 0,
+            notified_count INTEGER NOT NULL DEFAULT 0,
+            error TEXT
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS dream_notifications (
+            fingerprint TEXT PRIMARY KEY,
+            persona_scope TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
 
     conn.commit()
     conn.close()
@@ -365,6 +423,435 @@ def upsert_short_term_summary(persona_scope: str, last_entry_id: int, summary: s
             (persona_scope, int(last_entry_id), summary),
         )
         conn.commit()
+    finally:
+        conn.close()
+
+
+def get_short_term_summary_json(persona_scope: str) -> Optional[Dict]:
+    """Return cached structured summary JSON for the persona, or ``None``.
+
+    Falls back to parsing the legacy ``summary`` column into a minimal dict so
+    callers can migrate without a flag day.
+    """
+    conn = _get_short_term_conn()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT last_entry_id, summary, summary_json FROM short_term_summaries "
+            "WHERE persona_scope = ?",
+            (persona_scope,),
+        )
+        row = cursor.fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        return None
+    last_id = int(row["last_entry_id"])
+    raw_json = str(row["summary_json"] or "").strip()
+    data: Dict = {}
+    if raw_json and raw_json != "{}":
+        try:
+            parsed = json.loads(raw_json)
+            if isinstance(parsed, dict):
+                data = parsed
+        except json.JSONDecodeError:
+            data = {}
+    if not data and row["summary"]:
+        data = {"topic": "", "decisions": [], "entities": [],
+                "open_questions": [], "novelty_points": [],
+                "technical_specs": [], "compliance_refs": [],
+                "tone_markers": [], "_legacy_text": str(row["summary"] or "")}
+    return {"last_entry_id": last_id, "summary_json": data}
+
+
+def upsert_short_term_summary_json(
+    persona_scope: str,
+    last_entry_id: int,
+    summary_json: Dict,
+    *,
+    fallback_text: str = "",
+) -> None:
+    """Upsert the structured JSON summary for a persona scope.
+
+    Also stores ``fallback_text`` in the legacy ``summary`` column so older
+    code paths keep working even before full migration.
+    """
+    blob = json.dumps(summary_json or {}, ensure_ascii=False)
+    conn = _get_short_term_conn()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO short_term_summaries "
+            "(persona_scope, last_entry_id, summary, summary_json) "
+            "VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(persona_scope) DO UPDATE SET "
+            "last_entry_id=excluded.last_entry_id, "
+            "summary=excluded.summary, "
+            "summary_json=excluded.summary_json, "
+            "updated_at=CURRENT_TIMESTAMP",
+            (persona_scope, int(last_entry_id), fallback_text, blob),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Research Ledger (append-only) — PhD memory durability guarantee.
+# ---------------------------------------------------------------------------
+
+_LEDGER_KINDS: Tuple[str, ...] = (
+    "novelty_point",
+    "technical_spec",
+    "decision",
+    "open_question",
+    "compliance_ref",
+    "entity",
+)
+
+
+def append_research_ledger(
+    persona_scope: str,
+    kind: str,
+    content: str,
+    *,
+    source_entry_id: Optional[int] = None,
+    schema_v: int = 1,
+) -> Optional[int]:
+    """Append one research ledger row. Returns inserted row id or None on failure.
+
+    Silently ignores empty content. Unknown ``kind`` values are accepted (we
+    want extensibility) but logged so drift is visible.
+    """
+    content = (content or "").strip()
+    if not content:
+        return None
+    if kind not in _LEDGER_KINDS:
+        logger.debug("[LEDGER] unknown kind=%s persona=%s", kind, persona_scope)
+    conn = _get_short_term_conn()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO research_ledger "
+            "(persona_scope, kind, content, source_entry_id, schema_v) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (persona_scope, kind, content, source_entry_id, int(schema_v)),
+        )
+        conn.commit()
+        return int(cursor.lastrowid)
+    except Exception as exc:
+        logger.warning("[LEDGER] append failed persona=%s kind=%s: %s",
+                       persona_scope, kind, exc)
+        return None
+    finally:
+        conn.close()
+
+
+def append_research_ledger_batch(
+    persona_scope: str,
+    records: List[Dict],
+    *,
+    source_entry_id: Optional[int] = None,
+) -> int:
+    """Append multiple ledger rows in a single transaction.
+
+    Each record dict must have ``kind`` and ``content`` keys. Returns the count
+    of rows actually inserted (non-empty content only).
+    """
+    rows: List[Tuple] = []
+    for rec in records or []:
+        content = str(rec.get("content") or "").strip()
+        if not content:
+            continue
+        kind = str(rec.get("kind") or "").strip() or "decision"
+        rows.append((persona_scope, kind, content,
+                     rec.get("source_entry_id") or source_entry_id, 1))
+    if not rows:
+        return 0
+    conn = _get_short_term_conn()
+    try:
+        cursor = conn.cursor()
+        cursor.executemany(
+            "INSERT INTO research_ledger "
+            "(persona_scope, kind, content, source_entry_id, schema_v) "
+            "VALUES (?, ?, ?, ?, ?)",
+            rows,
+        )
+        conn.commit()
+        return len(rows)
+    except Exception as exc:
+        logger.warning("[LEDGER] batch append failed persona=%s count=%d: %s",
+                       persona_scope, len(rows), exc)
+        return 0
+    finally:
+        conn.close()
+
+
+def query_research_ledger(
+    persona_scope: str,
+    *,
+    kinds: Optional[List[str]] = None,
+    limit: int = 50,
+) -> List[Dict]:
+    """Return most recent ledger rows for a persona, newest first."""
+    conn = _get_short_term_conn()
+    try:
+        cursor = conn.cursor()
+        if kinds:
+            placeholders = ",".join("?" * len(kinds))
+            cursor.execute(
+                f"SELECT id, kind, content, source_entry_id, created_at "
+                f"FROM research_ledger WHERE persona_scope = ? AND kind IN ({placeholders}) "
+                f"ORDER BY id DESC LIMIT ?",
+                (persona_scope, *kinds, int(limit)),
+            )
+        else:
+            cursor.execute(
+                "SELECT id, kind, content, source_entry_id, created_at "
+                "FROM research_ledger WHERE persona_scope = ? ORDER BY id DESC LIMIT ?",
+                (persona_scope, int(limit)),
+            )
+        rows = cursor.fetchall()
+    finally:
+        conn.close()
+    return [
+        {
+            "id": int(r["id"]),
+            "kind": str(r["kind"]),
+            "content": str(r["content"]),
+            "source_entry_id": r["source_entry_id"],
+            "created_at": str(r["created_at"]),
+        }
+        for r in rows
+    ]
+
+
+def query_research_ledger_since(
+    cutoff_iso: str,
+    *,
+    limit: int = 500,
+) -> List[Dict]:
+    """Return ledger rows created since ``cutoff_iso`` across all personas."""
+    conn = _get_short_term_conn()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, persona_scope, kind, content, source_entry_id, created_at "
+            "FROM research_ledger WHERE created_at >= ? "
+            "ORDER BY id DESC LIMIT ?",
+            (cutoff_iso, int(limit)),
+        )
+        rows = cursor.fetchall()
+    finally:
+        conn.close()
+    return [
+        {
+            "id": int(r["id"]),
+            "persona_scope": str(r["persona_scope"]),
+            "kind": str(r["kind"]),
+            "content": str(r["content"]),
+            "source_entry_id": r["source_entry_id"],
+            "created_at": str(r["created_at"]),
+        }
+        for r in rows
+    ]
+
+
+def query_short_term_summaries_recent(limit: int = 50) -> List[Dict]:
+    """Return the most recently updated short_term_summaries rows.
+
+    We can't filter by a ``created_at`` column (there isn't one), but
+    ``updated_at`` reflects when the summarizer last wrote. Caller filters
+    further by parsing ``updated_at``.
+    """
+    conn = _get_short_term_conn()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT persona_scope, last_entry_id, summary, summary_json, updated_at "
+            "FROM short_term_summaries ORDER BY updated_at DESC LIMIT ?",
+            (int(limit),),
+        )
+        rows = cursor.fetchall()
+    finally:
+        conn.close()
+    return [
+        {
+            "persona_scope": str(r["persona_scope"]),
+            "last_entry_id": int(r["last_entry_id"]),
+            "summary": str(r["summary"] or ""),
+            "summary_json": str(r["summary_json"] or "{}"),
+            "updated_at": str(r["updated_at"]),
+        }
+        for r in rows
+    ]
+
+
+def query_short_term_latest_timestamp() -> Optional[str]:
+    """Return ISO timestamp of the most recent short_term row, or None."""
+    conn = _get_short_term_conn()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT timestamp FROM short_term ORDER BY id DESC LIMIT 1"
+        )
+        row = cursor.fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        return None
+    return str(row["timestamp"])
+
+
+# ---------------------------------------------------------------------------
+# Autonomous Dreaming — advisory lease, cycle audit, notification dedup
+# ---------------------------------------------------------------------------
+
+def acquire_dreaming_lease(name: str, leased_by: str, ttl_seconds: int) -> bool:
+    """Try to acquire an advisory lease on ``name`` with ``ttl_seconds`` TTL.
+
+    Returns ``True`` when acquired (row inserted or previous lease expired),
+    ``False`` when another holder still owns the active lease.
+
+    Implementation uses the stale-or-empty row as precondition so we never
+    steal a live lease.
+    """
+    conn = _get_short_term_conn()
+    try:
+        cursor = conn.cursor()
+        now = datetime.now()
+        expires = now + timedelta(seconds=max(60, int(ttl_seconds)))
+        cursor.execute("BEGIN IMMEDIATE")
+        cursor.execute(
+            "SELECT leased_by, lease_expires_at FROM dreaming_locks WHERE name = ?",
+            (name,),
+        )
+        row = cursor.fetchone()
+        if row is not None:
+            try:
+                held_until = datetime.fromisoformat(str(row["lease_expires_at"]))
+            except ValueError:
+                held_until = now - timedelta(seconds=1)
+            if held_until > now:
+                conn.rollback()
+                return False
+        cursor.execute(
+            "INSERT INTO dreaming_locks (name, leased_by, lease_expires_at) "
+            "VALUES (?, ?, ?) "
+            "ON CONFLICT(name) DO UPDATE SET "
+            "leased_by=excluded.leased_by, "
+            "lease_expires_at=excluded.lease_expires_at",
+            (name, leased_by, expires.isoformat(timespec="seconds")),
+        )
+        conn.commit()
+        return True
+    except Exception as exc:
+        logger.warning("[DREAMING_LEASE] acquire failed name=%s: %s", name, exc)
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        return False
+    finally:
+        conn.close()
+
+
+def release_dreaming_lease(name: str, leased_by: str) -> None:
+    """Release the lease only if we still own it (safe no-op otherwise)."""
+    conn = _get_short_term_conn()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "DELETE FROM dreaming_locks WHERE name = ? AND leased_by = ?",
+            (name, leased_by),
+        )
+        conn.commit()
+    except Exception as exc:
+        logger.warning("[DREAMING_LEASE] release failed name=%s: %s", name, exc)
+    finally:
+        conn.close()
+
+
+def insert_dreaming_cycle(status: str = "running") -> int:
+    """Insert a new dreaming cycle audit row. Returns the row id."""
+    conn = _get_short_term_conn()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO dreaming_cycles (started_at, status) VALUES (?, ?)",
+            (datetime.now().isoformat(timespec="seconds"), status),
+        )
+        conn.commit()
+        return int(cursor.lastrowid)
+    finally:
+        conn.close()
+
+
+def update_dreaming_cycle(
+    cycle_id: int,
+    *,
+    status: str,
+    findings_count: int = 0,
+    enriched_count: int = 0,
+    notified_count: int = 0,
+    error: Optional[str] = None,
+) -> None:
+    """Update a dreaming cycle audit row with final counts + status."""
+    conn = _get_short_term_conn()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE dreaming_cycles SET "
+            "finished_at = ?, status = ?, findings_count = ?, "
+            "enriched_count = ?, notified_count = ?, error = ? "
+            "WHERE id = ?",
+            (
+                datetime.now().isoformat(timespec="seconds"),
+                status,
+                int(findings_count),
+                int(enriched_count),
+                int(notified_count),
+                (error or None),
+                int(cycle_id),
+            ),
+        )
+        conn.commit()
+    except Exception as exc:
+        logger.warning("[DREAMING_CYCLE] update failed id=%s: %s", cycle_id, exc)
+    finally:
+        conn.close()
+
+
+def dream_notification_seen(fingerprint: str) -> bool:
+    """Return True if this notification fingerprint was already sent."""
+    conn = _get_short_term_conn()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT 1 FROM dream_notifications WHERE fingerprint = ? LIMIT 1",
+            (fingerprint,),
+        )
+        row = cursor.fetchone()
+        return row is not None
+    finally:
+        conn.close()
+
+
+def mark_dream_notification(
+    fingerprint: str, persona_scope: str, kind: str,
+) -> None:
+    """Record that a fingerprint was successfully notified."""
+    conn = _get_short_term_conn()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT OR IGNORE INTO dream_notifications "
+            "(fingerprint, persona_scope, kind) VALUES (?, ?, ?)",
+            (fingerprint, persona_scope, kind),
+        )
+        conn.commit()
+    except Exception as exc:
+        logger.warning("[DREAM_NOTIFY] mark failed fp=%s: %s", fingerprint, exc)
     finally:
         conn.close()
 

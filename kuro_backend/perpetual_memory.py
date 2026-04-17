@@ -1,5 +1,5 @@
 """
-Kuro AI V5.5 - Perpetual Memory with Mem0 [2026-04-17]
+Kuro AI V6.0 Sovereign - Perpetual Memory with Mem0 [2026-04-17]
 ================================================================================
 Integrates Mem0 framework for long-term personal memory about Pantronux.
 - Memory Extraction: Detects and saves personal info, preferences, habits

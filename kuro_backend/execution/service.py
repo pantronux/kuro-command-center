@@ -1,5 +1,5 @@
 """
-Kuro AI V5.5 — Execution service boundary for OpenClaw delegation.
+Kuro AI V6.0 Sovereign — Execution service boundary for OpenClaw delegation.
 
 The tool layer calls this synchronously (e.g. from `advanced_execution_tool`
 running in a LangGraph worker thread). We route to the pure-blocking variant

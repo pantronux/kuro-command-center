@@ -1,5 +1,5 @@
 """
-Kuro AI V5.5 Official - Core [2026-04-17]
+Kuro AI V6.0 Sovereign - Core [2026-04-17]
 ================================================================================
 AI Core with Contextual RAG Memory Injection and Dynamic Persona System
 SDK: google-genai v3 Protocol (client.models.generate_content)

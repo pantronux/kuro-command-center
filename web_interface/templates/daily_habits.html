@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Kuro AI - Habit Tracker V2.0</title>
+    <link rel="icon" type="image/x-icon" href="/profile/favicon.ico">
+    <link rel="apple-touch-icon" href="/profile/kuro_avatar.png">
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
     <link rel="stylesheet" href="/static/css/style.css">
@@ -179,6 +181,16 @@
         .pulse-glow {
             animation: pulse-glow 2s infinite;
         }
+
+        /* Kuro V6.0 Sovereign HUD/Research/Cinema themes */
+        html { transition: background 250ms ease, color 250ms ease; }
+        html.theme-hud { background: #02070f !important; color: #7dd3fc; }
+        html.theme-hud body { background: radial-gradient(circle at 20% 20%, rgba(34,211,238,0.15), transparent 60%), #02070f !important; color: #7dd3fc !important; }
+        html.theme-hud [class*="bg-white"], html.theme-hud [class*="bg-gray-"] { background-color: rgba(2,7,15,0.85) !important; color: #7dd3fc !important; }
+        html.theme-research { background: #f5e7c2 !important; color: #7c2d12; }
+        html.theme-research body { background: linear-gradient(180deg,#fef3c7 0%, #f5e7c2 100%) !important; color: #7c2d12 !important; }
+        html.theme-cinema { background: #0a0a0a !important; color: #d1c6b0; }
+        html.theme-cinema body { background: #0a0a0a !important; color: #d1c6b0 !important; }
     </style>
 </head>
 <body class="text-white">
@@ -367,9 +379,29 @@
             dashboardWs.onmessage = async (ev) => {
                 try {
                     const msg = JSON.parse(ev.data);
-                    if (msg.type === 'REFRESH_NOW') await refreshFromSyncSignal(msg.revision);
+                    if (msg.type === 'REFRESH_NOW') {
+                        await refreshFromSyncSignal(msg.revision);
+                    } else if (msg.type === 'UI_COMMAND' && msg.command) {
+                        applyKuroUIMode(msg.command);
+                    }
                 } catch (e) { console.warn('dashboard ws message', e); }
             };
+
+            if (!window.__kuroApplyUIModeInstalled) {
+                window.__kuroApplyUIModeInstalled = true;
+                window.applyKuroUIMode = function (command) {
+                    const root = document.documentElement;
+                    ['theme-hud','theme-research','theme-cinema'].forEach(c => root.classList.remove(c));
+                    if (command === 'HUD_MODE') root.classList.add('theme-hud');
+                    else if (command === 'RESEARCH_MODE') root.classList.add('theme-research');
+                    else if (command === 'CINEMA_MODE') root.classList.add('theme-cinema');
+                    try { localStorage.setItem('kuro-ui-mode', command); } catch (_) {}
+                };
+                try {
+                    const saved = localStorage.getItem('kuro-ui-mode');
+                    if (saved && saved !== 'NORMAL_MODE') window.applyKuroUIMode(saved);
+                } catch (_) {}
+            }
             dashboardWs.onclose = () => {
                 dashboardWs = null;
                 setTimeout(connectDashboardWS, 2000);

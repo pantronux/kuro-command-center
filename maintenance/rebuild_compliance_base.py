@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Kuro AI V5.5 - Compliance Knowledge Base Rebuild Script
+Kuro AI V6.0 Sovereign - Compliance Knowledge Base Rebuild Script
 ========================================================
 
 USAGE:
@@ -110,7 +110,7 @@ def preflight_dependency_check() -> bool:
 def print_header():
     """Print script header."""
     print("=" * 70)
-    print("Kuro AI V5.5 - Compliance Knowledge Base Rebuild")
+    print("Kuro AI V6.0 Sovereign - Compliance Knowledge Base Rebuild")
     print("=" * 70)
     print(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print()
@@ -263,7 +263,7 @@ def rebuild(directory, clear_first=False, force_reindex=False):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Kuro AI V5.5 - Compliance Knowledge Base Rebuild Script"
+        description="Kuro AI V6.0 Sovereign - Compliance Knowledge Base Rebuild Script"
     )
     parser.add_argument(
         "--directory",

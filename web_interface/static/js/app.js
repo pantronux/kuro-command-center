@@ -171,6 +171,8 @@ document.addEventListener('DOMContentLoaded', () => {
     setupAutoResize();
     setupInfiniteScroll();
     updateUserInfo();
+    kuroRestoreUIMode();
+    kuroConnectDashboardWS();
 });
 
 // ============================================
@@ -393,6 +395,344 @@ function toggleDarkMode() {
     document.documentElement.classList.toggle('dark');
     localStorage.setItem('kuro-theme', document.documentElement.classList.contains('dark') ? 'dark' : 'light');
 }
+
+// ============================================
+// Dashboard WebSocket: REFRESH_NOW + UI_COMMAND (Kuro V6.0 Sovereign)
+// ============================================
+const KURO_UI_MODES = ['HUD_MODE', 'RESEARCH_MODE', 'CINEMA_MODE', 'NORMAL_MODE'];
+const KURO_THEME_CLASSES = ['theme-hud', 'theme-research', 'theme-cinema'];
+const KURO_SENTINEL_IDLE_MS = 30000; // Client-side watchdog: revert to IDLE
+                                     // if backend stops updating.
+let _kuroDashboardWS = null;
+let _kuroDashboardWSBackoff = 1000;
+let _kuroCurrentMode = 'NORMAL_MODE';
+let _kuroLastStatusSnapshot = null;
+let _kuroTickerWatchdog = null;
+let _kuroCurrentAudio = null; // active <audio> element (mutex for playback)
+// V6.1 Live2D lip-sync plumbing. Created lazily on first TTS playback so we
+// don't violate the browser's autoplay policy and so non-Live2D pages avoid
+// AudioContext warnings.
+let _kuroAudioCtx = null;
+let _kuroAnalyser = null;
+let _kuroAnalyserData = null;
+const _kuroMediaSources = new WeakMap(); // <audio> -> MediaElementAudioSourceNode
+let _kuroLipSyncRAF = 0;
+
+function _kuroEnsureAudioGraph() {
+    if (_kuroAudioCtx) return _kuroAudioCtx;
+    try {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (!Ctx) return null;
+        _kuroAudioCtx = new Ctx();
+        _kuroAnalyser = _kuroAudioCtx.createAnalyser();
+        _kuroAnalyser.fftSize = 512;
+        _kuroAnalyser.smoothingTimeConstant = 0.75;
+        _kuroAnalyserData = new Uint8Array(_kuroAnalyser.fftSize);
+        _kuroAnalyser.connect(_kuroAudioCtx.destination);
+        return _kuroAudioCtx;
+    } catch (err) {
+        console.debug('[TTS] AudioContext unavailable', err);
+        _kuroAudioCtx = null;
+        return null;
+    }
+}
+
+function _kuroAttachAudioToAnalyser(audio) {
+    if (!_kuroAnalyser) return false;
+    try {
+        let src = _kuroMediaSources.get(audio);
+        if (!src) {
+            src = _kuroAudioCtx.createMediaElementSource(audio);
+            src.connect(_kuroAnalyser);
+            _kuroMediaSources.set(audio, src);
+        }
+        return true;
+    } catch (err) {
+        console.debug('[TTS] createMediaElementSource failed', err);
+        return false;
+    }
+}
+
+function _kuroStopLipSyncLoop() {
+    if (_kuroLipSyncRAF) {
+        cancelAnimationFrame(_kuroLipSyncRAF);
+        _kuroLipSyncRAF = 0;
+    }
+    try {
+        if (window.kuroLive2D && typeof window.kuroLive2D.setLipSyncValue === 'function') {
+            window.kuroLive2D.setLipSyncValue(0);
+        }
+    } catch (_) {}
+}
+
+function _kuroStartLipSyncLoop() {
+    if (!_kuroAnalyser || !_kuroAnalyserData) return;
+    const data = _kuroAnalyserData;
+    const analyser = _kuroAnalyser;
+    const tick = () => {
+        try {
+            analyser.getByteTimeDomainData(data);
+            let sumSq = 0;
+            for (let i = 0; i < data.length; i++) {
+                const v = (data[i] - 128) / 128;
+                sumSq += v * v;
+            }
+            const rms = Math.sqrt(sumSq / data.length);
+            // Boost so normal speech -> mouth swings between ~0.2 and ~1.0.
+            const lip = Math.min(1, rms * 3.5);
+            if (window.kuroLive2D && typeof window.kuroLive2D.setLipSyncValue === 'function') {
+                window.kuroLive2D.setLipSyncValue(lip);
+            }
+        } catch (_) {}
+        _kuroLipSyncRAF = requestAnimationFrame(tick);
+    };
+    _kuroLipSyncRAF = requestAnimationFrame(tick);
+}
+
+function kuroApplyUIMode(command, payload) {
+    if (!KURO_UI_MODES.includes(command)) return;
+    const root = document.documentElement;
+    KURO_THEME_CLASSES.forEach((cls) => root.classList.remove(cls));
+    if (command === 'HUD_MODE') root.classList.add('theme-hud');
+    else if (command === 'RESEARCH_MODE') root.classList.add('theme-research');
+    else if (command === 'CINEMA_MODE') root.classList.add('theme-cinema');
+    _kuroCurrentMode = command;
+    try { localStorage.setItem('kuro-ui-mode', command); } catch (_) {}
+    if (payload && payload.server_status) {
+        _kuroLastStatusSnapshot = payload.server_status;
+        kuroRenderStatusTicker(payload.server_status);
+    }
+    if (command === 'HUD_MODE') {
+        // HUD mode always starts in IDLE posture so master sees "SENTINEL: IDLE"
+        // instantly even if no sentinel has fired yet this session.
+        kuroRenderSentinelTicker({ status: 'IDLE', source: 'ALL' });
+    }
+    const banner = document.getElementById('kuroModeBanner');
+    if (banner) {
+        banner.textContent = command.replace('_MODE', '').toUpperCase();
+        banner.classList.toggle('hidden', command === 'NORMAL_MODE');
+    }
+}
+
+function kuroEnsureTicker() {
+    let ticker = document.getElementById('kuroStatusTicker');
+    if (!ticker) {
+        ticker = document.createElement('div');
+        ticker.id = 'kuroStatusTicker';
+        ticker.className = 'fixed bottom-4 right-4 max-w-md p-3 rounded-lg text-xs font-mono whitespace-pre-wrap shadow-xl z-50 bg-black/80 text-cyan-200 border border-cyan-700/50 pointer-events-none';
+        document.body.appendChild(ticker);
+    }
+    return ticker;
+}
+
+function kuroRenderStatusTicker(snapshot) {
+    const ticker = kuroEnsureTicker();
+    const txt = [
+        snapshot && snapshot.proxmox ? snapshot.proxmox : '(no proxmox data)',
+        snapshot && snapshot.host ? `\nHost: CPU ${snapshot.host.cpu}% | RAM ${snapshot.host.ram}% | Disk ${snapshot.host.disk}%` : ''
+    ].join('');
+    ticker.textContent = txt;
+    setTimeout(() => {
+        if (ticker && _kuroCurrentMode !== 'RESEARCH_MODE' && _kuroCurrentMode !== 'HUD_MODE') {
+            ticker.remove();
+        }
+    }, 60000);
+}
+
+function kuroRenderSentinelTicker(payload) {
+    // HUD-mode sentinel presentation. Outside HUD_MODE we stay silent to
+    // avoid clashing with RESEARCH_MODE's server-status dump.
+    if (_kuroCurrentMode !== 'HUD_MODE') return;
+    const p = payload || {};
+    const status = (p.status || 'IDLE').toString().toUpperCase();
+    const source = (p.source || 'ALL').toString().toUpperCase();
+    const detail = (p.detail || '').toString().slice(0, 120);
+    const ticker = kuroEnsureTicker();
+    ticker.classList.remove('sentinel-scanning', 'sentinel-alert');
+    const line = detail
+        ? `SENTINEL ${source}: ${status} — ${detail}`
+        : `SENTINEL ${source}: ${status}`;
+    ticker.textContent = line;
+    if (status === 'SCANNING') {
+        ticker.classList.add('sentinel-scanning');
+    } else if (status === 'ALERT') {
+        ticker.classList.add('sentinel-alert');
+    }
+    // Watchdog: if nothing else arrives within 30s, revert to IDLE so a
+    // crashed backend never strands "SCANNING…" on the master's screen.
+    if (_kuroTickerWatchdog) clearTimeout(_kuroTickerWatchdog);
+    if (status !== 'IDLE') {
+        _kuroTickerWatchdog = setTimeout(() => {
+            kuroRenderSentinelTicker({ status: 'IDLE', source: 'ALL' });
+        }, KURO_SENTINEL_IDLE_MS);
+    }
+}
+
+function kuroSetAvatarSpeaking(on) {
+    const av = document.getElementById('kuroAvatar');
+    if (!av) return;
+    if (on) av.classList.add('speaking');
+    else av.classList.remove('speaking');
+}
+
+/**
+ * Play text-to-speech audio for `text` via /api/voice/speech.
+ *
+ * Shared helper used by:
+ *   - Auto-speak in HUD_MODE after an assistant response.
+ *   - The per-message replay button.
+ *   - The daily proactive GREETING.
+ *
+ * options.lang   : language code (default 'en' — Sebastian voice).
+ * options.force  : bypass HUD_MODE gating (used by GREETING + replay).
+ * options.button : optional HTMLButtonElement to disable while playing.
+ */
+async function kuroPlayTTS(text, options = {}) {
+    if (!text || typeof text !== 'string') return false;
+    const opts = Object.assign({ lang: 'en', force: true }, options);
+    const trimmed = text.slice(0, 1800);
+    // Stop any in-flight playback so Master doesn't hear overlapping Kuros.
+    try {
+        if (_kuroCurrentAudio) {
+            _kuroCurrentAudio.pause();
+            _kuroCurrentAudio = null;
+        }
+    } catch (_) {}
+    if (opts.button) { opts.button.disabled = true; }
+    try {
+        const resp = await fetch('/api/voice/speech', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: trimmed, lang: opts.lang || 'en' })
+        });
+        if (!resp.ok) {
+            console.warn('[TTS] /api/voice/speech HTTP', resp.status);
+            return false;
+        }
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        audio.crossOrigin = 'anonymous';
+        _kuroCurrentAudio = audio;
+        const ctx = _kuroEnsureAudioGraph();
+        const analyserAttached = ctx ? _kuroAttachAudioToAnalyser(audio) : false;
+        const clear = () => {
+            kuroSetAvatarSpeaking(false);
+            _kuroStopLipSyncLoop();
+            try {
+                if (window.kuroLive2D && typeof window.kuroLive2D.returnToIdle === 'function') {
+                    window.kuroLive2D.returnToIdle();
+                }
+            } catch (_) {}
+            URL.revokeObjectURL(url);
+            if (_kuroCurrentAudio === audio) _kuroCurrentAudio = null;
+            if (opts.button) opts.button.disabled = false;
+        };
+        audio.addEventListener('play', () => {
+            kuroSetAvatarSpeaking(true);
+            try {
+                if (_kuroAudioCtx && _kuroAudioCtx.state === 'suspended') {
+                    _kuroAudioCtx.resume().catch(() => {});
+                }
+                if (window.kuroLive2D && typeof window.kuroLive2D.playTalkMotion === 'function') {
+                    window.kuroLive2D.playTalkMotion();
+                }
+                if (analyserAttached) _kuroStartLipSyncLoop();
+            } catch (_) {}
+        });
+        audio.addEventListener('pause', clear);
+        audio.addEventListener('ended', clear);
+        audio.addEventListener('error', clear);
+        await audio.play().catch((err) => {
+            // Autoplay policy may reject unprompted audio; fail quietly.
+            console.debug('[TTS] play blocked', err);
+            clear();
+        });
+        return true;
+    } catch (err) {
+        console.warn('[TTS] playback failed', err);
+        if (opts.button) opts.button.disabled = false;
+        return false;
+    }
+}
+
+function kuroConnectDashboardWS() {
+    try {
+        if (_kuroDashboardWS && _kuroDashboardWS.readyState === WebSocket.OPEN) return;
+        const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+        const ws = new WebSocket(`${proto}://${location.host}/ws/dashboard`);
+        _kuroDashboardWS = ws;
+        ws.addEventListener('open', () => { _kuroDashboardWSBackoff = 1000; });
+        ws.addEventListener('message', (evt) => {
+            try {
+                const msg = JSON.parse(evt.data);
+                if (!msg || typeof msg !== 'object') return;
+                if (msg.type !== 'UI_COMMAND' || !msg.command) return;
+                const cmd = msg.command;
+                const payload = msg.payload || {};
+                if (KURO_UI_MODES.includes(cmd)) {
+                    kuroApplyUIMode(cmd, payload);
+                } else if (cmd === 'STATUS_TICKER') {
+                    kuroRenderSentinelTicker(payload);
+                } else if (cmd === 'GREETING') {
+                    kuroHandleGreeting(payload);
+                }
+            } catch (_) {}
+        });
+        ws.addEventListener('close', () => {
+            _kuroDashboardWS = null;
+            setTimeout(kuroConnectDashboardWS, _kuroDashboardWSBackoff);
+            _kuroDashboardWSBackoff = Math.min(_kuroDashboardWSBackoff * 2, 30000);
+        });
+        ws.addEventListener('error', () => { try { ws.close(); } catch (_) {} });
+    } catch (_) {}
+}
+
+function kuroHandleGreeting(payload) {
+    const text = (payload && payload.text || '').toString().trim();
+    if (!text) return;
+    // Render a butler-styled system bubble in the chat so the greeting is
+    // visible even when the master has audio muted.
+    try {
+        if (typeof addMessageToChat === 'function') {
+            addMessageToChat('ai', text);
+        }
+    } catch (_) {}
+    // Force-play regardless of UI mode — Master deserves a proper welcome.
+    kuroPlayTTS(text, { lang: (payload && payload.lang) || 'en', force: true }).catch(() => {});
+}
+
+function kuroRestoreUIMode() {
+    try {
+        const saved = localStorage.getItem('kuro-ui-mode');
+        if (saved && KURO_UI_MODES.includes(saved) && saved !== 'NORMAL_MODE') {
+            kuroApplyUIMode(saved, {});
+        }
+    } catch (_) {}
+}
+
+async function kuroMaybeSpeakHUD(text) {
+    if (_kuroCurrentMode !== 'HUD_MODE') return;
+    return kuroPlayTTS(text, { lang: 'en', force: true });
+}
+
+// Delegated handler: any `.kuro-speak-btn` anywhere in the chat re-plays
+// its data-speak-text via the Sebastian voice.
+document.addEventListener('click', (evt) => {
+    const btn = evt.target && evt.target.closest && evt.target.closest('.kuro-speak-btn');
+    if (!btn) return;
+    evt.preventDefault();
+    const text = btn.getAttribute('data-speak-text') || '';
+    if (!text) return;
+    kuroPlayTTS(text, { lang: 'en', force: true, button: btn }).catch(() => {});
+});
+
+window.kuroMaybeSpeakHUD = kuroMaybeSpeakHUD;
+window.kuroPlayTTS = kuroPlayTTS;
+window.kuroApplyUIMode = kuroApplyUIMode;
+window.kuroRenderSentinelTicker = kuroRenderSentinelTicker;
+window.kuroConnectDashboardWS = kuroConnectDashboardWS;
+window.kuroRestoreUIMode = kuroRestoreUIMode;
 
 // ============================================
 // Drag & Drop
@@ -675,6 +1015,12 @@ async function sendMessage() {
                         streamingContent.classList.add('markdown-content');
                         highlightInContainer(streamingContent);
                         streamMeta = data.meta || null;
+                        if (data && data.ui_command) {
+                            kuroApplyUIMode(data.ui_command, data.payload || {});
+                        }
+                        if (_kuroCurrentMode === 'HUD_MODE' && botMessage) {
+                            kuroMaybeSpeakHUD(botMessage).catch(() => {});
+                        }
                         if (streamMeta?.ttfb_ms || streamMeta?.total_ms) {
                             const metaInfo = document.createElement('div');
                             metaInfo.className = 'text-[10px] text-gray-400 mt-2';
@@ -689,6 +1035,9 @@ async function sendMessage() {
                         streamingContent.innerHTML = `<span style="color:red">Error: ${escapeHtml(data.error)}</span>`;
                     } else if (eventType === 'meta') {
                         streamMeta = data;
+                        if (data && data.ui_command) {
+                            kuroApplyUIMode(data.ui_command, data.payload || {});
+                        }
                     }
                 } catch (e) {
                     console.error("JSON Parse Error on event:", dataStr);
@@ -796,13 +1145,20 @@ function addMessageToChat(role, content, files = []) {
             <i data-lucide="copy" class="w-3.5 h-3.5 text-gray-500 dark:text-gray-400"></i>
         </button>
     ` : '';
-    
+
+    // V6.0 Sovereign — per-message replay button. Stored plain text (not
+    // markdown) so the Sebastian voice pronounces it cleanly.
+    const speakButton = role === 'ai' && typeof content === 'string' && content.trim()
+        ? `<button class="kuro-speak-btn" title="Replay with Kuro's voice" data-speak-text="${escapeAttr(content)}">🔊</button>`
+        : '';
+
     messageDiv.innerHTML = `
         ${avatar}
         <div class="max-w-[85%] lg:max-w-[70%] relative group">
             <div class="${bubbleClass} px-4 py-3 shadow-sm relative">
                 ${copyButton}
                 ${contentHtml}
+                ${speakButton}
             </div>
             <span class="text-xs text-gray-400 mt-1 block ${role === 'user' ? 'text-right' : ''}">${getCurrentTime()}</span>
         </div>
@@ -934,7 +1290,7 @@ async function loadChatHistory() {
         } else {
             console.log('[CHAT_HISTORY] No history found, showing welcome message');
             // Show welcome message if no history
-            addMessageToChat('ai', 'Halo Pantronux! Saya Kuro, AI Butler setia Anda. Ada yang bisa saya bantu hari ini?');
+            addMessageToChat('ai', 'Welcome, Master Pantronux. I am Kuro, your devoted AI Butler. How may I be of service today?');
             hasMoreMessages = false;
         }
     } catch (error) {
@@ -945,7 +1301,7 @@ async function loadChatHistory() {
             </div>
         `;
         elements.scrollLoader = document.getElementById('scrollLoader');
-        addMessageToChat('ai', 'Halo Pantronux! Saya Kuro, AI Butler setia Anda. Ada yang bisa saya bantu hari ini?');
+        addMessageToChat('ai', 'Welcome, Master Pantronux. I am Kuro, your devoted AI Butler. How may I be of service today?');
         hasMoreMessages = false;
     }
 }
@@ -1319,6 +1675,16 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+// Safe attribute-value encoder: escapeHtml handles `<`/`>`/`&` but leaves
+// straight quotes intact, which breaks `data-…="…"` embedding. Replace the
+// remaining quotes explicitly so the Sebastian replay button survives any
+// response containing quotation marks.
+function escapeAttr(text) {
+    return escapeHtml(String(text || ''))
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
 }
 
 function getCurrentTime() {

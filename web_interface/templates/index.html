@@ -4,7 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Kuro AI - Web Dashboard</title>
-    
+
+    <!-- V6.1 branding: favicon + Apple touch icon served from /profile mount -->
+    <link rel="icon" type="image/x-icon" href="/profile/favicon.ico">
+    <link rel="shortcut icon" type="image/x-icon" href="/profile/favicon.ico">
+    <link rel="apple-touch-icon" href="/profile/kuro_avatar.png">
+
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     
@@ -69,8 +74,139 @@
     
     <!-- Custom CSS -->
     <link rel="stylesheet" href="/static/css/style.css">
+
+    <!-- Kuro V6.0 Sovereign HUD/Research/Cinema themes + Sebastian avatar visualizer -->
+    <style>
+        html { transition: background 250ms ease, color 250ms ease; }
+        html.theme-hud { background: #02070f !important; color: #7dd3fc; }
+        html.theme-hud body { background: radial-gradient(circle at 20% 20%, rgba(34,211,238,0.15), transparent 60%), #02070f !important; color: #7dd3fc !important; }
+        html.theme-hud * { border-color: rgba(34,211,238,0.35) !important; }
+        html.theme-hud .bg-white, html.theme-hud [class*="bg-gray-"], html.theme-hud [class*="bg-gradient"] {
+            background-color: rgba(2,7,15,0.85) !important;
+            color: #7dd3fc !important;
+        }
+        html.theme-research { background: #f5e7c2 !important; color: #7c2d12; }
+        html.theme-research body { background: linear-gradient(180deg,#fef3c7 0%, #f5e7c2 100%) !important; color: #7c2d12 !important; }
+        html.theme-research .bg-white, html.theme-research [class*="bg-gray-"] {
+            background-color: #fef6dc !important; color: #7c2d12 !important;
+        }
+        html.theme-cinema { background: #0a0a0a !important; color: #d1c6b0; }
+        html.theme-cinema body { background: #0a0a0a !important; color: #d1c6b0 !important; }
+        html.theme-cinema .bg-white, html.theme-cinema [class*="bg-gray-"] {
+            background-color: rgba(10,10,10,0.92) !important; color: #d1c6b0 !important;
+        }
+        #kuroModeBanner {
+            position: fixed; top: 12px; left: 50%; transform: translateX(-50%);
+            padding: 4px 14px; border-radius: 999px; font-size: 11px;
+            font-family: 'JetBrains Mono', monospace; letter-spacing: 2px;
+            background: rgba(0,0,0,0.6); color: #7dd3fc;
+            border: 1px solid rgba(125,211,252,0.4);
+            z-index: 1000; pointer-events: none;
+        }
+        /* Sebastian avatar (V6.0 Sovereign) — idle is subtle, pulses while
+           the TTS audio element is playing. Visual emphasis reserved for
+           HUD / Cinema themes; NORMAL_MODE keeps the avatar unobtrusive. */
+        .kuro-avatar {
+            width: 36px; height: 36px; border-radius: 50%;
+            display: inline-flex; align-items: center; justify-content: center;
+            font-weight: 700; font-family: 'JetBrains Mono', monospace;
+            font-size: 14px; letter-spacing: 1px;
+            background: linear-gradient(135deg, #10b981, #0ea5e9);
+            color: #fff; box-shadow: 0 0 0 0 rgba(125,211,252,0.0);
+            transition: box-shadow 220ms ease, transform 220ms ease;
+            overflow: hidden; position: relative;
+        }
+        .kuro-avatar .kuro-avatar-img {
+            width: 100%; height: 100%; object-fit: cover; border-radius: 50%;
+            display: block;
+        }
+        .kuro-avatar .kuro-avatar-fallback { display: none; }
+        .kuro-avatar--fallback .kuro-avatar-fallback { display: inline; }
+
+        /* V6.1 Live2D dock */
+        .live2d-dock {
+            position: fixed;
+            right: 18px;
+            bottom: 18px;
+            width: 300px;
+            height: 380px;
+            z-index: 40;
+            pointer-events: none;
+            opacity: 0.95;
+            transition: opacity 280ms ease;
+        }
+        .live2d-dock canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+            pointer-events: auto;
+            background: transparent;
+        }
+        .live2d-dock.live2d-dock--hidden { display: none; }
+        @media (max-width: 900px) {
+            .live2d-dock { display: none; }
+        }
+        .kuro-avatar.speaking { animation: kuroPulseGlow 1.1s ease-in-out infinite; }
+        html.theme-hud .kuro-avatar {
+            background: radial-gradient(circle at 35% 35%, #22d3ee, #0f172a 85%);
+            color: #e0f2fe;
+        }
+        html.theme-hud .kuro-avatar.speaking {
+            animation: kuroPulseGlowHUD 0.9s ease-in-out infinite;
+        }
+        html.theme-cinema .kuro-avatar {
+            background: radial-gradient(circle at 35% 35%, #f5d68b, #1c1410 85%);
+            color: #f5d68b;
+        }
+        html.theme-cinema .kuro-avatar.speaking {
+            animation: kuroPulseGlowCinema 1.3s ease-in-out infinite;
+        }
+        @keyframes kuroPulseGlow {
+            0%   { box-shadow: 0 0 0 0 rgba(16,185,129,0.45); transform: scale(1.00); }
+            50%  { box-shadow: 0 0 14px 6px rgba(16,185,129,0.35); transform: scale(1.04); }
+            100% { box-shadow: 0 0 0 0 rgba(16,185,129,0.0); transform: scale(1.00); }
+        }
+        @keyframes kuroPulseGlowHUD {
+            0%   { box-shadow: 0 0 0 0 rgba(34,211,238,0.55); transform: scale(1.00); }
+            50%  { box-shadow: 0 0 22px 8px rgba(34,211,238,0.55); transform: scale(1.06); }
+            100% { box-shadow: 0 0 0 0 rgba(34,211,238,0.0); transform: scale(1.00); }
+        }
+        @keyframes kuroPulseGlowCinema {
+            0%   { box-shadow: 0 0 0 0 rgba(245,214,139,0.45); transform: scale(1.00); }
+            50%  { box-shadow: 0 0 18px 6px rgba(245,214,139,0.40); transform: scale(1.03); }
+            100% { box-shadow: 0 0 0 0 rgba(245,214,139,0.0); transform: scale(1.00); }
+        }
+        /* Per-message replay button (V6.0 Sovereign). */
+        .kuro-speak-btn {
+            position: absolute; bottom: 6px; right: 8px;
+            width: 28px; height: 28px; border-radius: 8px;
+            display: inline-flex; align-items: center; justify-content: center;
+            background: rgba(15,23,42,0.08); color: inherit; border: none;
+            cursor: pointer; font-size: 13px; line-height: 1;
+            opacity: 0; transition: opacity 180ms ease, background 180ms ease;
+        }
+        .group:hover .kuro-speak-btn { opacity: 1; }
+        .kuro-speak-btn:hover:not([disabled]) { background: rgba(34,211,238,0.25); }
+        .kuro-speak-btn[disabled] { opacity: 0.6; cursor: progress; }
+        html.theme-hud .kuro-speak-btn { color: #7dd3fc; background: rgba(15,23,42,0.4); }
+        /* Sentinel status ticker (V6.0 Sovereign). */
+        #kuroStatusTicker.sentinel-scanning {
+            border-color: rgba(34,211,238,0.6) !important;
+            color: #7dd3fc !important;
+            animation: kuroTickerScan 1.4s ease-in-out infinite;
+        }
+        #kuroStatusTicker.sentinel-alert {
+            border-color: rgba(248,113,113,0.65) !important;
+            color: #fca5a5 !important;
+        }
+        @keyframes kuroTickerScan {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(34,211,238,0.0); }
+            50%      { box-shadow: 0 0 14px 3px rgba(34,211,238,0.35); }
+        }
+    </style>
 </head>
 <body class="bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900 min-h-screen transition-colors duration-500">
+    <div id="kuroModeBanner" class="hidden"></div>
     
     <!-- Animated Background Mesh -->
     <div class="fixed inset-0 -z-10 overflow-hidden">
@@ -94,7 +230,9 @@
                         </div>
                         <div class="sidebar-text">
                             <h1 class="text-lg font-bold text-gray-800 dark:text-white">Kuro AI</h1>
-                            <p class="text-xs text-gray-500 dark:text-gray-400">Butler Dashboard</p>
+                            <p class="text-xs text-gray-500 dark:text-gray-400">
+                                <span id="kuroVersionBadge">Sovereign V6.1</span>
+                            </p>
                         </div>
                     </div>
                     <div class="flex items-center gap-1">
@@ -186,6 +324,12 @@
                     <button id="openSidebar" class="lg:hidden p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
                         <i data-lucide="menu" class="w-6 h-6 text-gray-600 dark:text-gray-300"></i>
                     </button>
+                    <!-- V6.1 avatar: pulses while the Sebastian voice is speaking. -->
+                    <div id="kuroAvatar" class="kuro-avatar" title="Kuro — at your service">
+                        <img src="/profile/kuro_avatar.png" alt="Kuro" class="kuro-avatar-img"
+                             onerror="this.style.display='none';this.parentElement.classList.add('kuro-avatar--fallback');">
+                        <span class="kuro-avatar-fallback">K</span>
+                    </div>
                     <h2 class="text-xl font-semibold text-gray-800 dark:text-white">Chat with Kuro</h2>
                 </div>
                 
@@ -394,7 +538,7 @@
                             <pre id="personaAdminPreview" class="text-xs text-gray-700 dark:text-gray-200 whitespace-pre-wrap rounded-xl bg-gray-50 dark:bg-gray-700/60 p-3">Preview pending.</pre>
                             <div class="rounded-xl bg-gray-50 dark:bg-gray-700/60 p-3 space-y-2">
                                 <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Manual Override</p>
-                                <input id="personaOverrideRowIds" type="text" placeholder="Row IDs (contoh: 12,13,14)" class="w-full px-3 py-2 text-xs bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg text-gray-800 dark:text-white">
+                                <input id="personaOverrideRowIds" type="text" placeholder="Row IDs (e.g. 12,13,14)" class="w-full px-3 py-2 text-xs bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg text-gray-800 dark:text-white">
                                 <div class="flex gap-2">
                                     <select id="personaOverrideSelect" class="flex-1 px-3 py-2 text-xs bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg text-gray-800 dark:text-white">
                                         <option value="consultant">consultant</option>
@@ -420,7 +564,19 @@
         </div>
     </div>
     
+    <!-- V6.1 Live2D Hijiki mascot dock. Fixed to bottom-right, hidden on narrow viewports. -->
+    <div id="live2dDock" class="live2d-dock" aria-hidden="true">
+        <canvas id="live2d-canvas" width="300" height="380"></canvas>
+    </div>
+
     <!-- Custom JS -->
     <script src="/static/js/app.js"></script>
+
+    <!-- V6.1 Live2D manager (deferred; fails silently when SDK assets unavailable). -->
+    <script type="module">
+        import("/static/js/live2d_manager.js")
+            .then((mod) => { mod.initLive2D && mod.initLive2D(); })
+            .catch((err) => { console.warn("[Kuro] Live2D manager unavailable:", err); });
+    </script>
 </body>
 </html>

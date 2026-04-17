@@ -1,4 +1,4 @@
-"""Kuro AI V5.5 — Shared embedding cache (P3.3).
+"""Kuro AI V6.0 Sovereign — Shared embedding cache (P3.3).
 
 Several hot paths embed the same user query redundantly — Mem0 retrieve,
 Chroma retrieval, and the new semantic cache. This module exposes a single

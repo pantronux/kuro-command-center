@@ -1,5 +1,5 @@
 """
-Kuro AI V5.5 Official - Config [2026-04-17]
+Kuro AI V6.0 "Sovereign" - Config [2026-04-17]
 ================================================================================
 Centralized configuration for Kuro AI Butler System.
 """
@@ -33,7 +33,55 @@ class Settings:
     TIMEZONE: str = os.getenv("TIMEZONE", "Asia/Jakarta")
     # Optional Gemini cached content resource (e.g. cachedContents/abc123) for repeated static prompts
     GEMINI_CACHED_CONTENT: str = os.getenv("GEMINI_CACHED_CONTENT", "").strip()
-    
+
+    # -----------------------------------------------------------------
+    # Kuro V6.0 "Sovereign" — Sentinel, HUD, Voice, Sebastian toggles.
+    # All defaults preserve prior behaviour; flip to enable.
+    # -----------------------------------------------------------------
+    # Nightly Proxmox + NVD CVE sentinel (runs inside dreaming_worker).
+    KURO_CVE_SENTINEL_ENABLED: bool = os.getenv("KURO_CVE_SENTINEL_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on")
+    KURO_CVE_MIN_CVSS: float = float(os.getenv("KURO_CVE_MIN_CVSS", "7.0"))
+    KURO_CVE_MAX_ALERTS_PER_CYCLE: int = int(os.getenv("KURO_CVE_MAX_ALERTS_PER_CYCLE", "5"))
+    KURO_VULN_NMAP_ENABLED: bool = os.getenv("KURO_VULN_NMAP_ENABLED", "false").strip().lower() in ("1", "true", "yes", "on")
+
+    # Proactive event bus (fitness / hardware / memory anomalies).
+    KURO_PROACTIVE_ENABLED: bool = os.getenv("KURO_PROACTIVE_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on")
+    KURO_PROACTIVE_TELEGRAM_ENABLED: bool = os.getenv("KURO_PROACTIVE_TELEGRAM_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on")
+    KURO_PROACTIVE_SEVERITY_FLOOR: str = os.getenv("KURO_PROACTIVE_SEVERITY_FLOOR", "warning")
+
+    # Fitness anomaly sentinel.
+    KURO_FITNESS_ENABLED: bool = os.getenv("KURO_FITNESS_ENABLED", "false").strip().lower() in ("1", "true", "yes", "on")
+    KURO_FITNESS_DATA_PATH: str = os.getenv("KURO_FITNESS_DATA_PATH", "~/.kuro/fitness_latest.json")
+    KURO_FITNESS_INTERVAL_MIN: int = int(os.getenv("KURO_FITNESS_INTERVAL_MIN", "30"))
+
+    # Voice synthesis (V6.1 Sovereign defaults — Sebastian via Piper).
+    # Shipped voice: `en_GB-alan-medium` (British male, calm register), kept
+    # as default because it is fully offline and survives Internet blackouts.
+    # gTTS remains available as a manual override.
+    KURO_TTS_ENGINE: str = os.getenv("KURO_TTS_ENGINE", "piper").strip().lower()
+    KURO_PIPER_VOICE_PATH: str = os.getenv("KURO_PIPER_VOICE_PATH", "~/.kuro/piper/en_GB-alan-medium.onnx")
+    KURO_TTS_CACHE_DIR: str = os.getenv("KURO_TTS_CACHE_DIR", "media/tts")
+    # Piper length scale — >1 slows speech (elegant butler cadence).
+    KURO_PIPER_LENGTH_SCALE: float = float(os.getenv("KURO_PIPER_LENGTH_SCALE", "1.1"))
+    # ffmpeg pitch-shift multiplier applied to Piper's WAV output. <1.0
+    # deepens the voice; 0.93 ≈ 7% drop which lands in the 5–10% band
+    # requested for "Sebastian depth" without sounding artificial.
+    KURO_TTS_PITCH_SHIFT: float = float(os.getenv("KURO_TTS_PITCH_SHIFT", "0.93"))
+    KURO_TTS_FFMPEG_ENABLED: bool = os.getenv("KURO_TTS_FFMPEG_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on")
+
+    # Proactive daily greeting (V6.0 Sovereign).
+    KURO_PROACTIVE_GREETING_ENABLED: bool = os.getenv("KURO_PROACTIVE_GREETING_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on")
+    KURO_PROACTIVE_GREETING_TEXT: str = os.getenv(
+        "KURO_PROACTIVE_GREETING_TEXT",
+        "Welcome back, Master Pantronux. All systems are operating normally.",
+    )
+    KURO_PROACTIVE_GREETING_COOLDOWN_DAYS: int = int(os.getenv("KURO_PROACTIVE_GREETING_COOLDOWN_DAYS", "1"))
+    KURO_PROACTIVE_GREETING_LANG: str = os.getenv("KURO_PROACTIVE_GREETING_LANG", "en").strip().lower()
+
+    # Default UI mode applied on cold start when no client-side preference
+    # is remembered. One of NORMAL_MODE / HUD_MODE / RESEARCH_MODE / CINEMA_MODE.
+    KURO_UI_MODE_DEFAULT: str = os.getenv("KURO_UI_MODE_DEFAULT", "NORMAL_MODE")
+
     @property
     def tz(self):
         """Get pytz timezone object for the configured timezone."""

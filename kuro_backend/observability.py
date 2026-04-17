@@ -1,5 +1,5 @@
 """
-Kuro AI V5.5 - Observability with Arize Phoenix & OpenTelemetry
+Kuro AI V6.0 Sovereign - Observability with Arize Phoenix & OpenTelemetry
 ================================================================================
 Black Box System for Tracing, Guardrails Validation, and Performance Monitoring
 Port 6006 - Phoenix Dashboard with Simple Auth

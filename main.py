@@ -1,5 +1,5 @@
 """
-Kuro AI V5.5 — FastAPI application entry point (web dashboard, API, Telegram).
+Kuro AI V6.0 "Sovereign" — FastAPI application entry point (web dashboard, API, Telegram).
 """
 import warnings
 import hashlib
@@ -25,6 +25,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, RedirectResponse
 from starlette.websockets import WebSocket, WebSocketDisconnect
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from pydantic import BaseModel, Field
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from telegram import Update
@@ -54,6 +55,8 @@ from kuro_backend import auth_db
 from kuro_backend import observability
 from kuro_backend import intelligence_db
 from kuro_backend import persona_history_admin
+from kuro_backend import version as kuro_version
+from kuro_backend import proactive_greeting
 
 # --- Logging Setup with TimedRotatingFileHandler ---
 LOG_FILE = "kuro_butler.log"
@@ -83,7 +86,7 @@ class OTelStatusNoiseFilter(logging.Filter):
             return False
         return True
 
-# Configure root logger - V5.5: Single configuration, no duplication
+# Configure root logger - V6.0: Single configuration, no duplication
 root_logger = logging.getLogger()
 root_logger.setLevel(logging.INFO)
 root_logger.propagate = False  # Do not propagate root records upward (avoids duplicate handlers in some setups)
@@ -318,6 +321,16 @@ async def auth_stats():
     """Get authentication statistics for dashboard."""
     return {"status": "success", "data": auth_db.get_login_stats()}
 
+
+@app.get("/api/version")
+async def get_version():
+    """Return Kuro's canonical version payload (wired from kuro_backend.version).
+
+    The dashboard badge reads this once on load; bumping VERSION in a single
+    place keeps the sidebar + HUD banner in lockstep.
+    """
+    return {"status": "success", "data": kuro_version.version_info()}
+
 @app.post("/api/auth/logout")
 async def logout_endpoint():
     """Logout endpoint - clear the cookie."""
@@ -343,6 +356,21 @@ app.add_middleware(
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 WEB_DIR = os.path.join(BASE_DIR, "web_interface")
 app.mount("/static", StaticFiles(directory=os.path.join(WEB_DIR, "static")), name="static")
+
+# TTS cache mount (Kuro V6.0 Sovereign). Cached audio lives at media/tts
+# keyed by sha1; serving it directly lets the frontend replay without
+# hitting the synthesis path again.
+_TTS_CACHE_DIR = os.path.join(BASE_DIR, "media", "tts")
+os.makedirs(_TTS_CACHE_DIR, exist_ok=True)
+app.mount("/media/tts", StaticFiles(directory=_TTS_CACHE_DIR), name="tts_cache")
+
+# Profile assets mount (Kuro V6.1 — branding + Live2D Hijiki). Exposes the
+# repo-level `profile/` directory so the dashboard can fetch `kuro_avatar.png`,
+# `favicon.ico`, and the full Live2D runtime without copying anything into
+# `web_interface/static/`.
+_PROFILE_DIR = os.path.join(BASE_DIR, "profile")
+if os.path.isdir(_PROFILE_DIR):
+    app.mount("/profile", StaticFiles(directory=_PROFILE_DIR), name="profile")
 
 # Upload directory - use tools.PROJECT_ROOT for consistency
 UPLOAD_DIR = tools.UPLOAD_DIR
@@ -549,6 +577,60 @@ async def clear_chat_history():
     chat_history.clear_history()
     return api_success(data={"message": "Chat history cleared"}, message="Chat history cleared")
 
+
+def _collect_research_status_snapshot(max_chars: int = 600) -> Dict[str, Any]:
+    """Short Proxmox status payload for RESEARCH_MODE UI broadcasts."""
+    snapshot: Dict[str, Any] = {}
+    try:
+        from kuro_backend.tools.base_tools import check_proxmox_infrastructure
+        text = check_proxmox_infrastructure() or ""
+        snapshot["proxmox"] = text[:max_chars]
+    except Exception as exc:
+        snapshot["proxmox"] = f"(unavailable: {exc})"
+    try:
+        import psutil as _psutil
+        snapshot["host"] = {
+            "cpu": _psutil.cpu_percent(interval=0.1),
+            "ram": _psutil.virtual_memory().percent,
+            "disk": _psutil.disk_usage('/').percent,
+        }
+    except Exception:
+        pass
+    return snapshot
+
+
+async def _maybe_handle_ui_mode_command(message: str) -> Optional[Dict[str, Any]]:
+    """If ``message`` is a UI mode command, broadcast it and return an
+    envelope describing what happened. Callers forward ``cleaned_text`` to
+    the LangGraph core when non-empty, otherwise return the built-in
+    acknowledgement directly.
+    """
+    try:
+        from kuro_backend import ui_mode_router, dashboard_broadcast
+    except Exception as exc:
+        logger.debug(f"UI mode router unavailable: {exc}")
+        return None
+    detected = ui_mode_router.detect_mode_command(message or "")
+    if not detected:
+        return None
+    command, cleaned_text = detected
+    payload: Dict[str, Any] = {}
+    if command == "RESEARCH_MODE":
+        payload["server_status"] = _collect_research_status_snapshot()
+    try:
+        asyncio.create_task(
+            dashboard_broadcast.broadcast_ui_command(command, payload=payload)
+        )
+    except Exception as exc:
+        logger.warning(f"UI command broadcast scheduling failed: {exc}")
+    return {
+        "command": command,
+        "cleaned_text": cleaned_text,
+        "acknowledgement": ui_mode_router.acknowledgement(command),
+        "payload": payload,
+    }
+
+
 @app.post("/api/chat")
 async def chat_endpoint(
     request: Request,
@@ -564,6 +646,31 @@ async def chat_endpoint(
         )
         request_id = f"web_{uuid.uuid4().hex}"
         session_scope = _resolve_chat_session_id(request)
+
+        # UI mode router gate — intercept "Kuro, mode riset" style commands
+        # before hitting the LangGraph core. When the cleaned remainder is
+        # empty we answer with a built-in acknowledgement and skip Gemini
+        # entirely; otherwise we forward the remainder downstream.
+        mode_envelope = None
+        if message and not files:
+            mode_envelope = await _maybe_handle_ui_mode_command(message)
+            if mode_envelope and not (mode_envelope.get("cleaned_text") or "").strip():
+                ack = mode_envelope["acknowledgement"]
+                chat_history.add_message(
+                    "web", "user", message, [],
+                    persona=resolved_persona, request_id=request_id,
+                )
+                chat_history.add_message(
+                    "web", "assistant", ack,
+                    persona=resolved_persona, request_id=request_id,
+                )
+                return api_success(
+                    data={"response": ack, "ui_command": mode_envelope["command"]},
+                    trace_id=trace_id,
+                    response=ack,
+                )
+            if mode_envelope:
+                message = mode_envelope["cleaned_text"] or message
 
         # Save and process uploaded files
         image_paths = []
@@ -660,7 +767,7 @@ async def chat_endpoint(
         
     except Exception as e:
         logger.exception(f"Error in chat endpoint: {e}")
-        return api_error(f"Maaf, Pantronux. Terjadi kesalahan: {e}")
+        return api_error(f"My apologies, Master — an error occurred: {e}")
 
 
 @app.post("/api/chat/stream")
@@ -670,7 +777,7 @@ async def chat_stream_endpoint(
     files: list[UploadFile] = File([]),
     persona: str = Form(None),
 ):
-    """V5.5 STREAMING: Handle chat requests with Server-Sent Events (SSE) streaming."""
+    """V6.0 STREAMING: Handle chat requests with Server-Sent Events (SSE) streaming."""
     from fastapi.responses import StreamingResponse
     
     async def event_generator():
@@ -686,6 +793,40 @@ async def chat_stream_endpoint(
             resolved_persona = memory_manager.normalize_persona(
                 persona or request.query_params.get("persona") or memory_manager.get_active_persona()
             )
+
+            # UI mode router gate — broadcast the UI command and short-
+            # circuit the SSE stream when the user's message is purely a
+            # mode switch. The frontend receives a normal token stream
+            # containing only the acknowledgement.
+            user_message = message
+            if user_message and not files:
+                mode_envelope = await _maybe_handle_ui_mode_command(user_message)
+                if mode_envelope and not (mode_envelope.get("cleaned_text") or "").strip():
+                    ack = mode_envelope["acknowledgement"]
+                    chat_history.add_message(
+                        "web", "user", user_message, [],
+                        persona=resolved_persona, request_id=request_id,
+                    )
+                    chat_history.add_message(
+                        "web", "assistant", ack,
+                        persona=resolved_persona, request_id=request_id,
+                    )
+                    yield (
+                        "event: meta\n"
+                        f"data: {json.dumps({'ui_command': mode_envelope['command']}, ensure_ascii=False)}\n\n"
+                    )
+                    yield (
+                        "event: chunk\n"
+                        f"data: {json.dumps({'text': ack, 'chunk': ack}, ensure_ascii=False)}\n\n"
+                    )
+                    yield (
+                        "event: complete\n"
+                        f"data: {json.dumps({'trace_id': trace_id, 'response': ack, 'ui_command': mode_envelope['command']}, ensure_ascii=False)}\n\n"
+                    )
+                    return
+                if mode_envelope:
+                    user_message = mode_envelope["cleaned_text"] or user_message
+
             # Save uploaded files (same as non-streaming endpoint)
             image_paths = []
             file_contents = []
@@ -731,7 +872,7 @@ async def chat_stream_endpoint(
             
             # Build enhanced message - image paths are passed separately to LangGraph
             # Image metadata is NOT injected into the text message to prevent raw metadata in chunks
-            enhanced_message = message
+            enhanced_message = user_message
             if file_contents:
                 enhanced_message += "\n\n[Attached Files Content:]\n" + "\n".join(file_contents)
             att_idx = memory_coordinator.format_same_turn_attachment_index(file_attachments)
@@ -740,17 +881,17 @@ async def chat_stream_endpoint(
             if image_paths:
                 memory_manager.set_runtime_context_value("last_accessed_file", image_paths[-1])
 
-            # Save user message
+            # Save user message (post UI mode router cleanup)
             chat_history.add_message(
                 "web",
                 "user",
-                message,
+                user_message,
                 [f["stored_filename"] for f in file_attachments],
                 persona=resolved_persona,
                 request_id=request_id,
             )
             
-            # V5.5: Stream response - no guardrail overhead, direct LLM response
+            # V6.0: Stream response - no guardrail overhead, direct LLM response
             full_response = []
             
             async for chunk in process_chat_with_graph_stream(
@@ -821,6 +962,60 @@ async def chat_stream_endpoint(
 async def system_status():
     """Get real-time system status."""
     return api_success(data=tools.get_system_status())
+
+
+class VoiceSpeechRequest(BaseModel):
+    """Payload for ``POST /api/voice/speech``.
+
+    ``engine`` defaults to ``KURO_TTS_ENGINE`` (piper in V6.0) when omitted.
+    ``lang`` defaults to ``en`` to match the Sebastian voice (en_GB-alan).
+    ``voice`` is forwarded to piper only.
+    """
+
+    text: str = Field(..., min_length=1, max_length=2000)
+    engine: Optional[str] = Field(default=None)
+    lang: str = Field(default="en")
+    voice: Optional[str] = Field(default=None)
+
+
+@app.post("/api/voice/speech")
+async def api_voice_speech(body: VoiceSpeechRequest):
+    """Synthesise speech and return the audio file.
+
+    Uses the engine from env ``KURO_TTS_ENGINE`` (default ``piper`` in V6.0)
+    unless overridden per request. Results are cached under ``/media/tts/``
+    so repeat requests for the same text skip the engine entirely.
+    """
+    from fastapi.responses import FileResponse
+
+    try:
+        from kuro_backend import voice_service
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"voice service unavailable: {exc}")
+
+    try:
+        path, media_type = await asyncio.to_thread(
+            voice_service.synthesize_to_file,
+            body.text,
+            engine=body.engine,
+            lang=(body.lang or "en"),
+            voice=body.voice,
+        )
+    except voice_service.TTSError as exc:
+        logger.warning(f"[/api/voice/speech] synthesis failed: {exc}")
+        raise HTTPException(status_code=503, detail=str(exc))
+    except Exception as exc:
+        logger.exception("[/api/voice/speech] unexpected error")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return FileResponse(
+        str(path),
+        media_type=media_type,
+        headers={
+            "Cache-Control": "public, max-age=604800",
+            "X-Kuro-TTS-Cache": path.name,
+        },
+    )
 
 @app.get("/api/log-storage")
 async def log_storage():
@@ -1223,13 +1418,25 @@ async def dashboard_data_revision():
 
 @app.websocket("/ws/dashboard")
 async def dashboard_sync_websocket(websocket: WebSocket):
-    """Push REFRESH_NOW when data_revision bumps (same cookie auth as dashboards)."""
+    """Push REFRESH_NOW when data_revision bumps (same cookie auth as dashboards).
+
+    V6.0 Sovereign: also delivers the once-per-day butler greeting via
+    ``proactive_greeting.maybe_send`` right after the handshake so the
+    master hears Kuro the moment the dashboard loads.
+    """
     token = _ws_token_from_cookie(websocket)
-    if not validate_token(token):
+    token_info = validate_token(token)
+    if not token_info:
         await websocket.close(code=4401)
         return
     await dashboard_broadcast.connect(websocket)
     try:
+        try:
+            await proactive_greeting.maybe_send(
+                websocket, token_info.get("username"),
+            )
+        except Exception as greeting_exc:
+            logger.warning(f"[GREETING] maybe_send failed: {greeting_exc}")
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:
@@ -1247,7 +1454,7 @@ async def get_pending_notifications():
         await run_db(reminder_service.mark_notified_10m, r['id'])
         notifications.append({
             "type": "warning",
-            "message": f"Persiapan Master, 10 menit lagi event '{r['event_name']}'.",
+            "message": f"A gentle reminder, Master — the event '{r['event_name']}' begins in 10 minutes.",
             "reminder_id": r['id']
         })
 
@@ -1579,7 +1786,11 @@ def hardware_sentinel_check():
         return
     
     _last_hardware_check = now
-    
+    dashboard_broadcast.schedule_ui_command(
+        "STATUS_TICKER",
+        {"status": "SCANNING", "source": "HARDWARE"},
+    )
+
     try:
         # Collect metrics
         cpu_percent = psutil.cpu_percent(interval=1)
@@ -1600,24 +1811,78 @@ def hardware_sentinel_check():
             f"Net TX={net_sent_mb:.1f}MB, RX={net_recv_mb:.1f}MB"
         )
         
-        # Check thresholds and alert
-        alerts = []
-        if ram_percent > 90:
-            alerts.append(f"⚠️ [SYSTEM ALERT] Pantronux, penggunaan RAM VM Kuro mencapai {ram_percent}%. Mohon tinjau proses yang berjalan.")
+        # Check thresholds and route through the proactive event bus so
+        # dedup + severity gating stay centralised.
+        try:
+            from kuro_backend import proactive_events
 
-        if cpu_percent > 85:
-            alerts.append(f"🔥 [SYSTEM ALERT] Pantronux, penggunaan CPU VM Kuro mencapai {cpu_percent}%. Proses intensif terdeteksi.")
+            alert_specs = []
+            if ram_percent > 90:
+                alert_specs.append((
+                    "warning",
+                    f"RAM usage {ram_percent}%",
+                    (
+                        f"Master, Kuro's VM memory utilisation has reached "
+                        f"{ram_percent}%. Kindly review the active processes."
+                    ),
+                    f"hw:ram:{int(ram_percent)//5*5}",
+                ))
+            if cpu_percent > 85:
+                alert_specs.append((
+                    "warning",
+                    f"CPU usage {cpu_percent}%",
+                    (
+                        f"Master, Kuro's VM CPU utilisation has reached "
+                        f"{cpu_percent}%. An intensive workload has been detected."
+                    ),
+                    f"hw:cpu:{int(cpu_percent)//5*5}",
+                ))
+            if disk_percent > 85:
+                alert_specs.append((
+                    "critical" if disk_percent > 95 else "warning",
+                    f"Disk usage {disk_percent}%",
+                    (
+                        f"Master, disk utilisation has reached {disk_percent}%. "
+                        f"Do consider pruning any files that are no longer required."
+                    ),
+                    f"hw:disk:{int(disk_percent)//5*5}",
+                ))
 
-        if disk_percent > 85:
-            alerts.append(f"💾 [SYSTEM ALERT] Pantronux, penggunaan disk mencapai {disk_percent}%. Pertimbangkan untuk membersihkan file tidak diperlukan.")
-        
-        # Send alerts if any
-        for alert in alerts:
-            logger.warning(alert)
-            send_telegram_reminder_notification(alert)
-            
+            for severity, title, body, seed in alert_specs:
+                logger.warning("[HARDWARE] %s — %s", title, body)
+                event = proactive_events.make_event(
+                    kind="hardware",
+                    severity=severity,
+                    title=title,
+                    body=body,
+                    fingerprint_seed=seed,
+                    context={
+                        "cpu_percent": cpu_percent,
+                        "ram_percent": ram_percent,
+                        "disk_percent": disk_percent,
+                        "net_sent_mb": round(net_sent_mb, 1),
+                        "net_recv_mb": round(net_recv_mb, 1),
+                    },
+                )
+                proactive_events.publish(event)
+        except Exception as bus_exc:
+            logger.error(f"Hardware bus dispatch failed: {bus_exc}")
+
     except Exception as e:
         logger.error(f"Error in hardware sentinel check: {e}")
+    finally:
+        # Always signal IDLE so the HUD ticker snaps back even if the
+        # scan raised mid-way through.
+        try:
+            detail = None
+            if _last_hardware_check is not None:
+                detail = f"last {_last_hardware_check.strftime('%H:%M')}"
+            dashboard_broadcast.schedule_ui_command(
+                "STATUS_TICKER",
+                {"status": "IDLE", "source": "HARDWARE", "detail": detail or ""},
+            )
+        except Exception:
+            pass
 
 # --- Background Scheduler for Reminders & Habits ---
 _reminder_scheduler = None
@@ -1676,7 +1941,58 @@ def start_reminder_scheduler():
         id='daily_intelligence_briefing',
         replace_existing=True
     )
-    
+
+    # Autonomous memory dreaming cycle (Kuro AI V6.0 Sovereign).
+    # Reflects on the last 24h of short-term summaries + research ledger
+    # while Master is offline, enriches low-confidence findings via
+    # OpenClaw google_search (Serper fallback), and sends proactive
+    # Telegram alerts for inconsistencies. Gated by KURO_DREAMING_ENABLED
+    # so it can be switched off without a redeploy.
+    if os.getenv("KURO_DREAMING_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on"):
+        try:
+            from kuro_backend import dreaming_worker
+            dreaming_cron_hour = int(os.getenv("KURO_DREAMING_CRON_HOUR", "3"))
+        except Exception as dreaming_exc:
+            logger.warning(f"Dreaming worker hook skipped: {dreaming_exc}")
+        else:
+            _reminder_scheduler.add_job(
+                dreaming_worker.run_dreaming_cycle,
+                'cron',
+                hour=dreaming_cron_hour,
+                minute=0,
+                id='kuro_dreaming_cycle',
+                replace_existing=True,
+                max_instances=1,
+                coalesce=True,
+            )
+            logger.info(
+                f"Autonomous dreaming cycle scheduled at {dreaming_cron_hour:02d}:00 daily."
+            )
+
+    # Fitness anomaly sentinel (Kuro AI V6.0 Sovereign). Reads the
+    # wearable drop at ~/.kuro/fitness_latest.json every 30 minutes and
+    # publishes anomalies through the proactive_events bus. Gated by
+    # KURO_FITNESS_ENABLED (default: off).
+    if os.getenv("KURO_FITNESS_ENABLED", "false").strip().lower() in ("1", "true", "yes", "on"):
+        try:
+            from kuro_backend import fitness_service
+            fitness_interval = int(os.getenv("KURO_FITNESS_INTERVAL_MIN", "30"))
+        except Exception as fitness_exc:
+            logger.warning(f"Fitness sentinel hook skipped: {fitness_exc}")
+        else:
+            _reminder_scheduler.add_job(
+                fitness_service.run_fitness_sentinel,
+                'interval',
+                minutes=max(5, fitness_interval),
+                id='kuro_fitness_sentinel',
+                replace_existing=True,
+                max_instances=1,
+                coalesce=True,
+            )
+            logger.info(
+                f"Fitness anomaly sentinel scheduled every {fitness_interval} minute(s)."
+            )
+
     _reminder_scheduler.start()
     logger.info("Reminder, Habits & Intelligence scheduler started.")
 
@@ -1687,7 +2003,7 @@ def check_reminder_notifications():
         ten_min_reminders = reminder_service.get_reminders_needing_10m_notification()
         for r in ten_min_reminders:
             reminder_service.mark_notified_10m(r['id'])
-            msg = f"⏰ Persiapan Master, 10 menit lagi event '{r['event_name']}'."
+            msg = f"⏰ A gentle reminder, Master — the event '{r['event_name']}' begins in 10 minutes."
             logger.info(f"Reminder notification (10m): {r['event_name']}")
             # Send to Telegram if source is telegram or always
             send_telegram_reminder_notification(msg)
@@ -1714,14 +2030,14 @@ def recover_pending_reminders():
         logger.error(f"Error in reminder recovery: {e}")
 
 def send_telegram_reminder_notification(message: str):
-    """Send a reminder notification to Telegram."""
+    """Send a reminder notification to Telegram.
+
+    Delegates to :mod:`kuro_backend.telegram_notifier` so the HTTP client,
+    retry policy, and kill switches stay centralized.
+    """
     try:
-        import requests
-        url = f"https://api.telegram.org/bot{settings.TELEGRAM_TOKEN}/sendMessage"
-        requests.post(url, json={
-            "chat_id": settings.TELEGRAM_CHAT_ID,
-            "text": message
-        }, timeout=10)
+        from kuro_backend import telegram_notifier
+        telegram_notifier.send_message(message)
     except Exception as e:
         logger.error(f"Failed to send Telegram reminder: {e}")
 
@@ -1914,7 +2230,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.exception(f"Error sending response to Telegram: {e}")
         await context.bot.send_message(
             chat_id=settings.TELEGRAM_CHAT_ID,
-            text="Maaf, Pantronux. Kuro mengalami kesalahan saat mengirim respons. Silakan coba lagi."
+            text="My apologies, Master — I encountered an error while delivering the response. Please try once more."
         )
 
 

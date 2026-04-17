@@ -1,5 +1,5 @@
 """
-Kuro AI V5.5 — OpenClaw bridge client for external execution handover.
+Kuro AI V6.0 Sovereign — OpenClaw bridge client for external execution handover.
 """
 from __future__ import annotations
 

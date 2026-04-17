@@ -1,4 +1,4 @@
-"""Kuro AI V5.5 — Revision-aware semantic response cache (P3.1).
+"""Kuro AI V6.0 Sovereign — Revision-aware semantic response cache (P3.1).
 
 A tiny in-memory cache keyed by the embedding of a query. On read, we:
 

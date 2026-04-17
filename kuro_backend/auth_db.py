@@ -1,11 +1,11 @@
 # auth_db.py
-# Kuro AI V5.5 - Authentication Database for Brute Force Protection
+# Kuro AI V6.0 Sovereign - Authentication Database for Brute Force Protection
 # ISO 27001 Compliant: A.9.4.2 Secure Log-on, A.9.5.1 Information Access Restriction
 
 import sqlite3
 import logging
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, date, timedelta
 from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
@@ -66,7 +66,19 @@ def init_auth_db():
                 reason TEXT DEFAULT 'brute_force_protection'
             )
         """)
-        
+
+        # V6.0 Sovereign — proactive greeting ledger. One row per user keyed
+        # by username; `last_sent_date` is an ISO date (YYYY-MM-DD) used by
+        # `greeting_sent_today` to enforce once-per-calendar-day delivery
+        # without needing a separate job to clean old rows.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS proactive_greetings (
+                username TEXT PRIMARY KEY,
+                last_sent_date TEXT NOT NULL,
+                last_sent_ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
         conn.commit()
         logger.info("Auth database initialized successfully")
     except Exception as e:
@@ -199,6 +211,65 @@ def record_successful_login(username: str, ip_address: str = "", user_agent: str
         logger.info(f"Successful login recorded: {username}")
     except Exception as e:
         logger.error(f"Failed to record successful login: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+
+def greeting_sent_within(username: str, cooldown_days: int) -> bool:
+    """Return True if a proactive greeting was sent for ``username`` within
+    the last ``cooldown_days`` calendar days.
+
+    ``cooldown_days == 0`` forces the caller to always send (useful for the
+    CLI smoke test / manual "speak now" overrides).
+    """
+    if cooldown_days <= 0 or not username:
+        return False
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT last_sent_date FROM proactive_greetings WHERE username = ?",
+            (username,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return False
+        try:
+            last = date.fromisoformat(row["last_sent_date"])
+        except (TypeError, ValueError):
+            return False
+        return (date.today() - last) < timedelta(days=cooldown_days)
+    except Exception as exc:
+        logger.warning("greeting_sent_within failed: %s", exc)
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+
+def record_greeting_sent(username: str) -> None:
+    """Upsert today's date as the last greeting for ``username``."""
+    if not username:
+        return
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO proactive_greetings (username, last_sent_date, last_sent_ts)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(username) DO UPDATE SET
+                last_sent_date = excluded.last_sent_date,
+                last_sent_ts = CURRENT_TIMESTAMP
+            """,
+            (username, date.today().isoformat()),
+        )
+        conn.commit()
+    except Exception as exc:
+        logger.warning("record_greeting_sent failed: %s", exc)
     finally:
         if conn:
             conn.close()

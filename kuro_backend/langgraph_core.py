@@ -1,5 +1,5 @@
 """
-Kuro AI V5.5 Official - LangGraph Core (Guardrails Removed) [2026-04-17]
+Kuro AI V6.0 Sovereign - LangGraph Core (Guardrails Removed) [2026-04-17]
 ================================================================================
 AI Core with LangGraph Stateful Architecture for Agentik Long-Term Reasoning
 SDK: google-genai v3 Protocol with LangGraph State Machine
@@ -257,6 +257,11 @@ def _execute_post_response_task(task: Dict[str, Any]) -> None:
         user_input = task.get("user_input", "")
         final_response = task.get("final_response", "")
         memory_coordinator.execute_mem0_extract_task(user_input, final_response)
+    elif kind == "refresh_summary":
+        # Persona-Aware Context Management (V5.5) — proactive warm cache so
+        # the next turn never pays the summarizer LLM cost on the hot path.
+        persona_scope = task.get("persona_scope") or memory_manager.get_active_persona()
+        memory_coordinator.refresh_short_term_summary_background(persona_scope)
     else:
         logger.warning("[POST_RESPONSE_WORKER] Unknown task kind=%s", kind)
 
@@ -332,6 +337,14 @@ def _persist_short_term_and_enqueue_writes(user_input: str, response_text: str, 
             "kind": "mem0_extract",
             "user_input": user_input,
             "final_response": response_text,
+        }
+    )
+    # V5.5 — keep the structured short-term summary cache warm so the next
+    # foreground turn never pays the summarizer LLM on the hot path.
+    _enqueue_post_response_task(
+        {
+            "kind": "refresh_summary",
+            "persona_scope": persona_mode,
         }
     )
 
@@ -594,6 +607,9 @@ def memory_retrieval_node(state: KuroState) -> Dict[str, Any]:
 def memory_extraction_node(state: KuroState) -> Dict[str, Any]:
     user_input = state.get("user_input", "")
     final_response = state.get("final_response", "")
+    persona_mode = memory_manager.normalize_persona(
+        state.get("persona_mode", memory_manager.get_active_persona())
+    )
 
     # 1. Guard Clause: Jangan jalankan ekstraksi jika respon asisten kosong
     # Ini mencegah penyimpanan memori yang tidak lengkap atau error API
@@ -607,6 +623,13 @@ def memory_extraction_node(state: KuroState) -> Dict[str, Any]:
                 "kind": "mem0_extract",
                 "user_input": user_input,
                 "final_response": final_response,
+            }
+        )
+        # V5.5 — proactively warm the structured short-term summary cache.
+        _enqueue_post_response_task(
+            {
+                "kind": "refresh_summary",
+                "persona_scope": persona_mode,
             }
         )
         return {}
@@ -791,6 +814,7 @@ def response_node(state: KuroState) -> Dict[str, Any]:
         memory_injection = ctx["memory_injection"]
         mem0_context_block = ctx.get("mem0_context_block")
         referent_block = ctx.get("referent_grounding_block")
+        context_budget = ctx.get("budget")
 
         # Build system prompt
         system_prompt = get_system_instruction(persona_override=persona_mode)
@@ -848,7 +872,10 @@ def response_node(state: KuroState) -> Dict[str, Any]:
             )
         # tool_status == "no_tool" or None -> proceed normally
 
-        budgeted = token_budget.apply_section_budget(sections)
+        if context_budget is not None:
+            budgeted = token_budget.apply_persona_budget(sections, context_budget)
+        else:
+            budgeted = token_budget.apply_section_budget(sections)
         ordered_names = (
             "referent",
             "mem0",
@@ -861,7 +888,9 @@ def response_node(state: KuroState) -> Dict[str, Any]:
             (name, budgeted[name]) for name in ordered_names if budgeted.get(name)
         ]
         ordered_parts = token_budget.collapse_duplicate_blocks(ordered_parts)
-        ordered_parts = token_budget.enforce_global_ceiling(ordered_parts)
+        ordered_parts = token_budget.enforce_global_ceiling(
+            ordered_parts, budget=context_budget,
+        )
 
         message_parts: list[str] = [user_input]
         message_parts.extend(text for _, text in ordered_parts)

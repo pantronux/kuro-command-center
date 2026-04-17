@@ -1,4 +1,4 @@
-"""Kuro AI V5.5 — Compliance clause analysis via Gemini (ISO / regulatory text)."""
+"""Kuro AI V6.0 Sovereign — Compliance clause analysis via Gemini (ISO / regulatory text)."""
 import logging
 from google import genai
 from google.genai import types

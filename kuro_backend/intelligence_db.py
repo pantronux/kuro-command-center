@@ -1,5 +1,5 @@
 """
-Kuro AI V5.5 - Intelligence Briefings Database
+Kuro AI V6.0 Sovereign - Intelligence Briefings Database
 ================================================================================
 SQLite storage for daily intelligence briefings from autonomous research.
 """

@@ -1,5 +1,5 @@
 """
-Kuro AI V5.5 — Habit & reminder mutations + reads. Storage is exclusively in
+Kuro AI V6.0 Sovereign — Habit & reminder mutations + reads. Storage is exclusively in
 `kuro_backend.services.core_service` (single SQLite writer).
 """
 from __future__ import annotations

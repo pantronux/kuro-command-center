@@ -1,5 +1,5 @@
 """
-Kuro AI V5.5 — Unified Memory Coordinator — single orchestration surface for memory-related reads
+Kuro AI V6.0 Sovereign — Unified Memory Coordinator — single orchestration surface for memory-related reads
 and post-response writes across short-term, Chroma, Mem0, and SSOT revision (habits/reminders).
 
 AUDIT — mutation entry points (update when adding routes or tools):
@@ -346,10 +346,135 @@ def _get_summary_genai_client():
     return _summary_genai_client
 
 
+# ---------------------------------------------------------------------------
+# Persona-Aware Structured Summarizer (V5.5)
+# ---------------------------------------------------------------------------
+# Gemini `response_schema` gives us auditable JSON output so Advisor's
+# Novelty Points and Tactical's Technical Specs survive compression. The same
+# schema is returned for every persona; persona-specific sections are
+# populated based on the dispatched instruction.
+
+_STRUCTURED_SUMMARY_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "topic": {"type": "string"},
+        "decisions": {"type": "array", "items": {"type": "string"}},
+        "entities": {"type": "array", "items": {"type": "string"}},
+        "open_questions": {"type": "array", "items": {"type": "string"}},
+        "novelty_points": {"type": "array", "items": {"type": "string"}},
+        "technical_specs": {"type": "array", "items": {"type": "string"}},
+        "compliance_refs": {"type": "array", "items": {"type": "string"}},
+        "tone_markers": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["topic"],
+}
+
+_EMPTY_SUMMARY_JSON: Dict[str, Any] = {
+    "topic": "",
+    "decisions": [],
+    "entities": [],
+    "open_questions": [],
+    "novelty_points": [],
+    "technical_specs": [],
+    "compliance_refs": [],
+    "tone_markers": [],
+}
+
+
+_PERSONA_SUMMARIZER_PROMPTS: Dict[str, str] = {
+    "advisor": (
+        "Anda adalah forensic summarizer untuk riset PhD Digital Forensics on AI. "
+        "Ringkas percakapan sebagai JSON WAJIB mengikuti schema. "
+        "Ekstrak dengan teliti: "
+        "- topic: fokus riset utama percakapan. "
+        "- novelty_points: metode/argumen/temuan baru atau belum umum (WAJIB pertahankan). "
+        "- open_questions: celah riset, kontradiksi, counter-evidence — jangan buang. "
+        "- entities: paper, author, dataset, regulasi yang disebut. "
+        "- decisions: hipotesis atau arah riset yang disepakati. "
+        "DILARANG menambah fakta yang tidak muncul di percakapan."
+    ),
+    "tactical": (
+        "Anda adalah DevOps log compressor. "
+        "Ringkas percakapan sebagai JSON WAJIB mengikuti schema. "
+        "Ekstrak: "
+        "- topic: tujuan teknis. "
+        "- technical_specs: path absolut, versi library, CLI flag, error code, "
+        "env var, hostname, port (WAJIB pertahankan detail verbatim). "
+        "- decisions: fix atau pendekatan yang disepakati. "
+        "- entities: file/service/config yang disebut. "
+        "- open_questions: root cause yang belum terverifikasi. "
+        "DILARANG mengarang path atau versi."
+    ),
+    "consultant": (
+        "Anda adalah GRC audit summarizer. "
+        "Ringkas percakapan sebagai JSON WAJIB mengikuti schema. "
+        "Ekstrak: "
+        "- topic: domain audit / kerangka regulasi. "
+        "- compliance_refs: klausul ISO (e.g. 'ISO 27001:2022 A.5.1'), "
+        "control NIST, pasal UU PDP / GDPR yang disebut. "
+        "- decisions: rekomendasi yang disepakati. "
+        "- entities: framework / regulator / vendor. "
+        "- open_questions: gap compliance yang belum diatasi."
+    ),
+    "butler": (
+        "Anda adalah operational summarizer. "
+        "Ringkas percakapan sebagai JSON WAJIB mengikuti schema. "
+        "Ekstrak: "
+        "- topic: urusan operasional yang dibahas. "
+        "- decisions: instruksi Master yang disepakati. "
+        "- entities: habit/reminder/integrasi yang disebut. "
+        "- compliance_refs: kebijakan operasional internal. "
+        "Kosongkan field lain."
+    ),
+    "chill": (
+        "Anda adalah casual conversation summarizer. "
+        "Ringkas percakapan sebagai JSON WAJIB mengikuti schema. "
+        "Ekstrak: "
+        "- topic: pokok obrolan santai. "
+        "- tone_markers: mood, humor, preferensi ringan. "
+        "- entities: nama/hal yang disebut. "
+        "Kosongkan field lain."
+    ),
+}
+
+
+def _coerce_summary_dict(raw: Any) -> Dict[str, Any]:
+    """Normalize summarizer output into the canonical schema shape.
+
+    Accepts a dict (already parsed by google.genai) or a JSON string. Fills
+    missing keys with empty defaults and drops unexpected ones.
+    """
+    parsed: Dict[str, Any] = {}
+    if isinstance(raw, dict):
+        parsed = raw
+    elif isinstance(raw, str):
+        import json as _json
+        try:
+            parsed = _json.loads(raw) if raw.strip() else {}
+        except _json.JSONDecodeError:
+            parsed = {}
+    out: Dict[str, Any] = {k: v for k, v in _EMPTY_SUMMARY_JSON.items()}
+    for key, default in _EMPTY_SUMMARY_JSON.items():
+        val = parsed.get(key, default)
+        if isinstance(default, list):
+            if isinstance(val, list):
+                out[key] = [str(item).strip() for item in val if str(item).strip()]
+            else:
+                out[key] = []
+        else:
+            out[key] = str(val or "").strip()
+    return out
+
+
+def _summarizer_instruction_for(persona: str) -> str:
+    return _PERSONA_SUMMARIZER_PROMPTS.get(
+        persona, _PERSONA_SUMMARIZER_PROMPTS["consultant"]
+    )
+
+
 def _summarize_older_turns(older_entries: Sequence[Dict[str, Any]]) -> str:
-    """Synchronous Gemini call that produces a compact Indo summary of older
-    turns. Returns empty string on any failure so caller can fall back to the
-    uncompressed path."""
+    """Legacy free-text summarizer. Kept for backward compatibility with
+    any caller that still reads the plain-text ``summary`` column."""
     if not older_entries:
         return ""
     try:
@@ -383,55 +508,292 @@ def _summarize_older_turns(older_entries: Sequence[Dict[str, Any]]) -> str:
         return ""
 
 
+def _summarize_older_turns_structured(
+    persona_scope: str,
+    older_entries: Sequence[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Structured JSON summarizer. Dispatches by persona and returns a dict
+    that always matches ``_EMPTY_SUMMARY_JSON`` shape."""
+    if not older_entries:
+        return dict(_EMPTY_SUMMARY_JSON)
+    try:
+        from google.genai import types as genai_types
+        from kuro_backend.config import PRIMARY_MODEL
+
+        client = _get_summary_genai_client()
+        convo_blob = _format_entries_for_prompt(older_entries, max_chars_per_entry=250)
+        response = client.models.generate_content(
+            model=PRIMARY_MODEL,
+            contents=convo_blob,
+            config=genai_types.GenerateContentConfig(
+                system_instruction=_summarizer_instruction_for(persona_scope),
+                temperature=0.0,
+                top_p=0.1,
+                top_k=1,
+                max_output_tokens=512,
+                response_mime_type="application/json",
+                response_schema=_STRUCTURED_SUMMARY_SCHEMA,
+            ),
+        )
+        parsed = getattr(response, "parsed", None)
+        text = getattr(response, "text", "") or ""
+        return _coerce_summary_dict(parsed if parsed is not None else text)
+    except Exception as exc:
+        logger.warning("[SLIDING_WINDOW] structured summary failed persona=%s: %s",
+                       persona_scope, exc)
+        return dict(_EMPTY_SUMMARY_JSON)
+
+
+def _summary_to_fallback_text(summary_json: Dict[str, Any]) -> str:
+    """Flatten the JSON summary into a prose blob for the legacy
+    ``summary`` column and for emergency fallbacks."""
+    if not summary_json:
+        return ""
+    bits: List[str] = []
+    topic = str(summary_json.get("topic") or "").strip()
+    if topic:
+        bits.append(f"Topik: {topic}")
+    for key in ("novelty_points", "technical_specs", "compliance_refs",
+                "decisions", "open_questions", "entities", "tone_markers"):
+        items = summary_json.get(key) or []
+        if not items:
+            continue
+        label = key.replace("_", " ").title()
+        joined = "; ".join(str(x) for x in items[:6])
+        bits.append(f"{label}: {joined}")
+    text = ". ".join(bits)
+    return text[:_SLIDING_WINDOW_SUMMARY_MAX_CHARS]
+
+
+def _persona_ledger_kinds(persona_scope: str) -> List[tuple[str, str]]:
+    """Return the (schema_field, ledger_kind) pairs to persist for a persona.
+
+    Only persona-critical facets are persisted to keep the ledger focused.
+    """
+    base = [
+        ("decisions", "decision"),
+        ("open_questions", "open_question"),
+        ("entities", "entity"),
+    ]
+    per_persona = {
+        "advisor":    [("novelty_points", "novelty_point"), ("open_questions", "open_question")],
+        "tactical":   [("technical_specs", "technical_spec"), ("decisions", "decision")],
+        "consultant": [("compliance_refs", "compliance_ref"), ("decisions", "decision")],
+        "butler":     [("compliance_refs", "compliance_ref"), ("decisions", "decision")],
+        "chill":      [],
+    }
+    return per_persona.get(persona_scope, []) + base
+
+
+def _persist_summary_to_ledger(
+    persona_scope: str,
+    summary_json: Dict[str, Any],
+    *,
+    source_entry_id: Optional[int] = None,
+) -> int:
+    """Append persona-critical items from the JSON summary into the
+    append-only research ledger. Returns insertion count."""
+    from kuro_backend import memory_manager
+
+    seen: set[tuple[str, str]] = set()
+    records: List[Dict[str, Any]] = []
+    for schema_field, ledger_kind in _persona_ledger_kinds(persona_scope):
+        for item in summary_json.get(schema_field) or []:
+            content = str(item or "").strip()
+            if not content:
+                continue
+            key = (ledger_kind, content.lower()[:256])
+            if key in seen:
+                continue
+            seen.add(key)
+            records.append({
+                "kind": ledger_kind,
+                "content": content,
+                "source_entry_id": source_entry_id,
+            })
+    if not records:
+        return 0
+    return memory_manager.append_research_ledger_batch(
+        persona_scope, records, source_entry_id=source_entry_id,
+    )
+
+
+def render_summary_for_prompt(
+    summary_json: Dict[str, Any],
+    persona: str,
+) -> str:
+    """Render the structured summary as a readable ``[SUMMARY ...]`` block.
+
+    Persona-critical facets are placed FIRST so token-budget head/tail
+    trimming cannot clip them.
+    """
+    if not summary_json:
+        return ""
+    persona_key = (persona or "").strip().lower() or "consultant"
+    topic = str(summary_json.get("topic") or "").strip()
+
+    priority_order: List[str]
+    if persona_key == "advisor":
+        priority_order = ["novelty_points", "open_questions", "decisions",
+                          "entities", "compliance_refs"]
+    elif persona_key == "tactical":
+        priority_order = ["technical_specs", "decisions", "entities",
+                          "open_questions"]
+    elif persona_key == "consultant":
+        priority_order = ["compliance_refs", "decisions", "entities",
+                          "open_questions"]
+    elif persona_key == "butler":
+        priority_order = ["decisions", "compliance_refs", "entities"]
+    elif persona_key == "chill":
+        priority_order = ["tone_markers", "entities"]
+    else:
+        priority_order = ["decisions", "entities", "open_questions"]
+
+    lines: List[str] = ["[SUMMARY earlier_conversation]"]
+    if topic:
+        lines.append(f"Topik: {topic}")
+
+    pretty_labels = {
+        "decisions": "Keputusan",
+        "entities": "Entitas",
+        "open_questions": "Pertanyaan Terbuka",
+        "novelty_points": "Novelty Points",
+        "technical_specs": "Technical Specs",
+        "compliance_refs": "Compliance Refs",
+        "tone_markers": "Tone Markers",
+    }
+    for field in priority_order:
+        items = summary_json.get(field) or []
+        if not items:
+            continue
+        label = pretty_labels.get(field, field)
+        bullets = "\n".join(f"  - {str(it).strip()}" for it in items if str(it).strip())
+        if bullets:
+            lines.append(f"{label}:\n{bullets}")
+
+    legacy_text = str(summary_json.get("_legacy_text") or "").strip()
+    if legacy_text and len(lines) <= 2:
+        lines.append(legacy_text)
+
+    return "\n".join(lines)
+
+
+def _should_summarize(
+    entries: Sequence[Dict[str, Any]],
+    max_turns: int,
+    layer1_threshold_tokens: Optional[int],
+) -> bool:
+    """Hybrid trigger: fire when turn count exceeds window OR when the
+    raw Layer-1 text exceeds the persona's L1 utilization threshold."""
+    if len(entries) > max_turns:
+        return True
+    if layer1_threshold_tokens and layer1_threshold_tokens > 0:
+        from kuro_backend import token_budget as _tb
+        raw = _format_entries_for_prompt(entries, max_chars_per_entry=200)
+        if _tb.approx_tokens(raw) >= layer1_threshold_tokens:
+            return True
+    return False
+
+
 def build_compressed_short_term_text(
     persona_scope: str,
     *,
     max_turns: int = _SLIDING_WINDOW_MAX_TURNS,
     max_chars: int = _SLIDING_WINDOW_MAX_CHARS,
+    layer1_threshold_tokens: Optional[int] = None,
+    force_refresh_if_stale: bool = False,
 ) -> str:
     """Return a compressed short-term block suitable for prompt injection.
 
-    - If <= ``max_turns`` entries exist, returns the verbatim recent turns.
-    - Otherwise, compresses older turns into a cached ``[SUMMARY earlier_conversation]``
-      block and prepends it before the verbatim latest ``max_turns``.
+    Trigger is hybrid:
+      - turn count > ``max_turns``, OR
+      - raw Layer-1 token count >= ``layer1_threshold_tokens`` (when given).
 
-    The summary is cached per persona keyed by the highest included entry id so
-    we only regenerate when new turns push past the window.
+    Summary is cached per persona keyed by the highest included entry id.
+    When ``force_refresh_if_stale`` is set and the cache is stale, regeneration
+    runs synchronously — used by the background warmer.
     """
     from kuro_backend import memory_manager
 
     entries = memory_manager.get_short_term_with_ids(persona_scope=persona_scope)
     if not entries:
         return ""
-    if len(entries) <= max_turns:
+
+    if not _should_summarize(entries, max_turns, layer1_threshold_tokens):
         return _format_entries_for_prompt(entries, max_chars_per_entry=160)
 
-    older = entries[:-max_turns]
-    recent = entries[-max_turns:]
+    # Select split: keep latest ``max_turns`` verbatim, compress the rest.
+    if len(entries) <= max_turns:
+        older = entries[:-1] if len(entries) > 1 else []
+        recent = entries[-1:]
+    else:
+        older = entries[:-max_turns]
+        recent = entries[-max_turns:]
+    if not older:
+        return _format_entries_for_prompt(recent, max_chars_per_entry=160)
+
     older_max_id = max((e.get("id") or 0) for e in older)
 
-    cached = memory_manager.get_short_term_summary(persona_scope)
-    if cached and cached.get("last_entry_id", 0) >= older_max_id and cached.get("summary"):
-        summary_text = cached["summary"]
-    else:
-        summary_text = _summarize_older_turns(older)
-        if summary_text:
-            try:
-                memory_manager.upsert_short_term_summary(persona_scope, older_max_id, summary_text)
-            except Exception as exc:
-                logger.warning("[SLIDING_WINDOW] upsert cache failed: %s", exc)
+    cached = memory_manager.get_short_term_summary_json(persona_scope)
+    cached_valid = bool(
+        cached
+        and cached.get("last_entry_id", 0) >= older_max_id
+        and (cached.get("summary_json") or {}).get("topic") is not None
+    )
 
-    if not summary_text:
-        # Fallback: concat recent only so we never exceed the window even
-        # when summarization fails.
+    summary_json: Dict[str, Any]
+    if cached_valid and not force_refresh_if_stale:
+        summary_json = _coerce_summary_dict(cached.get("summary_json") or {})
+    else:
+        summary_json = _summarize_older_turns_structured(persona_scope, older)
+        if summary_json and summary_json.get("topic"):
+            try:
+                memory_manager.upsert_short_term_summary_json(
+                    persona_scope,
+                    older_max_id,
+                    summary_json,
+                    fallback_text=_summary_to_fallback_text(summary_json),
+                )
+            except Exception as exc:
+                logger.warning("[SLIDING_WINDOW] upsert JSON cache failed: %s", exc)
+            try:
+                _persist_summary_to_ledger(
+                    persona_scope, summary_json, source_entry_id=older_max_id,
+                )
+            except Exception as exc:
+                logger.warning("[LEDGER] persist failed persona=%s: %s",
+                               persona_scope, exc)
+
+    rendered_summary = render_summary_for_prompt(summary_json, persona_scope)
+    if not rendered_summary:
+        # Last-resort: legacy plain-text cache (old rows before migration).
+        legacy = memory_manager.get_short_term_summary(persona_scope)
+        if legacy and legacy.get("summary"):
+            rendered_summary = (
+                f"[SUMMARY earlier_conversation]\n{legacy['summary']}"
+            )
+
+    if not rendered_summary:
         return _format_entries_for_prompt(recent, max_chars_per_entry=160)
 
     recent_text = _format_entries_for_prompt(recent, max_chars_per_entry=160)
-    compressed = f"[SUMMARY earlier_conversation]\n{summary_text}\n\n{recent_text}"
+    compressed = f"{rendered_summary}\n\n{recent_text}"
     if len(compressed) > max_chars:
-        # Hard clamp in case summary + recent overshoot the budget.
         compressed = compressed[: max_chars - 3] + "..."
     return compressed
+
+
+def refresh_short_term_summary_background(persona_scope: str) -> None:
+    """Idempotent helper used by the post-response worker to keep the
+    structured summary cache warm. Never raises."""
+    try:
+        build_compressed_short_term_text(
+            persona_scope,
+            force_refresh_if_stale=True,
+        )
+    except Exception as exc:
+        logger.warning("[SLIDING_WINDOW] background refresh failed persona=%s: %s",
+                       persona_scope, exc)
 
 
 def build_context_for_llm(
@@ -442,17 +804,31 @@ def build_context_for_llm(
     mem0_retrieved_memories: Optional[List[Any]] = None,
     include_referent_grounding: bool = True,
     chat_platform: Optional[str] = None,
+    context_budget: Any = None,
 ) -> Dict[str, Any]:
     """
     Single read path: short-term + RAG memory + optional Mem0 block (same inputs as response_node / stream).
-    Returns keys: recent_messages, memory_injection, mem0_context_block, referent_grounding_block.
+    Returns keys: recent_messages, memory_injection, mem0_context_block,
+    referent_grounding_block, budget.
+
+    When ``context_budget`` is not supplied, resolves to the persona's
+    :class:`kuro_backend.personas.ContextBudget` so the Layer-1 summarizer
+    can fire on the hybrid utilization threshold.
     """
     from kuro_backend import memory_manager
     from kuro_backend import perpetual_memory
+    from kuro_backend import personas
+
+    budget = context_budget or personas.get_context_budget(persona_mode)
 
     _trace_coordinator_span(
         "build_context_for_llm",
-        {"persona": persona_mode, "has_compliance": bool(compliance_data), "mem0_n": len(mem0_retrieved_memories or [])},
+        {
+            "persona": persona_mode,
+            "has_compliance": bool(compliance_data),
+            "mem0_n": len(mem0_retrieved_memories or []),
+            "budget_total": budget.total_tokens,
+        },
     )
 
     # P1.1 — Parallelize independent I/O. `get_short_term` (SQLite), the Mem0
@@ -492,11 +868,14 @@ def build_context_for_llm(
         persona_scope=persona_mode,
         include_compliance=not bool(compliance_data),
     )
-    # P2.1 — replace the short-term block with a sliding-window-compressed
-    # version when the history exceeds the turn budget. Compressed summary is
-    # cached per-persona so we pay the LLM cost only when new turns arrive.
+    # Persona-aware hybrid trigger: fire summarization when either the turn
+    # count exceeds the window OR the raw L1 text exceeds the persona's L1
+    # utilization threshold.
     try:
-        compressed_short_term = build_compressed_short_term_text(persona_mode)
+        compressed_short_term = build_compressed_short_term_text(
+            persona_mode,
+            layer1_threshold_tokens=budget.summarize_threshold_tokens,
+        )
         if compressed_short_term:
             memory["short_term"] = compressed_short_term
     except Exception as exc:
@@ -509,6 +888,7 @@ def build_context_for_llm(
         "memory_injection": memory_injection,
         "mem0_context_block": mem0_context_block,
         "referent_grounding_block": referent_grounding_block,
+        "budget": budget,
     }
 
 
@@ -520,6 +900,7 @@ async def build_context_for_llm_async(
     mem0_retrieved_memories: Optional[List[Any]] = None,
     include_referent_grounding: bool = True,
     chat_platform: Optional[str] = None,
+    context_budget: Any = None,
 ) -> Dict[str, Any]:
     """Async variant of :func:`build_context_for_llm`.
 
@@ -537,6 +918,7 @@ async def build_context_for_llm_async(
         mem0_retrieved_memories=mem0_retrieved_memories,
         include_referent_grounding=include_referent_grounding,
         chat_platform=chat_platform,
+        context_budget=context_budget,
     )
 
 
@@ -751,11 +1133,13 @@ def record_mutation(
                 category=str(payload.get("category") or "General"),
                 source=source,
             )
-            return {
+            result_h = {
                 "ok": True,
                 "revision": _cs.get_data_revision(),
                 "canonical_record_id": str(hid),
             }
+            _maybe_emit_proactive_from_mutation(domain, source, payload, result_h)
+            return result_h
         if op == "update":
             habit_id = int(payload["habit_id"])
             fields = {
@@ -764,19 +1148,23 @@ def record_mutation(
                 if k not in ("op", "habit_id") and v is not None
             }
             habit_update(habit_id, source=source, **fields)
-            return {
+            result_h = {
                 "ok": True,
                 "revision": _cs.get_data_revision(),
                 "canonical_record_id": str(habit_id),
             }
+            _maybe_emit_proactive_from_mutation(domain, source, payload, result_h)
+            return result_h
         if op == "delete":
             habit_id = int(payload["habit_id"])
             habit_delete(habit_id, source=source)
-            return {
+            result_h = {
                 "ok": True,
                 "revision": _cs.get_data_revision(),
                 "canonical_record_id": str(habit_id),
             }
+            _maybe_emit_proactive_from_mutation(domain, source, payload, result_h)
+            return result_h
         return {"ok": False, "error": f"unknown habits op: {op}", "revision": _cs.get_data_revision()}
 
     if domain == "long_term":
@@ -788,16 +1176,82 @@ def record_mutation(
             str(payload.get("final_response", "")),
             str(persona),
         )
-        return {"ok": True, "revision": _cs.get_data_revision(), "canonical_record_id": None}
+        result_lt = {
+            "ok": True,
+            "revision": _cs.get_data_revision(),
+            "canonical_record_id": None,
+        }
+        _maybe_emit_proactive_from_mutation(domain, source, payload, result_lt)
+        return result_lt
 
     if domain == "mem0":
         execute_mem0_extract_task(
             str(payload.get("user_input", "")),
             str(payload.get("final_response", "")),
         )
-        return {"ok": True, "revision": _cs.get_data_revision(), "canonical_record_id": None}
+        result_mem0 = {
+            "ok": True,
+            "revision": _cs.get_data_revision(),
+            "canonical_record_id": None,
+        }
+        _maybe_emit_proactive_from_mutation(domain, source, payload, result_mem0)
+        return result_mem0
 
     return {"ok": False, "error": f"unsupported domain: {domain}", "revision": _cs.get_data_revision()}
+
+
+def _maybe_emit_proactive_from_mutation(
+    domain: str,
+    source: str,
+    payload: Dict[str, Any],
+    result: Dict[str, Any],
+) -> None:
+    """Post-mutation observer: fire a ProactiveEvent when the payload carries
+    an explicit anomaly marker.
+
+    Designed to be microscopic on the hot path — a single ``payload.get``
+    short-circuits when nothing anomalous happened. Publication is routed
+    through the event bus on a background thread so the caller's request
+    latency is never touched.
+    """
+    try:
+        if not isinstance(payload, dict):
+            return
+        if not (payload.get("anomaly") is True or payload.get("anomaly_severity")):
+            return
+        severity = str(payload.get("anomaly_severity") or "warning").lower()
+        kind_hint = str(payload.get("anomaly_kind") or domain or "generic").lower()
+        if kind_hint in ("fitness", "fitness_anomaly"):
+            kind = "fitness_anomaly"
+        elif kind_hint in ("hardware", "server", "system"):
+            kind = "hardware"
+        elif kind_hint in ("security", "security_cve", "cve"):
+            kind = "security_cve"
+        else:
+            kind = "generic"
+        title = str(payload.get("anomaly_title") or f"{kind} anomaly from {source}")
+        body = str(payload.get("anomaly_body") or "")
+        fingerprint_seed = str(
+            payload.get("anomaly_fingerprint")
+            or f"mutation:{domain}:{source}:{title}"
+        )
+        from kuro_backend import proactive_events
+
+        event = proactive_events.make_event(
+            kind=kind,
+            severity=severity,
+            title=title,
+            body=body,
+            fingerprint_seed=fingerprint_seed,
+            context={
+                "domain": domain,
+                "source": source,
+                "revision": result.get("revision"),
+            },
+        )
+        proactive_events.publish_async(event)
+    except Exception as exc:
+        logger.debug("[MEMORY_COORD] proactive observer skipped: %s", exc)
 
 
 def apply_openclaw_execution_result(
@@ -840,8 +1294,15 @@ def apply_openclaw_execution_result(
             revision_error = str(exc)
             logger.exception("[MEMORY_COORD] bump after OpenClaw failed: %s", exc)
 
-    return {
+    result = {
         "should_bump_revision": should_bump,
         "revision_bumped": revision_bumped,
         "revision_error": revision_error,
     }
+    _maybe_emit_proactive_from_mutation(
+        domain="openclaw",
+        source=skill_name,
+        payload=raw if isinstance(raw, dict) else {},
+        result=result,
+    )
+    return result

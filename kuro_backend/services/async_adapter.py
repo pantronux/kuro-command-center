@@ -1,5 +1,5 @@
 """
-Kuro AI V5.5 — Async adapter for synchronous SSoT writers.
+Kuro AI V6.0 Sovereign — Async adapter for synchronous SSoT writers.
 
 SSoT rule (see `services/core_service.py`): `bump_data_revision()` and
 `record_mutation()` + the `*_svc` wrappers MUST remain synchronous. FastAPI

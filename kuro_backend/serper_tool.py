@@ -1,5 +1,5 @@
 """
-Kuro AI V5.5 - Serper.dev Search Tool for Autonomous Research
+Kuro AI V6.0 Sovereign - Serper.dev Search Tool for Autonomous Research
 ================================================================================
 Web search integration using Serper.dev API for proactive intelligence gathering.
 """

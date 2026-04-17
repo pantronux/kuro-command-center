@@ -1,5 +1,5 @@
 """
-Kuro AI V5.5 — Sniper guardrails orchestration.
+Kuro AI V6.0 Sovereign — Sniper guardrails orchestration.
 
 NeMo `RailsConfig` + YAML prompts live in / `kuro_nemo_guardrails` (folder must not be named
 `guardrails` — that collides with Colang's `import guardrails`).

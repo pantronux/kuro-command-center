@@ -1,8 +1,215 @@
-# Kuro AI V5.5 Official - Changelog
+# Kuro AI V6.1 "Sovereign" - Changelog
 
 **Release Date:** 2026-04-17
-**Version:** 5.5.0
-**Codename:** "Extreme Optimization — Performance, Latency & Grounding"
+**Version:** 6.1.0
+**Codename:** "Sovereign — Full English Migration & Live2D Hijiki"
+
+---
+
+## V6.1.0 - Sovereign: English Migration & Live2D Hijiki (2026-04-17)
+
+### Summary
+Completes the Sovereign rollout by migrating every user-facing and
+prompt-level string from Bahasa Indonesia to elegant, Sebastian-register
+English, replacing the placeholder initial on the dashboard avatar with the
+real `profile/kuro_avatar.png` + favicon, and integrating a Live2D "Hijiki"
+mascot whose mouth lip-syncs to Piper TTS playback via Web Audio amplitude
+sampling.
+
+### Highlights
+- **Full ID → EN migration (Sebastian register):**
+  - `kuro_backend/personas.py` — every persona + SSoT directive + CoT tail
+    (`consultant`, `chill`, `advisor`, `tactical`, `butler`) rewritten in
+    refined butler-English. Structural headers (CORE KNOWLEDGE BASE,
+    CHAIN OF THOUGHT, HITL SECURITY POLICY, etc.) preserved verbatim.
+  - `kuro_backend/ui_mode_router.py` — new English triggers:
+    *"Activate Research Mode"*, *"Switch to HUD"*, *"Engage HUD Mode"*,
+    *"Stand down"*, *"System Status"*. Legacy Bahasa patterns retained.
+    All acknowledgements rewritten.
+  - `kuro_backend/telegram_notifier.py` — `_INCONSISTENCY_TEMPLATE` now in
+    butler English.
+  - `main.py` — chat-reply and WebSocket error messages, reminder previews,
+    hardware CPU/RAM/disk alert bodies all translated.
+  - `web_interface/static/js/app.js` — dashboard greeting bubbles
+    translated to *"Welcome, Master Pantronux. I am Kuro, your devoted AI
+    Butler…"*.
+- **Branding:**
+  - New `/profile` FastAPI static mount in `main.py` exposes
+    `profile/kuro_avatar.png`, `favicon.ico`, and the Live2D runtime to
+    the browser.
+  - `#kuroAvatar` now renders `profile/kuro_avatar.png` with graceful
+    fallback to the letter "K" on image load failure. Pulse-glow
+    animation continues to fire via the `.speaking` class.
+  - Favicon + Apple-touch-icon wired into every HTML template (index,
+    reminder, daily_habits, intelligence, login, compliance).
+- **Live2D Hijiki mascot:**
+  - New `<canvas id="live2d-canvas">` inside a fixed bottom-right
+    `#live2dDock` (auto-hides below 900 px viewports).
+  - New `web_interface/static/js/live2d_manager.js` dynamically loads
+    `live2dcubismcore.min.js` + `pixi.js@7` + `pixi-live2d-display@0.4`.
+    Offline-first: tries `/static/vendor/live2d/*` before falling back to
+    the Live2D CDN / jsDelivr. Drop README at
+    `web_interface/static/vendor/live2d/README.md` with download URLs.
+  - Loads the Hijiki model from
+    `profile/live2d/hijiki/runtime/hijiki.model3.json`, starts the Idle
+    motion, and exposes `window.kuroLive2D.{setLipSyncValue,
+    playTalkMotion, returnToIdle}`.
+  - **Connecting dots:** `kuroPlayTTS` in `app.js` now builds a shared
+    `AudioContext` + `AnalyserNode` on first playback, computes normalized
+    RMS each `requestAnimationFrame`, and pushes it into
+    `PARAM_MOUTH_OPEN_Y` on the Hijiki model so the mouth tracks the
+    Piper waveform. `Tap` motion plays on speech start, Idle restores on
+    `ended`/`pause`/`error`.
+- **Voice reaffirmation:** Piper `en_GB-alan-medium` (British male) remains
+  the shipped default with `KURO_PIPER_LENGTH_SCALE=1.1` and
+  `KURO_TTS_PITCH_SHIFT=0.93` unchanged from V6.0.
+- **Tests:**
+  - `tests/test_ui_mode_router.py` extended with English command coverage
+    (*activate research mode*, *switch to hud*, *stand down*,
+    *system status*) + English acknowledgement assertions.
+  - New `tests/test_branding.py` template-smoke covering favicon,
+    kuro_avatar.png, and the Live2D canvas dock.
+  - New persona-English smoke asserts the `consultant` prompt reads
+    "AI Butler" and contains no more "Kamu adalah".
+
+### Assets required at runtime
+- `profile/kuro_avatar.png` (shipped).
+- `profile/favicon.ico` (shipped).
+- `profile/live2d/hijiki/runtime/hijiki.model3.json` + associated Cubism 4
+  assets (shipped).
+- `~/.kuro/piper/en_GB-alan-medium.onnx` (user download — unchanged from
+  V6.0).
+- Optionally, `web_interface/static/vendor/live2d/*.js` for offline SDK.
+
+---
+
+## V6.0.0 - Sovereign: Sebastian Voice, HUD Polish, Proactive Greeting (2026-04-17)
+
+### Summary
+Upgrades the Jarvis sentinel foundation (V5.5.1) into a full Sebastian-style
+butler. Kuro now boots with an offline, pitch-treated Piper voice (calm UK
+male), pulses an avatar visualizer while speaking, lets the master re-play
+any message with a single click, shows a live "SENTINEL: SCANNING/IDLE"
+ticker around every sentinel sweep, and greets the master once per day the
+moment the dashboard opens — all over the existing WebSocket channel.
+
+### Highlights
+- **Sebastian voice:** `KURO_TTS_ENGINE=piper` is now the default. The
+  default model is `en_GB-alan-medium` (offline). New env knobs:
+  `KURO_PIPER_LENGTH_SCALE=1.1` (elegant cadence) and
+  `KURO_TTS_PITCH_SHIFT=0.93` (~7% deeper via ffmpeg
+  `asetrate + atempo`). `voice_service._apply_pitch_shift` degrades
+  gracefully when ffmpeg is missing.
+- **HUD avatar visualizer:** `#kuroAvatar` pulses (CSS keyframes) while
+  the `<audio>` element is playing — both for auto-speak and the new
+  per-message replay button.
+- **Replay buttons:** Every assistant bubble now carries a small 🔊
+  button that re-hits `/api/voice/speech` for that message.
+- **Sentinel status ticker:** `STATUS_TICKER` UI_COMMAND carries
+  `{status, source, detail}`; CVE / fitness / hardware sentinels broadcast
+  SCANNING on entry and IDLE on exit, with a 30-second client-side
+  watchdog so a crashed backend never strands the ticker.
+- **Proactive daily greeting:** A new `proactive_greetings` table in
+  `kuro_auth.db` tracks one-greeting-per-day-per-user. On dashboard WS
+  connect, Kuro whispers a butler-flavoured welcome (spoken + chat
+  bubble). Config: `KURO_PROACTIVE_GREETING_ENABLED`,
+  `KURO_PROACTIVE_GREETING_TEXT`,
+  `KURO_PROACTIVE_GREETING_COOLDOWN_DAYS`.
+- **Versioning SSOT:** New `kuro_backend/version.py` + `GET /api/version`.
+  Dashboard sidebar badge reads from this single source.
+
+### New Files (V6.0.0)
+- `kuro_backend/version.py`
+- `kuro_backend/proactive_greeting.py`
+- `tests/test_version.py`
+- `tests/test_proactive_greeting.py`
+
+### Files Changed (V6.0.0)
+- `kuro_backend/voice_service.py` (Piper default, length_scale, ffmpeg pitch)
+- `kuro_backend/dashboard_broadcast.py` (`GREETING` added to `UI_COMMANDS`)
+- `kuro_backend/dreaming_worker.py` / `kuro_backend/fitness_service.py` /
+  `main.py` (hardware sentinel) — STATUS_TICKER broadcasts.
+- `kuro_backend/auth_db.py` (greeting persistence).
+- `kuro_backend/config.py` (new env knobs).
+- `main.py` (`/api/version`, `proactive_greeting` hook in
+  `/ws/dashboard`, V5.5 banner refresh).
+- `web_interface/templates/index.html` (sidebar badge,
+  `#kuroAvatar` + keyframes, HUD ticker markup).
+- `web_interface/static/js/app.js` (`kuroPlayTTS` shared helper,
+  avatar pulse, replay button, `GREETING` + `STATUS_TICKER` handlers).
+- `requirements.txt` (piper-tts + onnxruntime promoted to required).
+- `tests/test_voice_service.py` (length_scale + pitch-shift + fallback tests).
+- V5.5 banner lines across module docstrings refreshed to V6.0 Sovereign.
+
+---
+
+## V5.5.1 - Jarvis Sentinel, HUD Modes, Proactive Bus & Voice (2026-04-17)
+
+### Summary
+Adds a presence layer on top of V5.5: a nightly Proxmox + NVD CVE sentinel
+wired through OpenClaw (with direct NVD fallback), a dashboard
+`ui_command` channel + chat-side mode router for HUD / RESEARCH / CINEMA
+atmospheres, an event-driven proactive anomaly bus that centralises Telegram
+dispatch for hardware / fitness / CVE / memory anomalies, and a pluggable
+TTS endpoint so Kuro can speak in the dashboard.
+
+#### Highlights
+- **Cyber Sentinel:** `openclaw_skills/vulnerability_scan/` reference skill
+  (Proxmox enumeration + NVD lookup + optional `nmap -sV`). Kuro-side
+  `_run_cve_sentinel` in `kuro_backend/dreaming_worker.py` persists
+  `#cve-alert` metadata to Chroma and fires `security_cve` events.
+- **Proactive Event Bus:** new `kuro_backend/proactive_events.py` with
+  dedup via the existing `dream_notifications` fingerprint table, severity
+  gating, and a thread-safe async publish path.
+- **Hardware sentinel refactor:** `hardware_sentinel_check` now routes
+  through `proactive_events.publish` instead of raw Telegram calls.
+- **Fitness sentinel:** `kuro_backend/fitness_service.py` reads
+  `~/.kuro/fitness_latest.json` every 30 minutes (env-gated) and emits
+  resting-HR / sleep / recovery / sync-stale anomalies.
+- **Memory coordinator hook:** `_maybe_emit_proactive_from_mutation`
+  attached to `record_mutation` + `apply_openclaw_execution_result` so
+  payload-marked anomalies become `ProactiveEvent`s without duplicating
+  dedup logic.
+- **HUD Mode UI channel:** `dashboard_broadcast.broadcast_ui_command`
+  with whitelist + thread-safe scheduler; chat-side `ui_mode_router`
+  (BI + EN keyword matcher) wired into `/api/chat` and `/api/chat/stream`;
+  frontend theme classes (`theme-hud`, `theme-research`, `theme-cinema`)
+  with WS handler in `app.js`, `daily_habits.html`, `reminder.html`.
+- **Voice Readiness:** `kuro_backend/voice_service.py` with pluggable
+  gTTS (default) and Piper engines, SHA-1 cache under `media/tts/`
+  capped at 50 MB with 7-day TTL. `POST /api/voice/speech` endpoint
+  and `/media/tts` static mount. Frontend auto-speaks the assistant
+  reply when HUD_MODE is active.
+
+#### Env / Config
+- `KURO_CVE_SENTINEL_ENABLED` (default `true`)
+- `KURO_CVE_MIN_CVSS` (default `7.0`)
+- `KURO_CVE_MAX_ALERTS_PER_CYCLE` (default `5`)
+- `KURO_VULN_NMAP_ENABLED` (default `false`)
+- `KURO_PROACTIVE_ENABLED`, `KURO_PROACTIVE_TELEGRAM_ENABLED`,
+  `KURO_PROACTIVE_SEVERITY_FLOOR` (default `warning`)
+- `KURO_FITNESS_ENABLED`, `KURO_FITNESS_DATA_PATH`, `KURO_FITNESS_INTERVAL_MIN`
+- `KURO_TTS_ENGINE` (`gtts` | `piper`), `KURO_PIPER_VOICE_PATH`, `KURO_TTS_CACHE_DIR`
+- `KURO_UI_MODE_DEFAULT` (default `NORMAL_MODE`)
+
+#### Dependencies
+- Added: `gTTS>=2.5.0` (default TTS engine).
+- Optional: `piper-tts>=1.2.0`, `onnxruntime>=1.17.0` (offline TTS,
+  install manually + voice model download).
+
+#### Files Changed (V5.5.1)
+- **NEW:** `kuro_backend/proactive_events.py`, `kuro_backend/ui_mode_router.py`,
+  `kuro_backend/fitness_service.py`, `kuro_backend/voice_service.py`,
+  `openclaw_skills/vulnerability_scan/vulnerability_scan.py`,
+  `openclaw_skills/vulnerability_scan/README.md`,
+  `tests/test_proactive_events.py`, `tests/test_ui_mode_router.py`,
+  `tests/test_cve_sentinel.py`, `tests/test_voice_service.py`.
+- **MODIFIED:** `kuro_backend/dashboard_broadcast.py`,
+  `kuro_backend/dreaming_worker.py`, `kuro_backend/memory_coordinator.py`,
+  `kuro_backend/config.py`, `main.py`, `requirements.txt`,
+  `web_interface/static/js/app.js`, `web_interface/templates/index.html`,
+  `web_interface/templates/daily_habits.html`,
+  `web_interface/templates/reminder.html`, `CHANGELOG.md`.
 
 ---
 

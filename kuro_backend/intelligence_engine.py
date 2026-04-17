@@ -1,5 +1,5 @@
 """
-Kuro AI V5.5 - Proactive Intelligence Research Engine
+Kuro AI V6.0 Sovereign - Proactive Intelligence Research Engine
 ================================================================================
 Autonomous research system using Serper.dev for daily intelligence gathering.
 Synthesizes findings into formal briefing reports for Pantronux.

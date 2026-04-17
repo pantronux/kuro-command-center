@@ -1,4 +1,4 @@
-"""Kuro AI V5.5 — SSoT shortcut router (P3.2) — bypass the LLM for high-confidence factual
+"""Kuro AI V6.0 Sovereign — SSoT shortcut router (P3.2) — bypass the LLM for high-confidence factual
 queries whose answer lives entirely in SQLite (habits / reminders).
 
 Rules:
