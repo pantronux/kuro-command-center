@@ -1,5 +1,5 @@
 """
-Sniper guardrails orchestration.
+Kuro AI V5.5 — Sniper guardrails orchestration.
 
 NeMo `RailsConfig` + YAML prompts live in / `kuro_nemo_guardrails` (folder must not be named
 `guardrails` — that collides with Colang's `import guardrails`).
@@ -348,6 +348,68 @@ def sniper_validate_and_maybe_block_input(message: str) -> Optional[str]:
         bypass_guardrails=bypass,
         bypass_reason=bypass_reason,
     )
+
+
+# ---------------------------------------------------------------------------
+# P4.5 — SSoT grounding lint
+# ---------------------------------------------------------------------------
+# Lightweight post-hoc check: does the assistant mention a habit streak
+# number, a concrete hour, or a specific reminder timestamp that is NOT
+# present in any of the SSoT-sourced context blocks (habit_block, reminder
+# list, etc.)? If so, emit a structured warning log and attach a soft
+# disclaimer to the reply. Non-destructive — never mutates or retries the
+# message silently, so it's safe to enable in production.
+
+_NUM_TOKEN_RE = re.compile(r"\b\d{1,3}\b")
+_TIME_TOKEN_RE = re.compile(r"\b\d{1,2}[:.]\d{2}\b")
+# Numbers small enough to plausibly be streaks / counts / hour prefixes that
+# must be grounded in SSoT context. We intentionally don't lint very large
+# numbers (years, ports, etc.) to avoid false positives.
+_LINT_NUM_THRESHOLD = 200
+
+
+def sniper_ssot_grounding_lint(
+    assistant_message: str,
+    ssot_blocks: Optional[list[str]] = None,
+) -> tuple[str, bool]:
+    """Check assistant text for numbers/times not present in SSoT blocks.
+
+    Returns ``(message, anomaly_detected)``. When an anomaly is found, the
+    message gets a small footnote reminding the user that specific numbers
+    should be verified against the dashboard — avoids propagating silent
+    hallucinations but doesn't throw away the response.
+    """
+    if not assistant_message or not ssot_blocks:
+        return assistant_message, False
+    blocks_joined = " ".join(b or "" for b in ssot_blocks if b)
+    if not blocks_joined:
+        return assistant_message, False
+
+    anomalies: set[str] = set()
+    for match in _TIME_TOKEN_RE.findall(assistant_message):
+        if match not in blocks_joined:
+            anomalies.add(match)
+    for match in _NUM_TOKEN_RE.findall(assistant_message):
+        try:
+            value = int(match)
+        except ValueError:
+            continue
+        if value > _LINT_NUM_THRESHOLD:
+            continue
+        if match not in blocks_joined:
+            anomalies.add(match)
+    if not anomalies:
+        return assistant_message, False
+
+    logger.warning(
+        "[SNIPER_LINT] possible SSoT-ungrounded tokens in reply: %s",
+        sorted(anomalies)[:10],
+    )
+    footnote = (
+        "\n\n_Catatan: sebagian angka/waktu di atas mungkin belum tersuplai dari SSoT "
+        "— harap verifikasi langsung di dashboard habit/reminder._"
+    )
+    return assistant_message.rstrip() + footnote, True
 
 
 def sniper_postprocess_output(user_message: str, assistant_message: str) -> str:

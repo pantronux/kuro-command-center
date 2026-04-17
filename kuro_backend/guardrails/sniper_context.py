@@ -1,4 +1,4 @@
-"""Shared context flags for Sniper rails (habit reports, fact-check gating)."""
+"""Kuro AI V5.5 — Shared context flags for Sniper rails (habit reports, fact-check gating)."""
 from __future__ import annotations
 
 import re

@@ -1,5 +1,5 @@
 """
-Kuro AI V5.0 Official - Memory Manager [2026-04-15]
+Kuro AI V5.5 Official - Memory Manager [2026-04-17]
 ================================================================================
 Kuro Cognitive Memory Engine V3.0 - Contextual RAG Architecture
 TIER 1: Short-Term Buffer (SQLite) - Last 20 interactions
@@ -25,6 +25,7 @@ PHASE 2 Fixes [2026-04-05]:
 - Anti-VCT Bias: VCT data only returned for VCT-specific queries
 """
 import json
+import hashlib
 import logging
 import os
 import re
@@ -287,9 +288,85 @@ def init_short_term_db():
     columns = [row["name"] for row in cursor.fetchall()]
     if "persona_scope" not in columns:
         cursor.execute("ALTER TABLE short_term ADD COLUMN persona_scope TEXT NOT NULL DEFAULT 'consultant'")
+
+    # Sliding-window summary cache (P2.1) — one row per persona. Keeps the
+    # compressed summary of older turns keyed by the highest short_term.id
+    # that was included, so we regenerate only when truly new turns arrive.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS short_term_summaries (
+            persona_scope TEXT PRIMARY KEY,
+            last_entry_id INTEGER NOT NULL DEFAULT 0,
+            summary TEXT NOT NULL DEFAULT '',
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     conn.commit()
     conn.close()
     logger.info("Short-term memory database initialized.")
+
+
+def get_short_term_with_ids(persona_scope: str = None) -> List[Dict]:
+    """Same as :func:`get_short_term` but includes the SQLite row id per entry.
+
+    Needed for the sliding-window summary cache so we can key summaries by the
+    highest id they cover.
+    """
+    scope = normalize_persona(persona_scope or get_active_persona())
+    conn = _get_short_term_conn()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT id, role, content, persona_scope, timestamp FROM short_term "
+        "WHERE persona_scope = ? ORDER BY id DESC LIMIT ?",
+        (scope, SHORT_TERM_LIMIT),
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [
+        {
+            "id": r["id"],
+            "role": r["role"],
+            "content": r["content"],
+            "persona_scope": r["persona_scope"],
+            "timestamp": r["timestamp"],
+        }
+        for r in reversed(rows)
+    ]
+
+
+def get_short_term_summary(persona_scope: str) -> Optional[Dict]:
+    """Return cached summary row ``(last_entry_id, summary)`` or ``None``."""
+    conn = _get_short_term_conn()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT last_entry_id, summary FROM short_term_summaries WHERE persona_scope = ?",
+            (persona_scope,),
+        )
+        row = cursor.fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        return None
+    return {"last_entry_id": int(row["last_entry_id"]), "summary": str(row["summary"] or "")}
+
+
+def upsert_short_term_summary(persona_scope: str, last_entry_id: int, summary: str) -> None:
+    """Upsert the compressed-history cache for a persona scope."""
+    conn = _get_short_term_conn()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO short_term_summaries (persona_scope, last_entry_id, summary) "
+            "VALUES (?, ?, ?) "
+            "ON CONFLICT(persona_scope) DO UPDATE SET "
+            "last_entry_id=excluded.last_entry_id, summary=excluded.summary, "
+            "updated_at=CURRENT_TIMESTAMP",
+            (persona_scope, int(last_entry_id), summary),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 def add_short_term(role: str, content: str, persona_scope: str = None):
     """Add interaction to short-term buffer."""
@@ -1624,6 +1701,52 @@ def reindex_all_files(file_texts: Dict[str, str]) -> Dict:
     return results
 
 
+# ---------------------------------------------------------------------------
+# Query-expansion cache (P1.3)
+# ---------------------------------------------------------------------------
+# Purpose: the ambiguous-query LLM expansion call adds 300-600ms to the hot
+# path. Most follow-up turns repeat very similar queries within a short window,
+# so a tiny TTL+LRU cache eliminates the call on repeats without changing
+# cache-miss behavior.
+_EXPAND_QUERY_CACHE: Dict[str, tuple[float, str]] = {}
+_EXPAND_QUERY_CACHE_LOCK = threading.Lock()
+_EXPAND_QUERY_CACHE_MAX = 256
+_EXPAND_QUERY_CACHE_TTL_S = 60.0
+
+
+def _expand_query_cache_key(query: str, recent_messages: List[Dict] | None) -> str:
+    # Fingerprint on the last 3 messages (enough to determine anaphora context)
+    # plus the normalized query. Avoids unbounded cache explosion and keeps the
+    # cache behaviorally equivalent to a full recompute.
+    tail = (recent_messages or [])[-3:]
+    tail_blob = "\n".join(f"{m.get('role','')}:{(m.get('content','') or '')[:120]}" for m in tail)
+    blob = f"{query.strip().lower()}\n---\n{tail_blob}"
+    return hashlib.sha1(blob.encode("utf-8", errors="replace")).hexdigest()
+
+
+def _expand_query_cache_get(key: str) -> Optional[str]:
+    now = time.monotonic()
+    with _EXPAND_QUERY_CACHE_LOCK:
+        entry = _EXPAND_QUERY_CACHE.get(key)
+        if entry is None:
+            return None
+        ts, value = entry
+        if now - ts > _EXPAND_QUERY_CACHE_TTL_S:
+            _EXPAND_QUERY_CACHE.pop(key, None)
+            return None
+        return value
+
+
+def _expand_query_cache_put(key: str, value: str) -> None:
+    now = time.monotonic()
+    with _EXPAND_QUERY_CACHE_LOCK:
+        if len(_EXPAND_QUERY_CACHE) >= _EXPAND_QUERY_CACHE_MAX:
+            # Evict oldest entry (cheap since cache is small).
+            oldest = min(_EXPAND_QUERY_CACHE.items(), key=lambda kv: kv[1][0])[0]
+            _EXPAND_QUERY_CACHE.pop(oldest, None)
+        _EXPAND_QUERY_CACHE[key] = (now, value)
+
+
 def expand_query(query: str, recent_messages: List[Dict] = None) -> str:
     """
     V3.0 INTELLIGENT RETRIEVAL - Query Expansion:
@@ -1653,7 +1776,13 @@ def expand_query(query: str, recent_messages: List[Dict] = None) -> str:
     
     if not is_ambiguous:
         return query  # Query is specific enough
-    
+
+    cache_key = _expand_query_cache_key(query, recent_messages)
+    cached = _expand_query_cache_get(cache_key)
+    if cached is not None:
+        logger.debug("[QUERY_EXPANSION] cache hit key=%s", cache_key[:8])
+        return cached
+
     try:
         from google import genai
         from google.genai import types
@@ -1729,6 +1858,7 @@ Example:
             return query
 
         logger.info(f"[QUERY_EXPANSION] Original: '{query}' -> Expanded: '{expanded}'")
+        _expand_query_cache_put(cache_key, expanded)
         return expanded
         
     except Exception as e:

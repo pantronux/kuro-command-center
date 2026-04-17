@@ -1,4 +1,29 @@
-# Kuro AI V5.2 Official - Changelog
+# Kuro AI V5.5 Official - Changelog
+
+**Release Date:** 2026-04-17
+**Version:** 5.5.0
+**Codename:** "Extreme Optimization — Performance, Latency & Grounding"
+
+---
+
+## V5.5.0 - Extreme Optimization — Performance, Latency & Grounding (2026-04-17)
+
+### Summary
+Enterprise-grade tuning across concurrency, token economy, semantic routing, and anti-hallucination sampling. SSoT primitives (`bump_data_revision`, `record_mutation`, `*_svc`) remain unchanged.
+
+#### Highlights
+- **Concurrency (P1):** Parallel fan-out in `build_context_for_llm` (`_parallel_gather_sync`), `build_context_for_llm_async` for streaming fast path, Mem0 prefetch from supervisor + consume in `memory_retrieval_node`, parallel Chroma in `compliance_node` expansion mode, parallel SQLite reads in `habit_node`, TTL cache for `expand_query`.
+- **Token economy (P2):** `token_budget.py` per-section quotas + global ceiling + duplicate block collapse; sliding-window short-term summarization with SQLite `short_term_summaries` cache; compressed tool-router system instruction.
+- **Routing & cache (P3):** `ssot_shortcuts.py` deterministic factual answers; `semantic_cache.py` + `embedding_cache.py` (opt-in semantic cache, shared embeddings).
+- **Grounding & sampling (P4):** SSoT priority directive in persona tails; per-persona `SAMPLING_PROFILES`; deterministic tool router; `build_factual_response_config` for JSON factual path; `sniper_ssot_grounding_lint` after response postprocess.
+
+#### Files Changed (V5.5.0) — representative
+- **NEW / MODIFIED:** `kuro_backend/token_budget.py`, `kuro_backend/ssot_shortcuts.py`, `kuro_backend/semantic_cache.py`, `kuro_backend/embedding_cache.py`, `kuro_backend/personas.py`, `kuro_backend/memory_coordinator.py`, `kuro_backend/memory_manager.py`, `kuro_backend/langgraph_core.py`, `kuro_backend/core.py`, `kuro_backend/guardrails/sniper_pipeline.py`, `kuro_backend/observability.py`, `main.py`, `web_interface/static/js/app.js`, `maintenance/rebuild_compliance_base.py`, and aligned module headers across `kuro_backend/`.
+- **MODIFIED:** `CHANGELOG.md` (this file).
+
+---
+
+# Kuro AI V5.2 Official - Changelog (archive)
 
 **Release Date:** 2026-04-16
 **Version:** 5.2.0

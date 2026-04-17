@@ -1,3 +1,6 @@
+"""
+Kuro AI V5.5 — FastAPI application entry point (web dashboard, API, Telegram).
+"""
 import warnings
 import hashlib
 import logging
@@ -45,6 +48,7 @@ from kuro_backend import compliance_db
 from kuro_backend import reminder_service
 from kuro_backend import dashboard_broadcast
 from kuro_backend.services import core_service as core_data
+from kuro_backend.services.async_adapter import run_db
 from kuro_backend.services.schemas import AiEvaluationRecord
 from kuro_backend import auth_db
 from kuro_backend import observability
@@ -79,7 +83,7 @@ class OTelStatusNoiseFilter(logging.Filter):
             return False
         return True
 
-# Configure root logger - V5.0: Single configuration, no duplication
+# Configure root logger - V5.5: Single configuration, no duplication
 root_logger = logging.getLogger()
 root_logger.setLevel(logging.INFO)
 root_logger.propagate = False  # Do not propagate root records upward (avoids duplicate handlers in some setups)
@@ -666,7 +670,7 @@ async def chat_stream_endpoint(
     files: list[UploadFile] = File([]),
     persona: str = Form(None),
 ):
-    """V5.1 STREAMING: Handle chat requests with Server-Sent Events (SSE) streaming."""
+    """V5.5 STREAMING: Handle chat requests with Server-Sent Events (SSE) streaming."""
     from fastapi.responses import StreamingResponse
     
     async def event_generator():
@@ -746,7 +750,7 @@ async def chat_stream_endpoint(
                 request_id=request_id,
             )
             
-            # V5.0: Stream response - no guardrail overhead, direct LLM response
+            # V5.5: Stream response - no guardrail overhead, direct LLM response
             full_response = []
             
             async for chunk in process_chat_with_graph_stream(
@@ -1190,30 +1194,31 @@ async def reminder_dashboard():
 @app.get("/api/reminders/upcoming")
 async def get_upcoming_reminders():
     """Get upcoming reminders."""
-    reminders = reminder_service.get_upcoming_reminders()
+    reminders = await run_db(reminder_service.get_upcoming_reminders)
     return {"status": "success", "reminders": reminders}
 
 @app.get("/api/reminders/history")
 async def get_reminder_history():
     """Get reminder history (read-only)."""
-    reminders = reminder_service.get_reminder_history()
+    reminders = await run_db(reminder_service.get_reminder_history)
     logger.debug(
         "api reminders/history: returning %s rows (revision=%s)",
         len(reminders),
-        reminder_service.get_data_revision(),
+        await run_db(reminder_service.get_data_revision),
     )
     return {"status": "success", "reminders": reminders}
 
 @app.get("/api/reminders/stats")
 async def get_reminder_stats():
     """Get reminder statistics."""
-    stats = reminder_service.get_reminder_stats()
+    stats = await run_db(reminder_service.get_reminder_stats)
     return {"status": "success", "stats": stats}
 
 @app.get("/api/dashboard/data-revision")
 async def dashboard_data_revision():
     """Cross-worker revision from SQLite (fallback if WebSocket disconnects)."""
-    return {"status": "success", "revision": core_data.get_data_revision()}
+    revision = await run_db(core_data.get_data_revision)
+    return {"status": "success", "revision": revision}
 
 
 @app.websocket("/ws/dashboard")
@@ -1236,27 +1241,25 @@ async def dashboard_sync_websocket(websocket: WebSocket):
 async def get_pending_notifications():
     """Check for reminders that need notification."""
     notifications = []
-    
-    # Check 10-minute warnings
-    ten_min_reminders = reminder_service.get_reminders_needing_10m_notification()
+
+    ten_min_reminders = await run_db(reminder_service.get_reminders_needing_10m_notification)
     for r in ten_min_reminders:
-        reminder_service.mark_notified_10m(r['id'])
+        await run_db(reminder_service.mark_notified_10m, r['id'])
         notifications.append({
             "type": "warning",
             "message": f"Persiapan Master, 10 menit lagi event '{r['event_name']}'.",
             "reminder_id": r['id']
         })
-    
-    # Check event-time notifications
-    event_reminders = reminder_service.get_reminders_needing_event_notification()
+
+    event_reminders = await run_db(reminder_service.get_reminders_needing_event_notification)
     for r in event_reminders:
-        reminder_service.mark_notified_event(r['id'])
+        await run_db(reminder_service.mark_notified_event, r['id'])
         notifications.append({
             "type": "urgent",
             "message": f"Waktunya event '{r['event_name']}' dimulai, Master!",
             "reminder_id": r['id']
         })
-    
+
     return {"status": "success", "notifications": notifications}
 
 # --- Daily Habits Routes ---
@@ -1268,7 +1271,7 @@ async def habits_dashboard():
 @app.get("/api/habits")
 async def get_habits():
     """Get all daily habits (Pydantic-validated; same data path as Telegram/schedulers)."""
-    habits = core_data.list_habits_validated()
+    habits = await run_db(core_data.list_habits_validated)
     return {"status": "success", "habits": habits}
 
 
@@ -1280,9 +1283,8 @@ async def create_habit(
 ):
     """Create a new habit via single service gateway (with revision bump)."""
     try:
-        from kuro_backend import memory_coordinator as _mem_coord
-
-        habit_id = _mem_coord.habit_create(
+        habit_id = await run_db(
+            memory_coordinator.habit_create,
             title=title,
             scheduled_time=scheduled_time,
             category=category,
@@ -1321,9 +1323,12 @@ async def update_habit(
                 status_code=400,
                 content={"status": "error", "message": "No update fields provided"},
             )
-        from kuro_backend import memory_coordinator as _mem_coord
-
-        _mem_coord.habit_update(habit_id, source="web_api", **filtered_updates)
+        await run_db(
+            memory_coordinator.habit_update,
+            habit_id,
+            source="web_api",
+            **filtered_updates,
+        )
         return {"status": "success", "habit_id": habit_id}
     except Exception as e:
         logger.error("Error updating habit %s: %s", habit_id, e)
@@ -1337,9 +1342,7 @@ async def update_habit(
 async def delete_habit(habit_id: int):
     """Delete a habit via service gateway (with revision bump)."""
     try:
-        from kuro_backend import memory_coordinator as _mem_coord
-
-        _mem_coord.habit_delete(habit_id, source="web_api")
+        await run_db(memory_coordinator.habit_delete, habit_id, source="web_api")
         return {"status": "success", "habit_id": habit_id}
     except Exception as e:
         logger.error("Error deleting habit %s: %s", habit_id, e)
@@ -1351,13 +1354,13 @@ async def delete_habit(habit_id: int):
 @app.get("/api/habits/stats")
 async def get_habits_stats():
     """Get today's habit completion stats."""
-    stats = core_data.get_completion_stats_validated()
+    stats = await run_db(core_data.get_completion_stats_validated)
     return {"status": "success", "stats": stats}
 
 @app.get("/api/habits/report")
 async def get_end_of_day_report():
     """Get end-of-day narrative report."""
-    report = core_data.get_end_of_day_report()
+    report = await run_db(core_data.get_end_of_day_report)
     return {"status": "success", "report": report}
 
 # --- V2.0: Monthly/Weekly Analytics Endpoints ---
@@ -1372,7 +1375,7 @@ async def get_monthly_habits(year: int = None, month: int = None):
         month = today.month
     
     try:
-        data = core_data.get_monthly_data_validated(year, month)
+        data = await run_db(core_data.get_monthly_data_validated, year, month)
         return {"status": "success", "data": data}
     except Exception as e:
         logger.error(f"Error getting monthly data: {e}")
@@ -1388,7 +1391,7 @@ async def get_weekly_habits(year: int = None, week: int = None):
         week = today.isocalendar()[1]
     
     try:
-        data = core_data.get_weekly_data_validated(year, week)
+        data = await run_db(core_data.get_weekly_data_validated, year, week)
         return {"status": "success", "data": data}
     except Exception as e:
         logger.error(f"Error getting weekly data: {e}")
@@ -1401,20 +1404,21 @@ async def get_habits_evaluation_cached(period_type: str, year: int, period: int)
     rev_headers = {
         "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
         "Pragma": "no-cache",
-        "X-Data-Revision": str(core_data.get_data_revision()),
+        "X-Data-Revision": str(await run_db(core_data.get_data_revision)),
     }
     try:
         if period_type == "monthly":
-            meta = core_data.get_monthly_report_data(year, period)
+            meta = await run_db(core_data.get_monthly_report_data, year, period)
         elif period_type == "weekly":
-            meta = core_data.get_weekly_report_data(year, period)
+            meta = await run_db(core_data.get_weekly_report_data, year, period)
         else:
             return JSONResponse(
                 status_code=400,
                 content={"status": "error", "message": "period_type must be monthly or weekly"},
                 headers=rev_headers,
             )
-        row = core_data.get_ai_evaluation(
+        row = await run_db(
+            core_data.get_ai_evaluation,
             None,
             meta["period_type"],
             meta["period_start"],

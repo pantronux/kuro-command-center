@@ -1,5 +1,5 @@
 """
-Kuro AI V5.0 - Perpetual Memory with Mem0 [2026-04-15]
+Kuro AI V5.5 - Perpetual Memory with Mem0 [2026-04-17]
 ================================================================================
 Integrates Mem0 framework for long-term personal memory about Pantronux.
 - Memory Extraction: Detects and saves personal info, preferences, habits
@@ -11,10 +11,15 @@ import logging
 import os
 import re
 import json
+import time
 from typing import List, Dict, Optional, Any
 from datetime import datetime
 from mem0 import Memory
 from kuro_backend.config import settings
+
+# Cooldown ladder (seconds) after embedding/API failure. Keeps client alive but rate-limited
+# so a single 404 from gemini-embedding doesn't kill Mem0 until process restart.
+_MEM0_COOLDOWN_LADDER = (60.0, 300.0, 900.0)
 
 logger = logging.getLogger(__name__)
 logger.propagate = False  # Prevent double-reporting to root logger
@@ -148,11 +153,36 @@ class PerpetualMemory:
     
     def __init__(self):
         self.user_id = MASTER_USER_ID
-        self._client = None
-    
+        self._client: Optional[Memory] = None
+        self._cooldown_until_ts: float = 0.0
+        self._consecutive_failures: int = 0
+
+    def _is_in_cooldown(self) -> bool:
+        return time.monotonic() < self._cooldown_until_ts
+
+    def _enter_cooldown(self, reason: str) -> None:
+        idx = min(self._consecutive_failures, len(_MEM0_COOLDOWN_LADDER) - 1)
+        delay = _MEM0_COOLDOWN_LADDER[idx]
+        self._cooldown_until_ts = time.monotonic() + delay
+        self._consecutive_failures += 1
+        logger.warning(
+            "[MEM0] Entering cooldown for %.0fs (failure #%s, reason=%s)",
+            delay,
+            self._consecutive_failures,
+            reason,
+        )
+
+    def _reset_cooldown(self) -> None:
+        if self._consecutive_failures or self._cooldown_until_ts:
+            logger.info("[MEM0] Cooldown reset after successful operation.")
+        self._cooldown_until_ts = 0.0
+        self._consecutive_failures = 0
+
     @property
-    def client(self) -> Memory:
-        """Lazy initialization of Mem0 client with fast fallback on embedding errors."""
+    def client(self) -> Optional[Memory]:
+        """Lazy initialization of Mem0 client with cooldown-aware fallback."""
+        if self._is_in_cooldown():
+            return None
         if self._client is None:
             try:
                 from mem0.configs.base import MemoryConfig, VectorStoreConfig, LlmConfig, EmbedderConfig
@@ -189,11 +219,12 @@ class PerpetualMemory:
                 logger.info(f"[MEM0] Client initialized with Gemini API and Qdrant storage at {MEM0_STORAGE_DIR}")
             except Exception as e:
                 error_str = str(e).lower()
-                # Fast fallback on embedding 404 or API errors - no retry
                 if "404" in error_str or "not found" in error_str or "embedding" in error_str:
-                    logger.warning(f"[MEM0] Embedding API error (fast bypass): {e}")
+                    logger.warning(f"[MEM0] Embedding API error (cooldown): {e}")
+                    self._enter_cooldown("init_embedding_error")
                 else:
                     logger.error(f"[MEM0] Failed to initialize client: {e}")
+                    self._enter_cooldown("init_generic_error")
                 self._client = None
         return self._client
     
@@ -364,20 +395,20 @@ class PerpetualMemory:
                 )
                 logger.info("[MEM0] Memory successfully stored.")
                 logger.debug(f"[MEM0] Stored memory preview: {mem_text[:60]}...")
+                self._reset_cooldown()
             except Exception as e:
                 error_str = str(e).lower()
-                # Fast bypass on embedding 404 - don't retry, just skip
                 if "404" in error_str or "not found" in error_str or "embedding" in error_str:
-                    logger.warning(f"[MEM0] Embedding error during store (fast bypass): {e}")
-                    self._client = None  # Disable client to prevent further attempts
+                    logger.warning(f"[MEM0] Embedding error during store (cooldown): {e}")
+                    self._enter_cooldown("store_embedding_error")
                     return
-                else:
-                    logger.error(f"[MEM0] Failed to store memory: {e}")
+                logger.error(f"[MEM0] Failed to store memory: {e}")
+                self._enter_cooldown("store_generic_error")
     
     def retrieve_memories(self, query: str, limit: int = 5) -> List[Dict]:
         """
         Retrieve relevant memories based on query.
-        V5.0: Fast bypass on embedding errors - no timeout waiting.
+        V5.5: Fast bypass on embedding errors - no timeout waiting.
         
         Returns list of memories with text and metadata.
         """
@@ -420,16 +451,17 @@ class PerpetualMemory:
                     logger.warning(f"[MEM0] Skipping unknown result type: {type(result)}")
             
             logger.info(f"[MEM0] Retrieved {len(memories)} memories for query: {query[:50]}...")
+            self._reset_cooldown()
             return memories
-            
+
         except Exception as e:
             error_str = str(e).lower()
-            # Fast bypass on embedding 404 - disable client and return empty
             if "404" in error_str or "not found" in error_str or "embedding" in error_str:
-                logger.warning(f"[MEM0] Embedding error during retrieve (fast bypass): {e}")
-                self._client = None  # Disable client to prevent further attempts
+                logger.warning(f"[MEM0] Embedding error during retrieve (cooldown): {e}")
+                self._enter_cooldown("retrieve_embedding_error")
             else:
                 logger.error(f"[MEM0] Failed to retrieve memories: {e}")
+                self._enter_cooldown("retrieve_generic_error")
             return []
     
     def get_habit_history(self, habit: str, days: int = 30) -> List[Dict]:

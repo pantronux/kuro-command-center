@@ -1,5 +1,5 @@
 """
-Kuro AI V5.0 - Observability with Arize Phoenix & OpenTelemetry
+Kuro AI V5.5 - Observability with Arize Phoenix & OpenTelemetry
 ================================================================================
 Black Box System for Tracing, Guardrails Validation, and Performance Monitoring
 Port 6006 - Phoenix Dashboard with Simple Auth
@@ -148,7 +148,7 @@ def setup_opentelemetry() -> Optional[trace.Tracer]:
         # Create resource with service info - SPECIFIC PROJECT NAME for Phoenix
         resource = Resource.create({
             "service.name": "Kuro-AI-Audit",
-            "service.version": "5.0",
+            "service.version": "5.5",
             "deployment.environment": "production",
         })
         
@@ -251,7 +251,7 @@ def trace_node(node_name: str, attributes: Dict[str, str] = None):
             span.set_attribute(f"{node_name}.duration_ms", round(duration * 1000, 2))
 
 
-# V5.0: Guardrails tracking removed. Environment is trusted (Local + VPN + Auth).
+# V5.5: Guardrails tracking removed. Environment is trusted (Local + VPN + Auth).
 # ============================================
 # TOKEN USAGE MONITORING
 # ============================================
@@ -274,7 +274,7 @@ def track_token_usage(session_id: str, prompt_tokens: int, completion_tokens: in
     _token_tracker[session_id]["completion_tokens"] += completion_tokens
     _token_tracker[session_id]["total_tokens"] += total_tokens
     
-    # V5.0: Token threshold alert disabled. Only tracking for observability.
+    # V5.5: Token threshold alert disabled. Only tracking for observability.
     return _token_tracker[session_id]
 
 

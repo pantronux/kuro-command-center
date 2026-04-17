@@ -1,5 +1,5 @@
 """
-Grounded habit reporting: SQLite is the only source of habit facts for LLM narratives.
+Kuro AI V5.5 — Grounded habit reporting: SQLite is the only source of habit facts for LLM narratives.
 
 Used by habit_node (evaluasi) and response_node (konteks) to reduce hallucinated
 activities, IPs, ISO clauses, etc.

@@ -1,5 +1,5 @@
 """
-OpenClaw bridge client for external execution handover.
+Kuro AI V5.5 — OpenClaw bridge client for external execution handover.
 """
 from __future__ import annotations
 
@@ -71,6 +71,44 @@ def _record_availability_failure() -> int:
             _circuit_opened_at = time.monotonic()
             _half_open_probe_inflight = False
         return _consecutive_unavailable_failures
+
+
+def _mark_bridge_failure(was_probe: bool) -> int:
+    """
+    Atomic single-lock failure bookkeeping.
+
+    - `was_probe=True`  -> this request originated from the half-open probe slot.
+      We clear `_half_open_probe_inflight` and re-open the circuit (push cooldown).
+      Failure counter is NOT incremented again (the circuit is already open).
+    - `was_probe=False` -> normal closed-circuit failure. Increment counter and
+      open circuit if threshold hit.
+
+    Returns current consecutive failure count (post-mutation).
+    """
+    global _consecutive_unavailable_failures, _circuit_open, _circuit_opened_at, _half_open_probe_inflight
+    with _circuit_breaker_lock:
+        if was_probe:
+            _half_open_probe_inflight = False
+            _circuit_open = True
+            _circuit_opened_at = time.monotonic()
+            return _consecutive_unavailable_failures
+        _consecutive_unavailable_failures += 1
+        if _consecutive_unavailable_failures >= OPENCLAW_CIRCUIT_BREAKER_THRESHOLD:
+            _circuit_open = True
+            _circuit_opened_at = time.monotonic()
+            _half_open_probe_inflight = False
+        return _consecutive_unavailable_failures
+
+
+def _mark_bridge_success(was_probe: bool) -> None:
+    """Atomic single-lock success bookkeeping (closes circuit)."""
+    global _consecutive_unavailable_failures, _circuit_open, _circuit_opened_at, _half_open_probe_inflight
+    with _circuit_breaker_lock:
+        _consecutive_unavailable_failures = 0
+        _circuit_open = False
+        _circuit_opened_at = 0.0
+        if was_probe:
+            _half_open_probe_inflight = False
 
 
 def _reset_circuit_breaker() -> None:
@@ -159,24 +197,27 @@ class OpenClawBridgeClient:
         return await execute_openclaw_skill(skill_name, params or {}, client=self)
 
 
-async def execute_openclaw_skill(
+def _build_bridge_request(
     skill_name: str,
-    params: Optional[Dict[str, Any]] = None,
-    *,
-    client: Optional[OpenClawBridgeClient] = None,
+    params: Optional[Dict[str, Any]],
+    client: Optional[OpenClawBridgeClient],
 ) -> Dict[str, Any]:
     """
-    Async handover to OpenClaw daemon.
+    Shared pre-flight (validation + circuit breaker claim + payload build).
 
-    Returns a normalized payload to simplify usage from tool callers.
+    Returns either:
+      - {"short_circuit": <response_dict>} when caller should return immediately, OR
+      - {"bridge": ..., "payload": ..., "request_id": ..., "was_probe": bool}
     """
     if not skill_name or not skill_name.strip():
         return {
-            "success": False,
-            "error": "OpenClaw skill_name is required.",
-            "status_code": None,
-            "request_id": None,
-            "raw_response": None,
+            "short_circuit": {
+                "success": False,
+                "error": "OpenClaw skill_name is required.",
+                "status_code": None,
+                "request_id": None,
+                "raw_response": None,
+            }
         }
 
     bridge = client or OpenClawBridgeClient()
@@ -185,21 +226,24 @@ async def execute_openclaw_skill(
     command_candidate = _extract_command_for_safety_check(normalized_params)
     execution_mode = _normalize_execution_mode(normalized_params)
 
-    if _is_circuit_open() and not _try_begin_half_open_probe():
+    circuit_was_open = _is_circuit_open()
+    if circuit_was_open and not _try_begin_half_open_probe():
         logger.warning("[OPENCLAW] Circuit open; skipping request request_id=%s", request_id)
-        return _build_circuit_open_response(request_id, raw_error="circuit_open")
+        return {"short_circuit": _build_circuit_open_response(request_id, raw_error="circuit_open")}
+    was_probe = circuit_was_open
 
     if execution_mode != "readonly" and command_candidate is None:
         return {
-            "success": False,
-            "error": "Eksekusi ditolak: execution_mode mutating wajib menyertakan command/task_description eksplisit.",
-            "status_code": None,
-            "request_id": request_id,
-            "raw_response": None,
+            "short_circuit": {
+                "success": False,
+                "error": "Eksekusi ditolak: execution_mode mutating wajib menyertakan command/task_description eksplisit.",
+                "status_code": None,
+                "request_id": request_id,
+                "raw_response": None,
+            }
         }
 
     if command_candidate is not None:
-        # Keep exact model-sent command for incident/audit traces.
         logger.info("[OPENCLAW] Gemini command request_id=%s command=%r", request_id, command_candidate)
         if not is_command_safe(command_candidate):
             logger.warning(
@@ -208,11 +252,13 @@ async def execute_openclaw_skill(
                 command_candidate,
             )
             return {
-                "success": False,
-                "error": "Eksekusi ditolak: Perintah ini berisiko mematikan sistem Master.",
-                "status_code": None,
-                "request_id": request_id,
-                "raw_response": None,
+                "short_circuit": {
+                    "success": False,
+                    "error": "Eksekusi ditolak: Perintah ini berisiko mematikan sistem Master.",
+                    "status_code": None,
+                    "request_id": request_id,
+                    "raw_response": None,
+                }
             }
 
     payload = {
@@ -222,37 +268,69 @@ async def execute_openclaw_skill(
         "source": "kuro_openclaw_bridge",
         "execution_mode": execution_mode,
     }
+    return {
+        "bridge": bridge,
+        "payload": payload,
+        "request_id": request_id,
+        "was_probe": was_probe,
+    }
 
-    def _post() -> Dict[str, Any]:
-        response = requests.post(
-            bridge.execute_url,
-            json=payload,
-            timeout=bridge.timeout_seconds,
-        )
-        parsed_body: Any
-        try:
-            parsed_body = response.json()
-        except ValueError:
-            parsed_body = {"text": response.text}
 
+def _post_openclaw_blocking(bridge: "OpenClawBridgeClient", payload: Dict[str, Any]) -> Dict[str, Any]:
+    response = requests.post(
+        bridge.execute_url,
+        json=payload,
+        timeout=bridge.timeout_seconds,
+    )
+    try:
+        parsed_body: Any = response.json()
+    except ValueError:
+        parsed_body = {"text": response.text}
+    return {"status_code": response.status_code, "ok": response.ok, "body": parsed_body}
+
+
+def _handle_bridge_response(
+    result: Dict[str, Any],
+    request_id: str,
+    was_probe: bool,
+) -> Dict[str, Any]:
+    body = result.get("body")
+    status_code = result.get("status_code")
+    ok = bool(result.get("ok"))
+
+    if not ok:
+        _mark_bridge_failure(was_probe)
         return {
-            "status_code": response.status_code,
-            "ok": response.ok,
-            "body": parsed_body,
+            "success": False,
+            "error": f"OpenClaw returned HTTP {status_code}",
+            "status_code": status_code,
+            "request_id": request_id,
+            "raw_response": body,
         }
 
-    try:
-        result = await asyncio.to_thread(_post)
-    except requests.Timeout:
-        _finish_half_open_probe(False)
-        failures = _record_availability_failure()
+    _mark_bridge_success(was_probe)
+    return {
+        "success": True,
+        "status_code": status_code,
+        "request_id": request_id,
+        "result": body,
+        "raw_response": body,
+    }
+
+
+def _build_exception_response(
+    exc: BaseException,
+    request_id: str,
+    bridge: "OpenClawBridgeClient",
+    was_probe: bool,
+) -> Dict[str, Any]:
+    if isinstance(exc, requests.Timeout):
+        failures = _mark_bridge_failure(was_probe)
         logger.warning(
-            "[OPENCLAW] Timeout request_id=%s endpoint=%s failures=%s",
-            request_id,
-            bridge.execute_url,
-            failures,
+            "[OPENCLAW] Timeout request_id=%s endpoint=%s failures=%s was_probe=%s",
+            request_id, bridge.execute_url, failures, was_probe,
         )
-        if failures >= OPENCLAW_CIRCUIT_BREAKER_THRESHOLD:
+        if was_probe or failures >= OPENCLAW_CIRCUIT_BREAKER_THRESHOLD:
             return _build_circuit_open_response(
                 request_id,
                 raw_error=f"timeout_after_{bridge.timeout_seconds:.1f}s",
@@ -270,11 +348,13 @@ async def execute_openclaw_skill(
                 "threshold": OPENCLAW_CIRCUIT_BREAKER_THRESHOLD,
             },
         }
-    except requests.ConnectionError as exc:
-        _finish_half_open_probe(False)
-        failures = _record_availability_failure()
-        logger.error("[OPENCLAW] Connection failed request_id=%s failures=%s error=%s", request_id, failures, exc)
-        if failures >= OPENCLAW_CIRCUIT_BREAKER_THRESHOLD:
+    if isinstance(exc, requests.ConnectionError):
+        failures = _mark_bridge_failure(was_probe)
+        logger.error(
+            "[OPENCLAW] Connection failed request_id=%s failures=%s was_probe=%s error=%s",
+            request_id, failures, was_probe, exc,
+        )
+        if was_probe or failures >= OPENCLAW_CIRCUIT_BREAKER_THRESHOLD:
             return _build_circuit_open_response(request_id, raw_error=f"connection_error:{exc}")
         return {
             "success": False,
@@ -289,8 +369,8 @@ async def execute_openclaw_skill(
                 "threshold": OPENCLAW_CIRCUIT_BREAKER_THRESHOLD,
             },
         }
-    except requests.RequestException as exc:
-        _finish_half_open_probe(False)
+    if isinstance(exc, requests.RequestException):
+        _mark_bridge_failure(was_probe)
         logger.error("[OPENCLAW] Request failed request_id=%s error=%s", request_id, exc)
         return {
             "success": False,
@@ -299,37 +379,67 @@ async def execute_openclaw_skill(
             "request_id": request_id,
             "raw_response": None,
         }
-    except Exception as exc:
-        _finish_half_open_probe(False)
-        logger.exception("[OPENCLAW] Unexpected error request_id=%s", request_id)
-        return {
-            "success": False,
-            "error": f"Unexpected OpenClaw bridge error: {exc}",
-            "status_code": None,
-            "request_id": request_id,
-            "raw_response": None,
-        }
-
-    body = result.get("body")
-    status_code = result.get("status_code")
-    ok = bool(result.get("ok"))
-
-    if not ok:
-        _finish_half_open_probe(False)
-        return {
-            "success": False,
-            "error": f"OpenClaw returned HTTP {status_code}",
-            "status_code": status_code,
-            "request_id": request_id,
-            "raw_response": body,
-        }
-
-    _finish_half_open_probe(True)
-    _reset_circuit_breaker()
+    _mark_bridge_failure(was_probe)
+    logger.exception("[OPENCLAW] Unexpected error request_id=%s", request_id)
     return {
-        "success": True,
-        "status_code": status_code,
+        "success": False,
+        "error": f"Unexpected OpenClaw bridge error: {exc}",
+        "status_code": None,
         "request_id": request_id,
-        "result": body,
-        "raw_response": body,
+        "raw_response": None,
     }
+
+
+def execute_openclaw_skill_blocking(
+    skill_name: str,
+    params: Optional[Dict[str, Any]] = None,
+    *,
+    client: Optional[OpenClawBridgeClient] = None,
+) -> Dict[str, Any]:
+    """
+    Pure synchronous variant for sync callers (tool thread, CLI, tests).
+
+    Does NOT spawn a nested asyncio event loop — uses `requests.post` directly.
+    Async callers should keep using `execute_openclaw_skill`.
+    """
+    pre = _build_bridge_request(skill_name, params, client)
+    if "short_circuit" in pre:
+        return pre["short_circuit"]
+
+    bridge = pre["bridge"]
+    payload = pre["payload"]
+    request_id = pre["request_id"]
+    was_probe = pre["was_probe"]
+
+    try:
+        result = _post_openclaw_blocking(bridge, payload)
+    except BaseException as exc:  # noqa: BLE001 - needs full matrix for circuit breaker
+        return _build_exception_response(exc, request_id, bridge, was_probe)
+
+    return _handle_bridge_response(result, request_id, was_probe)
+
+
+async def execute_openclaw_skill(
+    skill_name: str,
+    params: Optional[Dict[str, Any]] = None,
+    *,
+    client: Optional[OpenClawBridgeClient] = None,
+) -> Dict[str, Any]:
+    """
+    Async handover to OpenClaw daemon. Offloads blocking HTTP to a worker thread.
+    """
+    pre = _build_bridge_request(skill_name, params, client)
+    if "short_circuit" in pre:
+        return pre["short_circuit"]
+
+    bridge = pre["bridge"]
+    payload = pre["payload"]
+    request_id = pre["request_id"]
+    was_probe = pre["was_probe"]
+
+    try:
+        result = await asyncio.to_thread(_post_openclaw_blocking, bridge, payload)
+    except BaseException as exc:  # noqa: BLE001 - matrix handled by _build_exception_response
+        return _build_exception_response(exc, request_id, bridge, was_probe)
+
+    return _handle_bridge_response(result, request_id, was_probe)

@@ -534,7 +534,7 @@ function removeFile(index) {
 // ============================================
 // Chat Functions
 // ============================================
-// V5.1 STREAMING: Send message with SSE streaming
+// V5.5 STREAMING: Send message with SSE streaming
 // ============================================
 async function sendMessage() {
     const message = elements.messageInput.value.trim();
@@ -732,7 +732,7 @@ async function sendMessage() {
     }
 }
 
-// V5.1: Scroll to bottom helper for streaming
+// V5.5: Scroll to bottom helper for streaming
 function scrollToBottom() {
     if (elements.chatContainer) {
         elements.chatContainer.scrollTop = elements.chatContainer.scrollHeight;

@@ -1,5 +1,5 @@
 """
-Unified Memory Coordinator — single orchestration surface for memory-related reads
+Kuro AI V5.5 — Unified Memory Coordinator — single orchestration surface for memory-related reads
 and post-response writes across short-term, Chroma, Mem0, and SSOT revision (habits/reminders).
 
 AUDIT — mutation entry points (update when adding routes or tools):
@@ -15,6 +15,7 @@ AUDIT — mutation entry points (update when adding routes or tools):
 """
 from __future__ import annotations
 
+import concurrent.futures
 import hashlib
 import logging
 import os
@@ -25,6 +26,70 @@ from typing import Any, Dict, List, Optional, Sequence
 
 logger = logging.getLogger(__name__)
 logger.propagate = False
+
+_MEM0_DEFAULT_TIMEOUT_SEC = float(os.getenv("KURO_MEM0_TIMEOUT_SEC", "3.0"))
+_MEM0_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=2, thread_name_prefix="kuro-mem0"
+)
+
+# Dedicated pool for parallel context fan-out (SQLite + Chroma + referent).
+# Sized small because each call is I/O bound but we don't want to starve the
+# Mem0 pool.
+_CONTEXT_FANOUT_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=4, thread_name_prefix="kuro-ctx"
+)
+_CONTEXT_FETCH_TIMEOUT_SEC = float(os.getenv("KURO_CONTEXT_FETCH_TIMEOUT_SEC", "1.5"))
+
+
+def _parallel_gather_sync(
+    tasks: Dict[str, Any],
+    *,
+    timeout_s: float = _CONTEXT_FETCH_TIMEOUT_SEC,
+    default: Any = None,
+) -> Dict[str, Any]:
+    """Run a dict of zero-arg callables concurrently and return their results.
+
+    Returns ``default`` (or ``None``) for any task that times out or raises,
+    so callers can always assume every requested key is present. This makes
+    the helper safe to drop into hot paths where partial failures must degrade
+    gracefully rather than bubble up.
+    """
+    if not tasks:
+        return {}
+    results: Dict[str, Any] = {}
+    future_map: Dict[concurrent.futures.Future, str] = {}
+    for name, fn in tasks.items():
+        try:
+            future_map[_CONTEXT_FANOUT_EXECUTOR.submit(fn)] = name
+        except RuntimeError:
+            # Executor shutting down — run inline as last resort.
+            try:
+                results[name] = fn()
+            except Exception:
+                results[name] = default
+    try:
+        done, not_done = concurrent.futures.wait(
+            future_map.keys(), timeout=timeout_s, return_when=concurrent.futures.ALL_COMPLETED
+        )
+    except Exception as exc:
+        logger.warning("[CONTEXT_FANOUT] wait() error: %s", exc)
+        done, not_done = set(future_map.keys()), set()
+    for fut in done:
+        name = future_map[fut]
+        try:
+            results[name] = fut.result()
+        except Exception as exc:
+            logger.warning("[CONTEXT_FANOUT] task %s failed: %s", name, exc)
+            results[name] = default
+    for fut in not_done:
+        name = future_map[fut]
+        logger.warning("[CONTEXT_FANOUT] task %s timed out after %.2fs", name, timeout_s)
+        results[name] = default
+        fut.cancel()
+    # Fill in missing keys (should be none, defensive)
+    for name in tasks:
+        results.setdefault(name, default)
+    return results
 
 _DEICTIC_HINT_RE = re.compile(
     r"\b(ini|itu|tersebut|tadi|barusan|yang\s+dimaksud|maksudnya|gambar\s+ini|"
@@ -238,6 +303,137 @@ def build_gemini_contents_parts(full_text: str, image_paths: Optional[Sequence[s
     return parts
 
 
+# ---------------------------------------------------------------------------
+# Sliding-Window Summarization (P2.1)
+# ---------------------------------------------------------------------------
+# Compress older short-term turns into a single summary block so the prompt
+# stays small while historical context is preserved. Summaries are cached in
+# SQLite (one row per persona) keyed by the last included entry id, so we only
+# regenerate when genuinely new turns have arrived.
+
+_SLIDING_WINDOW_MAX_TURNS = int(os.getenv("KURO_SHORT_TERM_MAX_TURNS", "6"))
+_SLIDING_WINDOW_MAX_CHARS = int(os.getenv("KURO_SHORT_TERM_MAX_CHARS", "1200"))
+_SLIDING_WINDOW_SUMMARY_MAX_CHARS = int(os.getenv("KURO_SHORT_TERM_SUMMARY_MAX_CHARS", "900"))
+
+
+def _format_entries_for_prompt(entries: Sequence[Dict[str, Any]], *, max_chars_per_entry: int = 200) -> str:
+    lines: List[str] = []
+    for entry in entries:
+        role = "User" if entry.get("role") == "user" else "Kuro"
+        content = (entry.get("content") or "")[:max_chars_per_entry]
+        lines.append(f"{role}: {content}")
+    return "\n".join(lines)
+
+
+_summary_genai_client = None
+_summary_genai_client_lock = threading.Lock()
+
+
+def _get_summary_genai_client():
+    """Lazy-initialized standalone Gemini client used by the summarizer.
+
+    Kept separate from :func:`langgraph_core._get_genai_client` to avoid a
+    circular import (``langgraph_core`` imports this module at module load).
+    """
+    global _summary_genai_client
+    if _summary_genai_client is not None:
+        return _summary_genai_client
+    with _summary_genai_client_lock:
+        if _summary_genai_client is None:
+            from google import genai
+            from kuro_backend.config import settings
+            _summary_genai_client = genai.Client(api_key=settings.GEMINI_API_KEY)
+    return _summary_genai_client
+
+
+def _summarize_older_turns(older_entries: Sequence[Dict[str, Any]]) -> str:
+    """Synchronous Gemini call that produces a compact Indo summary of older
+    turns. Returns empty string on any failure so caller can fall back to the
+    uncompressed path."""
+    if not older_entries:
+        return ""
+    try:
+        from google.genai import types as genai_types
+        from kuro_backend.config import PRIMARY_MODEL
+
+        client = _get_summary_genai_client()
+
+        convo_blob = _format_entries_for_prompt(older_entries, max_chars_per_entry=250)
+        system_instruction = (
+            "Anda adalah kompresor percakapan. Rangkum percakapan berikut dalam "
+            "3-5 kalimat Bahasa Indonesia padat: topik utama, keputusan atau fakta "
+            "penting yang muncul, nama/referensi spesifik. JANGAN menambah fakta "
+            "yang tidak ada. JANGAN pakai bullet. Maksimum 220 token."
+        )
+        response = client.models.generate_content(
+            model=PRIMARY_MODEL,
+            contents=convo_blob,
+            config=genai_types.GenerateContentConfig(
+                system_instruction=system_instruction,
+                temperature=0.0,
+                top_p=0.1,
+                top_k=1,
+                max_output_tokens=220,
+            ),
+        )
+        text = getattr(response, "text", "") or ""
+        return text.strip()[:_SLIDING_WINDOW_SUMMARY_MAX_CHARS]
+    except Exception as exc:
+        logger.warning("[SLIDING_WINDOW] summary generation failed: %s", exc)
+        return ""
+
+
+def build_compressed_short_term_text(
+    persona_scope: str,
+    *,
+    max_turns: int = _SLIDING_WINDOW_MAX_TURNS,
+    max_chars: int = _SLIDING_WINDOW_MAX_CHARS,
+) -> str:
+    """Return a compressed short-term block suitable for prompt injection.
+
+    - If <= ``max_turns`` entries exist, returns the verbatim recent turns.
+    - Otherwise, compresses older turns into a cached ``[SUMMARY earlier_conversation]``
+      block and prepends it before the verbatim latest ``max_turns``.
+
+    The summary is cached per persona keyed by the highest included entry id so
+    we only regenerate when new turns push past the window.
+    """
+    from kuro_backend import memory_manager
+
+    entries = memory_manager.get_short_term_with_ids(persona_scope=persona_scope)
+    if not entries:
+        return ""
+    if len(entries) <= max_turns:
+        return _format_entries_for_prompt(entries, max_chars_per_entry=160)
+
+    older = entries[:-max_turns]
+    recent = entries[-max_turns:]
+    older_max_id = max((e.get("id") or 0) for e in older)
+
+    cached = memory_manager.get_short_term_summary(persona_scope)
+    if cached and cached.get("last_entry_id", 0) >= older_max_id and cached.get("summary"):
+        summary_text = cached["summary"]
+    else:
+        summary_text = _summarize_older_turns(older)
+        if summary_text:
+            try:
+                memory_manager.upsert_short_term_summary(persona_scope, older_max_id, summary_text)
+            except Exception as exc:
+                logger.warning("[SLIDING_WINDOW] upsert cache failed: %s", exc)
+
+    if not summary_text:
+        # Fallback: concat recent only so we never exceed the window even
+        # when summarization fails.
+        return _format_entries_for_prompt(recent, max_chars_per_entry=160)
+
+    recent_text = _format_entries_for_prompt(recent, max_chars_per_entry=160)
+    compressed = f"[SUMMARY earlier_conversation]\n{summary_text}\n\n{recent_text}"
+    if len(compressed) > max_chars:
+        # Hard clamp in case summary + recent overshoot the budget.
+        compressed = compressed[: max_chars - 3] + "..."
+    return compressed
+
+
 def build_context_for_llm(
     user_input: str,
     persona_mode: str,
@@ -259,34 +455,54 @@ def build_context_for_llm(
         {"persona": persona_mode, "has_compliance": bool(compliance_data), "mem0_n": len(mem0_retrieved_memories or [])},
     )
 
-    recent_messages = memory_manager.get_short_term(persona_scope=persona_mode)
+    # P1.1 — Parallelize independent I/O. `get_short_term` (SQLite), the Mem0
+    # formatter (CPU-only but cheap), and the referent grounding block are
+    # independent of each other. `query_memory` depends on `recent_messages`
+    # so it runs after the short-term fetch.
+    parallel_tasks: Dict[str, Any] = {
+        "short_term": lambda: memory_manager.get_short_term(persona_scope=persona_mode),
+    }
+    if include_referent_grounding:
+        parallel_tasks["referent"] = lambda: build_referent_grounding_block(
+            user_input,
+            persona_mode,
+            chat_platform=chat_platform,
+        )
+    if mem0_retrieved_memories:
+        parallel_tasks["mem0_fmt"] = lambda: perpetual_memory.perpetual_memory.format_memories_for_context(
+            mem0_retrieved_memories
+        )
+
+    fan_out = _parallel_gather_sync(parallel_tasks)
+    recent_messages = fan_out.get("short_term") or []
+    referent_grounding_block = fan_out.get("referent") if include_referent_grounding else None
+    mem0_context_block = fan_out.get("mem0_fmt") if mem0_retrieved_memories else None
+    if mem0_context_block:
+        logger.info(
+            "[MEMORY_COORD] build_context persona=%s mem0_chars=%s",
+            persona_mode,
+            len(mem0_context_block),
+        )
+
+    # query_memory depends on recent_messages (used for expansion), so it runs
+    # after the fan-out completes. Chroma calls are already internally parallel.
     memory = memory_manager.query_memory(
         user_input,
         recent_messages=recent_messages,
         persona_scope=persona_mode,
         include_compliance=not bool(compliance_data),
     )
+    # P2.1 — replace the short-term block with a sliding-window-compressed
+    # version when the history exceeds the turn budget. Compressed summary is
+    # cached per-persona so we pay the LLM cost only when new turns arrive.
+    try:
+        compressed_short_term = build_compressed_short_term_text(persona_mode)
+        if compressed_short_term:
+            memory["short_term"] = compressed_short_term
+    except Exception as exc:
+        logger.warning("[SLIDING_WINDOW] fallback to raw short-term: %s", exc)
+
     memory_injection = memory_manager.format_memory_with_temporal_grounding(memory)
-
-    mem0_context_block = None
-    if mem0_retrieved_memories:
-        mem0_context_block = perpetual_memory.perpetual_memory.format_memories_for_context(
-            mem0_retrieved_memories
-        )
-        if mem0_context_block:
-            logger.info(
-                "[MEMORY_COORD] build_context persona=%s mem0_chars=%s",
-                persona_mode,
-                len(mem0_context_block),
-            )
-
-    referent_grounding_block = None
-    if include_referent_grounding:
-        referent_grounding_block = build_referent_grounding_block(
-            user_input,
-            persona_mode,
-            chat_platform=chat_platform,
-        )
 
     return {
         "recent_messages": recent_messages,
@@ -294,6 +510,146 @@ def build_context_for_llm(
         "mem0_context_block": mem0_context_block,
         "referent_grounding_block": referent_grounding_block,
     }
+
+
+async def build_context_for_llm_async(
+    user_input: str,
+    persona_mode: str,
+    *,
+    compliance_data: Optional[List[Any]] = None,
+    mem0_retrieved_memories: Optional[List[Any]] = None,
+    include_referent_grounding: bool = True,
+    chat_platform: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Async variant of :func:`build_context_for_llm`.
+
+    Offloads the full sync build onto the fan-out pool so the FastAPI event
+    loop never blocks on SQLite/Chroma I/O. Semantics are identical to the
+    sync version — same keys, same trimming rules.
+    """
+    import asyncio
+
+    return await asyncio.to_thread(
+        build_context_for_llm,
+        user_input,
+        persona_mode,
+        compliance_data=compliance_data,
+        mem0_retrieved_memories=mem0_retrieved_memories,
+        include_referent_grounding=include_referent_grounding,
+        chat_platform=chat_platform,
+    )
+
+
+# ---------------------------------------------------------------------------
+# P1.2 — Mem0 prefetch fan-out
+# ---------------------------------------------------------------------------
+# The `memory_retrieval_node` always calls Mem0 after the supervisor has
+# already made a routing decision. If we kick off Mem0 retrieval *during*
+# supervisor evaluation, it runs in parallel with SQLite/Chroma reads in
+# downstream nodes. The prefetch cache is keyed by session id so different
+# concurrent users don't collide.
+
+_MEM0_PREFETCH_CACHE: Dict[str, concurrent.futures.Future] = {}
+_MEM0_PREFETCH_LOCK = threading.Lock()
+_MEM0_PREFETCH_TTL_S = 30.0
+_MEM0_PREFETCH_TIMESTAMPS: Dict[str, float] = {}
+
+
+def prefetch_mem0(session_id: str, user_input: str, *, limit: int = 5) -> None:
+    """Kick off a Mem0 retrieval in the background, keyed by session.
+
+    Safe to call multiple times — existing in-flight futures are preserved.
+    Expired entries are reaped lazily to avoid unbounded growth.
+    """
+    if not session_id or not user_input:
+        return
+    from kuro_backend import perpetual_memory
+
+    now = time.monotonic()
+    with _MEM0_PREFETCH_LOCK:
+        # Reap stale prefetches so the cache never leaks.
+        stale = [
+            sid for sid, ts in _MEM0_PREFETCH_TIMESTAMPS.items()
+            if now - ts > _MEM0_PREFETCH_TTL_S
+        ]
+        for sid in stale:
+            _MEM0_PREFETCH_CACHE.pop(sid, None)
+            _MEM0_PREFETCH_TIMESTAMPS.pop(sid, None)
+        if session_id in _MEM0_PREFETCH_CACHE:
+            return
+        try:
+            future = _MEM0_EXECUTOR.submit(
+                perpetual_memory.perpetual_memory.retrieve_memories,
+                user_input,
+                limit,
+            )
+        except RuntimeError:
+            return
+        _MEM0_PREFETCH_CACHE[session_id] = future
+        _MEM0_PREFETCH_TIMESTAMPS[session_id] = now
+
+
+def take_prefetched_mem0(
+    session_id: str,
+    *,
+    timeout_s: float = _MEM0_DEFAULT_TIMEOUT_SEC,
+) -> Optional[List[Dict[str, Any]]]:
+    """Pop and await an in-flight Mem0 prefetch, or return ``None`` if absent."""
+    with _MEM0_PREFETCH_LOCK:
+        future = _MEM0_PREFETCH_CACHE.pop(session_id, None)
+        _MEM0_PREFETCH_TIMESTAMPS.pop(session_id, None)
+    if future is None:
+        return None
+    try:
+        return future.result(timeout=timeout_s)
+    except concurrent.futures.TimeoutError:
+        logger.warning("[MEM0] prefetch timed out after %.2fs (session=%s)", timeout_s, session_id)
+        future.cancel()
+        return []
+    except Exception as exc:
+        logger.warning("[MEM0] prefetch failed (session=%s): %s", session_id, exc)
+        return []
+
+
+def safe_mem0_retrieve(
+    user_input: str,
+    *,
+    limit: int = 5,
+    timeout_s: float = _MEM0_DEFAULT_TIMEOUT_SEC,
+) -> List[Dict[str, Any]]:
+    """
+    Hard-timeout Mem0 retrieval. Returns `[]` on timeout or any exception so
+    LangGraph nodes degrade gracefully to short-term-only context.
+    """
+    if not user_input:
+        return []
+    from kuro_backend import perpetual_memory
+
+    try:
+        future = _MEM0_EXECUTOR.submit(
+            perpetual_memory.perpetual_memory.retrieve_memories,
+            user_input,
+            limit,
+        )
+        result = future.result(timeout=timeout_s)
+    except concurrent.futures.TimeoutError:
+        logger.warning(
+            "[MEMORY_COORD] mem0 retrieve timed out after %.2fs (query=%r)",
+            timeout_s,
+            (user_input or "")[:60],
+        )
+        _trace_memory_layer("mem0", "retrieve", ok=False)
+        return []
+    except Exception as exc:
+        logger.warning("[MEMORY_COORD] mem0 retrieve failed: %s", exc)
+        _trace_memory_layer("mem0", "retrieve", ok=False)
+        return []
+
+    _trace_memory_layer("mem0", "retrieve", ok=True)
+    if isinstance(result, list):
+        return result
+    logger.warning("[MEMORY_COORD] mem0 retrieve returned non-list %s; coercing", type(result))
+    return []
 
 
 def execute_memory_write_task(

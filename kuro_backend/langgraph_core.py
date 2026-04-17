@@ -1,40 +1,48 @@
 """
-Kuro AI V5.0 Official - LangGraph Core (Guardrails Removed) [2026-04-07]
+Kuro AI V5.5 Official - LangGraph Core (Guardrails Removed) [2026-04-17]
 ================================================================================
 AI Core with LangGraph Stateful Architecture for Agentik Long-Term Reasoning
 SDK: google-genai v3 Protocol with LangGraph State Machine
-V5.0: Guardrails REMOVED for maximum performance. Local + VPN + Auth environment.
+V5.5: Guardrails REMOVED for maximum performance. Local + VPN + Auth environment.
       Latency optimized: direct path from memory retrieval to response generation.
 """
 import asyncio
+import functools
+import hashlib
+import json
 import logging
 import os
-import json
-import re
-import uuid
-import time
 import queue
-import threading
+import re
 import secrets
-import hashlib
-from typing import TypedDict, List, Optional, Dict, Any, Annotated, AsyncGenerator, Iterator
+import threading
+import time
+import uuid
 from datetime import datetime
+from typing import Annotated, Any, AsyncGenerator, Dict, Iterator, List, Optional, TypedDict
+
+from google import genai
+from google.genai import types as genai_types
 
 # LangGraph imports
-from langgraph.graph import StateGraph, END, START
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.graph import END, START, StateGraph
 
 # Kuro imports
-from kuro_backend.config import settings, PRIMARY_MODEL
-from kuro_backend import memory_manager
-from kuro_backend import chat_history
-from kuro_backend.services import core_service as core_data
-from kuro_backend import habit_service
+from kuro_backend import (
+    chat_history,
+    habit_service,
+    memory_coordinator,
+    memory_manager,
+    observability,
+    perpetual_memory,
+)
 from kuro_backend import tools as kuro_tools
-from kuro_backend import perpetual_memory
-from kuro_backend import memory_coordinator
-from kuro_backend import observability
+from kuro_backend.config import PRIMARY_MODEL, settings
 from kuro_backend.guardrails import sniper_pipeline
+from kuro_backend import personas, token_budget
+from kuro_backend.personas import build_system_instruction
+from kuro_backend.services import core_service as core_data
 
 logger = logging.getLogger(__name__)
 logger.propagate = False  # Prevent double-reporting to root logger
@@ -70,11 +78,18 @@ OPENCLAW_READONLY_KEYWORDS = [
 ]
 _approval_lock = threading.Lock()
 _pending_tool_approval: Dict[str, Dict[str, Any]] = {}
-_post_response_queue: "queue.Queue[Dict[str, Any]]" = queue.Queue()
 _post_response_worker_started = False
 _TRUE_TOKEN_STREAMING_ENABLED = (
     os.getenv("KURO_TRUE_TOKEN_STREAMING", "1").strip().lower() in {"1", "true", "yes", "on"}
 )
+_POST_RESPONSE_QUEUE_MAXSIZE = int(os.getenv("KURO_POST_RESPONSE_QUEUE_MAXSIZE", "500"))
+_post_response_queue = queue.Queue(maxsize=_POST_RESPONSE_QUEUE_MAXSIZE)  # type: ignore[assignment]
+
+
+@functools.lru_cache(maxsize=1)
+def _get_genai_client() -> "genai.Client":
+    """Single shared google-genai client (lazy init, thread-safe via lru_cache)."""
+    return genai.Client(api_key=settings.GEMINI_API_KEY)
 
 
 def _parse_approval_token(user_input: str) -> Optional[str]:
@@ -230,24 +245,43 @@ def _maybe_handle_pending_approval(user_input: str, scope_key: str) -> Optional[
     )
 
 
+def _execute_post_response_task(task: Dict[str, Any]) -> None:
+    """Dispatch a single post-response task to memory_coordinator."""
+    kind = task.get("kind")
+    if kind == "memory_write":
+        user_input = task.get("user_input", "")
+        final_response = task.get("final_response", "")
+        persona_scope = task.get("persona_scope") or memory_manager.get_active_persona()
+        memory_coordinator.execute_memory_write_task(user_input, final_response, persona_scope)
+    elif kind == "mem0_extract":
+        user_input = task.get("user_input", "")
+        final_response = task.get("final_response", "")
+        memory_coordinator.execute_mem0_extract_task(user_input, final_response)
+    else:
+        logger.warning("[POST_RESPONSE_WORKER] Unknown task kind=%s", kind)
+
+
 def _post_response_worker_loop() -> None:
     while True:
         task = _post_response_queue.get()
+        kind = task.get("kind", "unknown")
         try:
-            kind = task.get("kind")
-            if kind == "memory_write":
-                user_input = task.get("user_input", "")
-                final_response = task.get("final_response", "")
-                persona_scope = task.get("persona_scope")
-                memory_coordinator.execute_memory_write_task(
-                    user_input, final_response, persona_scope or memory_manager.get_active_persona()
+            try:
+                _execute_post_response_task(task)
+            except Exception as first_exc:
+                logger.warning(
+                    "[POST_RESPONSE_WORKER] Task failed kind=%s error=%s (retrying once)",
+                    kind,
+                    first_exc,
                 )
-            elif kind == "mem0_extract":
-                user_input = task.get("user_input", "")
-                final_response = task.get("final_response", "")
-                memory_coordinator.execute_mem0_extract_task(user_input, final_response)
+                time.sleep(0.5)
+                _execute_post_response_task(task)
         except Exception as exc:
-            logger.error("[POST_RESPONSE_WORKER] Task failed kind=%s error=%s", task.get("kind"), exc)
+            logger.error(
+                "[POST_RESPONSE_WORKER] Task dropped kind=%s error=%s",
+                kind,
+                exc,
+            )
         finally:
             _post_response_queue.task_done()
 
@@ -256,14 +290,30 @@ def _start_post_response_worker_once() -> None:
     global _post_response_worker_started
     if _post_response_worker_started:
         return
-    worker = threading.Thread(target=_post_response_worker_loop, daemon=True)
+    worker = threading.Thread(
+        target=_post_response_worker_loop,
+        daemon=True,
+        name="kuro-post-response-worker",
+    )
     worker.start()
     _post_response_worker_started = True
 
 
 def _enqueue_post_response_task(task: Dict[str, Any]) -> None:
     _start_post_response_worker_once()
-    _post_response_queue.put(task)
+    try:
+        _post_response_queue.put_nowait(task)
+    except queue.Full:
+        logger.warning(
+            "[POST_RESPONSE_WORKER] Queue full (size=%s); dropping task kind=%s",
+            _post_response_queue.qsize(),
+            task.get("kind", "unknown"),
+        )
+
+
+def get_post_response_queue_depth() -> int:
+    """Observability helper — queue depth for health-check endpoints."""
+    return _post_response_queue.qsize()
 
 
 def _persist_short_term_and_enqueue_writes(user_input: str, response_text: str, persona_mode: str) -> None:
@@ -286,26 +336,30 @@ def _persist_short_term_and_enqueue_writes(user_input: str, response_text: str, 
     )
 
 
-async def _stream_direct_llm_chunks(system_prompt: str, full_message: str) -> AsyncGenerator[str, None]:
+async def _stream_direct_llm_chunks(
+    system_prompt: str,
+    full_message: str,
+    *,
+    persona_mode: str | None = None,
+) -> AsyncGenerator[str, None]:
     """
     Real token streaming bridge from blocking Gemini iterator into async generator.
     """
-    from google import genai
-    from google.genai import types
-
     loop = asyncio.get_running_loop()
     chunk_queue: asyncio.Queue = asyncio.Queue()
+    profile = personas.get_sampling_profile(persona_mode)
 
     def _worker() -> None:
         try:
-            client = genai.Client(api_key=settings.GEMINI_API_KEY)
+            client = _get_genai_client()
             stream = client.models.generate_content_stream(
                 model=PRIMARY_MODEL,
                 contents=full_message,
-                config=types.GenerateContentConfig(
+                config=genai_types.GenerateContentConfig(
                     system_instruction=system_prompt,
-                    temperature=0.2,
-                    top_p=0.8,
+                    temperature=profile.temperature,
+                    top_p=profile.top_p,
+                    top_k=profile.top_k,
                 ),
             )
             for event in stream:
@@ -334,7 +388,7 @@ async def _stream_direct_llm_chunks(system_prompt: str, full_message: str) -> As
 class KuroState(TypedDict):
     """
     Kuro Agent State - persists across graph nodes.
-    V5.0: Guardrail-related fields removed for performance.
+    V5.5: Guardrail-related fields removed for performance.
     
     Fields:
     - messages: Conversation history (list of dicts with role/content)
@@ -368,103 +422,24 @@ class KuroState(TypedDict):
 
 
 # ============================================
-# PERSONA SYSTEM (LangChain System Prompts)
+# PERSONA SYSTEM (shared with core.py via kuro_backend.personas)
 # ============================================
 
-_PERSONA_INSTRUCTIONS = {
-    'consultant': (
-        "Kamu adalah Kuro, seorang Elite AI Butler dan Senior IT Security, GRC, & Enterprise Architecture Consultant. Tuanmu adalah Pantronux.\n\n"
-        "CORE KNOWLEDGE BASE (PREDEFINED EXPERTISE):\n"
-        "Kamu memiliki pemahaman mendalam setara Lead Auditor untuk:\n"
-        "- ISO Frameworks: ISO 27001:2022 (ISMS), ISO 27701 (PIMS), ISO/IEC 42001.\n"
-        "- NIST: NIST CSF 2.0 & NIST SP 800-53.\n"
-        "- Enterprise Architecture: TOGAF.\n"
-        "- Regulasi privasi & IT: UU PDP No. 27/2022 dan GDPR.\n\n"
-        "MINDSET KONSULTAN:\n"
-        "1. Kritis dan risk-based: identifikasi gap, risiko, serta dampak bisnis.\n"
-        "2. Struktur eksplisit: Gap Analysis, Mapping regulasi, Evaluasi Risiko, Mitigasi actionable.\n"
-        "3. Citation rule: saat memberi rekomendasi keamanan/compliance, sertakan referensi kontrol/klausul relevan.\n\n"
-        "TONE:\n"
-        "Profesional, strategic-partner, tajam namun tetap komunikatif."
-    ),
-    'chill': (
-        "Kamu adalah Kuro, AI Butler setia Pantronux dengan kepribadian santai dan friendly. "
-        "Gunakan bahasa yang ringan, humoris, dan hindari istilah teknis/ISO kecuali diminta. "
-        "Kamu tetap cerdas dan membantu, tapi dengan pendekatan yang lebih kasual. "
-        "Panggil 'Pantronux' dengan sopan tapi tidak terlalu formal."
-    ),
-    'tactical': (
-        "Kamu adalah Kuro, Senior DevOps/IT Support Engineer Pantronux. "
-        "Fokus pada efisiensi kode, diagnosa sistem, dan pembacaan log. "
-        "Kamu memiliki izin penuh untuk menganalisis file di /home/kuro/projects/kuro/ menggunakan smart_read. "
-        "Beri solusi yang praktis, langsung ke inti, dan sertakan contoh kode jika relevan. "
-        "Jika mendeteksi error di log, WAJIB sarankan perbaikan kodingan secara spesifik."
-    ),
-    'advisor': (
-        "Kamu adalah Rekan Peneliti Senior dan Auditor Forensik Digital untuk riset PhD Pantronux tentang Digital Forensics on AI.\n\n"
-        "MODUS KERJA WAJIB:\n"
-        "1. Jangan pernah menerima argumen Master mentah-mentah; gunakan Socratic questioning.\n"
-        "2. Untuk setiap hipotesis, sajikan minimal dua counter-evidence atau edge-case kegagalan.\n"
-        "3. Bongkar asumsi tersembunyi dalam metodologi, dataset, dan evaluasi.\n"
-        "4. Evidence-first: prioritaskan grounding pada NIST AI 100-2, ISO/IEC 27001:2022, EU AI Act, dan UU PDP No. 27/2022.\n"
-        "5. Fokus investigasi forensik AI: data provenance/poisoning, explainability sebagai evidence, adversarial forensics.\n"
-        "6. Audit integritas teknis: chain of custody, konsistensi timestamp, volatilitas memori AI, jejak token/inference.\n\n"
-        "FORMAT JAWABAN WAJIB (gunakan heading ini persis):\n"
-        "- Analisis Logika\n"
-        "- Novelty Check\n"
-        "- Forensic Challenge\n"
-        "- Pertanyaan Provokatif\n"
-    ),
-    'butler': (
-        "Kamu adalah Sentinel Butler Pantronux, penjaga integritas operasional Kuro.\n"
-        "Fokusmu: habits, reminders, data revision, sinkronisasi dashboard, dan reliabilitas workflow.\n"
-        "Bersikap formal-friendly, disiplin, dan proaktif. Prioritaskan akurasi data serta kejelasan status."
-    )
-}
 
-def get_system_instruction(persona_override: str = None) -> str:
-    """Get system instruction with current time and active persona."""
+def get_system_instruction(persona_override: Optional[str] = None) -> str:
+    """Get system instruction with current time and active persona (graph variant)."""
     current_time = settings.get_current_time_formatted()
     current_date = settings.get_current_time().strftime("%Y-%m-%d")
-    active_persona = memory_manager.normalize_persona(persona_override or memory_manager.get_active_persona())
-    
-    persona_instruction = _PERSONA_INSTRUCTIONS.get(active_persona, _PERSONA_INSTRUCTIONS['consultant'])
-    
-    common_instruction = (
-        f"\n\n[CURRENT_TIME: {current_time}] "
-        f"[CURRENT_DATE: {current_date}] "
-        f"[KURO_VERSION: V5.0 LangGraph - {current_date}] "
-        "Gunakan waktu saat ini sebagai referensi untuk menghitung 'besok', 'nanti malam', '10 menit lagi', dll.\n\n"
-        
-        "CHAIN OF THOUGHT (HIDDEN THOUGHT PROCESS):\n"
-        "Sebelum memberikan jawaban, gunakan langkah berpikir eksplisit (Hidden Thought):\n"
-        "1. Analisis niat Master - apa yang sebenarnya ditanyakan?\n"
-        "2. Cek konteks percakapan untuk kata ganti ('ini', 'itu', 'dia', 'tadi')\n"
-        "3. Cek data fisik di OS menggunakan os.path.exists() jika terkait file\n"
-        "4. Cek memori (Tier 1 > Tier 2 > Tier 3)\n"
-        "5. Verifikasi silang antara SQLite dan ChromaDB untuk konsistensi\n"
-        "6. Baru berikan jawaban yang akurat dan terverifikasi.\n\n"
-        
-        "NEGATIVE CONSTRAINTS & HALLUCINATION CHECK:\n"
-        "- DILARANG berasumsi file ada jika os.path.exists() mengembalikan False\n"
-        "- Jika tidak tahu, katakan tidak tahu dan tawarkan untuk mencari di folder lain\n"
-        "- JANGAN mengarang fakta, data, atau referensi klausul\n"
-        "- Selalu verifikasi silang antara Memori Tier-1 (SQLite) dan Tier-2 (ChromaDB)\n\n"
-        "HITL SECURITY POLICY (WAJIB):\n"
-        "- Jika ada perintah destruktif lewat advanced_execution_tool (contoh: 'hapus', 'format', 'rm -rf'), WAJIB stop di approval.\n"
-        "- DILARANG mengeksekusi bridge OpenClaw sebelum Master mengirim input tepat 'y'.\n"
-        "- Jika approval belum ada, minta konfirmasi dan jangan lanjutkan eksekusi.\n\n"
-        "OPENCLAW EXECUTION POLICY:\n"
-        "- Tugas read-only (web search paper terbaru, novelty check, analisis metadata/log, mapping regulasi) boleh auto-execute via advanced_execution_tool.\n"
-        "- Tugas non-read-only, modifikasi sistem, atau aksi destruktif wajib menunggu approval Master.\n\n"
-        
-        "CAPABILITIES:\n"
-        "Kamu memiliki kemampuan Vision - kamu bisa melihat dan menganalisis gambar yang dikirimkan. "
-        "Kamu juga memiliki sistem pengingat (Reminder) dan Daily Habit Tracker. "
-        "Untuk pembacaan dokumen, gunakan smart_read sebagai antarmuka utama (PDF/Office/OCR/text)."
+    active_persona = memory_manager.normalize_persona(
+        persona_override or memory_manager.get_active_persona()
     )
-    
-    return persona_instruction + common_instruction
+    return build_system_instruction(
+        active_persona,
+        current_time=current_time,
+        current_date=current_date,
+        kuro_version_label="V5.5 LangGraph",
+        variant="graph",
+    )
 
 # ============================================
 # NODE: SUPERVISOR (The Brain)
@@ -491,6 +466,13 @@ def supervisor_node(state: KuroState) -> Dict[str, Any]:
     trace_attrs = observability.add_client_label(trace_attrs, user_input)
     
     with observability.trace_node("supervisor_node", trace_attrs) as span:
+        # P1.2 — kick off Mem0 retrieve in parallel with the supervisor's
+        # routing logic; memory_retrieval_node will await the future.
+        try:
+            memory_coordinator.prefetch_mem0(session_id, state.get("user_input", ""), limit=5)
+        except Exception as exc:
+            logger.debug("[SUPERVISOR] mem0 prefetch skipped: %s", exc)
+
         # Compliance keywords detection
         compliance_keywords = [
             "iso", "iso 27001", "iso 27002", "nist", "gdpr", "audit", "compliance",
@@ -565,34 +547,43 @@ def supervisor_node(state: KuroState) -> Dict[str, Any]:
 # ============================================
 
 def memory_retrieval_node(state: KuroState) -> Dict[str, Any]:
-    # 1. Validasi Input State: Pastikan state adalah dictionary
     if not isinstance(state, dict):
-        logger.error(f"[MEM0] Invalid state type: {type(state)}")
+        logger.error("[MEM0] Invalid state type: %s", type(state))
         return {"mem0_retrieved_memories": []}
 
     user_input = state.get("user_input", "")
-    
-    with observability.trace_node("memory_retrieval_node"):
+    session_id = state.get("_session_id", "")
+
+    with observability.trace_node("memory_retrieval_node") as span:
         try:
-            # 2. Pemanggilan API dengan Timeout (jika didukung library-nya)
-            raw_memories = perpetual_memory.perpetual_memory.retrieve_memories(user_input, limit=5)
-            
-            # 3. Validasi Output: Pastikan selalu mengembalikan List of Strings/Dicts
-            # Menghindari kasus Mem0 mengembalikan None atau String Error
+            # P1.2 — consume supervisor's prefetch if present; otherwise fall
+            # back to a live retrieval. Either path degrades gracefully.
+            raw_memories = memory_coordinator.take_prefetched_mem0(session_id)
+            if raw_memories is None:
+                raw_memories = memory_coordinator.safe_mem0_retrieve(user_input, limit=5)
+
             if not isinstance(raw_memories, list):
-                logger.warning(f"[MEM0] Unexpected output format: {type(raw_memories)}")
-                processed_memories = []
+                logger.warning("[MEM0] Unexpected output format: %s", type(raw_memories))
+                processed_memories: List[Any] = []
             else:
-                # Opsional: Ekstrak hanya teks memori jika outputnya objek kompleks
                 processed_memories = [
-                    m.get("text", str(m)) if isinstance(m, dict) else str(m) 
+                    m.get("text", str(m)) if isinstance(m, dict) else str(m)
                     for m in raw_memories
                 ]
 
+            if span is not None:
+                span.set_attribute("mem0.ok", True)
+                span.set_attribute("mem0.result_count", len(processed_memories))
             return {"mem0_retrieved_memories": processed_memories}
 
         except Exception as e:
-            logger.error(f"[MEM0_RETRIEVAL] Critical Failure: {e}")
+            logger.error("[MEM0_RETRIEVAL] Critical Failure: %s", e)
+            if span is not None:
+                span.set_attribute("mem0.ok", False)
+                try:
+                    span.record_exception(e)
+                except Exception:
+                    pass
             return {"mem0_retrieved_memories": []}
 
 
@@ -638,15 +629,20 @@ def compliance_node(state: KuroState) -> Dict[str, Any]:
     trace_attrs = observability.add_client_label(trace_attrs, user_input)
     
     with observability.trace_node("compliance_node", trace_attrs) as span:
-        # Search compliance knowledge base
-        compliance_results = memory_manager.search_compliance_base(user_input, top_k=5)
-        
-        # If no results and we're in self-correction mode, try query expansion
-        if not compliance_results and query_expansion_count > 0:
-            # Simple query expansion: add common ISO terms
+        # P1.4 — in expansion mode, fire the baseline + expanded Chroma queries in
+        # parallel so we don't pay two sequential Chroma round-trips.
+        if query_expansion_count > 0:
             expanded_query = f"{user_input} ISO standard control requirement"
-            compliance_results = memory_manager.search_compliance_base(expanded_query, top_k=5)
-            logger.info(f"[COMPLIANCE] Query expanded to: {expanded_query}")
+            fan_out = memory_coordinator._parallel_gather_sync({
+                "base": lambda: memory_manager.search_compliance_base(user_input, top_k=5),
+                "expanded": lambda: memory_manager.search_compliance_base(expanded_query, top_k=5),
+            })
+            compliance_results = fan_out.get("base") or []
+            if not compliance_results:
+                compliance_results = fan_out.get("expanded") or []
+                logger.info(f"[COMPLIANCE] Query expanded to: {expanded_query}")
+        else:
+            compliance_results = memory_manager.search_compliance_base(user_input, top_k=5)
         
         # Format compliance data for state
         formatted_data = []
@@ -684,13 +680,17 @@ def habit_node(state: KuroState) -> Dict[str, Any]:
     trace_attrs = observability.create_session_context(session_id=session_id)
     
     with observability.trace_node("habit_node", trace_attrs) as span:
-        # Get all habits
-        habits = core_data.get_all_habits()
-        
-        # Get today's stats
-        stats = core_data.get_completion_stats()
-        
-        sqlite_snapshot = habit_service.fetch_sqlite_habit_snapshot(days=30)
+        # P1.4 — the three SQLite reads below are independent; run them
+        # concurrently on the fan-out pool so habit_node latency = max() rather
+        # than sum().
+        fan_out = memory_coordinator._parallel_gather_sync({
+            "habits": core_data.get_all_habits,
+            "stats": core_data.get_completion_stats,
+            "snapshot": lambda: habit_service.fetch_sqlite_habit_snapshot(days=30),
+        })
+        habits = fan_out.get("habits") or []
+        stats = fan_out.get("stats") or {}
+        sqlite_snapshot = fan_out.get("snapshot") or {}
         habit_service.log_snapshot_debug(sqlite_snapshot)
 
         # Check if user is asking for evaluation
@@ -708,25 +708,23 @@ def habit_node(state: KuroState) -> Dict[str, Any]:
         # If evaluation requested, generate AI evaluation
         if is_evaluation_request and habits:
             try:
-                from google import genai
-                from google.genai import types
-                
-                client = genai.Client(api_key=settings.GEMINI_API_KEY)
-                
-                # Get monthly data for evaluation
+                client = _get_genai_client()
+
                 today = datetime.now()
                 monthly_data = core_data.get_monthly_report_data(today.year, today.month)
-                
+
                 eval_user_prompt = habit_service.build_monthly_eval_user_prompt(monthly_data)
-                
+
                 response = client.models.generate_content(
                     model=PRIMARY_MODEL,
                     contents=eval_user_prompt,
-                    config=types.GenerateContentConfig(
+                    config=genai_types.GenerateContentConfig(
                         system_instruction=habit_service.STRICT_HABIT_NARRATIVE_INSTRUCTION,
-                        temperature=0.35,
-                        max_output_tokens=2000
-                    )
+                        temperature=personas.HABIT_EVAL_SAMPLING_PROFILE.temperature,
+                        top_p=personas.HABIT_EVAL_SAMPLING_PROFILE.top_p,
+                        top_k=personas.HABIT_EVAL_SAMPLING_PROFILE.top_k,
+                        max_output_tokens=personas.HABIT_EVAL_SAMPLING_PROFILE.max_output_tokens,
+                    ),
                 )
                 
                 habit_data["evaluation_text"] = response.text if response.text else ""
@@ -764,7 +762,7 @@ def habit_node(state: KuroState) -> Dict[str, Any]:
 def response_node(state: KuroState) -> Dict[str, Any]:
     """
     Response Generator Node: Synthesizes all state data into final response.
-    V5.0: Guardrails validation removed. Direct LLM response is returned.
+    V5.5: Guardrails validation removed. Direct LLM response is returned.
     """
     user_input = state.get("user_input", "")
     compliance_data = state.get("compliance_data", [])
@@ -797,23 +795,24 @@ def response_node(state: KuroState) -> Dict[str, Any]:
         # Build system prompt
         system_prompt = get_system_instruction(persona_override=persona_mode)
 
-        # Build user message with context injection
-        message_parts = [user_input]
+        # Assemble per-section context blocks so we can apply the token budget
+        # uniformly. Each block is independently trimmed to its quota before
+        # concatenation, with a final global ceiling enforcement pass.
+        sections: dict[str, str] = {}
 
         if referent_block:
-            message_parts.append("\n\n" + referent_block)
+            sections["referent"] = "\n\n" + referent_block
 
         if mem0_context_block:
-            message_parts.append(f"\n\n[USER_CONTEXT - PERPETUAL MEMORY]\n{mem0_context_block}")
+            sections["mem0"] = f"\n\n[USER_CONTEXT - PERPETUAL MEMORY]\n{mem0_context_block}"
             logger.info("[MEM0] Injected %s memories into context", len(mem0_memories or []))
-        
-        # Add compliance context if available
+
         if compliance_data:
             compliance_context = "\n\n[COMPLIANCE REFERENCES]\n"
             for i, ref in enumerate(compliance_data, 1):
                 compliance_context += f"{i}. [{ref['iso_name']}] Klausul: {ref['clauses']}\n{ref['content'][:300]}\n\n"
-            message_parts.append(compliance_context)
-        
+            sections["compliance"] = compliance_context
+
         # Habit grounding: must run for habit_node path even when habits=[] (avoid Tier-1 hallucinations)
         if habit_data.get("from_sqlite"):
             snap = habit_service.fetch_sqlite_habit_snapshot(days=30)
@@ -822,52 +821,71 @@ def response_node(state: KuroState) -> Dict[str, Any]:
                 snap,
                 evaluation_text=habit_data.get("evaluation_text") or "",
             )
-            message_parts.append("\n\n" + habit_block)
-        
-        # Add memory injection
-        message_parts.append(memory_injection)
-        
-        # Add tool execution result if available
-        if tool_result and tool_result.get("status"):
-            if tool_result["status"] == "success":
-                tool_context = f"\n\n[TOOL EXECUTION RESULT]\nTool: {tool_result.get('tool', 'unknown')}\nResult: {tool_result.get('result', '')}\n\nPlease inform the user about the successful tool execution in a professional manner."
-                message_parts.append(tool_context)
-            elif tool_result["status"] == "pending_approval":
-                tool_context = (
-                    f"\n\n[HITL APPROVAL REQUIRED]\n"
-                    f"{tool_result.get('message', 'Approval needed for tool execution.')}\n\n"
-                    "Ask user to reply exactly with `approve <nonce>` to proceed."
-                )
-                message_parts.append(tool_context)
-            elif tool_result["status"] == "error":
-                tool_context = f"\n\n[TOOL ERROR]\nError: {tool_result.get('message', 'Unknown error')}\n\nInform the user about the error professionally."
-                message_parts.append(tool_context)
-            elif tool_result["status"] == "no_tool":
-                # No tool was needed, proceed normally
-                pass
-        
-        # Build final message
+            sections["habit"] = "\n\n" + habit_block
+
+        if memory_injection:
+            sections["memory_injection"] = memory_injection
+
+        tool_status = (tool_result or {}).get("status")
+        if tool_status == "success":
+            sections["tool_result"] = (
+                "\n\n[TOOL EXECUTION RESULT]\n"
+                f"Tool: {tool_result.get('tool', 'unknown')}\n"
+                f"Result: {tool_result.get('result', '')}\n\n"
+                "Please inform the user about the successful tool execution in a professional manner."
+            )
+        elif tool_status == "pending_approval":
+            sections["tool_result"] = (
+                "\n\n[HITL APPROVAL REQUIRED]\n"
+                f"{tool_result.get('message', 'Approval needed for tool execution.')}\n\n"
+                "Ask user to reply exactly with `approve <nonce>` to proceed."
+            )
+        elif tool_status == "error":
+            sections["tool_result"] = (
+                "\n\n[TOOL ERROR]\n"
+                f"Error: {tool_result.get('message', 'Unknown error')}\n\n"
+                "Inform the user about the error professionally."
+            )
+        # tool_status == "no_tool" or None -> proceed normally
+
+        budgeted = token_budget.apply_section_budget(sections)
+        ordered_names = (
+            "referent",
+            "mem0",
+            "compliance",
+            "habit",
+            "memory_injection",
+            "tool_result",
+        )
+        ordered_parts: list[tuple[str, str]] = [
+            (name, budgeted[name]) for name in ordered_names if budgeted.get(name)
+        ]
+        ordered_parts = token_budget.collapse_duplicate_blocks(ordered_parts)
+        ordered_parts = token_budget.enforce_global_ceiling(ordered_parts)
+
+        message_parts: list[str] = [user_input]
+        message_parts.extend(text for _, text in ordered_parts)
+
         full_message = "\n".join(message_parts)
         contents_parts = memory_coordinator.build_gemini_contents_parts(
             full_message, image_paths if image_paths else None
         )
 
         # Generate response using direct google-genai SDK (more reliable)
-        response_text = None  # Initialize to detect if generation fails
+        response_text: Optional[str] = None  # Initialize to detect if generation fails
         try:
-            from google import genai
-            from google.genai import types
-            
-            genai_client = genai.Client(api_key=settings.GEMINI_API_KEY)
-            
+            genai_client = _get_genai_client()
+
+            profile = personas.get_sampling_profile(persona_mode)
             response = genai_client.models.generate_content(
                 model=PRIMARY_MODEL,
                 contents=contents_parts,
-                config=types.GenerateContentConfig(
+                config=genai_types.GenerateContentConfig(
                     system_instruction=system_prompt,
-                    temperature=0.2,
-                    top_p=0.8,
-                )
+                    temperature=profile.temperature,
+                    top_p=profile.top_p,
+                    top_k=profile.top_k,
+                ),
             )
             
             # SAFETY CHECK: Check prompt_feedback BEFORE accessing response.text
@@ -910,28 +928,31 @@ def response_node(state: KuroState) -> Dict[str, Any]:
                     response_text = "Maaf, Pantronux. Terjadi kesalahan saat menghasilkan respons. Silakan coba lagi."
 
         # Canonical served response must match persisted response for integrity.
-        response_text = sniper_pipeline.sniper_postprocess_output(user_input, response_text)
+        try:
+            response_text = sniper_pipeline.sniper_postprocess_output(user_input, response_text)
+        except Exception as post_exc:
+            logger.warning("[RESPONSE] sniper postprocess failed, using raw: %s", post_exc)
 
-        # Store to memory (preserve existing memory flow)
-        memory_manager.add_short_term("user", user_input, persona_scope=persona_mode)
-        memory_manager.add_short_term("assistant", response_text, persona_scope=persona_mode)
-        
-        # FIX: DO NOT save to chat_history here - it's saved in the streaming/non-streaming
-        # entry points to prevent duplicate database inserts (3-bubble bug).
-        # chat_history.add_message("web", "user", user_input)
-        # chat_history.add_message("web", "assistant", response_text)
-        
-        # Offload heavy writes out of request critical path.
-        _enqueue_post_response_task(
-            {
-                "kind": "memory_write",
-                "user_input": user_input,
-                "final_response": response_text,
-                "persona_scope": persona_mode,
-            }
-        )
-        
-        logger.info(f"[RESPONSE] Generated response ({len(response_text)} chars)")
+        # P4.5 — SSoT grounding lint. Non-destructive: only appends a footnote
+        # when the reply mentions numbers/times absent from any SSoT block.
+        try:
+            ssot_blocks = [
+                sections.get("habit", ""),
+                sections.get("memory_injection", ""),
+                sections.get("referent", ""),
+            ]
+            response_text, _lint_anomaly = sniper_pipeline.sniper_ssot_grounding_lint(
+                response_text, ssot_blocks=ssot_blocks
+            )
+        except Exception as lint_exc:
+            logger.debug("[RESPONSE] ssot lint skipped: %s", lint_exc)
+
+        # Single consolidated persist path (short-term + enqueue memory_write + mem0_extract).
+        # memory_extraction_node still runs as a dedupe/guardian, but mem0 fingerprint dedupe
+        # in memory_coordinator prevents double-store.
+        _persist_short_term_and_enqueue_writes(user_input, response_text, persona_mode)
+
+        logger.info("[RESPONSE] Generated response (%s chars)", len(response_text))
         
         if span:
             span.set_attribute("response_node.response_length", len(response_text))
@@ -945,102 +966,110 @@ def response_node(state: KuroState) -> Dict[str, Any]:
 # NODE: TOOL EXECUTOR (The Hands)
 # ============================================
 
+# P2.3 — minimal tool-router instruction. Tool specs come from the Gemini
+# function-calling declarations, so we only tell the router *how to route*.
+# Persona, CoT and negative-constraint text are intentionally removed — the
+# router doesn't generate the final answer and doesn't need them.
+_TOOL_ROUTER_SYSTEM_INSTRUCTION = (
+    "Kuro tool router. Pick at most ONE function_call for the user request. "
+    "For read-only OpenClaw tasks use execution_mode='readonly', else 'mutating'. "
+    "Use skill_name='harvest_gemini_share' for gemini.google.com/share links. "
+    "No tool matches? Reply with empty text."
+)
+
+
+def _collect_tool_calls(response: Any) -> List[Any]:
+    """Extract function_calls from google-genai v3 response across SDK variants."""
+    direct = getattr(response, "function_calls", None)
+    if direct:
+        return list(direct)
+    calls: List[Any] = []
+    candidates = getattr(response, "candidates", None) or []
+    for cand in candidates:
+        content = getattr(cand, "content", None)
+        parts = getattr(content, "parts", None) or []
+        for part in parts:
+            fc = getattr(part, "function_call", None)
+            if fc is not None:
+                calls.append(fc)
+    return calls
+
+
 def tool_node(state: KuroState) -> Dict[str, Any]:
     """
-    Tool Node: Executes system tools based on user intent.
-    Uses LLM to parse tool calls from the user message.
-    
+    Tool Node: delegates to a tool chosen by Gemini native function-calling.
+
     Tools available:
-    - generate_excel_report: Create Excel files from JSON data
-    - manage_files: List, read, write, delete files in /home/kuro/exports/
-    - generate_report_template: Generate audit/compliance report templates
-    - advanced_execution_tool: Delegate complex system automation to OpenClaw
+    - generate_excel_report
+    - manage_files
+    - generate_report_template
+    - advanced_execution_tool (OpenClaw bridge)
     """
-    from kuro_backend.tools.system_tools import (
+    from kuro_backend.tools.system_tools import (  # noqa: F401 (validates module import)
         generate_excel_report,
-        manage_files,
         generate_report_template,
-        TOOL_DESCRIPTIONS
+        manage_files,
     )
-    
+
     user_input = state.get("user_input", "")
     session_id = state.get("_session_id", "unknown")
     trace_attrs = observability.create_session_context(session_id=session_id)
-    
+
     with observability.trace_node("tool_node", trace_attrs) as span:
         try:
-            # Use LLM to determine which tool to call and with what arguments
-            from google import genai
-            from google.genai import types
-            
-            genai_client = genai.Client(api_key=settings.GEMINI_API_KEY)
-            
-            tool_prompt = f"""You are a tool router. Analyze the user's request and determine which tool to call.
+            genai_client = _get_genai_client()
 
-AVAILABLE TOOLS:
-1. generate_excel_report(data, filename, sheet_name) - Create Excel from JSON data
-2. manage_files(action, filename, content) - Manage files (list, read, write, delete, info)
-3. generate_report_template(template_type, filename, data, format) - Generate report templates
-4. advanced_execution_tool(task_description, params, skill_name) - Delegate complex execution tasks to OpenClaw
-
-USER REQUEST: {user_input}
-
-Respond with ONLY a JSON object in this format:
-{{"tool": "tool_name", "args": {{"arg1": "value1", ...}}}}
-
-If no tool is appropriate, respond with: {{"tool": null, "reason": "explanation"}}
-
-POLICY:
-- Use advanced_execution_tool for complex execution tasks.
-- If task is read-only (search/analyze/mapping), include args.execution_mode=\"readonly\".
-- If task can modify/delete/format/reboot system state, include args.execution_mode=\"mutating\".
-
-Examples:
-- "Buatkan excel audit" -> {{"tool": "manage_files", "args": {{"action": "list"}}}}
-- "List file di exports" -> {{"tool": "manage_files", "args": {{"action": "list"}}}}
-- "Buat laporan audit" -> {{"tool": "generate_report_template", "args": {{"template_type": "audit_findings", "filename": "audit_report.md"}}}}
-- "Kuro tolong bersihkan log lama di Proxmox pake OpenClaw" -> {{"tool": "advanced_execution_tool", "args": {{"task_description": "bersihkan log lama di Proxmox", "skill_name": "general_execution"}}}}
-- "Cari paper terbaru digital forensics on AI" -> {{"tool": "advanced_execution_tool", "args": {{"task_description": "cari paper terbaru digital forensics on AI", "skill_name": "general_execution", "execution_mode": "readonly"}}}}
-- "Kuro, pelajari materi dari link Gemini share ini dan masukkan ke library riset gue. https://gemini.google.com/share/abc123" -> {{"tool": "advanced_execution_tool", "args": {{"task_description": "Kuro, pelajari materi dari link Gemini share ini dan masukkan ke library riset gue. https://gemini.google.com/share/abc123", "skill_name": "harvest_gemini_share", "params": {{"share_url": "https://gemini.google.com/share/abc123"}}, "execution_mode": "mutating"}}}}
-
-TOOL CALL:"""
-            
+            router_tools = [
+                generate_excel_report,
+                manage_files,
+                generate_report_template,
+                kuro_tools.advanced_execution_tool,
+            ]
             response = genai_client.models.generate_content(
                 model=PRIMARY_MODEL,
-                contents=tool_prompt,
-                config=types.GenerateContentConfig(
-                    temperature=0.1,
-                    max_output_tokens=500,
-                )
+                contents=user_input,
+                config=genai_types.GenerateContentConfig(
+                    system_instruction=_TOOL_ROUTER_SYSTEM_INSTRUCTION,
+                    temperature=personas.ROUTER_SAMPLING_PROFILE.temperature,
+                    top_p=personas.ROUTER_SAMPLING_PROFILE.top_p,
+                    top_k=personas.ROUTER_SAMPLING_PROFILE.top_k,
+                    max_output_tokens=personas.ROUTER_SAMPLING_PROFILE.max_output_tokens,
+                    tools=router_tools,
+                    tool_config=genai_types.ToolConfig(
+                        function_calling_config=genai_types.FunctionCallingConfig(mode="AUTO")
+                    ),
+                ),
             )
-            
-            tool_call_text = response.text.strip()
-            logger.info(f"[TOOL_NODE] LLM tool call: {tool_call_text}")
-            
-            # Parse tool call
-            try:
-                # Extract JSON from response
-                json_match = re.search(r'\{.*\}', tool_call_text, re.DOTALL)
-                if json_match:
-                    tool_call = json.loads(json_match.group())
-                else:
-                    tool_call = {"tool": None, "reason": "Could not parse tool call"}
-            except json.JSONDecodeError:
-                tool_call = {"tool": None, "reason": f"Invalid JSON: {tool_call_text}"}
-            
-            tool_name = tool_call.get("tool")
-            
-            if not tool_name:
-                # No tool needed, pass through to response node
-                if span:
+
+            function_calls = _collect_tool_calls(response)
+            if not function_calls:
+                reason = ""
+                try:
+                    reason = (response.text or "").strip()[:200]
+                except Exception:
+                    reason = ""
+                logger.info("[TOOL_NODE] No function_call returned; falling through.")
+                if span is not None:
                     span.set_attribute("tool_node.tool_used", "none")
                 return {
-                    "tool_execution_result": {"status": "no_tool", "message": tool_call.get("reason", "")},
-                    "next_step": "response_node"
+                    "tool_execution_result": {"status": "no_tool", "message": reason},
+                    "next_step": "response_node",
                 }
-            
+
+            fc = function_calls[0]
+            tool_name = getattr(fc, "name", None) or ""
+            raw_args = getattr(fc, "args", None) or {}
+            args: Dict[str, Any] = dict(raw_args) if isinstance(raw_args, dict) else {}
+
+            if not tool_name:
+                if span is not None:
+                    span.set_attribute("tool_node.tool_used", "none")
+                return {
+                    "tool_execution_result": {"status": "no_tool", "message": ""},
+                    "next_step": "response_node",
+                }
+
             # Check for HITL interrupt (file write/delete operations)
-            args = tool_call.get("args", {})
             action = args.get("action", "")
 
             high_risk_text = f"{user_input} {json.dumps(args, ensure_ascii=False)}"
@@ -1124,7 +1153,7 @@ TOOL CALL:"""
             }
 
 
-def _execute_tool(tool_name: str, args: Dict) -> Dict[str, Any]:
+def _execute_tool(tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
     """Execute a specific tool with given arguments."""
     from kuro_backend.tools.system_tools import (
         generate_excel_report,
@@ -1220,7 +1249,7 @@ def build_kuro_graph() -> StateGraph:
     graph_builder.add_edge("habit_node", "response_node")
     graph_builder.add_edge("tool_node", "response_node")
     
-    # V5.0: Direct edge from response_node to memory_extraction_node (no re-ask loop)
+    # V5.5: Direct edge from response_node to memory_extraction_node (no re-ask loop)
     graph_builder.add_edge("response_node", "memory_extraction_node")
     
     # After memory extraction, go to END
@@ -1304,19 +1333,19 @@ def _split_head_for_early_flush(text: str) -> tuple[str, str]:
 
 
 # ============================================
-# ASYNC STREAMING ENTRY POINT (Project Quicksilver V5.1)
+# ASYNC STREAMING ENTRY POINT (Project Quicksilver V5.5)
 # ============================================
 
 async def process_chat_with_graph_stream(
     message: str,
-    image_paths: list = None,
-    persona_override: str = None,
+    image_paths: Optional[List[str]] = None,
+    persona_override: Optional[str] = None,
     stream_metrics: Optional[Dict[str, Any]] = None,
     approval_scope: str = "default",
     trace_id: str = "",
 ) -> AsyncGenerator[str, None]:
     """
-    V5.3 STREAMING: Graph runs in asyncio.to_thread (sync stream) so the event loop can serve SSE.
+    V5.5 STREAMING: Graph runs in asyncio.to_thread (sync stream) so the event loop can serve SSE.
     Sniper input/output checks use async wrappers (Gemini/NeMo in thread pool).
     After postprocess, first sentence/line is yielded once with flush, then word-chunked tail.
     
@@ -1350,6 +1379,42 @@ async def process_chat_with_graph_stream(
         persona_mode = memory_manager.normalize_persona(
             persona_override or memory_manager.get_active_persona()
         )
+
+        # P3.2 — Try SSoT shortcut first. If the query is a pure factual ask
+        # about habits/reminders and the persona isn't generative, respond
+        # entirely from SQLite without paying for the LLM. The shortcut result
+        # is still persisted as short-term memory so conversation continuity
+        # is preserved.
+        if not image_paths:
+            from kuro_backend import ssot_shortcuts
+            shortcut = ssot_shortcuts.try_shortcut(message, persona_mode)
+            if shortcut is not None:
+                logger.info("[SSOT_SHORTCUT] hit source=%s — bypassing LLM", shortcut.source)
+                if stream_metrics is not None:
+                    stream_metrics["stream_mode"] = "ssot_shortcut"
+                    stream_metrics["ssot_shortcut_source"] = shortcut.source
+                yield shortcut.response
+                try:
+                    _persist_short_term_and_enqueue_writes(message, shortcut.response, persona_mode)
+                except Exception as exc:
+                    logger.warning("[SSOT_SHORTCUT] persist failed: %s", exc)
+                return
+
+        # P3.1 — Semantic cache lookup BEFORE committing to any LLM path.
+        # Disabled by default; opt-in via KURO_SEMANTIC_CACHE_ENABLED.
+        if not image_paths:
+            from kuro_backend import semantic_cache
+            cached_response = semantic_cache.lookup(message, persona_mode)
+            if cached_response is not None:
+                if stream_metrics is not None:
+                    stream_metrics["stream_mode"] = "semantic_cache"
+                yield cached_response
+                try:
+                    _persist_short_term_and_enqueue_writes(message, cached_response, persona_mode)
+                except Exception as exc:
+                    logger.warning("[SEMANTIC_CACHE] persist failed: %s", exc)
+                return
+
         can_use_true_stream = (
             _TRUE_TOKEN_STREAMING_ENABLED
             and not image_paths
@@ -1362,7 +1427,7 @@ async def process_chat_with_graph_stream(
             fastpath_started = time.perf_counter()
             memory_coordinator.apply_path_tokens_to_runtime(message, persona_mode)
             memory_started = time.perf_counter()
-            ctx = memory_coordinator.build_context_for_llm(
+            ctx = await memory_coordinator.build_context_for_llm_async(
                 message,
                 persona_mode,
                 compliance_data=None,
@@ -1384,7 +1449,7 @@ async def process_chat_with_graph_stream(
             emitted = 0
             response_acc: List[str] = []
             stream_llm_started = time.perf_counter()
-            async for live_chunk in _stream_direct_llm_chunks(system_prompt, full_message):
+            async for live_chunk in _stream_direct_llm_chunks(system_prompt, full_message, persona_mode=persona_mode):
                 response_acc.append(live_chunk)
                 emitted += 1
                 yield live_chunk
@@ -1398,6 +1463,17 @@ async def process_chat_with_graph_stream(
                 yield response_text
                 emitted += 1
             _persist_short_term_and_enqueue_writes(message, response_text, persona_mode)
+            # P3.1 — cache the fastpath response for near-duplicate queries.
+            try:
+                from kuro_backend import semantic_cache
+                semantic_cache.store(
+                    message,
+                    persona_mode,
+                    response_text,
+                    tags=semantic_cache.classify_tags(message),
+                )
+            except Exception as exc:
+                logger.debug("[SEMANTIC_CACHE] store skipped: %s", exc)
             if stream_metrics is not None:
                 stream_metrics["response_chars"] = float(len(response_text))
                 stream_metrics["stream_total_ms"] = round((time.perf_counter() - fastpath_started) * 1000, 2)
@@ -1585,8 +1661,8 @@ async def process_pdf_with_thinking(
 
 def process_chat_with_graph(
     message: str,
-    image_paths: list = None,
-    persona_override: str = None,
+    image_paths: Optional[List[str]] = None,
+    persona_override: Optional[str] = None,
     approval_scope: str = "sync_default",
     trace_id: str = "",
 ) -> str:
@@ -1618,6 +1694,30 @@ def process_chat_with_graph(
         persona_mode = memory_manager.normalize_persona(
             persona_override or memory_manager.get_active_persona()
         )
+
+        # P3.2 — same SSoT shortcut as the stream path. Bypasses the full graph
+        # for clearly-factual habit/reminder queries.
+        if not image_paths:
+            from kuro_backend import ssot_shortcuts
+            shortcut = ssot_shortcuts.try_shortcut(message, persona_mode)
+            if shortcut is not None:
+                logger.info("[SSOT_SHORTCUT] hit source=%s (sync) — bypassing LLM", shortcut.source)
+                try:
+                    _persist_short_term_and_enqueue_writes(message, shortcut.response, persona_mode)
+                except Exception as exc:
+                    logger.warning("[SSOT_SHORTCUT] persist failed: %s", exc)
+                return shortcut.response
+
+        # P3.1 — semantic cache lookup on the sync path as well.
+        if not image_paths:
+            from kuro_backend import semantic_cache
+            cached_response = semantic_cache.lookup(message, persona_mode)
+            if cached_response is not None:
+                try:
+                    _persist_short_term_and_enqueue_writes(message, cached_response, persona_mode)
+                except Exception as exc:
+                    logger.warning("[SEMANTIC_CACHE] persist failed: %s", exc)
+                return cached_response
 
         # Initialize state with session ID for observability
         initial_state = {
@@ -1653,6 +1753,17 @@ def process_chat_with_graph(
         if not response:
             logger.warning("[LANGGRAPH] Empty response from graph")
             return "Maaf, Pantronux. Respons tidak tersedia untuk saat ini. Mohon ulangi instruksi."
+        # P3.1 — store response for future semantic reuse.
+        try:
+            from kuro_backend import semantic_cache
+            semantic_cache.store(
+                message,
+                persona_mode,
+                response,
+                tags=semantic_cache.classify_tags(message),
+            )
+        except Exception as exc:
+            logger.debug("[SEMANTIC_CACHE] store (sync) skipped: %s", exc)
         return response
         
     except Exception as e:
@@ -1664,12 +1775,9 @@ def process_chat_with_graph(
 # GRAPH VISUALIZATION (Debug)
 # ============================================
 
-def save_graph_visualization(path: str = "kuro_graph.png"):
-    """Save graph visualization as PNG."""
-    try:
-        from IPython.display import Image, display
-        # This requires graphviz installed
-        # graph_image = kuro_graph.get_graph().draw_mermaid_png()
-        logger.info(f"[LANGGRAPH] Graph visualization saved to {path}")
-    except Exception as e:
-        logger.warning(f"[LANGGRAPH] Could not save graph visualization: {e}")
+def save_graph_visualization(path: str = "kuro_graph.png") -> None:
+    """No-op placeholder kept for API compatibility.
+
+    Real rendering requires graphviz/IPython which are optional in prod.
+    """
+    logger.debug("[LANGGRAPH] save_graph_visualization no-op (target=%s)", path)

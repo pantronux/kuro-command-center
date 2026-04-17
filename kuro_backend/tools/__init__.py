@@ -1,5 +1,5 @@
 """
-Kuro AI Tools Package
+Kuro AI V5.5 Tools Package
 Re-exports all functions from the original tools.py module.
 """
 # Re-export everything from the original tools.py (now base_tools.py)

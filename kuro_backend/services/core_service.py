@@ -1,5 +1,5 @@
 """
-kuro_backend.services.core_service — SINGLE SQLite writer for reminders + habits.
+Kuro AI V5.5 — kuro_backend.services.core_service — SINGLE SQLite writer for reminders + habits.
 
 All other modules must use this API only (no direct sqlite3 to these DBs).
 """
