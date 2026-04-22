@@ -6,6 +6,11 @@ Covers:
   - Thread-safe publish_async fires on a background thread.
   - Kill switches (KURO_PROACTIVE_ENABLED, KURO_PROACTIVE_TELEGRAM_ENABLED).
   - ProactiveEvent.format_telegram truncates and tags severity.
+
+--- Header Doc ---
+Purpose: Anomaly event bus invariants (severity gate + dedup + kill switches).
+Covers: kuro_backend.proactive_events.
+Fixtures: monkeypatched telegram_notifier + tmp sqlite fingerprint DB.
 """
 from __future__ import annotations
 

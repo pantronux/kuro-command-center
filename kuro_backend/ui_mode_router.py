@@ -15,6 +15,13 @@ Handlers must:
 
 This mirrors the lightweight pattern used by ``route_telegram_persona``
 in ``main.py`` — zero LLM calls, zero DB hits.
+
+--- Header Doc ---
+Purpose: Zero-cost keyword router for chat-initiated UI mode commands.
+Caller: main.py chat routes before LangGraph dispatch.
+Dependencies: dashboard_broadcast command constants.
+Main Functions: detect_mode_command(text) -> (command, remainder, confirmation).
+Side Effects: None (pure regex).
 """
 from __future__ import annotations
 

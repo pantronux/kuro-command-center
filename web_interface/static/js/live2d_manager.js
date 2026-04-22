@@ -16,6 +16,13 @@
  *
  * Everything fails silently so the dashboard keeps working even when the
  * Live2D SDK cannot be loaded (license-gated binary, offline, etc.).
+ *
+ * --- Header Doc ---
+ * Purpose: Live2D Hijiki avatar loader + motion controller used by the dashboard HUD.
+ * Caller: index.html (script tag) + app.js (speak/idle transitions driven by chat events).
+ * Dependencies: pixi.js, pixi-live2d-display, Cubism Core (loaded from /static/vendor/live2d or CDN fallback).
+ * Main Functions: kuroLive2DInit, kuroLive2DSpeak, returnToIdle, kuroLive2DSetExpression.
+ * Side Effects: Network fetches for SDK + model assets; DOM mutation on `#live2d-canvas`; RAF loop.
  */
 
 const LOCAL_VENDOR_BASE = "/static/vendor/live2d";

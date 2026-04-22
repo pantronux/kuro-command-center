@@ -2,6 +2,13 @@
 Kuro AI V6.0 Sovereign — kuro_backend.services.core_service — SINGLE SQLite writer for reminders + habits.
 
 All other modules must use this API only (no direct sqlite3 to these DBs).
+
+--- Header Doc ---
+Purpose: Single SQLite writer for reminders/habits/SSoT revision + cross-DB init orchestration.
+Caller: main.py routes, reminder_service, ssot_shortcuts, dreaming_worker, memory_coordinator (revision read).
+Dependencies: sqlite3, schemas (pydantic), tools.PROJECT_ROOT, logger.
+Main Functions: init_all_databases(), add_habit(), add_reminder(), bump_data_revision(), get_data_revision(), async helpers via services.async_adapter.
+Side Effects: Writes to kuro_short_term.db (WAL); bumps cache-buster revision used by semantic_cache; cross-init calls finance/compliance/intelligence/auth DBs.
 """
 from __future__ import annotations
 
@@ -1188,6 +1195,12 @@ def init_all_databases() -> None:
     _init_reminders_schema()
     _init_habits_schema()
     _migrate_habit_constraints()
+    try:
+        from kuro_backend import finance_db
+
+        finance_db.init_db()
+    except Exception as exc:
+        logger.warning("[DB_PATH] finance_db init skipped: %s", exc)
 
 
 def _migrate_habit_constraints() -> None:

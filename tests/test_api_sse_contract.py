@@ -1,3 +1,9 @@
+"""SSE/chat API contract tests.
+
+Purpose: Lock the /api/chat SSE frame schema and termination semantics.
+Covers: main.py SSE helpers and frame serialization.
+Fixtures: monkeypatch on LangGraph core, fake Gemini streams.
+"""
 import json
 import sys
 import types

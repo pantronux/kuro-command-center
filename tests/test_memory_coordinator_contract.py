@@ -1,4 +1,10 @@
-"""Contract tests for unified memory coordinator (habits + OpenClaw revision bump)."""
+"""Contract tests for unified memory coordinator (habits + OpenClaw revision bump).
+
+--- Header Doc ---
+Purpose: Verify memory_coordinator post-response fan-out + revision semantics.
+Covers: memory_coordinator.post_response_memory_writes, build_context_for_llm (chancellor market block).
+Fixtures: tmp sqlite DBs + monkeypatched Mem0 + finance_db stubs.
+"""
 import sys
 import types
 from pathlib import Path

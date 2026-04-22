@@ -8,6 +8,13 @@ V5.5: Gemini 3 Flash Engine + Contextual Retrieval + Query Expansion
 NOTE: This module is the legacy non-LangGraph path. Production traffic runs
 through `kuro_backend.langgraph_core`. Kept for CLI smoke tests and
 backward-compatible imports.
+
+--- Header Doc ---
+Purpose: Legacy single-shot Gemini chat path + generation-config factory (non-LangGraph).
+Caller: CLI smoke tests, fallback orchestration in core_service when LangGraph is disabled.
+Dependencies: google-genai, kuro_backend.chat_history, memory_manager, tools.base_tools, personas, config.
+Main Functions: process_chat(), _get_generation_config(), _assemble_contents().
+Side Effects: Gemini API calls, chat-history SQLite writes, token-usage metrics via observability.
 """
 from __future__ import annotations
 
@@ -74,6 +81,14 @@ def _get_generation_config(persona_override: Optional[str] = None) -> types.Gene
             tools.list_project_files,
             tools.add_reminder_tool,
             tools.get_reminders_tool,
+            tools.set_monthly_budget_tool,
+            tools.get_budget_tool,
+            tools.add_recurring_expense_tool,
+            tools.list_recurring_expenses_tool,
+            tools.get_daily_api_cost_tool,
+            tools.get_ticker_price_tool,
+            tools.get_market_news_tool,
+            tools.prediction_market_scan_tool,
             tools.mark_habit_done_tool,
             tools.get_habits_status_tool,
             tools.get_habit_history_tool,

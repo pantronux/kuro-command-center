@@ -6,6 +6,13 @@ Integrates Mem0 framework for long-term personal memory about Pantronux.
 - Memory Retrieval: Searches relevant memories based on current query
 - Privacy Filters: Only stores Pantronux data, excludes client data
 - Habit Sync: Tracks gym/tryhackme/learning patterns for smarter scolding
+
+--- Header Doc ---
+Purpose: Mem0-backed perpetual personal-memory layer with cooldown ladder and privacy filter.
+Caller: memory_coordinator post-response writer, langgraph_core response_node fastpath.
+Dependencies: mem0, google-genai embeddings, kuro_backend.config, file-lock for profile.
+Main Functions: extract_and_store(), search_relevant(), sync_habits(), cooldown_backoff().
+Side Effects: HTTP calls to Mem0, embedding API calls, persistent mem0 store writes, local cooldown state.
 """
 import logging
 import os

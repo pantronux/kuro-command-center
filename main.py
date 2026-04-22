@@ -18,7 +18,7 @@ import re
 import psutil
 import uvicorn
 from typing import Any, Dict, Optional
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from fastapi import FastAPI, UploadFile, File, Form, Request, Depends, HTTPException, status
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -50,7 +50,16 @@ from kuro_backend import reminder_service
 from kuro_backend import dashboard_broadcast
 from kuro_backend.services import core_service as core_data
 from kuro_backend.services.async_adapter import run_db
-from kuro_backend.services.schemas import AiEvaluationRecord
+from kuro_backend.services.schemas import (
+    AiEvaluationRecord,
+    ApiUsageDailyRecord,
+    MarketHudChip,
+    MonthlyBudgetRecord,
+    PredictionWatchRecord,
+    RecurringExpenseRecord,
+    WatchedSymbolRecord,
+)
+from kuro_backend import finance_db
 from kuro_backend import auth_db
 from kuro_backend import observability
 from kuro_backend import intelligence_db
@@ -970,12 +979,15 @@ class VoiceSpeechRequest(BaseModel):
     ``engine`` defaults to ``KURO_TTS_ENGINE`` (piper in V6.0) when omitted.
     ``lang`` defaults to ``en`` to match the Sebastian voice (en_GB-alan).
     ``voice`` is forwarded to piper only.
+    ``persona`` overrides Piper tuning (e.g. ``chancellor``); when omitted,
+    the active profile from ``memory_manager`` is used.
     """
 
     text: str = Field(..., min_length=1, max_length=2000)
     engine: Optional[str] = Field(default=None)
     lang: str = Field(default="en")
     voice: Optional[str] = Field(default=None)
+    persona: Optional[str] = Field(default=None)
 
 
 @app.post("/api/voice/speech")
@@ -994,12 +1006,14 @@ async def api_voice_speech(body: VoiceSpeechRequest):
         raise HTTPException(status_code=500, detail=f"voice service unavailable: {exc}")
 
     try:
+        tts_persona = (body.persona or "").strip() or memory_manager.get_active_persona()
         path, media_type = await asyncio.to_thread(
             voice_service.synthesize_to_file,
             body.text,
             engine=body.engine,
             lang=(body.lang or "en"),
             voice=body.voice,
+            persona=tts_persona,
         )
     except voice_service.TTSError as exc:
         logger.warning(f"[/api/voice/speech] synthesis failed: {exc}")
@@ -1656,6 +1670,163 @@ async def get_habits_evaluation_cached(period_type: str, year: int, period: int)
             content={"status": "error", "message": str(e)},
             headers=rev_headers,
         )
+
+
+# --- Finances SSoT (The Chancellor) ---
+@app.get("/api/finances/budget")
+async def finances_get_budget(month: Optional[str] = None):
+    """Return monthly_budget for YYYY-MM (default: current month)."""
+    m = (month or "").strip() or date.today().strftime("%Y-%m")
+    row = await run_db(finance_db.get_budget, m)
+    if not row:
+        return {"status": "success", "month": m, "budget": None}
+    rec = MonthlyBudgetRecord.model_validate(dict(row))
+    return {"status": "success", "month": m, "budget": rec.model_dump(mode="json")}
+
+
+@app.post("/api/finances/budget")
+async def finances_set_budget(
+    month: str = Form(...),
+    amount_usd: float = Form(...),
+    notes: str = Form(""),
+):
+    """Upsert monthly_budget."""
+    try:
+        await run_db(finance_db.add_budget, month, amount_usd, notes or "")
+        await run_db(core_data.bump_data_revision)
+        return {"status": "success", "month": month.strip()}
+    except Exception as e:
+        logger.error("finances_set_budget: %s", e)
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "message": str(e)},
+        )
+
+
+@app.get("/api/finances/expenses")
+async def finances_list_expenses():
+    rows = await run_db(finance_db.list_recurring_expenses, True)
+    out = [RecurringExpenseRecord.model_validate(dict(r)).model_dump(mode="json") for r in rows]
+    return {"status": "success", "expenses": out}
+
+
+@app.post("/api/finances/expenses")
+async def finances_add_expense(
+    label: str = Form(...),
+    amount_usd: float = Form(...),
+    cadence: str = Form("monthly"),
+    next_due: str = Form(""),
+    category: str = Form(""),
+):
+    try:
+        await run_db(
+            finance_db.upsert_recurring_expense,
+            label,
+            amount_usd,
+            cadence,
+            next_due,
+            category,
+            True,
+        )
+        await run_db(core_data.bump_data_revision)
+        return {"status": "success", "label": label.strip()}
+    except Exception as e:
+        logger.error("finances_add_expense: %s", e)
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "message": str(e)},
+        )
+
+
+@app.delete("/api/finances/expenses/{expense_id}")
+async def finances_delete_expense(expense_id: int):
+    try:
+        ok = await run_db(finance_db.delete_recurring_expense, expense_id)
+        if ok:
+            await run_db(core_data.bump_data_revision)
+        return {"status": "success", "deleted": bool(ok)}
+    except Exception as e:
+        logger.error("finances_delete_expense: %s", e)
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "message": str(e)},
+        )
+
+
+@app.get("/api/finances/api-usage")
+async def finances_api_usage(days: int = 7):
+    rows = await run_db(finance_db.get_last_n_days_spend, max(1, min(int(days), 90)))
+    out = [ApiUsageDailyRecord.model_validate(dict(r)).model_dump(mode="json") for r in rows]
+    return {"status": "success", "usage": out}
+
+
+# --- Market Sentinel (Chancellor + OpenClaw cache) ---
+@app.get("/api/market/watch")
+async def market_list_watch():
+    rows = await run_db(finance_db.list_watched_symbols, True)
+    out = [WatchedSymbolRecord.model_validate(dict(r)).model_dump(mode="json") for r in rows]
+    return {"status": "success", "symbols": out}
+
+
+@app.post("/api/market/watch")
+async def market_add_watch(symbol: str = Form(...), label: str = Form("")):
+    try:
+        sym = (symbol or "").strip().upper()
+        if not sym:
+            return JSONResponse(
+                status_code=400,
+                content={"status": "error", "message": "symbol required"},
+            )
+        await run_db(finance_db.upsert_watched_symbol, sym, label or "")
+        await run_db(core_data.bump_data_revision)
+        return {"status": "success", "symbol": sym}
+    except Exception as e:
+        logger.error("market_add_watch: %s", e)
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "message": str(e)},
+        )
+
+
+@app.delete("/api/market/watch/{symbol}")
+async def market_delete_watch(symbol: str):
+    try:
+        sym = (symbol or "").strip().upper()
+        ok = await run_db(finance_db.delete_watched_symbol, sym)
+        if ok:
+            await run_db(core_data.bump_data_revision)
+        return {"status": "success", "deleted": bool(ok)}
+    except Exception as e:
+        logger.error("market_delete_watch: %s", e)
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "message": str(e)},
+        )
+
+
+@app.get("/api/market/hud")
+async def market_hud():
+    raw = await run_db(finance_db.get_market_hud_items)
+    items = [MarketHudChip.model_validate(x).model_dump(mode="json") for x in raw]
+    return {"status": "success", "items": items}
+
+
+@app.get("/api/market/brief")
+async def market_brief():
+    parts = await run_db(finance_db.get_market_brief_parts)
+    brief = (parts.get("brief_text") or "").strip()
+    if not brief:
+        brief = (
+            (parts.get("last_sentinel_note") or "").strip()
+            or "No market briefing cached yet. The nightly sentinel will populate this."
+        )
+    return {"status": "success", "brief": brief}
+
+
+@app.get("/market", response_class=HTMLResponse)
+async def market_dashboard():
+    """Market Sentinel hub (watchlist + probability ticker)."""
+    return FileResponse(os.path.join(WEB_DIR, "templates", "market.html"))
 
 
 # --- Persona API Endpoint ---

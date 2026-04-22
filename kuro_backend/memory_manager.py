@@ -6,6 +6,13 @@ TIER 1: Short-Term Buffer (SQLite) - Last 20 interactions
 TIER 2: Semantic Long-Term Memory (ChromaDB) - Context-enriched embedded facts
 TIER 3: Structured Knowledge Base (JSON) - Permanent master profile (ABSOLUTE TRUTH)
 
+--- Header Doc ---
+Purpose: Three-tier cognitive memory orchestration (short-term SQLite, semantic ChromaDB, master-profile JSON).
+Caller: memory_coordinator, langgraph_core, core.py, services/core_service, dreaming_worker.
+Dependencies: sqlite3, chromadb, google-genai (embeddings + summaries), embedding_cache, perpetual_memory.
+Main Functions: add_interaction(), retrieve_context(), semantic_upsert_fact(), extract_facts(), cleanup_old_facts(), load_master_profile().
+Side Effects: Writes to kuro_short_term.db, ChromaDB vector store, master_profile.json; Gemini embedding + summarization calls; background decay threads.
+
 V3.0 CONTEXTUAL RAG:
 - Contextual Ingestion: Gemini 3 generates global file context before chunking
 - Context-Enriched Chunks: Each chunk prefixed with file-level context for better retrieval
@@ -137,7 +144,14 @@ DECAY_EXEMPT_CATEGORIES = ["identity", "preference", "goal"]  # These never expi
 # Keywords that trigger memory storage
 MEMORY_KEYWORDS = ["ingat", "simpan", "jadwal", "info", "spesifikasi", "catat", "profile", "preferensi"]
 
-CANONICAL_PERSONAS = ["consultant", "advisor", "chill", "tactical", "butler"]
+CANONICAL_PERSONAS = [
+    "consultant",
+    "advisor",
+    "chill",
+    "tactical",
+    "butler",
+    "chancellor",
+]
 PERSONA_ALIASES = {
     "support": "tactical",
     "adversarial_scholar": "advisor",

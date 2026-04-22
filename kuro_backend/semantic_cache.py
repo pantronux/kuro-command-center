@@ -19,6 +19,13 @@ Design goals:
 
 NOT a replacement for :mod:`ssot_shortcuts` — shortcuts are deterministic
 templates; this cache is for repeated *LLM-generated* answers.
+
+--- Header Doc ---
+Purpose: Semantic (embedding-similarity) response cache gated by SSoT revision token.
+Caller: langgraph_core response_node, main.py stream fastpath.
+Dependencies: kuro_backend.embedding_cache, stdlib (threading, math, dataclasses).
+Main Functions: get(), put(), purge_ssot_tagged(), is_enabled().
+Side Effects: In-process dict + lock; no durable writes; logs diagnostic metrics.
 """
 from __future__ import annotations
 

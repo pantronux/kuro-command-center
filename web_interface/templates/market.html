@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<!--
+  Header Doc ---
+  Purpose: Chancellor market stewardship dashboard (brief + watchlist + HUD chips).
+  Caller: main.py GET "/market".
+  Dependencies: /api/market/watch, /api/market/hud, /api/market/brief; Tailwind CDN.
+  Main Sections: morning brief, watchlist CRUD forms, HUD chip row.
+  Side Effects: Polls /api/market/* endpoints every ~60s; issues POST/DELETE on watch CRUD.
+-->
+<html lang="en" class="dark scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kuro — Market Sentinel</title>
+    <link rel="icon" type="image/x-icon" href="/profile/favicon.ico">
+    <link rel="apple-touch-icon" href="/profile/kuro_avatar.png">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen">
+    <header class="border-b border-gray-700 px-4 py-3 flex items-center justify-between gap-4">
+        <div class="flex items-center gap-3">
+            <a href="/" class="text-emerald-400 hover:underline text-sm">← Chat</a>
+            <h1 class="text-lg font-semibold tracking-tight">Market Sentinel</h1>
+        </div>
+        <div id="kuroMarketProbTicker" class="font-mono text-xs text-cyan-300 truncate max-w-[50vw]"></div>
+    </header>
+    <main class="max-w-4xl mx-auto p-4 space-y-8">
+        <section class="rounded-xl border border-gray-700 bg-gray-800/50 p-4">
+            <h2 class="text-sm font-medium text-gray-400 mb-2">Morning brief (cached)</h2>
+            <p id="marketBrief" class="text-sm text-gray-200 whitespace-pre-wrap">Loading…</p>
+        </section>
+        <section class="rounded-xl border border-gray-700 bg-gray-800/50 p-4">
+            <h2 class="text-sm font-medium text-gray-400 mb-3">Watchlist</h2>
+            <form id="addWatch" class="flex flex-wrap gap-2 mb-4">
+                <input name="symbol" placeholder="Symbol (e.g. NVDA)" class="px-3 py-2 rounded bg-gray-900 border border-gray-600 text-sm w-40" required />
+                <input name="label" placeholder="Label (optional)" class="px-3 py-2 rounded bg-gray-900 border border-gray-600 text-sm flex-1 min-w-[8rem]" />
+                <button type="submit" class="px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-sm font-medium">Add</button>
+            </form>
+            <ul id="watchList" class="divide-y divide-gray-700 text-sm"></ul>
+        </section>
+        <section class="rounded-xl border border-gray-700 bg-gray-800/50 p-4">
+            <h2 class="text-sm font-medium text-gray-400 mb-2">HUD chips</h2>
+            <ul id="hudChips" class="font-mono text-xs text-cyan-200 space-y-1"></ul>
+        </section>
+    </main>
+    <script>
+        async function api(path, opts) {
+            const r = await fetch(path, Object.assign({ credentials: 'same-origin' }, opts || {}));
+            return r.json();
+        }
+        function chipLine(it) {
+            const id = (it.id || '').toString();
+            const lab = (it.label || id).toString();
+            if (it.kind === 'equity') {
+                const s = it.sentiment || 'FLAT';
+                const p = it.last_pct_change != null ? it.last_pct_change.toFixed(2) + '%' : '—';
+                return '[' + id + ': ' + s + ' ' + p + ']';
+            }
+            const prob = it.prob != null ? it.prob.toFixed(0) + '%' : '—';
+            const tr = (it.trend || 'flat').toString();
+            const arrow = tr === 'up' ? '↗' : tr === 'down' ? '↘' : '→';
+            return '[' + id + ': ' + prob + ' ' + arrow + ' ' + lab.slice(0, 24) + ']';
+        }
+        async function refresh() {
+            try {
+                const b = await api('/api/market/brief');
+                document.getElementById('marketBrief').textContent =
+                    (b && b.brief) ? b.brief : '(empty)';
+            } catch (e) {
+                document.getElementById('marketBrief').textContent = 'Could not load brief.';
+            }
+            try {
+                const h = await api('/api/market/hud');
+                const items = (h && h.items) ? h.items : [];
+                const el = document.getElementById('hudChips');
+                const tick = document.getElementById('kuroMarketProbTicker');
+                el.innerHTML = '';
+                const lines = items.map(chipLine);
+                tick.textContent = lines.slice(0, 6).join(' ');
+                lines.forEach(function (line) {
+                    const li = document.createElement('li');
+                    li.textContent = line;
+                    el.appendChild(li);
+                });
+            } catch (e) {
+                document.getElementById('hudChips').innerHTML = '<li>HUD unavailable</li>';
+            }
+            try {
+                const w = await api('/api/market/watch');
+                const rows = (w && w.symbols) ? w.symbols : [];
+                const ul = document.getElementById('watchList');
+                ul.innerHTML = '';
+                if (!rows.length) {
+                    ul.innerHTML = '<li class="py-2 text-gray-500">No symbols yet.</li>';
+                } else {
+                    rows.forEach(function (r) {
+                        const li = document.createElement('li');
+                        li.className = 'py-2 flex justify-between items-center gap-2';
+                        const left = document.createElement('span');
+                        left.textContent = r.symbol + (r.label ? ' — ' + r.label : '') +
+                            (r.last_price != null ? ' @ ' + r.last_price : '');
+                        const btn = document.createElement('button');
+                        btn.className = 'text-red-400 hover:underline text-xs';
+                        btn.textContent = 'Remove';
+                        btn.onclick = async function () {
+                            await api('/api/market/watch/' + encodeURIComponent(r.symbol), { method: 'DELETE' });
+                            refresh();
+                        };
+                        li.appendChild(left);
+                        li.appendChild(btn);
+                        ul.appendChild(li);
+                    });
+                }
+            } catch (e) {
+                document.getElementById('watchList').innerHTML = '<li class="py-2 text-red-400">Watchlist API error</li>';
+            }
+        }
+        document.getElementById('addWatch').addEventListener('submit', async function (ev) {
+            ev.preventDefault();
+            const fd = new FormData(ev.target);
+            await fetch('/api/market/watch', {
+                method: 'POST',
+                credentials: 'same-origin',
+                body: fd,
+            });
+            ev.target.reset();
+            refresh();
+        });
+        refresh();
+        setInterval(refresh, 45000);
+        if (window.lucide) lucide.createIcons();
+    </script>
+</body>
+</html>

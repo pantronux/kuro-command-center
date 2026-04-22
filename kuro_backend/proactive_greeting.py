@@ -14,6 +14,13 @@ Configuration (all optional; the defaults are Sebastian-safe):
 
 The function never raises; a broken greeting must never take down the
 WebSocket handshake.
+
+--- Header Doc ---
+Purpose: One-per-day butler greeting push to the dashboard UI on connect.
+Caller: main.py /ws/dashboard handler.
+Dependencies: dashboard_broadcast, voice_service (optional TTS line), sqlite for cooldown state.
+Main Functions: maybe_send_greeting(), _greeting_due_today(), _record_sent().
+Side Effects: Writes cooldown row to short-term DB, sends UI_COMMAND over WS, optional TTS synthesis.
 """
 from __future__ import annotations
 

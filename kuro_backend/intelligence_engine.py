@@ -3,6 +3,13 @@ Kuro AI V6.0 Sovereign - Proactive Intelligence Research Engine
 ================================================================================
 Autonomous research system using Serper.dev for daily intelligence gathering.
 Synthesizes findings into formal briefing reports for Pantronux.
+
+--- Header Doc ---
+Purpose: Nightly autonomous intelligence gathering + Gemini synthesis -> intelligence_db.
+Caller: dreaming_worker._run_intelligence, CLI manual briefing generator.
+Dependencies: serper_tool (HTTP), google-genai (synthesis), intelligence_db.
+Main Functions: run_daily_briefing(), generate_synthesis(), schedule_topics().
+Side Effects: Serper HTTP calls, Gemini LLM calls, intelligence_db writes.
 """
 import os
 import json

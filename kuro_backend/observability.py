@@ -3,6 +3,13 @@ Kuro AI V6.0 Sovereign - Observability with Arize Phoenix & OpenTelemetry
 ================================================================================
 Black Box System for Tracing, Guardrails Validation, and Performance Monitoring
 Port 6006 - Phoenix Dashboard with Simple Auth
+
+--- Header Doc ---
+Purpose: OpenTelemetry tracing + Phoenix integration + token/cost accounting.
+Caller: main.py startup, langgraph_core nodes, core.py, tools (via @traced), dreaming_worker.
+Dependencies: arize-phoenix, opentelemetry, google-genai usage metadata, kuro_backend.pricing, finance_db.
+Main Functions: init_observability(), traced(), track_token_usage(), log_event().
+Side Effects: Spins up Phoenix OTel collector threads, writes to phoenix sqlite, persists daily api_usage via finance_db.
 """
 import logging
 import os
@@ -10,7 +17,7 @@ import uuid
 import threading
 import time
 from typing import Optional, Dict, Any
-from datetime import datetime
+from datetime import date, datetime
 from contextlib import contextmanager
 
 # ============================================
@@ -273,6 +280,28 @@ def track_token_usage(session_id: str, prompt_tokens: int, completion_tokens: in
     _token_tracker[session_id]["prompt_tokens"] += prompt_tokens
     _token_tracker[session_id]["completion_tokens"] += completion_tokens
     _token_tracker[session_id]["total_tokens"] += total_tokens
+
+    # Chancellor / finances: persist daily API cost rollup (best-effort).
+    if os.getenv("KURO_FINANCE_TRACKING_ENABLED", "true").strip().lower() in (
+        "1", "true", "yes", "on",
+    ):
+        try:
+            from kuro_backend import finance_db, pricing
+            from kuro_backend.config import PRIMARY_MODEL
+
+            model = os.getenv("MODEL_NAME", PRIMARY_MODEL)
+            cost = pricing.estimate_cost_usd(
+                model, prompt_tokens, completion_tokens,
+            )
+            finance_db.add_api_usage(
+                date.today().isoformat(),
+                model,
+                prompt_tokens,
+                completion_tokens,
+                cost,
+            )
+        except Exception as exc:
+            logger.debug("[OBS] api_usage rollup skipped: %s", exc)
     
     # V5.5: Token threshold alert disabled. Only tracking for observability.
     return _token_tracker[session_id]

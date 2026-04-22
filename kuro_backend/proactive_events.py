@@ -17,6 +17,13 @@ The bus owns three cross-cutting concerns so no source re-implements them:
      thread so the HTTP request / SQLite write path never blocks.
 
 All public functions are safe to call from any thread; publish never raises.
+
+--- Header Doc ---
+Purpose: Single entry point for anomaly / alert publication (dedup + severity).
+Caller: dreaming_worker (reflection, CVE, fiscal, market), fitness_service, memory_coordinator write-path, hardware sentinel.
+Dependencies: telegram_notifier, dream_notifications fingerprint table, stdlib threading.
+Main Functions: publish(kind, severity, summary, details), _is_duplicate(), _dispatch_async().
+Side Effects: SQLite fingerprint writes, Telegram HTTP calls via background thread, logger events.
 """
 from __future__ import annotations
 
@@ -39,6 +46,8 @@ _KINDS: Final[Tuple[str, ...]] = (
     "fitness_anomaly",
     "hardware",
     "memory_inconsistency",
+    "fiscal_alert",
+    "market_alert",
     "generic",
 )
 

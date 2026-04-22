@@ -3,6 +3,13 @@ Kuro AI V6.0 Sovereign — Grounded habit reporting: SQLite is the only source o
 
 Used by habit_node (evaluasi) and response_node (konteks) to reduce hallucinated
 activities, IPs, ISO clauses, etc.
+
+--- Header Doc ---
+Purpose: Grounded habit-context formatter for LLM injection (anti-hallucination).
+Caller: langgraph_core habit_node + response_node, memory_coordinator.
+Dependencies: services.core_service read helpers.
+Main Functions: format_habit_block(), grounded_habit_narrative(), _streaks().
+Side Effects: Read-only SQLite access; log only.
 """
 from __future__ import annotations
 

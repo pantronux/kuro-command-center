@@ -3,6 +3,11 @@
 Covers the once-per-calendar-day cooldown, the kill-switch, the custom-text
 override, and the targeted-WS send path. The SQLite ledger is redirected
 to a tmp_path DB so the tests never touch the real ``kuro_auth.db``.
+
+--- Header Doc ---
+Purpose: Verify one-per-day greeting cooldown + kill-switch + text override.
+Covers: kuro_backend.proactive_greeting.maybe_send_greeting.
+Fixtures: tmp_path SQLite + fake WebSocket send spy.
 """
 from __future__ import annotations
 

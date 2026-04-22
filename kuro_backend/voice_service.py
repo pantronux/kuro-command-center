@@ -31,6 +31,13 @@ Install the Alan voice once:
 This module never imports the heavy engines at import-time — both imports
 live behind lazy helpers so the FastAPI server keeps booting even when
 gTTS or piper are not installed.
+
+--- Header Doc ---
+Purpose: Pluggable TTS synthesis (Piper offline / gTTS online) with LRU media cache.
+Caller: main.py /api/voice/speech and proactive greeting broadcaster.
+Dependencies: piper-tts, onnxruntime, gTTS, ffmpeg (optional), voice_profiles.
+Main Functions: synthesize_to_file(text, persona, engine), _synthesize_piper(), _synthesize_gtts(), _cache_key().
+Side Effects: Writes wav/mp3 under media/tts/, invokes ffmpeg subprocess, reads large ONNX voices from disk.
 """
 from __future__ import annotations
 
@@ -341,6 +348,7 @@ def synthesize_to_file(
     engine: Optional[str] = None,
     lang: str = _DEFAULT_LANG,
     voice: Optional[str] = None,
+    persona: Optional[str] = None,
 ) -> Tuple[Path, str]:
     """Synthesise ``text`` and return ``(path, media_type)``.
 
@@ -358,11 +366,28 @@ def synthesize_to_file(
 
     selected_engine = _resolve_engine(engine)
     selected_lang = (lang or _DEFAULT_LANG).strip().lower() or _DEFAULT_LANG
-    length_scale = _current_length_scale() if selected_engine == "piper" else 1.0
-    pitch_shift = _current_pitch_shift() if selected_engine == "piper" else 1.0
+    if selected_engine == "piper":
+        from kuro_backend import voice_profiles
+
+        prof = voice_profiles.for_persona(persona)
+        length_scale = (
+            prof.length_scale
+            if prof.length_scale is not None
+            else _current_length_scale()
+        )
+        pitch_shift = (
+            prof.pitch_shift
+            if prof.pitch_shift is not None
+            else _current_pitch_shift()
+        )
+        eff_voice = prof.voice_path if prof.voice_path else voice
+    else:
+        length_scale = 1.0
+        pitch_shift = 1.0
+        eff_voice = voice
 
     digest = _cache_key(
-        selected_engine, selected_lang, voice, trimmed,
+        selected_engine, selected_lang, eff_voice, trimmed,
         length_scale=length_scale, pitch_shift=pitch_shift,
     )
     target = _cache_path(selected_engine, digest)
@@ -384,7 +409,7 @@ def synthesize_to_file(
             _synth_gtts(trimmed, selected_lang, target)
         else:
             _synth_piper(
-                trimmed, voice, target, length_scale=length_scale,
+                trimmed, eff_voice, target, length_scale=length_scale,
             )
             # Pitch-shift only makes sense on WAV output (piper). gTTS output
             # is MP3; skipping keeps the cache deterministic.
@@ -396,7 +421,7 @@ def synthesize_to_file(
         logger.info(
             "[TTS] synthesised engine=%s lang=%s voice=%s key=%s size=%d "
             "ls=%.2f ps=%.2f",
-            selected_engine, selected_lang, voice or "-", digest[:8],
+            selected_engine, selected_lang, eff_voice or "-", digest[:8],
             target.stat().st_size, length_scale, pitch_shift,
         )
         return target, media_type
@@ -408,10 +433,13 @@ def synthesize(
     engine: Optional[str] = None,
     lang: str = _DEFAULT_LANG,
     voice: Optional[str] = None,
+    persona: Optional[str] = None,
 ) -> bytes:
     """Synthesise and return the raw audio bytes (convenience for callers
     that don't need the cache path)."""
-    path, _ = synthesize_to_file(text, engine=engine, lang=lang, voice=voice)
+    path, _ = synthesize_to_file(
+        text, engine=engine, lang=lang, voice=voice, persona=persona,
+    )
     return path.read_bytes()
 
 

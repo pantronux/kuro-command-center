@@ -3,6 +3,11 @@
 These tests don't spin up the FastAPI app; they just assert the dashboard
 HTML templates ship the new favicon links, the real avatar image, the
 Live2D canvas dock, and the loader <script type="module"> entry point.
+
+--- Header Doc ---
+Purpose: Static smoke over HTML templates (no FastAPI boot) — branding + market bar + market link.
+Covers: web_interface/templates/index.html, market.html.
+Fixtures: Path reads only; no DB.
 """
 from __future__ import annotations
 
@@ -35,9 +40,21 @@ def test_index_has_live2d_canvas_and_loader():
     assert "/static/js/live2d_manager.js" in html
 
 
+def test_index_includes_chancellor_persona_option():
+    html = _read("index.html")
+    assert 'data-persona="chancellor"' in html
+    assert "The Chancellor" in html
+
+
+def test_index_links_market_sentinel():
+    html = _read("index.html")
+    assert 'href="/market"' in html
+    assert "kuroMarketChipsBar" in html
+
+
 def test_secondary_templates_have_favicon():
     for name in ("reminder.html", "daily_habits.html", "intelligence.html",
-                 "login.html", "compliance.html"):
+                 "market.html", "login.html", "compliance.html"):
         html = _read(name)
         assert '/profile/favicon.ico' in html, f"{name} missing favicon link"
 

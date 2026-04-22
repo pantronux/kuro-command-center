@@ -11,6 +11,13 @@ Design goals:
   :mod:`config.settings` has no ``TELEGRAM_TOKEN`` / ``TELEGRAM_CHAT_ID``.
 - ``dry_run=True`` logs the payload and skips the HTTP call — used by the
   CLI ``--dry-run`` flag and by tests.
+
+--- Header Doc ---
+Purpose: Resilient outbound Telegram notifier (bot token + chat id) for proactive events.
+Caller: proactive_events._dispatch_async, reminder_service due-reminder loop, dreaming_worker alerts.
+Dependencies: requests/httpx, kuro_backend.config.
+Main Functions: send_message(text, *, dry_run), is_configured(), _post_with_retry().
+Side Effects: HTTPS call to api.telegram.org; logs redacted request/response.
 """
 from __future__ import annotations
 

@@ -10,6 +10,11 @@ wrappers (which call `bump_data_revision()` + `record_mutation()`).
 This test scans the `kuro_backend/` tree and fails if any other file imports
 or calls those raw primitives. It also ensures the SSoT API surface
 (`bump_data_revision`, `record_mutation`) still exists.
+
+--- Header Doc ---
+Purpose: Static AST guardrail ensuring only *_svc wrappers mutate SSoT.
+Covers: kuro_backend/ AST scan for raw writer primitives.
+Fixtures: Walks package tree; no runtime DB.
 """
 from __future__ import annotations
 

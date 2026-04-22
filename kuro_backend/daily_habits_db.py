@@ -1,5 +1,12 @@
 """
 Deprecated shim — SQLite habits live in `kuro_backend.services.core_service` only.
+
+--- Header Doc ---
+Purpose: Backwards-compat re-export for legacy callers that imported the old flat module.
+Caller: Legacy tests / scripts that pre-date services/core_service.
+Dependencies: kuro_backend.services.core_service.
+Main Functions: Re-exports HABITS_DB_PATH + helper aliases.
+Side Effects: None beyond re-export.
 """
 from kuro_backend.services.core_service import (
     HABITS_DB_PATH as HABITS_DB,

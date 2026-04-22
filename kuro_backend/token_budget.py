@@ -14,6 +14,13 @@ Design notes:
   are not lost (helpful for RAG passages and summaries).
 - `KURO_MAX_CONTEXT_TOKENS` env var is a hard ceiling across the whole
   assembled prompt and acts as a final safety net.
+
+--- Header Doc ---
+Purpose: Per-section token budgeting + trim policy for assembled LLM prompts.
+Caller: memory_coordinator.build_context_for_llm, langgraph_core response_node.
+Dependencies: stdlib only (logging, os).
+Main Functions: SECTION_QUOTAS, build_budgeted_context(), approximate_tokens(), trim_to_tokens().
+Side Effects: None (pure string functions + logging).
 """
 from __future__ import annotations
 
@@ -40,6 +47,8 @@ SECTION_QUOTAS: Final[Mapping[str, int]] = {
     "tool_result":      600,
     "referent":         300,
     "summary":          600,
+    "finance":          450,
+    "market":           350,
     # catch-all bucket for ad-hoc blocks not matching the above
     "other":            500,
 }
@@ -55,6 +64,8 @@ _TRIM_PRIORITY: Final[tuple[str, ...]] = (
     "summary",
     "memory_injection",
     "other",
+    "finance",
+    "market",
     # Layer 3 — protected floor, trimmed last
     "habit",
     "compliance",

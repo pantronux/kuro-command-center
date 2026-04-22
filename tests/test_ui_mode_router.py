@@ -1,4 +1,10 @@
-"""Tests for Kuro AI V6.1 Sovereign UI mode router (primarily EN, legacy BI retained)."""
+"""Tests for Kuro AI V6.1 Sovereign UI mode router (primarily EN, legacy BI retained).
+
+--- Header Doc ---
+Purpose: Verify keyword detection for UI mode switching (HUD/RESEARCH/CINEMA).
+Covers: kuro_backend.ui_mode_router.detect_mode_command.
+Fixtures: None (pure regex).
+"""
 from __future__ import annotations
 
 import sys

@@ -1,5 +1,12 @@
 """
 Kuro AI V6.0 Sovereign — OpenClaw bridge client for external execution handover.
+
+--- Header Doc ---
+Purpose: HTTP client + circuit breaker to the OpenClaw external execution daemon.
+Caller: tools/base_tools (advanced_execution_tool, market tools), execution/service, dreaming_worker market + prediction scans.
+Dependencies: requests, stdlib threading/time/asyncio.
+Main Functions: call_skill(name, payload), healthcheck(), _circuit_state(), _should_trip().
+Side Effects: Outbound HTTPS/HTTP to OpenClaw host, background state for circuit breaker, logs retries + trip events.
 """
 from __future__ import annotations
 

@@ -12,6 +12,13 @@ Rules:
 
 The module is pure-Python + regex; all SQLite access goes through the
 validated ``core_service`` API, so SSoT guarantees are unchanged.
+
+--- Header Doc ---
+Purpose: Deterministic LLM-bypass router for high-confidence habit/reminder queries.
+Caller: langgraph_core supervisor_node, main.py stream fastpath.
+Dependencies: kuro_backend.services.core_service (habit + reminder getters), stdlib re + datetime.
+Main Functions: match_shortcut(), format_habits_answer(), format_reminders_answer(), is_shortcut_candidate().
+Side Effects: None (read-only via core_service accessors); log only.
 """
 from __future__ import annotations
 
@@ -116,6 +123,24 @@ _HABIT_STREAK_PATTERN: Final[re.Pattern[str]] = re.compile(
     re.IGNORECASE,
 )
 
+_BUDGET_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"\b(what\s*(is|'s)\s*my\s*budget|my\s*budget|this\s*month'?s?\s*budget|"
+    r"budget\s*remaining|monthly\s*budget|how\s*much\s*budget)\b",
+    re.IGNORECASE,
+)
+
+_EXPENSES_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"\b(recurring\s*expenses?|list\s*subscriptions?|monthly\s*bills?|"
+    r"subscriptions?\s*list|what\s*subscriptions)\b",
+    re.IGNORECASE,
+)
+
+_API_SPEND_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"\b(api\s*spend|today'?s?\s*api\s*cost|api\s*usage|daily\s*api\s*cost|"
+    r"api\s*cost\s*today)\b",
+    re.IGNORECASE,
+)
+
 
 # ---------------------------------------------------------------------------
 # Formatters (work entirely on SSoT data)
@@ -190,6 +215,38 @@ def _format_reminders_upcoming(reminders: Sequence[dict]) -> str:
     return "\n".join(lines)
 
 
+def _format_budget_row(row: Optional[dict], month_key: str) -> str:
+    if not row:
+        return (
+            f"The ledger records no monthly_budget entry for {month_key}. "
+            "Master may set one via the finances API or the Chancellor tools."
+        )
+    amt = float(row.get("amount_usd") or 0.0)
+    notes = (row.get("notes") or "").strip()
+    tail = f" Notes: {notes}" if notes else ""
+    return f"Monthly budget ({month_key}): USD {amt:.2f}.{tail}"
+
+
+def _format_recurring_expenses_block(rows: Sequence[dict]) -> str:
+    if not rows:
+        return "The ledger records no active recurring_expenses."
+    lines = ["Active recurring obligations (from SSoT):"]
+    for e in rows[:30]:
+        lab = e.get("label") or "-"
+        amt = float(e.get("amount_usd") or 0.0)
+        cad = e.get("cadence") or "monthly"
+        nxt = e.get("next_due") or ""
+        lines.append(f"- {lab}: USD {amt:.2f} ({cad}), next due: {nxt or '—'}")
+    return "\n".join(lines)
+
+
+def _format_daily_api_spend(amount: float, date_str: str) -> str:
+    return (
+        f"Estimated API expenditure for {date_str} (api_usage_daily): "
+        f"USD {amount:.4f}."
+    )
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -216,6 +273,35 @@ def try_shortcut(query: str, persona_mode: str) -> Optional[ShortcutResult]:
         return None
 
     try:
+        if _BUDGET_PATTERN.search(norm):
+            from kuro_backend import finance_db
+
+            month_key = date.today().strftime("%Y-%m")
+            row = finance_db.get_budget(month_key)
+            return ShortcutResult(
+                response=_format_budget_row(row, month_key),
+                source="finances_budget",
+            )
+
+        if _EXPENSES_PATTERN.search(norm):
+            from kuro_backend import finance_db
+
+            rows = finance_db.list_recurring_expenses(active_only=True)
+            return ShortcutResult(
+                response=_format_recurring_expenses_block(rows),
+                source="finances_expenses",
+            )
+
+        if _API_SPEND_PATTERN.search(norm):
+            from kuro_backend import finance_db
+
+            d = date.today().isoformat()
+            cost = finance_db.get_daily_api_cost_usd(d)
+            return ShortcutResult(
+                response=_format_daily_api_spend(cost, d),
+                source="finances_api_spend",
+            )
+
         if _HABIT_STREAK_PATTERN.search(norm):
             habits = core_data.list_habits_validated()
             return ShortcutResult(response=_format_habit_streaks(habits), source="habits_streaks")

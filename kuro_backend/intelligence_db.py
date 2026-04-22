@@ -2,6 +2,13 @@
 Kuro AI V6.0 Sovereign - Intelligence Briefings Database
 ================================================================================
 SQLite storage for daily intelligence briefings from autonomous research.
+
+--- Header Doc ---
+Purpose: Persistent store for daily intel briefings + topic watchlist.
+Caller: intelligence_engine (writer), memory_coordinator (reader), main.py briefing routes.
+Dependencies: sqlite3.
+Main Functions: init_db(), save_briefing(), list_recent_briefings(), upsert_topic(), list_topics().
+Side Effects: Writes to kuro_intelligence.db (WAL); short-lived connections closed in finally.
 """
 import sqlite3
 import json

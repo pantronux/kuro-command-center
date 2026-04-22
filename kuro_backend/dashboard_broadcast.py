@@ -2,6 +2,13 @@
 Dashboard WebSocket fan-out: push REFRESH_NOW when sync revision bumps
 (multi-worker safe via DB revision) and relay UI_COMMAND frames to toggle
 HUD / RESEARCH / CINEMA themes from the chat pipeline (Kuro AI V6.0 Sovereign).
+
+--- Header Doc ---
+Purpose: WebSocket fan-out hub for dashboard UI commands + revision pings.
+Caller: main.py /ws/dashboard handler, memory_coordinator write-path, dreaming_worker sentinels.
+Dependencies: starlette WebSocket, services.core_service.get_data_revision.
+Main Functions: register(ws), unregister(ws), broadcast_ui_command(), broadcast_refresh(), notify_revision_changed().
+Side Effects: Maintains in-memory socket set; pushes JSON frames; reads revision token from SQLite.
 """
 from __future__ import annotations
 

@@ -1,4 +1,12 @@
-"""Kuro AI V6.0 Sovereign — Shared context flags for Sniper rails (habit reports, fact-check gating)."""
+"""Kuro AI V6.0 Sovereign — Shared context flags for Sniper rails (habit reports, fact-check gating).
+
+--- Header Doc ---
+Purpose: Mutable cross-module flags guiding rail decisions per turn.
+Caller: sniper_pipeline, langgraph_core supervisor_node.
+Dependencies: stdlib re/typing.
+Main Functions: set_flag(), get_flag(), looks_like_habit_report(text).
+Side Effects: In-memory dict state only (reset per turn).
+"""
 from __future__ import annotations
 
 import re

@@ -1,3 +1,9 @@
+"""Approval / HITL integrity tests.
+
+Purpose: Ensure advanced_execution_tool approval/reject payloads do not mutate SSoT out-of-band.
+Covers: tools.base_tools.advanced_execution_tool, openclaw bridge stubs.
+Fixtures: monkeypatched openclaw_bridge + temp core_service DBs.
+"""
 import sys
 import types
 from pathlib import Path

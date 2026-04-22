@@ -14,6 +14,13 @@ Usage:
     from kuro_backend.services import async_adapter
     habits = await async_adapter.run_db(core_service.list_habits_validated)
     await async_adapter.run_db(core_service.add_habit_svc, name="read", target=30)
+
+--- Header Doc ---
+Purpose: Typed bridge to run synchronous SSoT writers off the FastAPI event loop.
+Caller: main.py async FastAPI routes that need to call sync core_service helpers.
+Dependencies: asyncio (stdlib).
+Main Functions: run_db(func, *args, **kwargs).
+Side Effects: Dispatches callable to a worker thread via asyncio.to_thread.
 """
 from __future__ import annotations
 

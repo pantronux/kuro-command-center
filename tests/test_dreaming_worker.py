@@ -11,6 +11,11 @@ Covers:
   - SSoT bump gated by ssot_bump_recommended + kind + confidence.
   - Telegram dedup: second fire with same fingerprint is a no-op.
   - Kill switches: KURO_DREAMING_ENABLED=false short-circuits cycle.
+
+--- Header Doc ---
+Purpose: Verify dreaming_worker cycle end-to-end (lease, collect, reflect, enrich, persist, bump, dedup).
+Covers: kuro_backend.dreaming_worker (most _run_* helpers).
+Fixtures: tmp sqlite DBs, monkeypatched Gemini/OpenClaw/Serper/Telegram.
 """
 from __future__ import annotations
 
@@ -258,10 +263,11 @@ def test_ssot_bump_gated_by_confidence(monkeypatch):
     def _fake_bump():
         calls.append("bump")
 
-    fake_core_svc = types.ModuleType("kuro_backend.services.core_service")
-    fake_core_svc.bump_data_revision = _fake_bump
-    monkeypatch.setitem(
-        sys.modules, "kuro_backend.services.core_service", fake_core_svc,
+    # Patch the real submodule attribute: replacing sys.modules is order-dependent
+    # once another test has imported kuro_backend.services.core_service.
+    monkeypatch.setattr(
+        "kuro_backend.services.core_service.bump_data_revision",
+        _fake_bump,
     )
 
     low = Finding(
@@ -285,14 +291,13 @@ def test_ssot_bump_gated_by_confidence(monkeypatch):
 
 def test_ssot_bump_dry_run_skips_bump(monkeypatch):
     called = {"n": 0}
-    fake_core_svc = types.ModuleType("kuro_backend.services.core_service")
 
     def _fake_bump():
         called["n"] += 1
 
-    fake_core_svc.bump_data_revision = _fake_bump
-    monkeypatch.setitem(
-        sys.modules, "kuro_backend.services.core_service", fake_core_svc,
+    monkeypatch.setattr(
+        "kuro_backend.services.core_service.bump_data_revision",
+        _fake_bump,
     )
 
     finding = Finding(

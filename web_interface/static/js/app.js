@@ -1,6 +1,13 @@
 /**
  * Kuro AI Web Dashboard - Main Application V4.0
  * One UI + Glassmorphism Design with Infinite Scroll
+ *
+ * --- Header Doc ---
+ * Purpose: Frontend app for the main chat dashboard (chat, personas, voice, HUD, market chips, infinite scroll).
+ * Caller: Loaded from web_interface/templates/index.html.
+ * Dependencies: Tailwind (CDN), Lucide icons, live2d_manager.js (avatar), browser Web APIs (WebSocket, fetch, MediaRecorder).
+ * Main Functions: kuroSendMessage, kuroLoadHistory, kuroPollMarketHudOnce, kuroStartMarketHudPoll, kuroRenderSentinelTicker, persona switcher, voice capture pipeline.
+ * Side Effects: /api/chat XHR, WebSocket /ws/dashboard, localStorage cache, DOM mutations.
  */
 
 // ============================================
@@ -88,7 +95,7 @@ let chatOffset = 0;
 let isLoadingMore = false;
 let hasMoreMessages = true;
 let scrollAnchorPosition = null;
-const VALID_PERSONAS = ['consultant', 'advisor', 'chill', 'tactical', 'butler'];
+const VALID_PERSONAS = ['consultant', 'advisor', 'chill', 'tactical', 'butler', 'chancellor'];
 
 // ============================================
 // DOM Elements
@@ -173,6 +180,7 @@ document.addEventListener('DOMContentLoaded', () => {
     updateUserInfo();
     kuroRestoreUIMode();
     kuroConnectDashboardWS();
+    kuroStartMarketHudPoll();
 });
 
 // ============================================
@@ -539,6 +547,43 @@ function kuroRenderStatusTicker(snapshot) {
     }, 60000);
 }
 
+function kuroMarketHudChipLine(it) {
+    const id = (it && it.id || '').toString();
+    if (it && it.kind === 'equity') {
+        const s = it.sentiment || 'FLAT';
+        const p = it.last_pct_change != null ? it.last_pct_change.toFixed(2) + '%' : '—';
+        return '[' + id + ': ' + s + ' ' + p + ']';
+    }
+    const prob = it && it.prob != null ? it.prob.toFixed(0) + '%' : '—';
+    const tr = (it && it.trend || 'flat').toString();
+    const arrow = tr === 'up' ? '↗' : tr === 'down' ? '↘' : '→';
+    return '[' + id + ': ' + prob + ' ' + arrow + ']';
+}
+
+async function kuroPollMarketHudOnce() {
+    const el = document.getElementById('kuroMarketChipsBar');
+    if (!el) return;
+    try {
+        const r = await fetch('/api/market/hud', { credentials: 'same-origin' });
+        const h = await r.json();
+        const items = (h && h.items) ? h.items : [];
+        if (!items.length) {
+            el.classList.add('hidden');
+            el.textContent = '';
+            return;
+        }
+        el.textContent = items.slice(0, 10).map(kuroMarketHudChipLine).join('  ');
+        el.classList.remove('hidden');
+    } catch (_) {
+        el.classList.add('hidden');
+    }
+}
+
+function kuroStartMarketHudPoll() {
+    kuroPollMarketHudOnce();
+    setInterval(kuroPollMarketHudOnce, 60000);
+}
+
 function kuroRenderSentinelTicker(payload) {
     // HUD-mode sentinel presentation. Outside HUD_MODE we stay silent to
     // avoid clashing with RESEARCH_MODE's server-status dump.
@@ -549,9 +594,12 @@ function kuroRenderSentinelTicker(payload) {
     const detail = (p.detail || '').toString().slice(0, 120);
     const ticker = kuroEnsureTicker();
     ticker.classList.remove('sentinel-scanning', 'sentinel-alert');
-    const line = detail
+    let line = detail
         ? `SENTINEL ${source}: ${status} — ${detail}`
         : `SENTINEL ${source}: ${status}`;
+    if (source === 'MARKET' && p.market_chips && Array.isArray(p.market_chips) && p.market_chips.length) {
+        line = p.market_chips.map(kuroMarketHudChipLine).join(' ').slice(0, 220);
+    }
     ticker.textContent = line;
     if (status === 'SCANNING') {
         ticker.classList.add('sentinel-scanning');
@@ -731,6 +779,8 @@ window.kuroMaybeSpeakHUD = kuroMaybeSpeakHUD;
 window.kuroPlayTTS = kuroPlayTTS;
 window.kuroApplyUIMode = kuroApplyUIMode;
 window.kuroRenderSentinelTicker = kuroRenderSentinelTicker;
+window.kuroMarketHudChipLine = kuroMarketHudChipLine;
+window.kuroStartMarketHudPoll = kuroStartMarketHudPoll;
 window.kuroConnectDashboardWS = kuroConnectDashboardWS;
 window.kuroRestoreUIMode = kuroRestoreUIMode;
 
@@ -1703,7 +1753,8 @@ const personaLabels = {
     advisor: '🧪 Advisor',
     chill: '😎 Chill Wingman',
     tactical: '🔧 Tactical Ops',
-    butler: '🛡️ Butler'
+    butler: '🛡️ Butler',
+    chancellor: '📒 The Chancellor'
 };
 
 const personaAliases = {

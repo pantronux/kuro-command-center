@@ -1,4 +1,10 @@
-"""Tests for Kuro AI V6.0 Sovereign voice_service (pluggable gTTS / piper + cache)."""
+"""Tests for Kuro AI V6.0 Sovereign voice_service (pluggable gTTS / piper + cache).
+
+--- Header Doc ---
+Purpose: Verify synthesize_to_file routes to correct engine + LRU cache behaviour.
+Covers: kuro_backend.voice_service.synthesize_to_file.
+Fixtures: tmp_path media dir + monkeypatched piper / gTTS shims.
+"""
 from __future__ import annotations
 
 import sys

@@ -12,6 +12,13 @@ AUDIT — mutation entry points (update when adding routes or tools):
 - Optional batch entry: record_mutation(domain=habits|long_term|mem0, ...)
 - Deictic read path: build_referent_grounding_block, format_same_turn_attachment_index; apply_path_tokens_to_runtime (integrity + last_accessed_file)
 - Vision bundle: build_gemini_contents_parts(text, image_paths) for LangGraph response_node
+
+--- Header Doc ---
+Purpose: Central memory-read orchestration + post-response write fan-out across all memory tiers.
+Caller: langgraph_core response_node, main.py chat routes, dreaming_worker, services/core_service.
+Dependencies: memory_manager, perpetual_memory, finance_db, reminder_service, habit_service, intelligence_engine, observability, Mem0 (optional).
+Main Functions: build_context_for_llm(), post_response_memory_writes(), record_mutation(), build_gemini_contents_parts(), build_referent_grounding_block().
+Side Effects: Reads + writes across sqlite + ChromaDB, Mem0 HTTP calls, SSoT revision bumps via core_service.bump_data_revision.
 """
 from __future__ import annotations
 
@@ -883,12 +890,27 @@ def build_context_for_llm(
 
     memory_injection = memory_manager.format_memory_with_temporal_grounding(memory)
 
+    finance_block = ""
+    market_block = ""
+    if memory_manager.normalize_persona(persona_mode) == "chancellor":
+        try:
+            from kuro_backend import finance_db
+
+            finance_block = finance_db.format_ledger_snapshot()
+            market_block = finance_db.format_market_snapshot_for_prompt()
+        except Exception as exc:
+            logger.debug("[MEMORY_COORD] finance/market snapshot skipped: %s", exc)
+            finance_block = ""
+            market_block = ""
+
     return {
         "recent_messages": recent_messages,
         "memory_injection": memory_injection,
         "mem0_context_block": mem0_context_block,
         "referent_grounding_block": referent_grounding_block,
         "budget": budget,
+        "finance_block": finance_block,
+        "market_block": market_block,
     }
 
 

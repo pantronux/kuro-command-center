@@ -1,3 +1,9 @@
+"""Sync-revision cache-buster contract tests.
+
+Purpose: Assert mutation paths bump data-revision; semantic_cache honours stale tokens.
+Covers: services.core_service.bump_data_revision, semantic_cache invalidation.
+Fixtures: temp sqlite path + monkeypatched revision token.
+"""
 import sys
 import types
 from pathlib import Path

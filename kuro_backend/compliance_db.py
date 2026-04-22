@@ -1,6 +1,13 @@
 """
 Kuro Compliance Database - SQLite-based storage for audit & compliance data.
 Supports ISO 27001, NIST 800-53, GDPR compliance tracking.
+
+--- Header Doc ---
+Purpose: Persistent compliance / audit SSoT (controls, findings, evidence).
+Caller: compliance_analyzer, langgraph_core (consultant persona context), main.py routes.
+Dependencies: sqlite3, kuro_backend.config.
+Main Functions: init_db(), save_finding(), list_findings(), get_controls_summary(), mark_remediation().
+Side Effects: Writes to compliance SQLite DB (WAL); short-lived connections.
 """
 import sqlite3
 import json

@@ -6,6 +6,13 @@ Supports cross-platform sync between Telegram and Web.
 
 PHASE 4 Fixes [2026-04-05]:
 - Database safety: try-except-finally with conn.close()
+
+--- Header Doc ---
+Purpose: Cross-channel chat history persistence (Web + Telegram) in SQLite.
+Caller: core.py, langgraph_core, main.py, telegram handler, memory_coordinator.
+Dependencies: sqlite3, kuro_backend.config, memory_manager (for turn metadata).
+Main Functions: save_interaction(), get_history(), clear_history(), get_history_for_persona().
+Side Effects: Writes to kuro_chat_history.db (WAL); short-lived connections closed in finally.
 """
 import sqlite3
 import json

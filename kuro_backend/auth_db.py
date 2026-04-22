@@ -1,6 +1,14 @@
-# auth_db.py
-# Kuro AI V6.0 Sovereign - Authentication Database for Brute Force Protection
-# ISO 27001 Compliant: A.9.4.2 Secure Log-on, A.9.5.1 Information Access Restriction
+"""Kuro AI V6.0 Sovereign - Authentication Database for Brute Force Protection.
+
+ISO 27001 Compliant: A.9.4.2 Secure Log-on, A.9.5.1 Information Access Restriction.
+
+--- Header Doc ---
+Purpose: Track failed-login attempts + lockouts for dashboard auth.
+Caller: main.py auth middleware / login route.
+Dependencies: sqlite3, stdlib datetime.
+Main Functions: init_db(), record_failed_attempt(), is_locked_out(), reset_attempts(), cleanup_old_rows().
+Side Effects: Writes to kuro_auth.db; logs security events.
+"""
 
 import sqlite3
 import logging

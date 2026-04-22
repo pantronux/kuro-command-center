@@ -2,6 +2,13 @@
 Kuro AI V6.0 "Sovereign" - Config [2026-04-17]
 ================================================================================
 Centralized configuration for Kuro AI Butler System.
+
+--- Header Doc ---
+Purpose: Single source of truth for environment-driven runtime configuration.
+Caller: Virtually every kuro_backend module + main.py bootstrap.
+Dependencies: python-dotenv, pytz, stdlib os.
+Main Functions: Settings() class; module constants PRIMARY_MODEL, CLASSIFIER_MODEL.
+Side Effects: Reads .env at import-time; none thereafter.
 """
 import os
 import pytz
@@ -81,6 +88,32 @@ class Settings:
     # Default UI mode applied on cold start when no client-side preference
     # is remembered. One of NORMAL_MODE / HUD_MODE / RESEARCH_MODE / CINEMA_MODE.
     KURO_UI_MODE_DEFAULT: str = os.getenv("KURO_UI_MODE_DEFAULT", "NORMAL_MODE")
+
+    # -----------------------------------------------------------------
+    # Finances SSoT + Chancellor (V6.2)
+    # -----------------------------------------------------------------
+    KURO_FINANCE_TRACKING_ENABLED: bool = os.getenv(
+        "KURO_FINANCE_TRACKING_ENABLED", "true",
+    ).strip().lower() in ("1", "true", "yes", "on")
+    KURO_FINANCE_DB_PATH: str = os.getenv(
+        "KURO_FINANCE_DB_PATH",
+        os.path.join(os.path.dirname(os.path.dirname(__file__)), "kuro_finances.db"),
+    )
+    KURO_FISCAL_DAILY_USD_THRESHOLD: float = float(
+        os.getenv("KURO_FISCAL_DAILY_USD_THRESHOLD", "1.00"),
+    )
+    KURO_FISCAL_SENTINEL_ENABLED: bool = os.getenv(
+        "KURO_FISCAL_SENTINEL_ENABLED", "true",
+    ).strip().lower() in ("1", "true", "yes", "on")
+
+    # Market Sentinel (Chancellor + OpenClaw) — V6.3
+    KURO_MARKET_SENTINEL_ENABLED: bool = os.getenv(
+        "KURO_MARKET_SENTINEL_ENABLED", "true",
+    ).strip().lower() in ("1", "true", "yes", "on")
+    KURO_MARKET_MOVE_PCT: float = float(os.getenv("KURO_MARKET_MOVE_PCT", "3"))
+    KURO_PREDICTION_SCAN_ENABLED: bool = os.getenv(
+        "KURO_PREDICTION_SCAN_ENABLED", "true",
+    ).strip().lower() in ("1", "true", "yes", "on")
 
     @property
     def tz(self):

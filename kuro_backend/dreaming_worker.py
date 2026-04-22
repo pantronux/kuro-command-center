@@ -27,6 +27,13 @@ Safety:
   in production without redeploys.
 
 Run as a module: ``python3 -m kuro_backend.dreaming_worker``.
+
+--- Header Doc ---
+Purpose: Nightly reflection / CVE / fitness / fiscal / market sentinels + intel briefings.
+Caller: APScheduler (from main.py), CLI direct invocation (--run-*).
+Dependencies: google-genai, chromadb, serper_tool, openclaw_bridge, finance_db, intelligence_engine, proactive_events, telegram_notifier.
+Main Functions: run_dreaming_cycle(), _run_reflection(), _run_cve_sentinel(), _run_fiscal_sentinel(), _run_market_sentinel(), _run_prediction_scan_nightly().
+Side Effects: SQLite lease + writes, Gemini calls, OpenClaw HTTP, Serper HTTP, Telegram alerts, Chroma Layer-2 upserts.
 """
 from __future__ import annotations
 
@@ -919,6 +926,249 @@ def _make_lease_holder() -> str:
     return f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
 
 
+def _persist_fiscal_roll_up_insight(
+    *,
+    date_str: str,
+    cost_usd: float,
+    threshold: float,
+    cycle_id: int,
+    alerted: bool,
+) -> None:
+    """Lightweight long-term note for the Chancellor (no Finding required)."""
+    try:
+        from kuro_backend import memory_manager
+
+        summary = (
+            f"API ledger {date_str}: USD {cost_usd:.4f} "
+            f"(threshold USD {threshold:.2f}; over_threshold={'yes' if alerted else 'no'})."
+        )
+        memory_manager.add_long_term_v2(
+            f"[DREAM-INSIGHT][FISCAL] {summary}",
+            metadata={
+                "source": "dream_insight",
+                "tag": "fiscal-audit",
+                "persona_scope": "chancellor",
+                "cycle_id": cycle_id,
+                "date": date_str,
+            },
+        )
+    except Exception as exc:
+        logger.warning("[FISCAL] chroma insight failed: %s", exc)
+
+
+def _run_fiscal_sentinel(*, cycle_id: int, dry_run: bool) -> Dict[str, int]:
+    """Nightly audit: yesterday's API cost vs USD threshold; Telegram if over."""
+    counts: Dict[str, int] = {"checked": 0, "notified": 0, "cost_cents": 0}
+    if not _env_bool("KURO_FISCAL_SENTINEL_ENABLED", True):
+        logger.info("[FISCAL] sentinel disabled via KURO_FISCAL_SENTINEL_ENABLED")
+        return counts
+
+    try:
+        from kuro_backend import finance_db, proactive_events
+
+        yesterday = (datetime.now().date() - timedelta(days=1)).isoformat()
+        cost = float(finance_db.get_daily_api_cost_usd(yesterday))
+        counts["checked"] = 1
+        counts["cost_cents"] = int(round(cost * 100))
+
+        threshold = float(os.getenv("KURO_FISCAL_DAILY_USD_THRESHOLD", "1.00"))
+
+        alerted = cost >= threshold
+        if not dry_run:
+            _persist_fiscal_roll_up_insight(
+                date_str=yesterday,
+                cost_usd=cost,
+                threshold=threshold,
+                cycle_id=cycle_id,
+                alerted=alerted,
+            )
+
+        if not alerted:
+            return counts
+
+        body = (
+            f"Date (UTC calendar day): {yesterday}\n"
+            f"Estimated API spend: USD {cost:.4f}\n"
+            f"Threshold: USD {threshold:.2f}\n"
+            "Source: api_usage_daily (static Gemini rate map)."
+        )
+        event = proactive_events.make_event(
+            kind="fiscal_alert",
+            severity="warning",
+            title=f"API spend exceeded USD {threshold:.2f}",
+            body=body,
+            fingerprint_seed=f"fiscal:{yesterday}",
+            context={"date": yesterday, "cost_usd": cost, "threshold": threshold},
+        )
+        if proactive_events.publish(event, dry_run=dry_run):
+            counts["notified"] = 1
+        return counts
+    except Exception as exc:
+        logger.warning("[FISCAL] sentinel failed: %s", exc)
+        return counts
+
+
+def _market_openclaw_price(symbol: str) -> Optional[float]:
+    try:
+        from kuro_backend.execution.service import execute_openclaw_skill_sync
+
+        r = execute_openclaw_skill_sync(
+            "market_analysis",
+            {
+                "op": "get_ticker_price",
+                "symbol": symbol.upper(),
+                "execution_mode": "readonly",
+            },
+        )
+        raw = r.get("result") or r.get("raw_response") or {}
+        if not r.get("success") or not isinstance(raw, dict) or raw.get("ok") is False:
+            return None
+        return float(raw["price"])
+    except Exception as exc:
+        logger.debug("[MARKET] price fetch failed %s: %s", symbol, exc)
+        return None
+
+
+def _persist_market_insight(note: str, *, cycle_id: int) -> None:
+    try:
+        from kuro_backend import memory_manager
+
+        memory_manager.add_long_term_v2(
+            f"[DREAM-INSIGHT][MARKET] {note}",
+            metadata={
+                "source": "dream_insight",
+                "tag": "market-sentinel",
+                "persona_scope": "chancellor",
+                "cycle_id": cycle_id,
+            },
+        )
+    except Exception as exc:
+        logger.warning("[MARKET] chroma insight failed: %s", exc)
+
+
+def _run_prediction_scan_nightly(*, dry_run: bool) -> int:
+    if not _env_bool("KURO_PREDICTION_SCAN_ENABLED", True):
+        return 0
+    try:
+        from kuro_backend.execution.service import execute_openclaw_skill_sync
+        from kuro_backend import finance_db
+
+        r = execute_openclaw_skill_sync(
+            "prediction_market_scan",
+            {
+                "topics": ["AI regulation", "Technology stocks", "Global economy"],
+                "execution_mode": "readonly",
+            },
+        )
+        raw = r.get("result") or r.get("raw_response") or {}
+        if not r.get("success") or not isinstance(raw, dict) or raw.get("ok") is False:
+            return 0
+        markets = raw.get("markets") or []
+        if not isinstance(markets, list) or dry_run:
+            return len(markets) if isinstance(markets, list) else 0
+        rows = finance_db.list_prediction_watch()
+        existing = {
+            str(x["slug"]): float(x.get("last_probability") or 0.0) for x in rows
+        }
+        n = 0
+        for m in markets:
+            if not isinstance(m, dict):
+                continue
+            slug = str(m.get("topic_id") or "").strip()
+            if not slug:
+                continue
+            prob = float(m.get("probability") or 0.0)
+            prev = existing.get(slug)
+            trend = "flat"
+            if prev is not None:
+                if prob > prev + 0.005:
+                    trend = "up"
+                elif prob < prev - 0.005:
+                    trend = "down"
+            finance_db.upsert_prediction_watch(
+                slug,
+                str(m.get("title") or slug)[:240],
+                prob,
+                trend=trend,
+            )
+            existing[slug] = prob
+            n += 1
+        return n
+    except Exception as exc:
+        logger.warning("[MARKET] prediction scan failed: %s", exc)
+        return 0
+
+
+def _run_market_sentinel(*, cycle_id: int, dry_run: bool) -> Dict[str, int]:
+    """Refresh watched symbols + optional prediction scan; alert on large moves."""
+    counts: Dict[str, int] = {"checked": 0, "notified": 0, "alerts": 0, "prediction_rows": 0}
+    if not _env_bool("KURO_MARKET_SENTINEL_ENABLED", True):
+        logger.info("[MARKET] sentinel disabled via KURO_MARKET_SENTINEL_ENABLED")
+        return counts
+    move_pct = abs(float(os.getenv("KURO_MARKET_MOVE_PCT", "3")))
+    try:
+        from kuro_backend import finance_db, proactive_events
+    except Exception as exc:
+        logger.warning("[MARKET] imports failed: %s", exc)
+        return counts
+
+    watched = finance_db.list_watched_symbols(active_only=True)
+    alerts: List[str] = []
+    for row in watched:
+        sym = str(row.get("symbol") or "").strip().upper()
+        if not sym:
+            continue
+        was_warm = row.get("last_price") is not None
+        price = _market_openclaw_price(sym)
+        if price is None:
+            continue
+        counts["checked"] += 1
+        meta = finance_db.apply_watched_price(sym, price)
+        pct = float(meta.get("last_pct_change") or 0.0)
+        if was_warm and abs(pct) >= move_pct:
+            counts["alerts"] += 1
+            alerts.append(f"{sym} {pct:+.2f}%")
+            day_key = datetime.now().date().isoformat()
+            body = (
+                f"Symbol: {sym}\nMove since last observation: {pct:+.2f}%\n"
+                f"Last price (USD): {price:.4f}\n"
+                "Source: OpenClaw market_analysis (readonly)."
+            )
+            event = proactive_events.make_event(
+                kind="market_alert",
+                severity="warning",
+                title=f"Watched symbol {sym} moved {pct:+.2f}%",
+                body=body,
+                fingerprint_seed=f"market:{sym}:{day_key}",
+                context={"symbol": sym, "pct": pct, "price": price},
+            )
+            if proactive_events.publish(event, dry_run=dry_run):
+                counts["notified"] += 1
+
+    pred_n = _run_prediction_scan_nightly(dry_run=dry_run)
+    counts["prediction_rows"] = pred_n
+    note = "; ".join(alerts[:6]) if alerts else ""
+    brief = note or (f"Prediction watch rows refreshed: {pred_n}." if pred_n else "")
+    if not dry_run:
+        finance_db.set_market_brief_and_note(
+            brief or "Market sentinel: no large moves; prediction scan complete.",
+            sentinel_note=note or f"predictions_updated={pred_n}",
+        )
+        if note:
+            _persist_market_insight(note, cycle_id=cycle_id)
+    if alerts and not dry_run:
+        try:
+            from kuro_backend import dashboard_broadcast
+
+            dashboard_broadcast.schedule_ui_command(
+                "STATUS_TICKER",
+                {"status": "ALERT", "source": "MARKET", "detail": "; ".join(alerts[:3])},
+            )
+        except Exception:
+            pass
+    return counts
+
+
 def run_dreaming_cycle(
     *,
     lookback_hours: Optional[int] = None,
@@ -993,6 +1243,26 @@ def run_dreaming_cycle(
         audit["cve_persisted"] = cve_counts.get("persisted", 0)
         audit["cve_notified"] = cve_counts.get("notified", 0)
         notified_count += cve_counts.get("notified", 0)
+
+        try:
+            fiscal_counts = _run_fiscal_sentinel(cycle_id=cycle_id, dry_run=dry_run)
+        except Exception as fiscal_exc:
+            logger.warning("[DREAMING] fiscal sentinel failed: %s", fiscal_exc)
+            fiscal_counts = {"checked": 0, "notified": 0, "cost_cents": 0}
+        audit["fiscal_cost_cents"] = fiscal_counts.get("cost_cents", 0)
+        audit["fiscal_notified"] = fiscal_counts.get("notified", 0)
+        notified_count += fiscal_counts.get("notified", 0)
+
+        try:
+            market_counts = _run_market_sentinel(cycle_id=cycle_id, dry_run=dry_run)
+        except Exception as m_exc:
+            logger.warning("[DREAMING] market sentinel failed: %s", m_exc)
+            market_counts = {"checked": 0, "notified": 0, "alerts": 0, "prediction_rows": 0}
+        audit["market_checked"] = market_counts.get("checked", 0)
+        audit["market_alerts"] = market_counts.get("alerts", 0)
+        audit["market_notified"] = market_counts.get("notified", 0)
+        audit["market_prediction_rows"] = market_counts.get("prediction_rows", 0)
+        notified_count += market_counts.get("notified", 0)
 
         hours = lookback_hours if lookback_hours is not None else _env_int(_ENV_LOOKBACK, 24)
         corpus = collect_last_24h(hours)
@@ -1078,6 +1348,16 @@ def _build_cli_parser() -> argparse.ArgumentParser:
         "--verbose", "-v", action="store_true",
         help="Verbose logging to stderr (DEBUG level).",
     )
+    parser.add_argument(
+        "--run-fiscal",
+        action="store_true",
+        help="Run only the fiscal API-usage sentinel (yesterday vs threshold) and exit.",
+    )
+    parser.add_argument(
+        "--run-market",
+        action="store_true",
+        help="Run only the market sentinel (watched symbols + prediction scan) and exit.",
+    )
     return parser
 
 
@@ -1087,6 +1367,20 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    if getattr(args, "run_fiscal", False):
+        logging.basicConfig(
+            level=logging.DEBUG if args.verbose else logging.INFO,
+            format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        )
+        fc = _run_fiscal_sentinel(cycle_id=0, dry_run=args.dry_run)
+        print(json.dumps({"fiscal": fc}, ensure_ascii=False, indent=2, default=str))
+        return 0
+
+    if getattr(args, "run_market", False):
+        mc = _run_market_sentinel(cycle_id=0, dry_run=args.dry_run)
+        print(json.dumps({"market": mc}, ensure_ascii=False, indent=2, default=str))
+        return 0
+
     audit = run_dreaming_cycle(
         lookback_hours=args.lookback_hours,
         dry_run=args.dry_run,

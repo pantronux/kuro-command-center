@@ -1,4 +1,12 @@
-"""Kuro AI V6.0 Sovereign — Compliance clause analysis via Gemini (ISO / regulatory text)."""
+"""Kuro AI V6.0 Sovereign — Compliance clause analysis via Gemini (ISO / regulatory text).
+
+--- Header Doc ---
+Purpose: Gemini-backed clause / regulation analyzer for consultant persona.
+Caller: tools/base_tools.analyze_compliance, main.py compliance routes.
+Dependencies: google-genai, compliance_db.
+Main Functions: analyze_clause(), search_clause_in_db(), cite_standard().
+Side Effects: Gemini API calls; reads from compliance SQLite.
+"""
 import logging
 from google import genai
 from google.genai import types

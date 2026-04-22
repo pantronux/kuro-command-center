@@ -1,6 +1,13 @@
 """
 Regex / keyword jailbreak heuristics (no LLM). Used fail-fast before NeMo + main LLM.
 Coding-help exception: allow risky tokens when message looks like a programming assistance request.
+
+--- Header Doc ---
+Purpose: Deterministic pre-LLM jailbreak/abuse keyword filter.
+Caller: guardrails.sniper_pipeline.run_input_rails.
+Dependencies: stdlib re.
+Main Functions: is_probable_jailbreak(text).
+Side Effects: None (pure regex).
 """
 from __future__ import annotations
 

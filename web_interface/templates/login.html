@@ -1,4 +1,12 @@
 <!DOCTYPE html>
+<!--
+  Header Doc ---
+  Purpose: Authentication screen (brute-force-hardened via auth_db).
+  Caller: main.py GET "/login" (redirects here when unauthenticated).
+  Dependencies: POST /auth/login, Tailwind.
+  Main Sections: password form + status banner.
+  Side Effects: Submits credentials to /auth/login; server sets session cookie.
+-->
 <html lang="en" class="scroll-smooth">
 <head>
     <meta charset="UTF-8">

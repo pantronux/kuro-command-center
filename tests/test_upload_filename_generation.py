@@ -1,3 +1,9 @@
+"""Upload filename generation tests.
+
+Purpose: Ensure uploaded-file names are sanitised + deterministic hashed.
+Covers: main.py upload pipeline helpers.
+Fixtures: asyncio event loop + temp dirs.
+"""
 import asyncio
 import hashlib
 import re

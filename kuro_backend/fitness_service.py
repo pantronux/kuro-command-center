@@ -20,6 +20,13 @@ File contract::
 
 The module never raises. Missing file, malformed JSON, or an empty payload
 all translate to an empty event list.
+
+--- Header Doc ---
+Purpose: Fitness anomaly sentinel (wearable JSON drop -> proactive_events).
+Caller: dreaming_worker nightly cycle; optional CLI runner.
+Dependencies: proactive_events, stdlib json/datetime.
+Main Functions: check_fitness_anomalies(), _load_latest(), _evaluate_thresholds().
+Side Effects: Reads ~/.kuro/fitness_latest.json; publishes proactive events.
 """
 from __future__ import annotations
 

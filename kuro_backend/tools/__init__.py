@@ -1,6 +1,13 @@
 """
 Kuro AI V6.0 Sovereign Tools Package
 Re-exports all functions from the original tools.py module.
+
+--- Header Doc ---
+Purpose: Public tool surface for Gemini tool-calling (re-export from base_tools).
+Caller: core.py, langgraph_core.py, main.py (when assembling generation_config tools).
+Dependencies: kuro_backend.tools.base_tools.
+Main Functions: reminder/habit/finance/market/system tools + filesystem path constants.
+Side Effects: None at import (base_tools itself is import-safe).
 """
 # Re-export everything from the original tools.py (now base_tools.py)
 from kuro_backend.tools.base_tools import (
@@ -20,6 +27,14 @@ from kuro_backend.tools.base_tools import (
     lookup_chroma_context,
     add_reminder_tool,
     get_reminders_tool,
+    set_monthly_budget_tool,
+    get_budget_tool,
+    add_recurring_expense_tool,
+    list_recurring_expenses_tool,
+    get_daily_api_cost_tool,
+    get_ticker_price_tool,
+    get_market_news_tool,
+    prediction_market_scan_tool,
     mark_habit_done_tool,
     get_habits_status_tool,
     get_habit_history_tool,

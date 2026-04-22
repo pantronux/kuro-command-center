@@ -12,6 +12,13 @@ Contract (JSON body returned to Kuro bridge):
 Env:
   HARVEST_GEMINI_TIMEOUT_MS  Navigation timeout (default 60000)
   HARVEST_GEMINI_HEADLESS  "0" to show browser (default "1")
+
+--- Header Doc ---
+Purpose: OpenClaw skill — scrape public Gemini share URLs and persist as Markdown.
+Caller: OpenClaw daemon invoked by Kuro memory ingestion workflow.
+Dependencies: playwright/chromium, stdlib pathlib/json/argparse.
+Main Functions: main(url) CLI entry, _render_page, _save_markdown.
+Side Effects: Launches headless Chromium, writes harvested .md under media/harvest/, prints JSON.
 """
 from __future__ import annotations
 

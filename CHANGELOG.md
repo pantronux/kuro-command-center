@@ -1,8 +1,85 @@
-# Kuro AI V6.1 "Sovereign" - Changelog
+# Kuro AI V7.0 "Leviathan" - Changelog
 
-**Release Date:** 2026-04-17
-**Version:** 6.1.0
-**Codename:** "Sovereign — Full English Migration & Live2D Hijiki"
+**Release Date:** 2026-04-22
+**Version:** 7.0.0
+**Codename:** "Leviathan — Discipline & Documentation Pass"
+
+---
+
+## V7.0.0 - Leviathan: Discipline & Documentation Pass (2026-04-22)
+
+### Summary
+Repository-wide discipline pass. Promotes every Python, HTML, JS and CSS
+source file to a standardized five-field **Header Doc** contract (Purpose,
+Caller, Dependencies, Main Functions, Side Effects), hardens
+`kuro_backend/finance_db.py` with an in-memory `_SCHEMA_READY` guard so
+`init_db()` is idempotent in hot paths, adds indexes for the active
+recurring-expense and watched-symbol hot queries, and refreshes
+`SYSTEM_MAP.md` + test coverage to match. No runtime behaviour changes
+outside the finance_db schema-guard and new indexes.
+
+### Highlights
+- **Version:** `kuro_backend/version.py` -> 7.0.0 "Leviathan", UI badge
+  reads `Leviathan V7.0`.
+- **Docs discipline:** 89 files (50 backend + 4 OpenClaw + 10 frontend +
+  25 tests) carry the Header Doc block; SYSTEM_MAP gains a
+  "Documentation discipline" section and NEWSAPI / Metaculus rows on the
+  External Integrations table.
+- **DB audit:** `finance_db.init_db()` now short-circuits after the first
+  successful bootstrap via a `threading.Lock`-guarded flag; new
+  `idx_recurring_active` and `idx_watched_active` indexes support the
+  hot list-by-active queries; `apply_watched_price` and
+  `format_market_snapshot_for_prompt` cost justification documented
+  inline.
+- **Tests:** updated `test_version.py`, added
+  `test_finance_db_schema_guard.py` (idempotent bootstrap + index
+  presence); `pytest` green.
+
+---
+
+## V6.3.0 - Sovereign: Market Sentinel & Chancellor Oracle (2026-04-22)
+
+### Summary
+Extends The Chancellor with **OpenClaw-backed** readonly market tools
+(`get_ticker_price_tool`, `get_market_news_tool`, `prediction_market_scan_tool`),
+new `openclaw_skills/market_analysis` and `prediction_market_scan`, finances DB
+extensions (`watched_symbols`, `prediction_watch`, `market_hud_snapshot`),
+nightly `_run_market_sentinel` in `dreaming_worker` (CLI `--run-market`),
+`market_alert` proactive events, `/api/market/*` routes + `/market` dashboard,
+HUD chip polling on the main chat chrome, and persona guardrails that forbid
+inventing quotes when the bridge fails.
+
+### Highlights
+- **OpenClaw:** reference skills under `openclaw_skills/` (Stooq price path;
+  optional NewsAPI / Metaculus / demo prediction rows).
+- **LangGraph:** supervisor routes market keywords to `tool_node`; response
+  assembly injects `market_block` for Chancellor.
+- **Config:** `KURO_MARKET_SENTINEL_ENABLED`, `KURO_MARKET_MOVE_PCT`,
+  `KURO_PREDICTION_SCAN_ENABLED` on `Settings`.
+
+---
+
+## V6.2.0 - Sovereign: The Chancellor — Finances SSoT & Fiscal Sentinel (2026-04-17)
+
+### Summary
+Adds **The Chancellor** persona (Sovereign Accountant register), a new
+SQLite **finances** domain (`monthly_budget`, `recurring_expenses`,
+`api_usage_daily`), per-persona Piper tuning via `voice_profiles.py`, SSoT
+shortcuts + REST routes under `/api/finances/*`, Gemini tool-calling entries
+for the ledger, static Gemini **pricing** estimates rolled into
+`observability.track_token_usage`, and a nightly **fiscal sentinel** in
+`dreaming_worker` that Telegram-alerts when yesterday's estimated API spend
+exceeds `KURO_FISCAL_DAILY_USD_THRESHOLD` (default USD 1.00).
+
+### Highlights
+- **Persona:** `chancellor` in `personas.py`, `memory_manager` canonical list,
+  dashboard persona picker + `app.js` `VALID_PERSONAS`.
+- **DB:** `kuro_backend/finance_db.py` (+ env `KURO_FINANCE_DB_PATH`);
+  initialized from `core_service.init_all_databases()`.
+- **Voice:** `kuro_backend/voice_profiles.py`; `/api/voice/speech` passes
+  active persona into `voice_service.synthesize_to_file`.
+- **Proactive:** `fiscal_alert` kind in `proactive_events`; `_run_fiscal_sentinel`
+  + CLI `--run-fiscal`.
 
 ---
 

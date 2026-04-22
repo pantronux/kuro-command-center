@@ -1,4 +1,10 @@
-"""Tests for Gemini share URL extraction and harvest_gemini_share routing."""
+"""Tests for Gemini share URL extraction and harvest_gemini_share routing.
+
+--- Header Doc ---
+Purpose: Verify URL sniffing + routing to harvest_gemini_share OpenClaw skill.
+Covers: tools.base_tools Gemini-share helpers.
+Fixtures: None (pure regex / pattern tests).
+"""
 from __future__ import annotations
 
 from kuro_backend.tools import base_tools as bt

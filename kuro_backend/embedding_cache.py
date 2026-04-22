@@ -12,6 +12,13 @@ Design notes:
   are idempotent — there's no correctness risk, only a cold-start tax.
 - Returns ``None`` on any failure so callers can gracefully fall back to
   whatever path they already use for embedding-free behavior.
+
+--- Header Doc ---
+Purpose: LRU+TTL cache in front of Gemini embedding API.
+Caller: memory_manager (retrieval), perpetual_memory, semantic_cache.
+Dependencies: google-genai embedding endpoint, stdlib threading.
+Main Functions: embed_query(text), clear_cache(), stats().
+Side Effects: Gemini embedding API calls on cache miss; in-process dict + RLock.
 """
 from __future__ import annotations
 

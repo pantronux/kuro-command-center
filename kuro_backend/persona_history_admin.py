@@ -1,5 +1,12 @@
 """
 Admin utilities for persona-specific chat history maintenance.
+
+--- Header Doc ---
+Purpose: CLI + programmatic admin helpers to inspect / purge persona chat history buckets.
+Caller: Admin CLI scripts, optional /api/admin routes.
+Dependencies: sqlite3, kuro_backend.memory_manager, config.
+Main Functions: list_personas_with_history(), purge_persona_history(), summarize_persona_activity().
+Side Effects: Reads + optional destructive DELETE on kuro_chat_history.db.
 """
 
 from __future__ import annotations

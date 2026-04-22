@@ -5,6 +5,11 @@ Covers:
   P6  - token_budget.apply_persona_budget + L3 immutability under enforce_global_ceiling
   P2  - short_term_summaries.summary_json round-trip + research_ledger append
   P4  - novelty points / technical specs persist in research_ledger through eviction
+
+--- Header Doc ---
+Purpose: Token budgeting invariants (per-persona quotas, L3 floor, global ceiling).
+Covers: kuro_backend.token_budget + memory_coordinator integration.
+Fixtures: Synthetic section dicts + monkeypatched settings.
 """
 from __future__ import annotations
 

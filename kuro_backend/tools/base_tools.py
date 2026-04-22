@@ -8,6 +8,13 @@ Supports: Text, Code, PDF, Images (Vision), Logs, and recursive crawling.
 PHASE 1 Fixes [2026-04-05]:
 - Path Integrity: All file interactions use os.path.abspath(PROJECT_ROOT)
 - Physical Validation: os.path.exists() checks before file operations
+
+--- Header Doc ---
+Purpose: All Gemini-callable tools (filesystem, system inspection, reminders, habits, finance, market, OpenClaw advanced execution).
+Caller: core.py, langgraph_core tool_node, services/core_service (some delegated helpers), tests.
+Dependencies: reminder_service, finance_db, execution.openclaw_bridge, chromadb (context lookup), PDF/DOCX parsers, requests, threading.
+Main Functions: get_system_status, universal_read, smart_read, analyze_compliance, add_reminder_tool, set_monthly_budget_tool, get_ticker_price_tool, get_market_news_tool, prediction_market_scan_tool, advanced_execution_tool.
+Side Effects: Filesystem reads under PROJECT_ROOT whitelist, subprocess calls, finance_db writes for price/prediction cache, OpenClaw HTTP calls via bridge.
 """
 import asyncio
 import base64
@@ -22,7 +29,7 @@ import requests
 import psutil
 import subprocess
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from kuro_backend.config import settings
 
 logger = logging.getLogger(__name__)
@@ -1236,6 +1243,218 @@ def get_reminders_tool() -> Dict:
         "upcoming": upcoming,
         "stats": stats
     }
+
+
+# ============================================
+# FINANCES SSoT (The Chancellor)
+# ============================================
+
+
+def set_monthly_budget_tool(
+    month: str,
+    amount_usd: float,
+    notes: str = "",
+) -> Dict[str, Any]:
+    """Set or replace the Master's monthly budget (USD) for YYYY-MM in the ledger."""
+    from kuro_backend import finance_db
+
+    m = (month or "").strip()
+    if len(m) != 7 or m[4] != "-":
+        return {"success": False, "error": "month must be YYYY-MM"}
+    rid = finance_db.add_budget(m, float(amount_usd), notes or "")
+    return {"success": True, "budget_id": rid, "month": m, "amount_usd": float(amount_usd)}
+
+
+def get_budget_tool(month: str = "") -> Dict[str, Any]:
+    """Read the monthly budget for YYYY-MM (defaults to current month)."""
+    from datetime import date
+
+    from kuro_backend import finance_db
+
+    m = (month or "").strip()
+    if not m:
+        m = date.today().strftime("%Y-%m")
+    row = finance_db.get_budget(m)
+    if not row:
+        return {"success": True, "month": m, "budget": None}
+    return {"success": True, "month": m, "budget": dict(row)}
+
+
+def add_recurring_expense_tool(
+    label: str,
+    amount_usd: float,
+    cadence: str = "monthly",
+    next_due: str = "",
+    category: str = "",
+) -> Dict[str, Any]:
+    """Record a recurring obligation (subscription, bill) in the finances ledger."""
+    from kuro_backend import finance_db
+
+    if not (label or "").strip():
+        return {"success": False, "error": "label is required"}
+    rid = finance_db.upsert_recurring_expense(
+        label.strip(),
+        float(amount_usd),
+        cadence=cadence or "monthly",
+        next_due=next_due or "",
+        category=category or "",
+        active=True,
+    )
+    return {"success": True, "expense_id": rid, "label": label.strip()}
+
+
+def list_recurring_expenses_tool() -> Dict[str, Any]:
+    """List active recurring expenses from the finances ledger."""
+    from kuro_backend import finance_db
+
+    rows = finance_db.list_recurring_expenses(active_only=True)
+    return {"success": True, "expenses": rows}
+
+
+def get_daily_api_cost_tool(date: str = "") -> Dict[str, Any]:
+    """Return estimated API spend (USD) for a calendar day (YYYY-MM-DD); default today."""
+    from datetime import date
+
+    from kuro_backend import finance_db
+
+    d = (date or "").strip()
+    if not d:
+        d = date.today().isoformat()
+    cost = finance_db.get_daily_api_cost_usd(d)
+    return {"success": True, "date": d, "cost_usd": cost}
+
+
+# ============================================
+# MARKET SENTINEL (OpenClaw readonly)
+# ============================================
+
+
+def _openclaw_skill_body(skill_name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    from kuro_backend.execution.service import execute_openclaw_skill_sync
+
+    merged = {"execution_mode": "readonly", **(payload or {})}
+    return execute_openclaw_skill_sync(skill_name=skill_name, payload=merged)
+
+
+def get_ticker_price_tool(symbol: str) -> Dict[str, Any]:
+    """Fetch last price for a US equity symbol via OpenClaw ``market_analysis`` (readonly)."""
+    sym = (symbol or "").strip().upper()
+    if not sym:
+        return {"success": False, "error": "symbol is required"}
+    exec_result = _openclaw_skill_body(
+        "market_analysis",
+        {"op": "get_ticker_price", "symbol": sym},
+    )
+    raw = exec_result.get("result") or exec_result.get("raw_response") or {}
+    if not isinstance(raw, dict):
+        raw = {}
+    if not exec_result.get("success"):
+        return {
+            "success": False,
+            "error": exec_result.get("error") or "OpenClaw bridge failure",
+            "openclaw": True,
+        }
+    if raw.get("ok") is False:
+        return {
+            "success": False,
+            "error": raw.get("user_message") or raw.get("error_code") or "market_analysis failed",
+            "openclaw": True,
+        }
+    try:
+        from kuro_backend import finance_db
+
+        px = float(raw.get("price"))
+        finance_db.apply_watched_price(sym, px)
+    except Exception:
+        pass
+    return {"success": True, "openclaw": True, **raw}
+
+
+def get_market_news_tool(symbol: str) -> Dict[str, Any]:
+    """Headlines for a symbol via OpenClaw ``market_analysis`` get_market_news (may be empty)."""
+    sym = (symbol or "").strip().upper()
+    if not sym:
+        return {"success": False, "error": "symbol is required"}
+    exec_result = _openclaw_skill_body(
+        "market_analysis",
+        {"op": "get_market_news", "symbol": sym},
+    )
+    raw = exec_result.get("result") or exec_result.get("raw_response") or {}
+    if not isinstance(raw, dict):
+        raw = {}
+    if not exec_result.get("success"):
+        return {
+            "success": False,
+            "error": exec_result.get("error") or "OpenClaw bridge failure",
+            "openclaw": True,
+        }
+    if raw.get("ok") is False:
+        return {
+            "success": False,
+            "error": raw.get("user_message") or "market_analysis failed",
+            "openclaw": True,
+        }
+    return {"success": True, "openclaw": True, **raw}
+
+
+def prediction_market_scan_tool(topics: str = "") -> Dict[str, Any]:
+    """Prediction-style probability rows from OpenClaw ``prediction_market_scan`` (readonly)."""
+    topic_list: List[str] = []
+    raw_t = (topics or "").strip()
+    if raw_t:
+        topic_list = [t.strip() for t in raw_t.split(",") if t.strip()]
+    exec_result = _openclaw_skill_body(
+        "prediction_market_scan",
+        {"topics": topic_list} if topic_list else {},
+    )
+    raw = exec_result.get("result") or exec_result.get("raw_response") or {}
+    if not isinstance(raw, dict):
+        raw = {}
+    if not exec_result.get("success"):
+        return {
+            "success": False,
+            "error": exec_result.get("error") or "OpenClaw bridge failure",
+            "openclaw": True,
+        }
+    if raw.get("ok") is False:
+        return {
+            "success": False,
+            "error": raw.get("user_message") or "prediction_market_scan failed",
+            "openclaw": True,
+        }
+    markets = raw.get("markets") or []
+    if isinstance(markets, list):
+        try:
+            from kuro_backend import finance_db
+
+            existing = {
+                str(r["slug"]): float(r.get("last_probability") or 0.0)
+                for r in finance_db.list_prediction_watch()
+            }
+            for m in markets:
+                if not isinstance(m, dict):
+                    continue
+                slug = str(m.get("topic_id") or "").strip()
+                if not slug:
+                    continue
+                prob = float(m.get("probability") or 0.0)
+                prev = existing.get(slug)
+                trend = "flat"
+                if prev is not None:
+                    if prob > prev + 0.005:
+                        trend = "up"
+                    elif prob < prev - 0.005:
+                        trend = "down"
+                finance_db.upsert_prediction_watch(
+                    slug,
+                    str(m.get("title") or slug)[:240],
+                    prob,
+                    trend=trend,
+                )
+                existing[slug] = prob
+        except Exception as exc:
+            logger.debug("[MARKET] prediction cache upsert skipped: %s", exc)
+    return {"success": True, "openclaw": True, **raw}
 
 
 # ============================================

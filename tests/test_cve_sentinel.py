@@ -1,4 +1,10 @@
-"""Tests for Kuro AI V6.0 Sovereign CVE sentinel inside dreaming_worker."""
+"""Tests for Kuro AI V6.0 Sovereign CVE sentinel inside dreaming_worker.
+
+--- Header Doc ---
+Purpose: Verify nightly CVE scan + proactive dedup.
+Covers: dreaming_worker._run_cve_sentinel + proactive_events integration.
+Fixtures: monkeypatched openclaw_bridge + temp sqlite dreaming lock.
+"""
 from __future__ import annotations
 
 import sys

@@ -1,6 +1,13 @@
 """
 Kuro AI V6.0 Sovereign — Habit & reminder mutations + reads. Storage is exclusively in
 `kuro_backend.services.core_service` (single SQLite writer).
+
+--- Header Doc ---
+Purpose: Thin orchestration facade for habit + reminder CRUD that bumps SSoT revision.
+Caller: main.py /api/habits + /api/reminders, tools/base_tools (habit/reminder tools), langgraph_core.
+Dependencies: kuro_backend.services.core_service, schemas.ReminderRecord.
+Main Functions: add_habit(), mark_habit_done(), add_reminder(), list_due_reminders(), delete_reminder().
+Side Effects: Writes to kuro_short_term.db via core_service, bumps data-revision cache-buster.
 """
 from __future__ import annotations
 

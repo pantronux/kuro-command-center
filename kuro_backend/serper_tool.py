@@ -2,6 +2,13 @@
 Kuro AI V6.0 Sovereign - Serper.dev Search Tool for Autonomous Research
 ================================================================================
 Web search integration using Serper.dev API for proactive intelligence gathering.
+
+--- Header Doc ---
+Purpose: Serper.dev HTTP client for general-purpose and news search.
+Caller: intelligence_engine, dreaming_worker reflection enrichment, tools/base_tools (optional).
+Dependencies: requests, kuro_backend.config (SERPER_API_KEY).
+Main Functions: serper_search(query), serper_news(query, recency), RESEARCH_PILLARS constants.
+Side Effects: HTTPS call to google.serper.dev; logs redacted request + results.
 """
 import os
 import logging

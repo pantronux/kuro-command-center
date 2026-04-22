@@ -1,4 +1,10 @@
-"""Tests for deictic / attachment grounding in memory_coordinator."""
+"""Tests for deictic / attachment grounding in memory_coordinator.
+
+--- Header Doc ---
+Purpose: Verify anaphora anchors (ini/itu/tadi) route through explicit grounding block.
+Covers: memory_coordinator.build_referent_grounding_block + apply_path_tokens_to_runtime.
+Fixtures: Synthetic turn state + tmp files.
+"""
 import sys
 import types
 from pathlib import Path

@@ -3,6 +3,14 @@
    One UI + Glassmorphism Design System
    ============================================ */
 
+/* --- Header Doc ---
+ * Purpose: Shared glassmorphism + One UI design tokens for all dashboard templates.
+ * Caller: <link rel="stylesheet"> in index.html, market.html, compliance.html, etc.
+ * Dependencies: None (Tailwind CDN used as a peer; no build step).
+ * Main Sections: CSS variables, HUD/Research/Cinema themes, chat bubbles, Live2D stage, chips.
+ * Side Effects: None (stylesheet only).
+ */
+
 /* --- CSS Variables (One UI + Glassmorphism) --- */
 :root {
     --glass-bg: rgba(30, 33, 40, 0.6);

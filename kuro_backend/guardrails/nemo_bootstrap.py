@@ -1,6 +1,13 @@
 """
 Register LangChain ChatGoogleGenerativeAI with NeMo under engine name `kuro_gemini`.
 Must be imported before RailsConfig.from_path loads models.
+
+--- Header Doc ---
+Purpose: NeMo Guardrails engine registration for Gemini (one-time import-side-effect).
+Caller: guardrails.sniper_pipeline at startup.
+Dependencies: nemoguardrails, langchain-google-genai, kuro_backend.config.
+Main Functions: register_engine().
+Side Effects: Mutates nemoguardrails engine registry (global).
 """
 from __future__ import annotations
 

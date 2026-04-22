@@ -5,6 +5,13 @@ AI Core with LangGraph Stateful Architecture for Agentik Long-Term Reasoning
 SDK: google-genai v3 Protocol with LangGraph State Machine
 V5.5: Guardrails REMOVED for maximum performance. Local + VPN + Auth environment.
       Latency optimized: direct path from memory retrieval to response generation.
+
+--- Header Doc ---
+Purpose: Primary stateful reasoning pipeline (supervisor -> tool_node -> response_node) backing /api/chat.
+Caller: main.py chat routes, stream fastpath, services/core_service orchestration.
+Dependencies: google-genai, langgraph, personas, memory_coordinator, token_budget, tools.base_tools, observability, semantic_cache.
+Main Functions: build_graph(), run_turn(), stream_turn(), supervisor_node, tool_node, response_node.
+Side Effects: LLM API calls (Gemini), SQLite reads via memory/finance/intelligence, ChromaDB reads, token-usage metrics, semantic-cache writes, threading primitives for fastpath.
 """
 import asyncio
 import functools
@@ -506,6 +513,19 @@ def supervisor_node(state: KuroState) -> Dict[str, Any]:
             "spreadsheet", "file", "laporan", "report", "template",
             "list file", "daftar file", "simpan", "save", "delete", "hapus"
         ]
+
+        # Chancellor / finances — route to tool_node for ledger tools
+        finance_keywords = [
+            "budget", "subscription", "subscriptions", "recurring expense",
+            "recurring expenses", "monthly bill", "api spend", "api cost",
+            "api usage", "monthly allocation", "ledger",
+        ]
+        market_keywords = [
+            "stock", "stocks", "ticker", "share price", "nasdaq", "nyse",
+            "portfolio", "equity", "equities", "nvda", "aapl", "msft",
+            "prediction market", "polymarket", "metaculus", "odds", "probability",
+            "earnings", "bullish", "bearish", "hedge",
+        ]
         
         # Check for compliance query
         is_compliance_query = any(kw in user_input for kw in compliance_keywords)
@@ -515,6 +535,8 @@ def supervisor_node(state: KuroState) -> Dict[str, Any]:
         
         # Check for tool action query
         is_tool_query = any(kw in user_input for kw in tool_keywords)
+        is_finance_query = any(kw in user_input for kw in finance_keywords)
+        is_market_query = any(kw in user_input for kw in market_keywords)
         
         # Self-correction loop: if compliance search was empty and we haven't expanded too many times
         if is_compliance_query and not compliance_data and query_expansion_count < 3:
@@ -547,6 +569,16 @@ def supervisor_node(state: KuroState) -> Dict[str, Any]:
             if span:
                 span.set_attribute("supervisor_node.decision", "habit_node")
             return {"next_step": "habit_node"}
+
+        if is_finance_query or is_market_query:
+            logger.info(
+                "[SUPERVISOR] Routing to tool_node (finance=%s market=%s)",
+                is_finance_query,
+                is_market_query,
+            )
+            if span:
+                span.set_attribute("supervisor_node.decision", "tool_node_finance")
+            return {"next_step": "tool_node"}
         
         # Default: route to response generator
         logger.info("[SUPERVISOR] Routing to response_node (general query)")
@@ -850,6 +882,13 @@ def response_node(state: KuroState) -> Dict[str, Any]:
         if memory_injection:
             sections["memory_injection"] = memory_injection
 
+        finance_block = (ctx or {}).get("finance_block") or ""
+        if finance_block:
+            sections["finance"] = "\n\n" + finance_block
+        market_block = (ctx or {}).get("market_block") or ""
+        if market_block:
+            sections["market"] = "\n\n" + market_block
+
         tool_status = (tool_result or {}).get("status")
         if tool_status == "success":
             sections["tool_result"] = (
@@ -882,6 +921,8 @@ def response_node(state: KuroState) -> Dict[str, Any]:
             "compliance",
             "habit",
             "memory_injection",
+            "finance",
+            "market",
             "tool_result",
         )
         ordered_parts: list[tuple[str, str]] = [
@@ -969,6 +1010,8 @@ def response_node(state: KuroState) -> Dict[str, Any]:
                 sections.get("habit", ""),
                 sections.get("memory_injection", ""),
                 sections.get("referent", ""),
+                sections.get("finance", ""),
+                sections.get("market", ""),
             ]
             response_text, _lint_anomaly = sniper_pipeline.sniper_ssot_grounding_lint(
                 response_text, ssot_blocks=ssot_blocks
@@ -1003,6 +1046,11 @@ _TOOL_ROUTER_SYSTEM_INSTRUCTION = (
     "Kuro tool router. Pick at most ONE function_call for the user request. "
     "For read-only OpenClaw tasks use execution_mode='readonly', else 'mutating'. "
     "Use skill_name='harvest_gemini_share' for gemini.google.com/share links. "
+    "For budgets, subscriptions, recurring expenses, or API spend use "
+    "get_budget_tool, set_monthly_budget_tool, list_recurring_expenses_tool, "
+    "add_recurring_expense_tool, or get_daily_api_cost_tool. "
+    "For equities or live quotes use get_ticker_price_tool or get_market_news_tool; "
+    "for prediction-market style odds use prediction_market_scan_tool (readonly OpenClaw). "
     "No tool matches? Reply with empty text."
 )
 
@@ -1033,6 +1081,9 @@ def tool_node(state: KuroState) -> Dict[str, Any]:
     - manage_files
     - generate_report_template
     - advanced_execution_tool (OpenClaw bridge)
+    - set_monthly_budget_tool / get_budget_tool / add_recurring_expense_tool
+    - list_recurring_expenses_tool / get_daily_api_cost_tool
+    - get_ticker_price_tool / get_market_news_tool / prediction_market_scan_tool
     """
     from kuro_backend.tools.system_tools import (  # noqa: F401 (validates module import)
         generate_excel_report,
@@ -1053,6 +1104,14 @@ def tool_node(state: KuroState) -> Dict[str, Any]:
                 manage_files,
                 generate_report_template,
                 kuro_tools.advanced_execution_tool,
+                kuro_tools.set_monthly_budget_tool,
+                kuro_tools.get_budget_tool,
+                kuro_tools.add_recurring_expense_tool,
+                kuro_tools.list_recurring_expenses_tool,
+                kuro_tools.get_daily_api_cost_tool,
+                kuro_tools.get_ticker_price_tool,
+                kuro_tools.get_market_news_tool,
+                kuro_tools.prediction_market_scan_tool,
             ]
             response = genai_client.models.generate_content(
                 model=PRIMARY_MODEL,
@@ -1195,6 +1254,14 @@ def _execute_tool(tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         "manage_files": manage_files,
         "generate_report_template": generate_report_template,
         "advanced_execution_tool": kuro_tools.advanced_execution_tool,
+        "set_monthly_budget_tool": kuro_tools.set_monthly_budget_tool,
+        "get_budget_tool": kuro_tools.get_budget_tool,
+        "add_recurring_expense_tool": kuro_tools.add_recurring_expense_tool,
+        "list_recurring_expenses_tool": kuro_tools.list_recurring_expenses_tool,
+        "get_daily_api_cost_tool": kuro_tools.get_daily_api_cost_tool,
+        "get_ticker_price_tool": kuro_tools.get_ticker_price_tool,
+        "get_market_news_tool": kuro_tools.get_market_news_tool,
+        "prediction_market_scan_tool": kuro_tools.prediction_market_scan_tool,
     }
     
     tool_func = tools_map.get(tool_name)
@@ -1467,8 +1534,14 @@ async def process_chat_with_graph_stream(
             memory_injection = ctx["memory_injection"]
             mem0_block = ctx.get("mem0_context_block") or ""
             ref_block = ctx.get("referent_grounding_block") or ""
+            fin_block = ctx.get("finance_block") or ""
+            mkt_block = ctx.get("market_block") or ""
             if mem0_block:
                 memory_injection = f"\n\n[USER_CONTEXT - PERPETUAL MEMORY]\n{mem0_block}{memory_injection}"
+            if fin_block:
+                memory_injection = f"\n\n{fin_block}{memory_injection}"
+            if mkt_block:
+                memory_injection = f"\n\n{mkt_block}{memory_injection}"
             prefix = message
             if ref_block:
                 prefix = f"{message}\n\n{ref_block}"

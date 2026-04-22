@@ -7,6 +7,13 @@ NeMo `RailsConfig` + YAML prompts live in / `kuro_nemo_guardrails` (folder must 
 The production hot path uses Python + `google.genai` for self-checks so we avoid Colang 2.x
 `LLMRails.generate()` pulling in dialog / user-intent LLM calls after input rails (broken with
 Gemini list responses in NeMo 0.21). Colang files remain for documentation / future NeMo server use.
+
+--- Header Doc ---
+Purpose: Input/output guardrail self-checks wrapped around the LangGraph pipeline.
+Caller: langgraph_core supervisor_node (input rail), response_node (output rail).
+Dependencies: google-genai, sniper_context, jailbreak_precheck, nemo_bootstrap.
+Main Functions: run_input_rails(), run_output_rails(), inspect_with_reasoning().
+Side Effects: Secondary Gemini LLM calls (self-check); logs guardrail verdicts.
 """
 from __future__ import annotations
 

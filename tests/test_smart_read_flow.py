@@ -1,3 +1,9 @@
+"""Smart-read routing tests (PDF / DOCX / image path selection).
+
+Purpose: Verify smart_read dispatches to the correct parser based on extension.
+Covers: tools.base_tools.smart_read + universal_read helpers.
+Fixtures: temp files in tmp_path + monkeypatched parser stubs.
+"""
 import sys
 import types
 from pathlib import Path

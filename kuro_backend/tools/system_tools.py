@@ -5,6 +5,13 @@ Tools available:
 - generate_excel_report: Create Excel files from JSON data
 - manage_files: List, read, write, delete files in /home/kuro/exports/
 - generate_report_template: Generate audit/compliance report templates
+
+--- Header Doc ---
+Purpose: Secondary system-level tools (Excel exports, file management, audit templates).
+Caller: langgraph_core tool_node, main.py report routes.
+Dependencies: openpyxl (optional), stdlib os/json.
+Main Functions: generate_excel_report, manage_files, generate_report_template.
+Side Effects: Writes files under /home/kuro/exports/ whitelist; logs operations.
 """
 import logging
 import os

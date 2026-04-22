@@ -2,6 +2,11 @@
 
 This is a lightweight guardrail so a future regression that reintroduces
 Bahasa Indonesia into the core system prompts trips immediately.
+
+--- Header Doc ---
+Purpose: Smoke lint — persona prompts are English + Chancellor SSoT addendum lists market tables.
+Covers: kuro_backend.personas PERSONA_INSTRUCTIONS + _CHANCELLOR_SSOT_ADDENDUM.
+Fixtures: None (pure string assertions).
 """
 from __future__ import annotations
 
@@ -64,3 +69,18 @@ def test_ssot_priority_directive_in_english():
     assert "MANDATORY" in personas._SSOT_PRIORITY_DIRECTIVE
     for phrase in BAHASA_FORBIDDEN:
         assert phrase not in personas._SSOT_PRIORITY_DIRECTIVE
+
+
+def test_chancellor_graph_prompt_includes_financial_ssot_addendum():
+    prompt = personas.build_system_instruction(
+        "chancellor",
+        current_time="10:00",
+        current_date="2026-04-17",
+        kuro_version_label="V6.2",
+        variant="graph",
+    )
+    assert "FINANCIAL SSoT PRIORITY" in prompt
+    assert "api_usage_daily" in prompt
+    assert "watched_symbols" in prompt
+    for phrase in BAHASA_FORBIDDEN:
+        assert phrase not in prompt, f"chancellor prompt contains Bahasa: {phrase!r}"
