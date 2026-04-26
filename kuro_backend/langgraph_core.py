@@ -351,6 +351,7 @@ async def _stream_direct_llm_chunks(
                 "temperature": profile.temperature,
                 "top_p": profile.top_p,
                 "top_k": profile.top_k,
+                "tools": [{"google_search": {}}],
             }
 
             if settings.GEMINI_CACHED_CONTENT:
@@ -855,6 +856,7 @@ def response_node(state: KuroState) -> Dict[str, Any]:
                 "temperature": profile.temperature,
                 "top_p": profile.top_p,
                 "top_k": profile.top_k,
+                "tools": [{"google_search": {}}],
             }
             if settings.GEMINI_CACHED_CONTENT:
                 config_kwargs["cached_content"] = settings.GEMINI_CACHED_CONTENT
