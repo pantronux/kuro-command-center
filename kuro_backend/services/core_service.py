@@ -843,21 +843,18 @@ def get_monthly_data(year: int, month: int) -> Dict:
     logs = cursor.fetchall()
     
     # Build grid data: {habit_id: {day: status}}
-    grid_data = {}
+    grid_data = {habit['id']: {day: 0 for day in range(1, days_in_month + 1)} for habit in habits}
     daily_totals = {day: 0 for day in range(1, days_in_month + 1)}
-    
-    for habit in habits:
-        grid_data[habit['id']] = {day: 0 for day in range(1, days_in_month + 1)}
     
     for log in logs:
         habit_id = log['habit_id']
         log_date = datetime.fromisoformat(log['log_date']).date()
-        if log_date.month == month and log_date.year == year:
-            day = log_date.day
-            if habit_id in grid_data:
-                grid_data[habit_id][day] = log['status']
-                if log['status'] == 1:
-                    daily_totals[day] = daily_totals.get(day, 0) + 1
+        # Redundant date check removed; SQL query already filters by start/end_date.
+        day = log_date.day
+        if habit_id in grid_data:
+            grid_data[habit_id][day] = log['status']
+            if log['status'] == 1:
+                daily_totals[day] += 1
     
     # Calculate per-habit monthly stats
     habit_stats = []
@@ -866,7 +863,9 @@ def get_monthly_data(year: int, month: int) -> Dict:
     
     for habit in habits:
         habit_id = habit['id']
-        completed = sum(1 for day, status in grid_data[habit_id].items() if status == 1)
+        habit_grid = grid_data[habit_id]
+        # status is 0 or 1, so sum is count of 1s
+        completed = sum(habit_grid.values())
         target = habit.get('target_per_month', 30)
         percentage = round((completed / target * 100), 1) if target > 0 else 0
         total_completed += completed
@@ -935,22 +934,19 @@ def get_weekly_data(year: int, week: int) -> Dict:
     logs = cursor.fetchall()
     
     # Build grid data: {habit_id: {day_offset: status}}
-    grid_data = {}
+    grid_data = {habit['id']: {i: 0 for i in range(7)} for habit in habits}
     daily_totals = {i: 0 for i in range(7)}  # 0=Mon, 6=Sun
     day_names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-    
-    for habit in habits:
-        grid_data[habit['id']] = {i: 0 for i in range(7)}
     
     for log in logs:
         habit_id = log['habit_id']
         log_date = datetime.fromisoformat(log['log_date']).date()
-        if week_start <= log_date <= week_end:
-            day_offset = (log_date - week_start).days
-            if habit_id in grid_data and 0 <= day_offset <= 6:
-                grid_data[habit_id][day_offset] = log['status']
-                if log['status'] == 1:
-                    daily_totals[day_offset] = daily_totals.get(day_offset, 0) + 1
+        # Redundant date check removed; SQL query already filters by week_start/week_end.
+        day_offset = (log_date - week_start).days
+        if habit_id in grid_data and 0 <= day_offset <= 6:
+            grid_data[habit_id][day_offset] = log['status']
+            if log['status'] == 1:
+                daily_totals[day_offset] += 1
     
     # Calculate per-habit weekly stats
     habit_stats = []
@@ -959,7 +955,9 @@ def get_weekly_data(year: int, week: int) -> Dict:
     
     for habit in habits:
         habit_id = habit['id']
-        completed = sum(1 for day, status in grid_data[habit_id].items() if status == 1)
+        habit_grid = grid_data[habit_id]
+        # status is 0 or 1, so sum is count of 1s
+        completed = sum(habit_grid.values())
         target = habit.get('target_per_week', 7)
         percentage = round((completed / target * 100), 1) if target > 0 else 0
         total_completed += completed
