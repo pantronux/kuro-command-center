@@ -366,12 +366,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 WEB_DIR = os.path.join(BASE_DIR, "web_interface")
 app.mount("/static", StaticFiles(directory=os.path.join(WEB_DIR, "static")), name="static")
 
-# TTS cache mount (Kuro V6.0 Sovereign). Cached audio lives at media/tts
-# keyed by sha1; serving it directly lets the frontend replay without
-# hitting the synthesis path again.
-_TTS_CACHE_DIR = os.path.join(BASE_DIR, "media", "tts")
-os.makedirs(_TTS_CACHE_DIR, exist_ok=True)
-app.mount("/media/tts", StaticFiles(directory=_TTS_CACHE_DIR), name="tts_cache")
+
 
 # Profile assets mount (Kuro V6.1 — branding + Live2D Hijiki). Exposes the
 # repo-level `profile/` directory so the dashboard can fetch `kuro_avatar.png`,
@@ -1021,63 +1016,6 @@ async def system_status():
     return api_success(data=tools.get_system_status())
 
 
-class VoiceSpeechRequest(BaseModel):
-    """Payload for ``POST /api/voice/speech``.
-
-    ``engine`` defaults to ``KURO_TTS_ENGINE`` (piper in V6.0) when omitted.
-    ``lang`` defaults to ``en`` to match the Sebastian voice (en_GB-alan).
-    ``voice`` is forwarded to piper only.
-    ``persona`` overrides Piper tuning (e.g. ``chancellor``); when omitted,
-    the active profile from ``memory_manager`` is used.
-    """
-
-    text: str = Field(..., min_length=1, max_length=2000)
-    engine: Optional[str] = Field(default=None)
-    lang: str = Field(default="en")
-    voice: Optional[str] = Field(default=None)
-    persona: Optional[str] = Field(default=None)
-
-
-@app.post("/api/voice/speech")
-async def api_voice_speech(body: VoiceSpeechRequest):
-    """Synthesise speech and return the audio file.
-
-    Uses the engine from env ``KURO_TTS_ENGINE`` (default ``piper`` in V6.0)
-    unless overridden per request. Results are cached under ``/media/tts/``
-    so repeat requests for the same text skip the engine entirely.
-    """
-    from fastapi.responses import FileResponse
-
-    try:
-        from kuro_backend import voice_service
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"voice service unavailable: {exc}")
-
-    try:
-        tts_persona = (body.persona or "").strip() or memory_manager.get_active_persona()
-        path, media_type = await asyncio.to_thread(
-            voice_service.synthesize_to_file,
-            body.text,
-            engine=body.engine,
-            lang=(body.lang or "en"),
-            voice=body.voice,
-            persona=tts_persona,
-        )
-    except voice_service.TTSError as exc:
-        logger.warning(f"[/api/voice/speech] synthesis failed: {exc}")
-        raise HTTPException(status_code=503, detail=str(exc))
-    except Exception as exc:
-        logger.exception("[/api/voice/speech] unexpected error")
-        raise HTTPException(status_code=500, detail=str(exc))
-
-    return FileResponse(
-        str(path),
-        media_type=media_type,
-        headers={
-            "Cache-Control": "public, max-age=604800",
-            "X-Kuro-TTS-Cache": path.name,
-        },
-    )
 
 @app.get("/api/log-storage")
 async def log_storage():
@@ -1354,6 +1292,25 @@ async def list_files(directory: str = None):
     """List all files in a directory (reality check - no memory reliance)."""
     result = tools.list_my_files(directory)
     return {"status": "success", "data": result}
+
+# --- Documentation Routes ---
+@app.get("/docs", response_class=HTMLResponse)
+async def docs_frontend():
+    """Serve the documentation frontend."""
+    return FileResponse(os.path.join(WEB_DIR, "templates", "docs.html"))
+
+@app.get("/api/docs/content")
+async def docs_content():
+    """Return the raw markdown content of SYSTEM_MAP.md."""
+    try:
+        map_path = os.path.join(BASE_DIR, "SYSTEM_MAP.md")
+        if not os.path.exists(map_path):
+            return {"status": "error", "message": "SYSTEM_MAP.md not found"}
+        with open(map_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        return {"status": "success", "markdown": content}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 # --- Compliance Routes ---
 @app.get("/compliance", response_class=HTMLResponse)

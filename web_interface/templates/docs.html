@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kuro AI | Documentation</title>
+    
+    <!-- Branding -->
+    <link rel="icon" type="image/x-icon" href="/profile/favicon.ico">
+    <link rel="apple-touch-icon" href="/profile/kuro_avatar.png">
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        kuro: {
+                            bg: '#020617', // slate-950
+                            panel: 'rgba(15, 23, 42, 0.65)', // slate-900 with opacity
+                            border: 'rgba(30, 41, 59, 0.5)', // slate-800
+                            accent: '#06b6d4', // cyan-500
+                            text: '#e2e8f0', // slate-200
+                            muted: '#94a3b8' // slate-400
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+    
+    <!-- Marked.js for Markdown -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    
+    <!-- Highlight.js for Code -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    
+    <!-- Mermaid.js for flowcharts -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+
+    <!-- Mark.js for Search Highlighting -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mark.js/8.11.1/mark.min.js"></script>
+
+    <style>
+        body {
+            background-color: #020617;
+            color: #e2e8f0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-image: 
+                radial-gradient(circle at 15% 50%, rgba(6, 182, 212, 0.04), transparent 50%),
+                radial-gradient(circle at 85% 30%, rgba(16, 185, 129, 0.04), transparent 50%);
+            background-attachment: fixed;
+        }
+
+        /* Glassmorphism utilities */
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.65);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(30, 41, 59, 0.5);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
+
+        /* Markdown Typography Styles */
+        .prose-kuro {
+            color: #e2e8f0;
+            line-height: 1.7;
+            font-size: 0.95rem;
+        }
+        .prose-kuro h1, .prose-kuro h2, .prose-kuro h3, .prose-kuro h4 {
+            color: #f8fafc;
+            font-weight: 600;
+            margin-top: 2em;
+            margin-bottom: 0.75em;
+            scroll-margin-top: 5rem;
+        }
+        .prose-kuro h1 { font-size: 2.25em; margin-top: 0; color: #06b6d4; }
+        .prose-kuro h2 { font-size: 1.5em; border-bottom: 1px solid rgba(30, 41, 59, 0.8); padding-bottom: 0.3em; }
+        .prose-kuro h3 { font-size: 1.25em; color: #38bdf8; }
+        .prose-kuro a {
+            color: #06b6d4;
+            text-decoration: none;
+            transition: color 0.2s ease;
+        }
+        .prose-kuro a:hover { color: #22d3ee; text-decoration: underline; }
+        .prose-kuro p { margin-top: 0; margin-bottom: 1.25em; }
+        .prose-kuro ul { list-style-type: disc; margin-top: 0; margin-bottom: 1.25em; padding-left: 1.625em; }
+        .prose-kuro ol { list-style-type: decimal; margin-top: 0; margin-bottom: 1.25em; padding-left: 1.625em; }
+        .prose-kuro li { margin-top: 0.25em; margin-bottom: 0.25em; }
+        .prose-kuro strong { color: #f8fafc; font-weight: 600; }
+        .prose-kuro code {
+            color: #38bdf8;
+            background-color: rgba(15, 23, 42, 0.8);
+            padding: 0.2em 0.4em;
+            border-radius: 0.25rem;
+            font-size: 0.875em;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        }
+        .prose-kuro pre {
+            background-color: #0f172a;
+            padding: 1em;
+            border-radius: 0.5rem;
+            overflow-x: auto;
+            margin-top: 1em;
+            margin-bottom: 1.5em;
+            border: 1px solid rgba(30, 41, 59, 0.8);
+        }
+        .prose-kuro pre code {
+            background-color: transparent;
+            padding: 0;
+            color: inherit;
+            border-radius: 0;
+        }
+        .prose-kuro blockquote {
+            border-left: 4px solid #06b6d4;
+            padding-left: 1em;
+            color: #94a3b8;
+            font-style: italic;
+            margin-top: 1.2em;
+            margin-bottom: 1.2em;
+            background: rgba(6, 182, 212, 0.05);
+            padding-top: 0.5em;
+            padding-bottom: 0.5em;
+            border-radius: 0 0.25rem 0.25rem 0;
+        }
+        .prose-kuro table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1.5em;
+            margin-bottom: 1.5em;
+        }
+        .prose-kuro th {
+            background-color: rgba(30, 41, 59, 0.8);
+            padding: 0.75em;
+            text-align: left;
+            border: 1px solid rgba(51, 65, 85, 0.5);
+            color: #e2e8f0;
+        }
+        .prose-kuro td {
+            padding: 0.75em;
+            border: 1px solid rgba(51, 65, 85, 0.5);
+        }
+        .prose-kuro tr:nth-child(even) { background-color: rgba(15, 23, 42, 0.4); }
+        
+        /* Mark.js highlight styling */
+        mark {
+            background-color: rgba(6, 182, 212, 0.4);
+            color: #f8fafc;
+            padding: 0 0.1em;
+            border-radius: 0.125rem;
+        }
+
+        /* Mermaid container styling */
+        .mermaid {
+            background: rgba(15, 23, 42, 0.8);
+            padding: 1.5rem;
+            border-radius: 0.5rem;
+            border: 1px solid rgba(30, 41, 59, 0.8);
+            margin: 1.5rem 0;
+            overflow-x: auto;
+            text-align: center;
+        }
+
+        /* Sidebar active link */
+        .toc-link.active {
+            color: #06b6d4;
+            border-left-color: #06b6d4;
+            background-color: rgba(6, 182, 212, 0.1);
+        }
+        
+        /* Custom scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #020617; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #475569; }
+    </style>
+</head>
+<body class="h-screen flex flex-col overflow-hidden text-kuro-text antialiased">
+
+    <!-- Navbar -->
+    <header class="glass-panel sticky top-0 z-40 border-b border-kuro-border h-16 flex-none">
+        <div class="h-full px-6 flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+                <div class="w-8 h-8 rounded-full bg-gradient-to-tr from-cyan-500 to-emerald-400 p-[1px]">
+                    <div class="w-full h-full rounded-full bg-slate-900 flex items-center justify-center overflow-hidden">
+                        <img src="/profile/kuro_avatar.png" alt="Kuro" class="w-full h-full object-cover">
+                    </div>
+                </div>
+                <div>
+                    <h1 class="font-bold text-slate-100 tracking-wide flex items-center gap-2">
+                        KURO V7.0 <span class="text-xs font-mono text-cyan-400 bg-cyan-900/30 px-2 py-0.5 rounded-full border border-cyan-800/50">DOCS</span>
+                    </h1>
+                </div>
+            </div>
+
+            <div class="flex items-center space-x-4 flex-1 justify-end max-w-xl">
+                <!-- Search Box -->
+                <div class="relative w-full max-w-md hidden md:block">
+                    <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                        <i data-lucide="search" class="w-4 h-4 text-slate-400"></i>
+                    </div>
+                    <input type="text" id="searchInput" placeholder="Search documentation..." 
+                           class="block w-full pl-10 pr-3 py-1.5 border border-slate-700 rounded-lg leading-5 bg-slate-800/50 text-slate-300 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-cyan-500 focus:border-cyan-500 sm:text-sm transition-colors">
+                    <div class="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none hidden" id="searchCount">
+                        <span class="text-xs text-cyan-400 bg-cyan-900/40 px-1.5 rounded">0</span>
+                    </div>
+                </div>
+
+                <a href="/" class="text-slate-400 hover:text-cyan-400 transition-colors" title="Back to Dashboard">
+                    <i data-lucide="layout-dashboard" class="w-5 h-5"></i>
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <div class="flex-1 flex overflow-hidden relative">
+        <!-- Sidebar Navigation (TOC) -->
+        <aside class="w-64 flex-none glass-panel border-r border-kuro-border flex flex-col hidden lg:flex">
+            <div class="px-4 py-3 border-b border-kuro-border bg-slate-800/30">
+                <h2 class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Contents</h2>
+            </div>
+            <div class="flex-1 overflow-y-auto p-4 space-y-1" id="tocContainer">
+                <div class="animate-pulse flex space-x-2 items-center p-2">
+                    <div class="w-4 h-4 bg-slate-700 rounded-full"></div>
+                    <div class="h-2 bg-slate-700 rounded w-24"></div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="flex-1 overflow-y-auto p-6 md:p-10 relative scroll-smooth" id="mainScrollArea">
+            <div class="max-w-4xl mx-auto">
+                <!-- Loader -->
+                <div id="loadingIndicator" class="flex flex-col items-center justify-center py-20 opacity-100 transition-opacity duration-300">
+                    <i data-lucide="loader-2" class="w-8 h-8 text-cyan-500 animate-spin mb-4"></i>
+                    <p class="text-slate-400 animate-pulse text-sm">Decoding System Map...</p>
+                </div>
+
+                <!-- Markdown Container -->
+                <div id="docContent" class="prose-kuro hidden opacity-0 transition-opacity duration-500 pb-20">
+                    <!-- Markdown will be injected here -->
+                </div>
+            </div>
+            
+            <!-- Mobile TOC Button -->
+            <button id="mobileTocBtn" class="lg:hidden fixed bottom-6 right-6 bg-cyan-600 text-white p-3 rounded-full shadow-lg hover:bg-cyan-500 transition-colors z-50">
+                <i data-lucide="list" class="w-5 h-5"></i>
+            </button>
+        </main>
+        
+        <!-- Mobile TOC Overlay -->
+        <div id="mobileTocOverlay" class="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-50 hidden opacity-0 transition-opacity">
+            <div class="absolute right-0 top-0 bottom-0 w-64 bg-slate-900 border-l border-slate-700 p-4 overflow-y-auto shadow-2xl transform translate-x-full transition-transform" id="mobileTocPanel">
+                <div class="flex justify-between items-center mb-6 border-b border-slate-800 pb-2">
+                    <h2 class="text-sm font-semibold text-slate-300 uppercase tracking-wider">Contents</h2>
+                    <button id="closeTocBtn" class="text-slate-400 hover:text-white"><i data-lucide="x" class="w-5 h-5"></i></button>
+                </div>
+                <!-- Mobile Search -->
+                <div class="relative w-full mb-4 md:hidden">
+                    <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                        <i data-lucide="search" class="w-4 h-4 text-slate-400"></i>
+                    </div>
+                    <input type="text" id="mobileSearchInput" placeholder="Search..." 
+                           class="block w-full pl-9 pr-3 py-1.5 border border-slate-700 rounded-lg leading-5 bg-slate-800 text-slate-300 placeholder-slate-500 focus:outline-none focus:border-cyan-500 sm:text-sm">
+                </div>
+                <div id="mobileTocContainer" class="space-y-1"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Initialize Lucide Icons
+        lucide.createIcons();
+
+        // Configure Mermaid
+        mermaid.initialize({ 
+            startOnLoad: false,
+            theme: 'dark',
+            themeVariables: {
+                darkMode: true,
+                background: '#0f172a',
+                primaryColor: '#06b6d4',
+                primaryTextColor: '#e2e8f0',
+                primaryBorderColor: '#334155',
+                lineColor: '#cbd5e1',
+                secondaryColor: '#10b981',
+                tertiaryColor: '#0f172a'
+            },
+            flowchart: { curve: 'basis' }
+        });
+
+        // DOM Elements
+        const docContent = document.getElementById('docContent');
+        const loadingIndicator = document.getElementById('loadingIndicator');
+        const tocContainer = document.getElementById('tocContainer');
+        const mobileTocContainer = document.getElementById('mobileTocContainer');
+        const searchInput = document.getElementById('searchInput');
+        const mobileSearchInput = document.getElementById('mobileSearchInput');
+        const searchCount = document.getElementById('searchCount');
+        const searchCountSpan = searchCount.querySelector('span');
+        const mainScrollArea = document.getElementById('mainScrollArea');
+
+        // Mark.js instance
+        let markInstance = null;
+
+        // Custom Marked.js renderer for Mermaid blocks and code highlighting
+        const renderer = new marked.Renderer();
+        const originalCode = renderer.code.bind(renderer);
+        
+        renderer.code = function({text, lang}) {
+            if (lang === 'mermaid') {
+                // Return a placeholder div that we will process after DOM injection
+                return `<div class="mermaid-container my-6"><div class="mermaid">${text}</div></div>`;
+            }
+            // Syntax highlighting using highlight.js
+            const validLanguage = hljs.getLanguage(lang) ? lang : 'plaintext';
+            const highlighted = hljs.highlight(text, { language: validLanguage }).value;
+            return `<pre><code class="hljs ${validLanguage}">${highlighted}</code></pre>`;
+        };
+
+        marked.setOptions({ renderer: renderer });
+
+        // Build Table of Contents dynamically
+        function buildTOC() {
+            const headings = docContent.querySelectorAll('h2, h3');
+            let tocHTML = '';
+            
+            headings.forEach((heading, index) => {
+                // Ensure heading has an ID
+                if (!heading.id) {
+                    heading.id = heading.textContent.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-');
+                }
+                
+                // Avoid duplicate IDs
+                if (document.querySelectorAll(`#${heading.id}`).length > 1) {
+                    heading.id = `${heading.id}-${index}`;
+                }
+
+                const isH3 = heading.tagName.toLowerCase() === 'h3';
+                const paddingClass = isH3 ? 'pl-6 text-xs' : 'pl-3 text-sm font-medium';
+                const colorClass = isH3 ? 'text-slate-400' : 'text-slate-300';
+                
+                tocHTML += `
+                    <a href="#${heading.id}" class="toc-link block py-1.5 border-l-2 border-transparent ${paddingClass} ${colorClass} hover:text-cyan-400 hover:border-slate-500 transition-colors truncate" data-target="${heading.id}">
+                        ${heading.textContent}
+                    </a>
+                `;
+            });
+
+            tocContainer.innerHTML = tocHTML;
+            mobileTocContainer.innerHTML = tocHTML;
+            setupScrollSpy();
+        }
+
+        // ScrollSpy for TOC highlighting
+        function setupScrollSpy() {
+            const headings = docContent.querySelectorAll('h2, h3');
+            const tocLinks = document.querySelectorAll('.toc-link');
+            
+            mainScrollArea.addEventListener('scroll', () => {
+                let current = '';
+                
+                // Add a small offset (100px) to trigger earlier
+                const scrollTop = mainScrollArea.scrollTop + 100;
+                
+                headings.forEach(h => {
+                    if (h.offsetTop <= scrollTop) {
+                        current = h.getAttribute('id');
+                    }
+                });
+                
+                tocLinks.forEach(link => {
+                    link.classList.remove('active');
+                    if (link.getAttribute('data-target') === current) {
+                        link.classList.add('active');
+                        // Auto scroll TOC
+                        if (link.parentElement.id === 'tocContainer') {
+                            const linkTop = link.offsetTop;
+                            const containerHeight = tocContainer.offsetHeight;
+                            if (linkTop > containerHeight - 50 || linkTop < tocContainer.scrollTop) {
+                                tocContainer.scrollTop = linkTop - containerHeight / 2;
+                            }
+                        }
+                    }
+                });
+            });
+        }
+
+        // Load Content
+        async function loadDocumentation() {
+            try {
+                const response = await fetch('/api/docs/content');
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    // 1. Render Markdown
+                    docContent.innerHTML = marked.parse(data.markdown);
+                    
+                    // 2. Hide loader & show content
+                    loadingIndicator.classList.add('hidden');
+                    docContent.classList.remove('hidden');
+                    // Small delay to allow CSS display to apply before opacity transition
+                    setTimeout(() => docContent.classList.remove('opacity-0'), 50);
+                    
+                    // 3. Render Mermaid charts
+                    try {
+                        await mermaid.run({
+                            querySelector: '.mermaid'
+                        });
+                    } catch (mermaidErr) {
+                        console.error('Mermaid render error:', mermaidErr);
+                    }
+                    
+                    // 4. Build TOC
+                    buildTOC();
+                    
+                    // 5. Initialize search
+                    markInstance = new window.Mark(docContent);
+                    
+                } else {
+                    throw new Error(data.message || 'Failed to load documentation');
+                }
+            } catch (err) {
+                console.error(err);
+                loadingIndicator.innerHTML = `
+                    <i data-lucide="alert-triangle" class="w-8 h-8 text-red-500 mb-4"></i>
+                    <p class="text-red-400">Failed to load documentation</p>
+                    <p class="text-xs text-slate-500 mt-2">${err.message}</p>
+                `;
+                lucide.createIcons();
+            }
+        }
+
+        // Search Implementation
+        function performSearch(keyword) {
+            if (!markInstance) return;
+            
+            // Unmark previous
+            markInstance.unmark({
+                done: function() {
+                    if (!keyword.trim()) {
+                        searchCount.classList.add('hidden');
+                        return;
+                    }
+                    
+                    // Mark new
+                    let count = 0;
+                    markInstance.mark(keyword, {
+                        separateWordSearch: false,
+                        done: function(totalMatches) {
+                            if (totalMatches > 0) {
+                                searchCountSpan.textContent = totalMatches;
+                                searchCount.classList.remove('hidden');
+                                
+                                // Scroll to first match
+                                const firstMatch = document.querySelector('mark');
+                                if (firstMatch) {
+                                    firstMatch.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                }
+                            } else {
+                                searchCountSpan.textContent = '0';
+                                searchCount.classList.remove('hidden');
+                            }
+                        }
+                    });
+                }
+            });
+        }
+
+        // Debounce helper
+        function debounce(func, wait) {
+            let timeout;
+            return function executedFunction(...args) {
+                const later = () => {
+                    clearTimeout(timeout);
+                    func(...args);
+                };
+                clearTimeout(timeout);
+                timeout = setTimeout(later, wait);
+            };
+        }
+
+        const debouncedSearch = debounce((e) => performSearch(e.target.value), 300);
+        searchInput.addEventListener('input', debouncedSearch);
+        mobileSearchInput.addEventListener('input', (e) => {
+            searchInput.value = e.target.value;
+            debouncedSearch(e);
+        });
+
+        // Mobile TOC Toggle
+        const mobileTocBtn = document.getElementById('mobileTocBtn');
+        const mobileTocOverlay = document.getElementById('mobileTocOverlay');
+        const mobileTocPanel = document.getElementById('mobileTocPanel');
+        const closeTocBtn = document.getElementById('closeTocBtn');
+
+        function toggleMobileToc(show) {
+            if (show) {
+                mobileTocOverlay.classList.remove('hidden');
+                // Small delay to allow display block to apply before opacity
+                setTimeout(() => {
+                    mobileTocOverlay.classList.remove('opacity-0');
+                    mobileTocPanel.classList.remove('translate-x-full');
+                }, 10);
+            } else {
+                mobileTocOverlay.classList.add('opacity-0');
+                mobileTocPanel.classList.add('translate-x-full');
+                setTimeout(() => {
+                    mobileTocOverlay.classList.add('hidden');
+                }, 300); // Wait for transition
+            }
+        }
+
+        mobileTocBtn.addEventListener('click', () => toggleMobileToc(true));
+        closeTocBtn.addEventListener('click', () => toggleMobileToc(false));
+        mobileTocOverlay.addEventListener('click', (e) => {
+            if (e.target === mobileTocOverlay) toggleMobileToc(false);
+        });
+
+        // Close mobile TOC when a link is clicked
+        mobileTocContainer.addEventListener('click', (e) => {
+            if (e.target.classList.contains('toc-link')) {
+                toggleMobileToc(false);
+            }
+        });
+
+        // Boot
+        document.addEventListener('DOMContentLoaded', loadDocumentation);
+
+    </script>
+</body>
+</html>

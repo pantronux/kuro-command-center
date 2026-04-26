@@ -4,7 +4,7 @@
   Purpose: Primary dashboard / chat UI for Kuro AI (Leviathan V7.0).
   Caller: main.py GET "/" (HTMLResponse via Jinja2).
   Dependencies: static/js/app.js, static/js/live2d_manager.js, static/css/style.css, Tailwind CDN, Lucide, Live2D runtime.
-  Main Sections: persona picker, chat log, HUD chips bar (market), voice controls, settings/nav.
+  Main Sections: persona picker, chat log, HUD chips bar (market), settings/nav.
   Side Effects: Opens /ws/dashboard WebSocket, polls /api/market/hud on a timer, loads Live2D avatar assets.
 -->
 <html lang="en" class="scroll-smooth">
@@ -111,9 +111,8 @@
             border: 1px solid rgba(125,211,252,0.4);
             z-index: 1000; pointer-events: none;
         }
-        /* Sebastian avatar (V6.0 Sovereign) — idle is subtle, pulses while
-           the TTS audio element is playing. Visual emphasis reserved for
-           HUD / Cinema themes; NORMAL_MODE keeps the avatar unobtrusive. */
+        /* Sebastian avatar (V6.0 Sovereign) — idle state presentation.
+           HUD / Cinema themes apply different colour grading. */
         .kuro-avatar {
             width: 36px; height: 36px; border-radius: 50%;
             display: inline-flex; align-items: center; justify-content: center;
@@ -131,17 +130,17 @@
         .kuro-avatar .kuro-avatar-fallback { display: none; }
         .kuro-avatar--fallback .kuro-avatar-fallback { display: inline; }
 
-        /* V6.1 Live2D dock */
+        /* V6.1 Live2D dock — pinned to bottom-left above the profile area */
         .live2d-dock {
             position: fixed;
-            right: 18px;
-            bottom: 18px;
-            width: 300px;
-            height: 380px;
-            z-index: 40;
+            left: 0;
+            bottom: 72px; /* sits just above the 72px profile footer */
+            width: 288px; /* matches sidebar width (lg:w-72 = 18rem = 288px) */
+            height: 260px;
+            z-index: 38;
             pointer-events: none;
-            opacity: 0.95;
-            transition: opacity 280ms ease;
+            opacity: 0.97;
+            transition: opacity 280ms ease, transform 280ms ease;
         }
         .live2d-dock canvas {
             width: 100%;
@@ -150,53 +149,85 @@
             pointer-events: auto;
             background: transparent;
         }
+        /* Auto-hide when sidebar is collapsed / viewport too narrow */
         .live2d-dock.live2d-dock--hidden { display: none; }
-        @media (max-width: 900px) {
+        @media (max-width: 1024px) {
             .live2d-dock { display: none; }
         }
-        .kuro-avatar.speaking { animation: kuroPulseGlow 1.1s ease-in-out infinite; }
+
+        /* ── Kuro tips bubble ────────────────────────────────────────── */
+        #kuroBubble {
+            position: fixed;
+            left: 14px;
+            bottom: 344px; /* above the dock */
+            width: 256px;
+            z-index: 39;
+            pointer-events: auto;
+            display: none; /* shown by JS */
+        }
+        #kuroBubble.bubble-visible { display: block; animation: bubbleFadeIn 0.4s cubic-bezier(.22,1,.36,1) both; }
+        #kuroBubble.bubble-hiding  { animation: bubbleFadeOut 0.35s ease forwards; }
+        #kuroBubbleInner {
+            background: rgba(15,23,42,0.88);
+            backdrop-filter: blur(14px);
+            border: 1px solid rgba(125,211,252,0.25);
+            border-radius: 16px;
+            padding: 14px 16px 12px;
+            color: #e0f2fe;
+            font-size: 13px;
+            line-height: 1.55;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.45), 0 0 0 1px rgba(125,211,252,0.08) inset;
+            position: relative;
+        }
+        /* speech-bubble tail pointing down-left toward avatar */
+        #kuroBubbleInner::after {
+            content: '';
+            position: absolute;
+            bottom: -9px;
+            left: 28px;
+            border: 5px solid transparent;
+            border-top-color: rgba(15,23,42,0.88);
+        }
+        #kuroBubbleLabel {
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: #7dd3fc;
+            font-weight: 700;
+            margin-bottom: 6px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        #kuroBubbleClose {
+            position: absolute;
+            top: 8px; right: 10px;
+            background: none; border: none;
+            color: #94a3b8; cursor: pointer;
+            font-size: 16px; line-height: 1;
+            padding: 0 2px;
+            transition: color 150ms ease;
+        }
+        #kuroBubbleClose:hover { color: #e0f2fe; }
+        @keyframes bubbleFadeIn {
+            from { opacity: 0; transform: translateY(12px) scale(0.95); }
+            to   { opacity: 1; transform: translateY(0)   scale(1); }
+        }
+        @keyframes bubbleFadeOut {
+            from { opacity: 1; transform: translateY(0)   scale(1); }
+            to   { opacity: 0; transform: translateY(8px)  scale(0.95); }
+        }
+        @media (max-width: 1024px) {
+            #kuroBubble { display: none !important; }
+        }
         html.theme-hud .kuro-avatar {
             background: radial-gradient(circle at 35% 35%, #22d3ee, #0f172a 85%);
             color: #e0f2fe;
-        }
-        html.theme-hud .kuro-avatar.speaking {
-            animation: kuroPulseGlowHUD 0.9s ease-in-out infinite;
         }
         html.theme-cinema .kuro-avatar {
             background: radial-gradient(circle at 35% 35%, #f5d68b, #1c1410 85%);
             color: #f5d68b;
         }
-        html.theme-cinema .kuro-avatar.speaking {
-            animation: kuroPulseGlowCinema 1.3s ease-in-out infinite;
-        }
-        @keyframes kuroPulseGlow {
-            0%   { box-shadow: 0 0 0 0 rgba(16,185,129,0.45); transform: scale(1.00); }
-            50%  { box-shadow: 0 0 14px 6px rgba(16,185,129,0.35); transform: scale(1.04); }
-            100% { box-shadow: 0 0 0 0 rgba(16,185,129,0.0); transform: scale(1.00); }
-        }
-        @keyframes kuroPulseGlowHUD {
-            0%   { box-shadow: 0 0 0 0 rgba(34,211,238,0.55); transform: scale(1.00); }
-            50%  { box-shadow: 0 0 22px 8px rgba(34,211,238,0.55); transform: scale(1.06); }
-            100% { box-shadow: 0 0 0 0 rgba(34,211,238,0.0); transform: scale(1.00); }
-        }
-        @keyframes kuroPulseGlowCinema {
-            0%   { box-shadow: 0 0 0 0 rgba(245,214,139,0.45); transform: scale(1.00); }
-            50%  { box-shadow: 0 0 18px 6px rgba(245,214,139,0.40); transform: scale(1.03); }
-            100% { box-shadow: 0 0 0 0 rgba(245,214,139,0.0); transform: scale(1.00); }
-        }
-        /* Per-message replay button (V6.0 Sovereign). */
-        .kuro-speak-btn {
-            position: absolute; bottom: 6px; right: 8px;
-            width: 28px; height: 28px; border-radius: 8px;
-            display: inline-flex; align-items: center; justify-content: center;
-            background: rgba(15,23,42,0.08); color: inherit; border: none;
-            cursor: pointer; font-size: 13px; line-height: 1;
-            opacity: 0; transition: opacity 180ms ease, background 180ms ease;
-        }
-        .group:hover .kuro-speak-btn { opacity: 1; }
-        .kuro-speak-btn:hover:not([disabled]) { background: rgba(34,211,238,0.25); }
-        .kuro-speak-btn[disabled] { opacity: 0.6; cursor: progress; }
-        html.theme-hud .kuro-speak-btn { color: #7dd3fc; background: rgba(15,23,42,0.4); }
         /* Sentinel status ticker (V6.0 Sovereign). */
         #kuroStatusTicker.sentinel-scanning {
             border-color: rgba(34,211,238,0.6) !important;
@@ -336,7 +367,7 @@
                     <button id="openSidebar" class="lg:hidden p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
                         <i data-lucide="menu" class="w-6 h-6 text-gray-600 dark:text-gray-300"></i>
                     </button>
-                    <!-- V6.1 avatar: pulses while the Sebastian voice is speaking. -->
+                    <!-- V6.1 avatar -->
                     <div id="kuroAvatar" class="kuro-avatar" title="Kuro — at your service">
                         <img src="/profile/kuro_avatar.png" alt="Kuro" class="kuro-avatar-img"
                              onerror="this.style.display='none';this.parentElement.classList.add('kuro-avatar--fallback');">
@@ -593,9 +624,21 @@
         </div>
     </div>
     
-    <!-- V6.1 Live2D Hijiki mascot dock. Fixed to bottom-right, hidden on narrow viewports. -->
+    <!-- V6.1 Live2D Hijiki mascot dock. Fixed to bottom-left above profile, hidden on narrow viewports. -->
     <div id="live2dDock" class="live2d-dock" aria-hidden="true">
-        <canvas id="live2d-canvas" width="300" height="380"></canvas>
+        <canvas id="live2d-canvas" width="288" height="260"></canvas>
+    </div>
+
+    <!-- Kuro tips/trivia bubble — appears every 10 min while dashboard is open -->
+    <div id="kuroBubble" role="status" aria-live="polite">
+        <div id="kuroBubbleInner">
+            <button id="kuroBubbleClose" aria-label="Dismiss" title="Dismiss">&times;</button>
+            <div id="kuroBubbleLabel">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#7dd3fc" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                <span id="kuroBubbleCategory">Tip from Kuro</span>
+            </div>
+            <div id="kuroBubbleText"></div>
+        </div>
     </div>
 
     <!-- Custom JS -->

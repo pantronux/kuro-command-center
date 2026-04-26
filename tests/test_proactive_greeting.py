@@ -23,9 +23,8 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 
-# The module graph pulls in voice_service / memory_manager transitively
-# only if imported; we stub the optional deps the same way the other test
-# files do so the fresh conftest still boots cleanly.
+# The module graph pulls in memory_manager transitively if imported;
+# we stub the optional deps so the fresh conftest still boots cleanly.
 if "mem0" not in sys.modules:
     fake_mem0 = types.ModuleType("mem0")
 

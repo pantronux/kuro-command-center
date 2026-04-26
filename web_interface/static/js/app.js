@@ -3,10 +3,10 @@
  * One UI + Glassmorphism Design with Infinite Scroll
  *
  * --- Header Doc ---
- * Purpose: Frontend app for the main chat dashboard (chat, personas, voice, HUD, market chips, infinite scroll).
+ * Purpose: Frontend app for the main chat dashboard (chat, personas, HUD, market chips, infinite scroll).
  * Caller: Loaded from web_interface/templates/index.html.
- * Dependencies: Tailwind (CDN), Lucide icons, live2d_manager.js (avatar), browser Web APIs (WebSocket, fetch, MediaRecorder).
- * Main Functions: kuroSendMessage, kuroLoadHistory, kuroPollMarketHudOnce, kuroStartMarketHudPoll, kuroRenderSentinelTicker, persona switcher, voice capture pipeline.
+ * Dependencies: Tailwind (CDN), Lucide icons, live2d_manager.js (avatar), browser Web APIs (WebSocket, fetch).
+ * Main Functions: kuroSendMessage, kuroLoadHistory, kuroPollMarketHudOnce, kuroStartMarketHudPoll, kuroRenderSentinelTicker, persona switcher.
  * Side Effects: /api/chat XHR, WebSocket /ws/dashboard, localStorage cache, DOM mutations.
  */
 
@@ -416,86 +416,6 @@ let _kuroDashboardWSBackoff = 1000;
 let _kuroCurrentMode = 'NORMAL_MODE';
 let _kuroLastStatusSnapshot = null;
 let _kuroTickerWatchdog = null;
-let _kuroCurrentAudio = null; // active <audio> element (mutex for playback)
-// V6.1 Live2D lip-sync plumbing. Created lazily on first TTS playback so we
-// don't violate the browser's autoplay policy and so non-Live2D pages avoid
-// AudioContext warnings.
-let _kuroAudioCtx = null;
-let _kuroAnalyser = null;
-let _kuroAnalyserData = null;
-const _kuroMediaSources = new WeakMap(); // <audio> -> MediaElementAudioSourceNode
-let _kuroLipSyncRAF = 0;
-
-function _kuroEnsureAudioGraph() {
-    if (_kuroAudioCtx) return _kuroAudioCtx;
-    try {
-        const Ctx = window.AudioContext || window.webkitAudioContext;
-        if (!Ctx) return null;
-        _kuroAudioCtx = new Ctx();
-        _kuroAnalyser = _kuroAudioCtx.createAnalyser();
-        _kuroAnalyser.fftSize = 512;
-        _kuroAnalyser.smoothingTimeConstant = 0.75;
-        _kuroAnalyserData = new Uint8Array(_kuroAnalyser.fftSize);
-        _kuroAnalyser.connect(_kuroAudioCtx.destination);
-        return _kuroAudioCtx;
-    } catch (err) {
-        console.debug('[TTS] AudioContext unavailable', err);
-        _kuroAudioCtx = null;
-        return null;
-    }
-}
-
-function _kuroAttachAudioToAnalyser(audio) {
-    if (!_kuroAnalyser) return false;
-    try {
-        let src = _kuroMediaSources.get(audio);
-        if (!src) {
-            src = _kuroAudioCtx.createMediaElementSource(audio);
-            src.connect(_kuroAnalyser);
-            _kuroMediaSources.set(audio, src);
-        }
-        return true;
-    } catch (err) {
-        console.debug('[TTS] createMediaElementSource failed', err);
-        return false;
-    }
-}
-
-function _kuroStopLipSyncLoop() {
-    if (_kuroLipSyncRAF) {
-        cancelAnimationFrame(_kuroLipSyncRAF);
-        _kuroLipSyncRAF = 0;
-    }
-    try {
-        if (window.kuroLive2D && typeof window.kuroLive2D.setLipSyncValue === 'function') {
-            window.kuroLive2D.setLipSyncValue(0);
-        }
-    } catch (_) {}
-}
-
-function _kuroStartLipSyncLoop() {
-    if (!_kuroAnalyser || !_kuroAnalyserData) return;
-    const data = _kuroAnalyserData;
-    const analyser = _kuroAnalyser;
-    const tick = () => {
-        try {
-            analyser.getByteTimeDomainData(data);
-            let sumSq = 0;
-            for (let i = 0; i < data.length; i++) {
-                const v = (data[i] - 128) / 128;
-                sumSq += v * v;
-            }
-            const rms = Math.sqrt(sumSq / data.length);
-            // Boost so normal speech -> mouth swings between ~0.2 and ~1.0.
-            const lip = Math.min(1, rms * 3.5);
-            if (window.kuroLive2D && typeof window.kuroLive2D.setLipSyncValue === 'function') {
-                window.kuroLive2D.setLipSyncValue(lip);
-            }
-        } catch (_) {}
-        _kuroLipSyncRAF = requestAnimationFrame(tick);
-    };
-    _kuroLipSyncRAF = requestAnimationFrame(tick);
-}
 
 function kuroApplyUIMode(command, payload) {
     if (!KURO_UI_MODES.includes(command)) return;
@@ -616,93 +536,7 @@ function kuroRenderSentinelTicker(payload) {
     }
 }
 
-function kuroSetAvatarSpeaking(on) {
-    const av = document.getElementById('kuroAvatar');
-    if (!av) return;
-    if (on) av.classList.add('speaking');
-    else av.classList.remove('speaking');
-}
 
-/**
- * Play text-to-speech audio for `text` via /api/voice/speech.
- *
- * Shared helper used by:
- *   - Auto-speak in HUD_MODE after an assistant response.
- *   - The per-message replay button.
- *   - The daily proactive GREETING.
- *
- * options.lang   : language code (default 'en' — Sebastian voice).
- * options.force  : bypass HUD_MODE gating (used by GREETING + replay).
- * options.button : optional HTMLButtonElement to disable while playing.
- */
-async function kuroPlayTTS(text, options = {}) {
-    if (!text || typeof text !== 'string') return false;
-    const opts = Object.assign({ lang: 'en', force: true }, options);
-    const trimmed = text.slice(0, 1800);
-    // Stop any in-flight playback so Master doesn't hear overlapping Kuros.
-    try {
-        if (_kuroCurrentAudio) {
-            _kuroCurrentAudio.pause();
-            _kuroCurrentAudio = null;
-        }
-    } catch (_) {}
-    if (opts.button) { opts.button.disabled = true; }
-    try {
-        const resp = await fetch('/api/voice/speech', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text: trimmed, lang: opts.lang || 'en' })
-        });
-        if (!resp.ok) {
-            console.warn('[TTS] /api/voice/speech HTTP', resp.status);
-            return false;
-        }
-        const blob = await resp.blob();
-        const url = URL.createObjectURL(blob);
-        const audio = new Audio(url);
-        audio.crossOrigin = 'anonymous';
-        _kuroCurrentAudio = audio;
-        const ctx = _kuroEnsureAudioGraph();
-        const analyserAttached = ctx ? _kuroAttachAudioToAnalyser(audio) : false;
-        const clear = () => {
-            kuroSetAvatarSpeaking(false);
-            _kuroStopLipSyncLoop();
-            try {
-                if (window.kuroLive2D && typeof window.kuroLive2D.returnToIdle === 'function') {
-                    window.kuroLive2D.returnToIdle();
-                }
-            } catch (_) {}
-            URL.revokeObjectURL(url);
-            if (_kuroCurrentAudio === audio) _kuroCurrentAudio = null;
-            if (opts.button) opts.button.disabled = false;
-        };
-        audio.addEventListener('play', () => {
-            kuroSetAvatarSpeaking(true);
-            try {
-                if (_kuroAudioCtx && _kuroAudioCtx.state === 'suspended') {
-                    _kuroAudioCtx.resume().catch(() => {});
-                }
-                if (window.kuroLive2D && typeof window.kuroLive2D.playTalkMotion === 'function') {
-                    window.kuroLive2D.playTalkMotion();
-                }
-                if (analyserAttached) _kuroStartLipSyncLoop();
-            } catch (_) {}
-        });
-        audio.addEventListener('pause', clear);
-        audio.addEventListener('ended', clear);
-        audio.addEventListener('error', clear);
-        await audio.play().catch((err) => {
-            // Autoplay policy may reject unprompted audio; fail quietly.
-            console.debug('[TTS] play blocked', err);
-            clear();
-        });
-        return true;
-    } catch (err) {
-        console.warn('[TTS] playback failed', err);
-        if (opts.button) opts.button.disabled = false;
-        return false;
-    }
-}
 
 function kuroConnectDashboardWS() {
     try {
@@ -739,15 +573,12 @@ function kuroConnectDashboardWS() {
 function kuroHandleGreeting(payload) {
     const text = (payload && payload.text || '').toString().trim();
     if (!text) return;
-    // Render a butler-styled system bubble in the chat so the greeting is
-    // visible even when the master has audio muted.
+    // Render a butler-styled system bubble in the chat.
     try {
         if (typeof addMessageToChat === 'function') {
             addMessageToChat('ai', text);
         }
     } catch (_) {}
-    // Force-play regardless of UI mode — Master deserves a proper welcome.
-    kuroPlayTTS(text, { lang: (payload && payload.lang) || 'en', force: true }).catch(() => {});
 }
 
 function kuroRestoreUIMode() {
@@ -759,24 +590,6 @@ function kuroRestoreUIMode() {
     } catch (_) {}
 }
 
-async function kuroMaybeSpeakHUD(text) {
-    if (_kuroCurrentMode !== 'HUD_MODE') return;
-    return kuroPlayTTS(text, { lang: 'en', force: true });
-}
-
-// Delegated handler: any `.kuro-speak-btn` anywhere in the chat re-plays
-// its data-speak-text via the Sebastian voice.
-document.addEventListener('click', (evt) => {
-    const btn = evt.target && evt.target.closest && evt.target.closest('.kuro-speak-btn');
-    if (!btn) return;
-    evt.preventDefault();
-    const text = btn.getAttribute('data-speak-text') || '';
-    if (!text) return;
-    kuroPlayTTS(text, { lang: 'en', force: true, button: btn }).catch(() => {});
-});
-
-window.kuroMaybeSpeakHUD = kuroMaybeSpeakHUD;
-window.kuroPlayTTS = kuroPlayTTS;
 window.kuroApplyUIMode = kuroApplyUIMode;
 window.kuroRenderSentinelTicker = kuroRenderSentinelTicker;
 window.kuroMarketHudChipLine = kuroMarketHudChipLine;
@@ -1068,9 +881,6 @@ async function sendMessage() {
                         if (data && data.ui_command) {
                             kuroApplyUIMode(data.ui_command, data.payload || {});
                         }
-                        if (_kuroCurrentMode === 'HUD_MODE' && botMessage) {
-                            kuroMaybeSpeakHUD(botMessage).catch(() => {});
-                        }
                         if (streamMeta?.ttfb_ms || streamMeta?.total_ms) {
                             const metaInfo = document.createElement('div');
                             metaInfo.className = 'text-[10px] text-gray-400 mt-2';
@@ -1196,11 +1006,6 @@ function addMessageToChat(role, content, files = []) {
         </button>
     ` : '';
 
-    // V6.0 Sovereign — per-message replay button. Stored plain text (not
-    // markdown) so the Sebastian voice pronounces it cleanly.
-    const speakButton = role === 'ai' && typeof content === 'string' && content.trim()
-        ? `<button class="kuro-speak-btn" title="Replay with Kuro's voice" data-speak-text="${escapeAttr(content)}">🔊</button>`
-        : '';
 
     messageDiv.innerHTML = `
         ${avatar}
@@ -1208,7 +1013,6 @@ function addMessageToChat(role, content, files = []) {
             <div class="${bubbleClass} px-4 py-3 shadow-sm relative">
                 ${copyButton}
                 ${contentHtml}
-                ${speakButton}
             </div>
             <span class="text-xs text-gray-400 mt-1 block ${role === 'user' ? 'text-right' : ''}">${getCurrentTime()}</span>
         </div>
@@ -2001,4 +1805,113 @@ function addTableCopyButtons(container) {
         wrapper.appendChild(copyBtn);
     });
     lucide.createIcons();
+}
+
+// ============================================
+// Kuro Tips & Trivia Bubble
+// ============================================
+const KURO_TIPS = [
+    // — Cybersecurity —
+    { cat: "🔐 Cybersecurity", text: "The average time to detect a data breach is <strong>194 days</strong>. Zero-trust architecture shrinks that window by assuming every request is hostile by default." },
+    { cat: "🔐 Cybersecurity", text: "<strong>SQL injection</strong> still tops the OWASP Top 10. Always use parameterized queries — never interpolate user input directly into SQL strings." },
+    { cat: "🔐 Cybersecurity", text: "A single exposed <code>.env</code> file on GitHub can compromise an entire infrastructure. Use <strong>git-secrets</strong> or <strong>pre-commit hooks</strong> to prevent secret leaks before they happen." },
+    { cat: "🔐 Cybersecurity", text: "<strong>Phishing</strong> accounts for 36% of all data breaches (Verizon DBIR). Multi-factor authentication (MFA) blocks 99.9% of credential-stuffing attacks." },
+    { cat: "🔐 Cybersecurity", text: "ISO/IEC 27001:2022 introduced <strong>93 controls</strong> (down from 114) across 4 themes: Organizational, People, Physical, and Technological." },
+    { cat: "🔐 Cybersecurity", text: "The <strong>CVE scoring system (CVSS)</strong> rates vulnerabilities 0–10. A score ≥ 9.0 is Critical — patch or mitigate within 24 hours in production environments." },
+    // — AI & Machine Learning —
+    { cat: "🤖 AI Insight", text: "Large language models predict the <strong>next token</strong>, not the correct answer. That distinction is why grounding with RAG (Retrieval-Augmented Generation) reduces hallucinations." },
+    { cat: "🤖 AI Insight", text: "<strong>Temperature = 0</strong> makes a model deterministic (same output every run). Raise it toward 1.0 for creative tasks, keep it near 0 for factual or code generation." },
+    { cat: "🤖 AI Insight", text: "The <strong>EU AI Act</strong> classifies AI systems into four risk tiers: Unacceptable, High, Limited, and Minimal. High-risk systems require human oversight and conformity assessments." },
+    { cat: "🤖 AI Insight", text: "Prompt injection is the AI equivalent of SQL injection. An adversarial user can override your system prompt if inputs aren't properly <strong>sandboxed and validated</strong>." },
+    { cat: "🤖 AI Insight", text: "<strong>RLHF</strong> (Reinforcement Learning from Human Feedback) is how modern LLMs are aligned. Human raters score responses, and those signals shape the reward model." },
+    { cat: "🤖 AI Insight", text: "A <strong>vector database</strong> stores embeddings — numeric representations of meaning. Querying by cosine similarity lets you find semantically related content, not just keyword matches." },
+    // — DevOps & Engineering —
+    { cat: "⚙️ Engineering", text: "The <strong>Four DORA Metrics</strong> measure DevOps performance: Deployment Frequency, Lead Time for Changes, Change Failure Rate, and Time to Restore Service." },
+    { cat: "⚙️ Engineering", text: "<strong>Docker layers are cached</strong> top-down. Put rarely-changing instructions (like OS dependencies) at the top of your Dockerfile so rebuilds are faster." },
+    { cat: "⚙️ Engineering", text: "A <strong>blue-green deployment</strong> runs two identical environments. Traffic switches instantly from blue (old) to green (new), with a one-command rollback if the new version fails." },
+    { cat: "⚙️ Engineering", text: "<strong>Git rebase vs. merge:</strong> Merge preserves history verbatim; rebase rewrites commits for a linear history. Never rebase public branches others depend on." },
+    { cat: "⚙️ Engineering", text: "<strong>APM (Application Performance Monitoring)</strong> gives you distributed traces, not just logs. Tools like Phoenix, Jaeger, or Datadog reveal exactly where latency hides." },
+    { cat: "⚙️ Engineering", text: "The <strong>CAP theorem</strong> states a distributed system can guarantee only two of three: Consistency, Availability, Partition tolerance. Design your architecture knowing the trade-off." },
+    // — Productivity & Research —
+    { cat: "📚 Productivity", text: "The <strong>Pomodoro Technique</strong>: 25 minutes of deep work, then a 5-minute break. After four cycles, take a 15–30 minute break. Proven to reduce mental fatigue." },
+    { cat: "📚 Productivity", text: "<strong>Rubber duck debugging:</strong> explain your code line-by-line to an inanimate object. Verbalising logic forces you to think differently and often reveals the bug immediately." },
+    { cat: "📚 Productivity", text: "Writing a 1-page <strong>Problem Statement</strong> before coding saves hours of rework. Clearly define: What is the problem? Who is affected? What does 'solved' look like?" },
+    { cat: "📚 Productivity", text: "The <strong>Feynman Technique</strong>: if you can't explain a concept to a 12-year-old, you don't fully understand it yet. Simplify first, then deepen." },
+    { cat: "📚 Productivity", text: "<strong>Zettelkasten</strong> is a networked note-taking method — each note links to related notes. It mirrors how your brain stores knowledge and accelerates PhD-level research." },
+    // — Python —
+    { cat: "🐍 Python Tip", text: "Use <strong>dataclasses</strong> with <code>frozen=True</code> for immutable value objects. They auto-generate <code>__init__</code>, <code>__repr__</code>, and make hashing predictable." },
+    { cat: "🐍 Python Tip", text: "<code>asyncio.gather()</code> runs coroutines <strong>concurrently</strong>, not in parallel. For true parallelism on CPU-bound tasks, use <code>ProcessPoolExecutor</code> instead." },
+    { cat: "🐍 Python Tip", text: "<strong>Type hints</strong> in Python are documentation that tools can enforce. Use <code>mypy</code> or <code>pyright</code> in CI to catch type errors before runtime." },
+    { cat: "🐍 Python Tip", text: "The <code>walrus operator</code> (<code>:=</code>) assigns and returns in one expression — useful in while loops: <code>while chunk := f.read(8192):</code>" },
+    // — Digital Forensics —
+    { cat: "🔍 Forensics", text: "<strong>Chain of Custody</strong> ensures digital evidence is admissible in court. Every person who touches evidence must be logged with time, purpose, and handoff signature." },
+    { cat: "🔍 Forensics", text: "Volatile memory (RAM) contains running processes, encryption keys, and network connections that <strong>disappear on power-off</strong>. Always capture memory before shutting down a suspect machine." },
+    { cat: "🔍 Forensics", text: "<strong>Write blockers</strong> are mandatory in forensic imaging. They allow read access while preventing any write — preserving evidence integrity." },
+    { cat: "🔍 Forensics", text: "<strong>MD5 and SHA-256 hashes</strong> verify evidence integrity. If the hash of a forensic image matches the original drive's hash, the copy is forensically sound." },
+    // — General Trivia —
+    { cat: "💡 Did You Know?", text: "The first computer bug was <strong>a literal moth</strong> found in relay #70 of the Harvard Mark II in 1947. Grace Hopper's team taped it into the logbook: 'First actual case of bug being found.'" },
+    { cat: "💡 Did You Know?", text: "The term <strong>'firewall'</strong> comes from physical walls designed to stop fires from spreading in buildings. The metaphor stuck when network engineers needed to describe traffic barriers." },
+    { cat: "💡 Did You Know?", text: "<strong>IPv4</strong> provides ~4.3 billion addresses. IPv6 provides ~340 <em>undecillion</em> — enough to assign trillions of addresses to every atom on Earth's surface." },
+    { cat: "💡 Did You Know?", text: "<strong>Git</strong> was created by Linus Torvalds in just <strong>10 days</strong> in April 2005, after BitKeeper revoked free access for the Linux kernel team." },
+    { cat: "💡 Did You Know?", text: "The <strong>halting problem</strong>, proved by Alan Turing in 1936, shows it's mathematically impossible to write a program that determines if any arbitrary program will halt or run forever." },
+];
+
+let _kuroBubbleTimer        = null;
+let _kuroBubbleDismissTimer = null;
+let _kuroBubbleIndex        = Math.floor(Math.random() * KURO_TIPS.length);
+
+function _kuroBubbleNext() {
+    _kuroBubbleIndex = (_kuroBubbleIndex + 1) % KURO_TIPS.length;
+    return KURO_TIPS[_kuroBubbleIndex];
+}
+
+function kuroShowTipBubble(tip) {
+    const bubble = document.getElementById('kuroBubble');
+    const catEl  = document.getElementById('kuroBubbleCategory');
+    const textEl = document.getElementById('kuroBubbleText');
+    if (!bubble || !catEl || !textEl) return;
+
+    catEl.textContent = tip.cat;
+    textEl.innerHTML  = tip.text;
+
+    bubble.classList.remove('bubble-hiding');
+    bubble.classList.add('bubble-visible');
+
+    // Auto-dismiss after 30 s
+    clearTimeout(_kuroBubbleDismissTimer);
+    _kuroBubbleDismissTimer = setTimeout(() => kuroHideTipBubble(), 30_000);
+}
+
+function kuroHideTipBubble() {
+    const bubble = document.getElementById('kuroBubble');
+    if (!bubble || !bubble.classList.contains('bubble-visible')) return;
+    bubble.classList.add('bubble-hiding');
+    bubble.addEventListener('animationend', () => {
+        bubble.classList.remove('bubble-visible', 'bubble-hiding');
+    }, { once: true });
+}
+
+function kuroInitTipBubble() {
+    const closeBtn = document.getElementById('kuroBubbleClose');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+            clearTimeout(_kuroBubbleDismissTimer);
+            kuroHideTipBubble();
+        });
+    }
+
+    // First tip appears after 90 s (let user settle in), then every 10 min
+    setTimeout(() => {
+        kuroShowTipBubble(_kuroBubbleNext());
+        _kuroBubbleTimer = setInterval(
+            () => kuroShowTipBubble(_kuroBubbleNext()),
+            10 * 60 * 1000
+        );
+    }, 90_000);
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', kuroInitTipBubble);
+} else {
+    kuroInitTipBubble();
 }

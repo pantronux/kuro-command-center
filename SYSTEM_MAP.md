@@ -10,17 +10,14 @@
 - **Purpose**: Kuro is Master Pantronux's personal AI Butler — a unified
   FastAPI application that fuses a LangGraph reasoning loop, a 3-layer memory
   system (recent chat → short-term summary → long-term semantic + SSoT),
-  proactive sentinels (CVE, fitness, reminders), a compliance workbench, a
-  habit tracker, a Piper-driven butler voice, and a Live2D (Hijiki) mascot
-  into one cohesive assistant accessible from a web dashboard and Telegram.
+  proactive sentinels (CVE, fitness, reminders), a habit tracker, and a Live2D (Hijiki)
+  mascot into one cohesive assistant accessible from a web dashboard and Telegram.
 - **Tech stack**:
-  - Backend: FastAPI, LangGraph, `google-genai` (Gemini), NeMo Guardrails,
+  - Backend: FastAPI, LangGraph, `google-genai` (Gemini),
     APScheduler, SQLite, ChromaDB, Mem0 (via `perpetual_memory.py`),
     Arize Phoenix + OpenTelemetry.
-  - Voice: Piper TTS (`en_GB-alan-medium`) + ffmpeg pitch-shift, gTTS
-    fallback.
   - Frontend: Vanilla JS on Jinja2 templates, PIXI.js +
-    `pixi-live2d-display` for Hijiki, Web Audio API for lip-sync RMS.
+    `pixi-live2d-display` for Hijiki.
   - External: Telegram Bot API, Serper.dev, Proxmox VE API, NVD CVE feed,
     OpenClaw skill bridge.
 - **Architecture pattern**: Monolithic FastAPI process (`main.py`) owning
@@ -32,22 +29,23 @@
   alongside the request loop. A separate `OpenClaw` process is reached via
   HTTP bridge for privileged skill execution.
 
-## V7.0 Reset Notes
+## V7.0 Reset Notes ("Lean Leviathan")
 
+- **The "Lean" Philosophy Purge:** NeMo Guardrails, Compliance Scorers, the `voice_service` (TTS), and redundant legacy modules were fully excised from the repository to achieve maximum efficiency and limit bloatware.
+- **QA Architect Persona Integration:** Strict adherence to Business Requirements Documents (BRD) is enforced by the QA Architect, integrated directly into the `memory_manager` and frontend.
 - **Core DAG simplified:** `kuro_backend/langgraph_core.py` now follows
   `Input -> Memory Retrieval -> Tool/Action -> Response -> Memory Extraction`.
   Compliance and habit/reminder nodes are removed from runtime graph routing.
 - **Long-term semantic memory:** `kuro_backend/memory_coordinator.py` +
   `kuro_backend/perpetual_memory.py` use Mem0 as the only long-term semantic
   source for chat context.
-- **Short-term context policy:** prompt injection now prioritizes raw
-  last-15-turn context (no summary compression in hot path).
+- **Short-term context policy:** prompt injection now prioritizes a raw
+  10-15 turn episodic buffer (no summary compression in hot path) to prevent hallucinations.
 - **Attachment continuity:** `main.py` persists `current_session_state`
   runtime context (attachments + extracted snippets) and
   `memory_coordinator.build_referent_grounding_block` prioritizes this state
   for deictic follow-ups like "edit previous result" / "add to that".
-- **Legacy modules:** compliance/habits/reminders product routes are retained
-  as disabled endpoints (`410`) pending full module excision in a follow-up.
+- **Legacy modules:** Legacy compliance endpoints return `410 Gone` to enforce the Lean architecture.
 
 ## Core Logic Flow (Function-Level Flowchart)
 
@@ -62,14 +60,11 @@ flowchart TD
     subgraph Routes[FastAPI routes - main.py]
         R1["POST /api/chat\nchat_endpoint"]
         R2["POST /api/chat/stream\nchat_stream_endpoint"]
-        R3["POST /api/voice/speech\napi_voice_speech"]
         R4["WS /ws/dashboard\ndashboard_sync_websocket"]
     end
 
     subgraph Pre[Pre-flight guards]
         G1[ui_mode_router.detect_mode_command]
-        G2[guardrails.sniper_pipeline.sniper_validate_and_maybe_block_input]
-        G3[guardrails.jailbreak_precheck.precheck_jailbreak]
     end
 
     subgraph Brain[Reasoning core]
@@ -90,7 +85,6 @@ flowchart TD
         S1[services.core_service reminders+habits]
         S2[reminder_service]
         S3[habit_service]
-        S4[compliance_analyzer + compliance_db]
         S5[intelligence_engine + intelligence_db]
     end
 
@@ -101,22 +95,20 @@ flowchart TD
     end
 
     subgraph Out[Output fabric]
-        O1[voice_service.synthesize_to_file]
         O2[dashboard_broadcast.broadcast_ui_command]
         O3[telegram_notifier.send_message]
     end
 
     subgraph FE[Frontend]
-        F1[app.js kuroPlayTTS]
-        F2[live2d_manager.js setLipSyncValue + playTalkMotion]
+        F1[app.js dashboard handlers]
+        F2[live2d_manager.js avatar logic]
     end
 
     U1 --> R1
     U1 --> R2
-    U1 --> R3
     U1 --> R4
     U2 --> R1
-    R1 --> G1 --> G2 --> G3 --> B1
+    R1 --> G1 --> B1
     R2 --> G1
     R2 --> B1
     B1 --> B2 --> B3
@@ -129,14 +121,11 @@ flowchart TD
     T1 --> T2
     T1 --> T3
     T1 --> S1
-    T1 --> S4
     T1 --> S5
     S1 --> S2
     S1 --> S3
     B3 --> O3
-    R3 --> O1
     R4 --> O2
-    O1 --> F1
     O2 --> F1
     F1 --> F2
 ```
@@ -146,8 +135,6 @@ Side-branches not drawn on the trunk but reachable from the same
 - **Habits** — `/api/habits*` routes → `services/core_service` → `habit_service`.
 - **Reminders** — APScheduler jobs in `main.py` → `reminder_service` →
   Telegram + dashboard WS.
-- **Compliance** — `/api/compliance/*` → `compliance_analyzer` +
-  `compliance_db` + Chroma `kuro_compliance_chroma`.
 - **Intelligence briefings** — `/api/intelligence/*` and the daily scheduler
   → `intelligence_engine` → `serper_tool` + `intelligence_db`.
 - **Dreaming / CVE + fiscal sentinels** — `dreaming_worker.run_dreaming_cycle`
@@ -182,7 +169,6 @@ artefacts are excluded — see **Exclusions** at the bottom of this section.
 │   ├── embedding_cache.py
 │   ├── token_budget.py          # per-persona context sizing
 │   ├── observability.py         # Phoenix + OTel bootstrap
-│   ├── voice_service.py         # Piper + gTTS + pitch shift
 │   ├── ui_mode_router.py        # English mode commands
 │   ├── dashboard_broadcast.py   # /ws/dashboard fan-out
 │   ├── telegram_notifier.py
@@ -192,12 +178,10 @@ artefacts are excluded — see **Exclusions** at the bottom of this section.
 │   ├── habit_service.py
 │   ├── fitness_service.py
 │   ├── intelligence_engine.py
-│   ├── compliance_analyzer.py
 │   ├── persona_history_admin.py
 │   ├── dreaming_worker.py       # CVE + fiscal sentinels, reflection + CLI
 │   ├── finance_db.py            # budgets, api_usage_daily, watched_symbols, prediction_watch
 │   ├── pricing.py               # static Gemini USD/token estimates
-│   ├── voice_profiles.py        # per-persona Piper length/pitch overrides
 │   ├── serper_tool.py
 │   ├── auth_db.py               # schema only; *.db files excluded
 │   ├── chat_history.py
@@ -217,20 +201,6 @@ artefacts are excluded — see **Exclusions** at the bottom of this section.
 │   ├── execution/
 │   │   ├── openclaw_bridge.py   # HTTP + circuit breaker
 │   │   └── service.py           # sync wrapper
-│   └── guardrails/
-│       ├── __init__.py
-│       ├── sniper_pipeline.py
-│       ├── sniper_context.py
-│       ├── jailbreak_precheck.py
-│       └── nemo_bootstrap.py
-├── kuro_nemo_guardrails/
-│   ├── config.yml
-│   ├── actions.py
-│   ├── main.co                  # NeMo Colang rails
-│   ├── rails.co
-│   ├── safety.co
-│   ├── fact_check.co
-│   └── jailbreak.co
 ├── web_interface/
 │   ├── templates/
 │   │   ├── index.html           # dashboard + Live2D dock + avatar
@@ -241,8 +211,8 @@ artefacts are excluded — see **Exclusions** at the bottom of this section.
 │   │   └── compliance.html
 │   └── static/
 │       ├── js/
-│       │   ├── app.js           # WS client, kuroPlayTTS, UI modes
-│       │   └── live2d_manager.js # Hijiki loader + lip-sync
+│       │   ├── app.js           # WS client, UI modes
+│       │   └── live2d_manager.js # Hijiki loader
 │       ├── css/                 # dashboard styles
 │       └── vendor/
 │           └── live2d/
@@ -267,7 +237,6 @@ artefacts are excluded — see **Exclusions** at the bottom of this section.
 │   ├── migrate_persona_consultant_advisor.py
 │   ├── purge_mem0_junk.py
 │   ├── smoke_mem0_store.py
-│   ├── smoke_sniper_guardrails.py
 │   └── smoke_test_openclaw.py
 ├── tests/
 │   ├── test_api_sse_contract.py
@@ -289,13 +258,10 @@ artefacts are excluded — see **Exclusions** at the bottom of this section.
 │   ├── test_referent_grounding.py
 │   ├── test_shortcuts_finance.py
 │   ├── test_smart_read_flow.py
-│   ├── test_ssot_guardrails.py
 │   ├── test_sync_revision_contract.py
 │   ├── test_ui_mode_router.py
 │   ├── test_upload_filename_generation.py
-│   ├── test_version.py
-│   ├── test_voice_profiles.py
-│   └── test_voice_service.py
+│   └── test_version.py
 ├── profile/
 │   ├── kuro_avatar.png
 │   ├── favicon.ico
@@ -306,8 +272,8 @@ artefacts are excluded — see **Exclusions** at the bottom of this section.
 
 **Exclusions honoured** (not listed above, never committed as code):
 `__pycache__/`, `venv/`, `.venv/`, `node_modules/`, `.git/`, `kuro_chromadb/`,
-`kuro_compliance_chroma/`, `phoenix_data/`, `media/`, `uploaded_files/`,
-`logs/`, `guardrails_test/`, all `*.db` files (`kuro_auth.db`,
+`phoenix_data/`, `uploaded_files/`,
+`logs/`, all `*.db` files (`kuro_auth.db`,
 `kuro_chat_history.db`, `kuro_compliance.db`, `kuro_habits.db`,
 `kuro_intelligence.db`, `kuro_reminders.db`, `kuro_short_term.db`, plus
 backups like `kuro_chat_history.db.backup_*`), all `*.log` /
@@ -426,8 +392,7 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
   — *public*: `generate_daily_queries`, `execute_research`,
   `synthesize_intelligence`, `format_telegram_message`,
   `run_daily_research`.
-- [`kuro_backend/compliance_analyzer.py`](kuro_backend/compliance_analyzer.py)
-  — *public*: `analyze_document_compliance`.
+
 - [`kuro_backend/persona_history_admin.py`](kuro_backend/persona_history_admin.py)
   — *public*: `get_persona_counts`, `list_backups`, `preview_reclassify`,
   `run_reclassify`, `override_persona`, `restore_persona_from_backup`.
@@ -446,7 +411,7 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
   `list_project_files`, `read_pdf_content`, `universal_read`, `smart_read`,
   `parse_log_content`, `index_system_path`, `analyze_system_health`,
   `get_system_status`, `check_proxmox_infrastructure`, `process_video`,
-  `analyze_compliance`, `search_compliance_clause`, `parse_datetime`,
+  `parse_datetime`,
   `lookup_chroma_context`, `add_reminder_tool`, `get_reminders_tool`,
   `set_monthly_budget_tool`, `get_budget_tool`, `add_recurring_expense_tool`,
   `list_recurring_expenses_tool`, `get_daily_api_cost_tool`,
@@ -467,36 +432,10 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
 - [`kuro_backend/serper_tool.py`](kuro_backend/serper_tool.py) — *public*:
   `serper_search`, `serper_news`, `serper_scholar`.
 
-### Guardrails
-- [`kuro_backend/guardrails/sniper_pipeline.py`](kuro_backend/guardrails/sniper_pipeline.py)
-  — *public*: `self_check_input_python` (+ async variant),
-  `self_check_output_python` (+ async), `memory_grounding_ok`,
-  `sniper_fact_gate_python`, `sniper_precheck_or_block`,
-  `is_low_risk_stream_candidate`, `sniper_validate_and_maybe_block_input`
-  (+ async), `sniper_ssot_grounding_lint`, `sniper_postprocess_output`
-  (+ async), `guardrails_config_path`.
-- [`kuro_backend/guardrails/sniper_context.py`](kuro_backend/guardrails/sniper_context.py)
-  — *public*: `is_command_intent`, `is_general_compliance_knowledge_query`,
-  `is_habit_report_message`, `should_fact_check_heuristic`,
-  `extract_entity_hint`, `build_sniper_context`.
-- [`kuro_backend/guardrails/jailbreak_precheck.py`](kuro_backend/guardrails/jailbreak_precheck.py)
-  — *public*: `looks_like_coding_help`, `jailbreak_triggered`,
-  `precheck_jailbreak`.
-- [`kuro_backend/guardrails/nemo_bootstrap.py`](kuro_backend/guardrails/nemo_bootstrap.py)
-  — *public*: `KuroGeminiChat`, `ensure_nemo_providers_registered`.
-- [`kuro_nemo_guardrails/`](kuro_nemo_guardrails/) — Colang rails loaded by
-  sniper_pipeline: `main.co`, `rails.co`, `safety.co`, `fact_check.co`,
-  `jailbreak.co` + `config.yml` + `actions.py`.
-
-### Real-time, Voice & UI
+### Real-time & UI
 - [`kuro_backend/dashboard_broadcast.py`](kuro_backend/dashboard_broadcast.py)
   — *public*: `connect`, `disconnect`, `broadcast_refresh`,
   `broadcast_ui_command`, `send_ui_command_to`, `schedule_ui_command`.
-- [`kuro_backend/voice_service.py`](kuro_backend/voice_service.py) —
-  *public*: `TTSError`, `synthesize`, `synthesize_to_file`, `cache_stats`.
-  Default engine = Piper (`en_GB-alan-medium`) with ffmpeg pitch-shift
-  (`0.93`) and `KURO_PIPER_LENGTH_SCALE=1.1`; optional `persona=` selects
-  overrides from `voice_profiles.py` (Chancellor sterner cadence).
 - [`kuro_backend/ui_mode_router.py`](kuro_backend/ui_mode_router.py) —
   *public*: `detect_mode_command`, `acknowledgement`. English verbs:
   "activate research mode", "switch to HUD", "system status", "stand
@@ -592,12 +531,12 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
   `clean_duplicate_chat_history.py`, `rebuild_compliance_base.py`.
 - [`scripts/`](scripts/) — one-shot migrations & smokes:
   `migrate_persona_consultant_advisor.py`, `purge_mem0_junk.py`,
-  `smoke_mem0_store.py`, `smoke_sniper_guardrails.py`,
+  `smoke_mem0_store.py`, `smoke_test_openclaw.py`.
   `smoke_test_openclaw.py`.
 - [`tests/`](tests/) — pytest suite covering contracts (SSE, referent
   grounding, sync revisions), branding/HTML, English personas, UI router,
-  dreaming worker, CVE sentinel, fiscal shortcuts, finance_db, voice
-  profiles, proactive events/greeting, voice, upload hashing, version,
+  dreaming worker, CVE sentinel, fiscal shortcuts, finance_db,
+  proactive events/greeting, upload hashing, version,
   persona budget.
 
 ## Data & Config
@@ -618,9 +557,6 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
   - Finances / Chancellor: `KURO_FINANCE_TRACKING_ENABLED`,
     `KURO_FINANCE_DB_PATH`, `KURO_FISCAL_DAILY_USD_THRESHOLD`,
     `KURO_FISCAL_SENTINEL_ENABLED`.
-  - Voice (V6.1+): `KURO_TTS_ENGINE`, `KURO_PIPER_VOICE_PATH`,
-    `KURO_TTS_CACHE_DIR`, `KURO_PIPER_LENGTH_SCALE`,
-    `KURO_TTS_PITCH_SHIFT`, `KURO_TTS_FFMPEG_ENABLED`.
   - Greeting / UI: `KURO_PROACTIVE_GREETING_ENABLED`,
     `KURO_PROACTIVE_GREETING_COOLDOWN_DAYS`,
     `KURO_PROACTIVE_GREETING_LANG`, `KURO_UI_MODE_DEFAULT`.
@@ -638,9 +574,8 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
   `kuro_compliance.db`, `kuro_habits.db`, `kuro_intelligence.db`,
   `kuro_reminders.db`, `kuro_short_term.db`, `kuro_finances.db`. The empty
   [`db/`](db/) directory is reserved for future versioned migrations.
-- **Vector stores**: `kuro_chromadb/` (general semantic memory) and
-  `kuro_compliance_chroma/` (ISO/NIST clause embeddings). Both are
-  Chroma on-disk persistents and are excluded from the tree.
+- **Vector stores**: `kuro_chromadb/` (general semantic memory). It is a
+  Chroma on-disk persistent and is excluded from the tree.
 - **Primary table one-liners** (summaries — see each `*_db.py` /
   `services/core_service.py` for full DDL):
   - `failed_attempts(id, username, ip, user_agent, timestamp, …)`
@@ -671,10 +606,9 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
     `api_usage_daily(date, model_name, prompt_tokens, completion_tokens, cost_usd, …)`
 - **Migrations / seeds**: [`maintenance/`](maintenance/) +
   [`scripts/`](scripts/).
-- **Runtime output directories (excluded)**: `media/tts/` (Piper WAV
-  cache keyed by text+voice hash), `uploaded_files/` (user uploads),
+- **Runtime output directories (excluded)**: `uploaded_files/` (user uploads),
   `logs/` and top-level `kuro_butler.log*` (rotating app log),
-  `phoenix_data/` (OpenTelemetry traces), `guardrails_test/`.
+  `phoenix_data/` (OpenTelemetry traces).
 - **TLS**: [`certs/cert.pem`](certs/cert.pem) +
   [`certs/key.pem`](certs/key.pem) used by Uvicorn's HTTPS bind in
   `main.py`.
@@ -683,13 +617,13 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
 
 | Integration | Call sites | Notes |
 | --- | --- | --- |
-| Google Gemini (`google-genai`) | `langgraph_core.py`, `core.py`, `compliance_analyzer.py`, `memory_coordinator.py` (summariser), `dreaming_worker.py`, `guardrails/sniper_pipeline.py` | Primary LLM; persona-specific configs in `personas.py`. |
+| Google Gemini (`google-genai`) | `langgraph_core.py`, `core.py`, `memory_coordinator.py` (summariser), `dreaming_worker.py` | Primary LLM; persona-specific configs in `personas.py`. |
 | Static Gemini list pricing (USD) | `pricing.py` (→ `observability.track_token_usage` → `finance_db.add_api_usage`) | Approximate per-1K token map for ledgered `api_usage_daily`; unknown models log + record `0.0` cost. |
 | Mem0 | `perpetual_memory.py` (via `memory_coordinator.safe_mem0_retrieve` + `execute_mem0_extract_task`) | Long-term semantic memory store. |
-| ChromaDB | `perpetual_memory.py`, `compliance_analyzer.py`, `tools/base_tools.lookup_chroma_context`, maintenance scripts | On-disk collections `kuro_chromadb/`, `kuro_compliance_chroma/`. |
+| ChromaDB | `perpetual_memory.py`, `tools/base_tools.lookup_chroma_context`, maintenance scripts | On-disk collections `kuro_chromadb/`. |
 | Telegram Bot API | `telegram_notifier.py` (→ `proactive_events.publish`, reminder scheduler jobs in `main.py`, `intelligence_engine.format_telegram_message` pipeline) | Uses `TELEGRAM_TOKEN` / `TELEGRAM_CHAT_ID`. |
 | Serper.dev | `serper_tool.py` (→ `tool_node` in `langgraph_core.py`, `intelligence_engine.execute_research`, `dreaming_worker._google_via_serper`) | Requires `SERPER_API_KEY` env. |
-| Piper TTS + ffmpeg | `voice_service.py` (route `/api/voice/speech` and LangGraph streaming) | Voice model dropped at `KURO_PIPER_VOICE_PATH`; ffmpeg only for pitch shift. |
+
 | Live2D Cubism Core + `pixi-live2d-display` | `web_interface/static/js/live2d_manager.js` (loads `/static/vendor/live2d/*` then CDN fallback) | Hijiki model served from `/profile/live2d/hijiki/runtime/`. |
 | Proxmox VE API | `tools/base_tools._get_proxmox_headers`, `check_proxmox_infrastructure`, `dreaming_worker._discover_proxmox_targets_locally`, `/api/proxmox-status` route | Uses `PVE_*` env keys. |
 | NVD (CVE feed) | `dreaming_worker._cve_scan_via_nvd_direct` | Direct HTTPS; no auth required but API key supported. |
@@ -697,7 +631,7 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
 | NewsAPI (optional) | `openclaw_skills/market_analysis/market_analysis.py` (`get_market_news`) | Requires `NEWSAPI_API_KEY`; when unset the skill returns `articles: []` gracefully. |
 | Metaculus (prediction markets) | `openclaw_skills/prediction_market_scan/prediction_market_scan.py` (→ Chancellor tool + nightly `_run_prediction_scan_nightly`) | Requires `METACULUS_API_TOKEN` or the `KURO_PREDICTION_MARKET_DEMO=1` seeded path. |
 | Stooq (ticker price CSV) | `openclaw_skills/market_analysis/market_analysis.py` (`get_ticker_price`) | No auth; public CSV endpoint at `https://stooq.com/q/d/l/`. |
-| NeMo Guardrails | `guardrails/sniper_pipeline.py`, `guardrails/nemo_bootstrap.py`, `kuro_nemo_guardrails/` Colang package | Wraps Gemini via `KuroGeminiChat`. |
+
 | Arize Phoenix + OpenTelemetry | `observability.py` | Phoenix UI served from `phoenix_data/`; OTel exports traces for every LangGraph node via `trace_node`. |
 
 ## Documentation discipline (V7.0 Leviathan)
@@ -778,8 +712,7 @@ semantics, and the presence of both indexes via `PRAGMA index_list`.
   lazily inside `build_kuro_graph`). Conditional edges (e.g. approval
   gating, tool-vs-response routing) only resolve at runtime.
 - **Runtime state files** (`kuro_memory.json`, `master_profile.json`, all
-  `*.db` files, `media/tts/`, `kuro_chromadb/`, `kuro_compliance_chroma/`,
-  `phoenix_data/`) are deliberately excluded; they mutate constantly and
+  `*.db` files, `kuro_chromadb/`, `phoenix_data/`) are deliberately excluded; they mutate constantly and
   are never part of the source tree.
 - **Telegram, Proxmox, and OpenClaw** calls assume the matching sidecar
   services are reachable; failure is absorbed by circuit-breakers but
@@ -788,10 +721,5 @@ semantics, and the presence of both indexes via `PRAGMA index_list`.
   are not vendored (license). Offline deployments must populate
   `web_interface/static/vendor/live2d/` per the `README.md` there; when
   missing, `live2d_manager.js` silently falls back to CDN.
-- **NeMo Guardrails Colang graph** (`kuro_nemo_guardrails/*.co`) is parsed
-  at bootstrap and cannot be fully flattened statically; specific rail
-  decisions happen at turn time inside
-  `sniper_pipeline.self_check_*_python`.
-- **Any `sys.path` or import-time monkey-patch** (e.g. in
-  `guardrails/nemo_bootstrap.py` when registering providers) is flagged
+- **Any `sys.path` or import-time monkey-patch** is flagged
   here rather than traced — assume hidden side-effects at import.
