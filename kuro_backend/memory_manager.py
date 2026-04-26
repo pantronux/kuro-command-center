@@ -151,12 +151,14 @@ CANONICAL_PERSONAS = [
     "tactical",
     "butler",
     "chancellor",
+    "auditor",
 ]
 PERSONA_ALIASES = {
     "support": "tactical",
     "adversarial_scholar": "advisor",
     "technical": "tactical",
     "casual": "chill",
+    "qa": "auditor",
 }
 
 # Keywords that indicate Master is sharing personal facts

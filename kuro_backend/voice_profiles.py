@@ -36,6 +36,7 @@ VOICE_PROFILES: Final[Mapping[str, VoiceProfile]] = {
     "butler": VoiceProfile(None, None, None),
     "chill": VoiceProfile(None, None, None),
     "chancellor": VoiceProfile(1.00, 0.90, None),
+    "auditor": VoiceProfile(1.20, 0.85, None),
 }
 
 

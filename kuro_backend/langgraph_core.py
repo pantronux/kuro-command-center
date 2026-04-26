@@ -45,7 +45,7 @@ from kuro_backend import (
 )
 from kuro_backend import tools as kuro_tools
 from kuro_backend.config import PRIMARY_MODEL, settings
-from kuro_backend.guardrails import sniper_pipeline
+
 from kuro_backend import personas, token_budget
 from kuro_backend.personas import build_system_instruction
 
@@ -346,21 +346,6 @@ def get_post_response_queue_depth() -> int:
 def _persist_short_term_and_enqueue_writes(user_input: str, response_text: str, persona_mode: str) -> None:
     memory_manager.add_short_term("user", user_input, persona_scope=persona_mode)
     memory_manager.add_short_term("assistant", response_text, persona_scope=persona_mode)
-    _enqueue_post_response_task(
-        {
-            "kind": "memory_write",
-            "user_input": user_input,
-            "final_response": response_text,
-            "persona_scope": persona_mode,
-        }
-    )
-    _enqueue_post_response_task(
-        {
-            "kind": "mem0_extract",
-            "user_input": user_input,
-            "final_response": response_text,
-        }
-    )
 
 
 async def _stream_direct_llm_chunks(
@@ -438,6 +423,7 @@ class KuroState(TypedDict):
     requires_approval: bool
     _approval_scope: str
     _trace_id: str
+    _intent: str
 
 
 # ============================================
@@ -459,6 +445,20 @@ def get_system_instruction(persona_override: Optional[str] = None) -> str:
         kuro_version_label="V5.5 LangGraph",
         variant="graph",
     )
+
+# ============================================
+# NODE: REFLECTION (Task Continuity)
+# ============================================
+
+def reflection_node(state: KuroState) -> Dict[str, Any]:
+    user_input = state.get("user_input", "").lower()
+    edit_keywords = ["edit", "add", "revise", "revisi", "tambah", "ubah", "perbaiki", "lanjut", "sekali lagi", "update"]
+    intent = "new"
+    if any(kw in user_input for kw in edit_keywords):
+        intent = "edit"
+        logger.info("[REFLECTION] Intent detected as Edit/Update")
+    return {"_intent": intent}
+
 
 # ============================================
 # NODE: SUPERVISOR (The Brain)
@@ -611,9 +611,7 @@ def memory_retrieval_node(state: KuroState) -> Dict[str, Any]:
 def memory_extraction_node(state: KuroState) -> Dict[str, Any]:
     user_input = state.get("user_input", "")
     final_response = state.get("final_response", "")
-    persona_mode = memory_manager.normalize_persona(
-        state.get("persona_mode", memory_manager.get_active_persona())
-    )
+    tool_result = state.get("tool_execution_result", {})
 
     # 1. Guard Clause: Jangan jalankan ekstraksi jika respon asisten kosong
     # Ini mencegah penyimpanan memori yang tidak lengkap atau error API
@@ -621,15 +619,26 @@ def memory_extraction_node(state: KuroState) -> Dict[str, Any]:
         logger.warning("[MEM0_EXTRACTION] Skipped: No final_response found in state.")
         return {}
 
-    with observability.trace_node("memory_extraction_node"):
-        _enqueue_post_response_task(
-            {
-                "kind": "mem0_extract",
-                "user_input": user_input,
-                "final_response": final_response,
-            }
-        )
-        return {}
+    task_success = False
+    if tool_result.get("status") == "success":
+        task_success = True
+    
+    success_keywords = ["thanks", "terima kasih", "selesai", "fixed", "done", "berhasil", "sip", "ok", "confirmed"]
+    if any(kw in user_input.lower() for kw in success_keywords):
+        task_success = True
+
+    if task_success:
+        with observability.trace_node("memory_extraction_node"):
+            _enqueue_post_response_task(
+                {
+                    "kind": "mem0_extract",
+                    "user_input": user_input,
+                    "final_response": final_response,
+                }
+            )
+    else:
+        logger.info("[MEM0_EXTRACTION] Skipped: Task not explicitly completed.")
+    return {}
 
 
 # ============================================
@@ -668,6 +677,16 @@ def response_node(state: KuroState) -> Dict[str, Any]:
 
         # Build system prompt
         system_prompt = get_system_instruction(persona_override=persona_mode)
+        
+        intent = state.get("_intent", "new")
+        if intent == "edit":
+            system_prompt += (
+                "\n\n[TASK CONTINUITY LOCK]\n"
+                "The Master is editing, revising, or adding to the previous turn. "
+                "You MUST act as an incremental update to the existing state. "
+                "DO NOT generate a 'New Conclusion' or restart the thought process. "
+                "Maintain the exact same context and only apply the requested delta."
+            )
 
         # Assemble per-section context blocks so we can apply the token budget
         # uniformly. Each block is independently trimmed to its quota before
@@ -876,26 +895,7 @@ def response_node(state: KuroState) -> Dict[str, Any]:
                 )
                 _v7_reset_announcement_sent = True
 
-        # Canonical served response must match persisted response for integrity.
-        try:
-            response_text = sniper_pipeline.sniper_postprocess_output(user_input, response_text)
-        except Exception as post_exc:
-            logger.warning("[RESPONSE] sniper postprocess failed, using raw: %s", post_exc)
 
-        # P4.5 — SSoT grounding lint. Non-destructive: only appends a footnote
-        # when the reply mentions numbers/times absent from any SSoT block.
-        try:
-            ssot_blocks = [
-                sections.get("memory_injection", ""),
-                sections.get("referent", ""),
-                sections.get("finance", ""),
-                sections.get("market", ""),
-            ]
-            response_text, _lint_anomaly = sniper_pipeline.sniper_ssot_grounding_lint(
-                response_text, ssot_blocks=ssot_blocks
-            )
-        except Exception as lint_exc:
-            logger.debug("[RESPONSE] ssot lint skipped: %s", lint_exc)
 
         # Single consolidated persist path (short-term + enqueue memory_write + mem0_extract).
         # memory_extraction_node still runs as a dedupe/guardian, but mem0 fingerprint dedupe
@@ -1227,6 +1227,7 @@ def build_kuro_graph() -> StateGraph:
     graph_builder = StateGraph(KuroState)
     
     # Add nodes
+    graph_builder.add_node("reflection_node", reflection_node)
     graph_builder.add_node("supervisor_node", supervisor_node)
     graph_builder.add_node("memory_retrieval_node", memory_retrieval_node)
     graph_builder.add_node("tool_node", tool_node)
@@ -1234,7 +1235,8 @@ def build_kuro_graph() -> StateGraph:
     graph_builder.add_node("memory_extraction_node", memory_extraction_node)
     
     # Set entry point using START constant (LangGraph v0.2+ compatible)
-    graph_builder.add_edge(START, "supervisor_node")
+    graph_builder.add_edge(START, "reflection_node")
+    graph_builder.add_edge("reflection_node", "supervisor_node")
     
     # After supervisor, run memory retrieval in parallel
     graph_builder.add_edge("supervisor_node", "memory_retrieval_node")
@@ -1371,14 +1373,7 @@ async def process_chat_with_graph_stream(
             yield approval_response
             return
 
-        guard_in_started = time.perf_counter()
-        blocked = await sniper_pipeline.sniper_validate_and_maybe_block_input_async(message)
-        if stream_metrics is not None:
-            stream_metrics["guardrail_input_ms"] = round((time.perf_counter() - guard_in_started) * 1000, 2)
-        if blocked:
-            logger.debug("[SNIPER] Input blocked before graph invoke (stream)")
-            yield blocked
-            return
+
 
         persona_mode = memory_manager.normalize_persona(
             persona_override or memory_manager.get_active_persona()
@@ -1402,7 +1397,6 @@ async def process_chat_with_graph_stream(
         can_use_true_stream = (
             _TRUE_TOKEN_STREAMING_ENABLED
             and not image_paths
-            and sniper_pipeline.is_low_risk_stream_candidate(message)
         )
         if stream_metrics is not None:
             stream_metrics["stream_mode"] = "true_token_fastpath" if can_use_true_stream else "graph_collect_chunked"
@@ -1670,10 +1664,7 @@ def process_chat_with_graph(
         if approval_response is not None:
             return approval_response
 
-        blocked = sniper_pipeline.sniper_validate_and_maybe_block_input(message)
-        if blocked:
-            logger.info("[SNIPER] Input blocked before graph invoke")
-            return blocked
+
 
         # Get current persona
         persona_mode = memory_manager.normalize_persona(

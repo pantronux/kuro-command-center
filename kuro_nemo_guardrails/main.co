@@ -1,6 +1,0 @@
-import core
-import llm
-
-# Required Colang 2.x entry flow for NeMo runtime (dialog disabled for API input/output-only use).
-flow main
-  activate llm continuation

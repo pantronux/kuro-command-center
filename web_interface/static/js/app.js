@@ -95,7 +95,7 @@ let chatOffset = 0;
 let isLoadingMore = false;
 let hasMoreMessages = true;
 let scrollAnchorPosition = null;
-const VALID_PERSONAS = ['consultant', 'advisor', 'chill', 'tactical', 'butler', 'chancellor'];
+const VALID_PERSONAS = ['consultant', 'advisor', 'chill', 'tactical', 'butler', 'chancellor', 'auditor'];
 
 // ============================================
 // DOM Elements
@@ -1754,7 +1754,8 @@ const personaLabels = {
     chill: '😎 Chill Wingman',
     tactical: '🔧 Tactical Ops',
     butler: '🛡️ Butler',
-    chancellor: '📒 The Chancellor'
+    chancellor: '📒 The Chancellor',
+    auditor: '🔍 QA Architect'
 };
 
 const personaAliases = {
@@ -1762,6 +1763,7 @@ const personaAliases = {
     technical: 'tactical',
     casual: 'chill',
     adversarial_scholar: 'advisor',
+    qa: 'auditor'
 };
 
 function normalizePersona(persona) {
@@ -1790,6 +1792,25 @@ function setPersonaInUrl(personaName, refresh = false) {
 function updatePersonaLabel() {
     if (elements.currentPersonaLabel) {
         elements.currentPersonaLabel.textContent = personaLabels[selectedPersona] || 'Consultant';
+    }
+    
+    // Add "System Status: Auditing" ticker in HUD when auditor is active
+    if (selectedPersona === 'auditor') {
+        if (window.auditorInterval) clearInterval(window.auditorInterval);
+        kuroRenderSentinelTicker({ status: 'SCANNING', source: 'AUDITOR', detail: 'System Status: Auditing' });
+        window.auditorInterval = setInterval(() => {
+            if (selectedPersona === 'auditor') {
+                kuroRenderSentinelTicker({ status: 'SCANNING', source: 'AUDITOR', detail: 'System Status: Auditing' });
+            }
+        }, 25000); // refresh before 30s timeout
+    } else {
+        if (window.auditorInterval) {
+            clearInterval(window.auditorInterval);
+            window.auditorInterval = null;
+        }
+        if (typeof kuroRenderSentinelTicker === 'function') {
+            kuroRenderSentinelTicker({ status: 'IDLE', source: 'ALL' });
+        }
     }
 }
 

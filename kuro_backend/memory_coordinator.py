@@ -240,8 +240,8 @@ def build_referent_grounding_block(
                 extractions = session_state.get("file_extractions") or []
                 for item in extractions[:6]:
                     fname = item.get("original_filename", "")
-                    summary = str(item.get("extracted_content", "")).replace("\n", " ")[:220]
-                    lines.append(f"- current_session_file={fname!r} extracted={summary!r}")
+                    content = str(item.get("extracted_content", ""))
+                    lines.append(f"- current_session_file={fname!r}\n[RAW_CONTENT_START]\n{content}\n[RAW_CONTENT_END]")
         except Exception as exc:
             logger.debug("[MEMORY_COORD] current_session_state parse skipped: %s", exc)
 
@@ -877,7 +877,7 @@ def build_context_for_llm(
 
     fan_out = _parallel_gather_sync(parallel_tasks)
     all_recent_messages = fan_out.get("short_term") or []
-    recent_messages = all_recent_messages[-15:]
+    recent_messages = all_recent_messages[-10:]
     referent_grounding_block = fan_out.get("referent") if include_referent_grounding else None
     mem0_context_block = fan_out.get("mem0_fmt") if mem0_retrieved_memories else None
     if mem0_context_block:
@@ -889,7 +889,7 @@ def build_context_for_llm(
 
     # KURO V7.0: raw short-term window only (no summary compression) and Mem0 as
     # sole long-term semantic layer. Keep memory_injection focused on raw turns.
-    short_term_block = _format_entries_for_prompt(recent_messages, max_chars_per_entry=800)
+    short_term_block = _format_entries_for_prompt(recent_messages, max_chars_per_entry=10000)
     memory = {
         "profile": "",
         "long_term": "",
@@ -1068,18 +1068,7 @@ def execute_memory_write_task(
     persona_scope: str,
 ) -> None:
     """Post-response memory writer for Mem0-only long-term semantic storage."""
-    from kuro_backend import perpetual_memory
-
-    _trace_coordinator_span(
-        "execute_memory_write_task",
-        {"persona": persona_scope, "chars_in": len(user_input or ""), "chars_out": len(final_response or "")},
-    )
-    logger.info("[MEMORY_COORD] memory_write start persona=%s (mem0-only)", persona_scope)
-    payload = f"User: {user_input}\nKuro: {final_response}"
-    perpetual_memory.perpetual_memory.store_memories(
-        [{"text": payload, "metadata": {"source": "conversation_turn", "persona_scope": persona_scope}}]
-    )
-    logger.info("[MEMORY_COORD] memory_write done persona=%s (mem0-only)", persona_scope)
+    pass
 
 
 def execute_mem0_extract_task(user_input: str, final_response: str) -> None:
