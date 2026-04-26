@@ -156,11 +156,8 @@ def add_gap_analysis(document_name: str, standard: str, results: List[Dict]):
     """Store gap analysis results."""
     conn = _get_connection()
     cursor = conn.cursor()
-    for result in results:
-        cursor.execute("""
-            INSERT INTO gap_analysis (document_name, standard, clause_id, status, finding, recommendation, confidence)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (
+    data = [
+        (
             document_name,
             standard,
             result.get("clause_id", ""),
@@ -168,7 +165,13 @@ def add_gap_analysis(document_name: str, standard: str, results: List[Dict]):
             result.get("finding", ""),
             result.get("recommendation", ""),
             result.get("confidence", 0.0)
-        ))
+        )
+        for result in results
+    ]
+    cursor.executemany("""
+        INSERT INTO gap_analysis (document_name, standard, clause_id, status, finding, recommendation, confidence)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, data)
     conn.commit()
     conn.close()
     add_audit_trail("gap_analysis", f"Analyzed {document_name} against {standard}", standard)
@@ -178,14 +181,19 @@ def get_compliance_progress(standard: str) -> Dict:
     conn = _get_connection()
     cursor = conn.cursor()
     
-    cursor.execute("SELECT COUNT(*) as total FROM evidence_matrix WHERE standard = ?", (standard,))
-    total = cursor.fetchone()["total"]
+    cursor.execute("""
+        SELECT
+            COUNT(*) as total,
+            SUM(CASE WHEN status = 'compliant' THEN 1 ELSE 0 END) as compliant,
+            SUM(CASE WHEN status = 'non_compliant' THEN 1 ELSE 0 END) as non_compliant
+        FROM evidence_matrix
+        WHERE standard = ?
+    """, (standard,))
     
-    cursor.execute("SELECT COUNT(*) as compliant FROM evidence_matrix WHERE standard = ? AND status = 'compliant'", (standard,))
-    compliant = cursor.fetchone()["compliant"]
-    
-    cursor.execute("SELECT COUNT(*) as non_compliant FROM evidence_matrix WHERE standard = ? AND status = 'non_compliant'", (standard,))
-    non_compliant = cursor.fetchone()["non_compliant"]
+    row = cursor.fetchone()
+    total = row["total"] or 0
+    compliant = row["compliant"] or 0
+    non_compliant = row["non_compliant"] or 0
     
     conn.close()
     
