@@ -594,9 +594,9 @@ def _persist_cve_alert(cve: Dict[str, Any], *, cycle_id: int) -> bool:
             f"Target: {target_id} | Software: {software} {version}\n"
             f"{(cve.get('description') or '').strip()}"
         )
-        memory_manager.add_long_term_v2(
-            content,
-            metadata={
+        from kuro_backend import perpetual_memory
+        perpetual_memory.get_memory_client().store_memories([
+            {"memory": content, "metadata": {
                 "source": "cve_sentinel",
                 "tag": "cve-alert",
                 "cve_id": cve_id,
@@ -606,11 +606,11 @@ def _persist_cve_alert(cve: Dict[str, Any], *, cycle_id: int) -> bool:
                 "software": software,
                 "version": version,
                 "cycle_id": cycle_id,
-            },
-        )
+            }}
+        ])
         return True
     except Exception as exc:
-        logger.warning("[CVE] chroma write failed cve=%s: %s", cve.get("id"), exc)
+        logger.warning("[CVE] mem0 write failed cve=%s: %s", cve.get("id"), exc)
         return False
 
 
@@ -781,9 +781,9 @@ def _persist_dream_insight(
             f"Confidence: {finding.confidence:.2f} | Source: {source_label}\n\n"
             f"{summary_text}"
         )
-        memory_manager.add_long_term_v2(
-            content,
-            metadata={
+        from kuro_backend import perpetual_memory
+        perpetual_memory.get_memory_client().store_memories([
+            {"memory": content, "metadata": {
                 "source": "dream_insight",
                 "tag": "dream-insight",
                 "persona_scope": finding.persona_scope,
@@ -791,11 +791,11 @@ def _persist_dream_insight(
                 "finding_id": finding.id,
                 "cycle_id": cycle_id,
                 "search_source": source_label,
-            },
-        )
+            }}
+        ])
         return True
     except Exception as exc:
-        logger.warning("[DREAMING] chroma write failed finding=%s: %s", finding.id, exc)
+        logger.warning("[DREAMING] mem0 write failed finding=%s: %s", finding.id, exc)
         return False
 
 
@@ -942,18 +942,18 @@ def _persist_fiscal_roll_up_insight(
             f"API ledger {date_str}: USD {cost_usd:.4f} "
             f"(threshold USD {threshold:.2f}; over_threshold={'yes' if alerted else 'no'})."
         )
-        memory_manager.add_long_term_v2(
-            f"[DREAM-INSIGHT][FISCAL] {summary}",
-            metadata={
+        from kuro_backend import perpetual_memory
+        perpetual_memory.get_memory_client().store_memories([
+            {"memory": f"[DREAM-INSIGHT][FISCAL] {summary}", "metadata": {
                 "source": "dream_insight",
                 "tag": "fiscal-audit",
                 "persona_scope": "chancellor",
                 "cycle_id": cycle_id,
                 "date": date_str,
-            },
-        )
+            }}
+        ])
     except Exception as exc:
-        logger.warning("[FISCAL] chroma insight failed: %s", exc)
+        logger.warning("[FISCAL] mem0 insight failed: %s", exc)
 
 
 def _run_fiscal_sentinel(*, cycle_id: int, dry_run: bool) -> Dict[str, int]:
@@ -1031,19 +1031,18 @@ def _market_openclaw_price(symbol: str) -> Optional[float]:
 
 def _persist_market_insight(note: str, *, cycle_id: int) -> None:
     try:
-        from kuro_backend import memory_manager
+        from kuro_backend import perpetual_memory
 
-        memory_manager.add_long_term_v2(
-            f"[DREAM-INSIGHT][MARKET] {note}",
-            metadata={
+        perpetual_memory.get_memory_client().store_memories([
+            {"memory": f"[DREAM-INSIGHT][MARKET] {note}", "metadata": {
                 "source": "dream_insight",
                 "tag": "market-sentinel",
                 "persona_scope": "chancellor",
                 "cycle_id": cycle_id,
-            },
-        )
+            }}
+        ])
     except Exception as exc:
-        logger.warning("[MARKET] chroma insight failed: %s", exc)
+        logger.warning("[MARKET] mem0 insight failed: %s", exc)
 
 
 def _run_prediction_scan_nightly(*, dry_run: bool) -> int:

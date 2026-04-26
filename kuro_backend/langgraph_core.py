@@ -11,7 +11,7 @@ Purpose: Primary stateful reasoning pipeline (supervisor -> tool_node -> respons
 Caller: main.py chat routes, stream fastpath, services/core_service orchestration.
 Dependencies: google-genai, langgraph, personas, memory_coordinator, token_budget, tools.base_tools, observability, semantic_cache.
 Main Functions: build_graph(), run_turn(), stream_turn(), supervisor_node, tool_node, response_node.
-Side Effects: LLM API calls (Gemini), SQLite reads via memory/finance/intelligence, ChromaDB reads, token-usage metrics, semantic-cache writes, threading primitives for fastpath.
+Side Effects: LLM API calls (Gemini), SQLite reads via memory/finance/intelligence, Mem0 reads, token-usage metrics, semantic-cache writes, threading primitives for fastpath.
 """
 import asyncio
 import functools
@@ -659,6 +659,34 @@ def memory_extraction_node(state: KuroState) -> Dict[str, Any]:
     success_keywords = ["thanks", "terima kasih", "selesai", "fixed", "done", "berhasil", "sip", "ok", "confirmed"]
     if any(kw in user_input.lower() for kw in success_keywords):
         task_success = True
+
+    if not task_success:
+        # LLM-based semantic check for task success / conclusion
+        try:
+            from kuro_backend.config import CLASSIFIER_MODEL
+            genai_client = _get_genai_client()
+            prompt = f"""
+Determine if the user's message indicates that a task has been completed, a conclusion has been reached, or if the user is expressing gratitude/agreement that signals the end of an interaction.
+
+User's message: "{user_input}"
+
+If yes, output ONLY the word "success".
+If no, output ONLY the word "continue".
+
+Status:"""
+            response = genai_client.models.generate_content(
+                model=CLASSIFIER_MODEL,
+                contents=prompt,
+                config=genai_types.GenerateContentConfig(
+                    temperature=0.0,
+                    max_output_tokens=10,
+                ),
+            )
+            if response.text and "success" in response.text.strip().lower():
+                task_success = True
+                logger.info(f"[MEM0_EXTRACTION] LLM Router detected task completion for: {user_input[:50]}...")
+        except Exception as e:
+            logger.warning(f"[MEM0_EXTRACTION] Semantic task check failed: {e}")
 
     if task_success:
         with observability.trace_node("memory_extraction_node"):

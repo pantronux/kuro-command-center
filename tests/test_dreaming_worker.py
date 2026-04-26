@@ -365,12 +365,17 @@ def test_finding_fingerprint_stable():
 def test_persist_dream_insight_writes_tag(monkeypatch, isolated_short_term_db):
     captured = {}
 
-    def _fake_add(content, metadata=None):
-        captured["content"] = content
-        captured["metadata"] = metadata
-        return {"ok": True}
+    class FakeMemoryClient:
+        def store_memories(self, memories):
+            captured["memories"] = memories
+            return True
 
-    monkeypatch.setattr(memory_manager, "add_long_term_v2", _fake_add)
+    class FakePerpetualMemory:
+        def get_memory_client(self):
+            return FakeMemoryClient()
+
+    from kuro_backend import perpetual_memory
+    monkeypatch.setattr(perpetual_memory, "get_memory_client", FakePerpetualMemory().get_memory_client)
 
     finding = Finding(
         kind="deep_research", persona_scope="advisor",
@@ -381,11 +386,11 @@ def test_persist_dream_insight_writes_tag(monkeypatch, isolated_short_term_db):
         source_label="openclaw", cycle_id=42,
     )
     assert ok is True
-    assert captured["metadata"]["tag"] == "dream-insight"
-    assert captured["metadata"]["source"] == "dream_insight"
-    assert captured["metadata"]["cycle_id"] == 42
-    assert captured["metadata"]["finding_kind"] == "deep_research"
-    assert captured["content"].startswith("[DREAM-INSIGHT]")
+    assert captured["memories"][0]["metadata"]["tag"] == "dream-insight"
+    assert captured["memories"][0]["metadata"]["source"] == "dream_insight"
+    assert captured["memories"][0]["metadata"]["cycle_id"] == 42
+    assert captured["memories"][0]["metadata"]["finding_kind"] == "deep_research"
+    assert captured["memories"][0]["memory"].startswith("[DREAM-INSIGHT]")
 
 
 # ---------------------------------------------------------------------------

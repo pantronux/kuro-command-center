@@ -155,7 +155,7 @@ def process_chat(
     """Processes a chat message with 3-tier memory injection.
 
     MEMORY FLOW:
-    1. Pre-process: Query all 3 tiers (SQLite, ChromaDB, JSON)
+    1. Pre-process: Query all 3 tiers (SQLite, Mem0, JSON)
     2. Inject: Format memory into prompt with [ACTIVE_CONVERSATION_CONTEXT]
     3. Generate: Send to Gemini with full context
     4. Post-process: Store to appropriate memory tiers
@@ -174,21 +174,6 @@ def process_chat(
         active_persona = memory_manager.normalize_persona(persona_override or memory_manager.get_active_persona())
         recent_messages = memory_manager.get_short_term(persona_scope=active_persona)
         memory = memory_manager.query_memory(message, recent_messages=recent_messages, persona_scope=active_persona)
-        
-        # === MEMORY V2.1: Temporal Grounding ===
-        memory_injection = memory_manager.format_memory_with_temporal_grounding(memory)
-        
-        # === MEMORY V2.1: Master Profile Override Layer ===
-        override = memory_manager.check_tier_override(message, memory)
-        
-        # === ANTI-HALLUCINATION: Enhanced Confidence Scoring ===
-        confidence = memory_manager.compute_confidence_score(message, memory)
-        
-        # === ANTI-HALLUCINATION: Fact Verification ===
-        verification = memory_manager.verify_fact_across_tiers(message, memory)
-        
-        # === MEMORY V2.1: Smart Decay (respects decay_exempt) ===
-        memory_manager.apply_memory_decay_v2()
         
         # === ACTIVE CONVERSATION CONTEXT (Priority 1 for Anaphora Resolution) ===
         short_term = memory.get("short_term", "")
@@ -264,7 +249,7 @@ def process_chat(
         # Tier 2: Store to long-term with V2.1 Semantic Upsert
         memory_manager.add_long_term_v2(f"User: {message}\nKuro: {response_text}")
         
-        # If there are file attachments, store file content to ChromaDB for semantic search
+        # If there are file attachments, store file content to Mem0 for semantic search
         if image_paths:
             for img_path in image_paths:
                 if os.path.exists(img_path):
@@ -272,7 +257,7 @@ def process_chat(
                         f"User uploaded image: {os.path.basename(img_path)}",
                         metadata={"type": "image", "filename": os.path.basename(img_path), "path": img_path}
                     )
-                    logger.info(f"Stored image reference in ChromaDB: {img_path}")
+                    logger.info(f"Stored image reference in Mem0: {img_path}")
         
         # Check for explicit memory commands
         if any(kw in message.lower() for kw in memory_manager.MEMORY_KEYWORDS):
@@ -287,7 +272,7 @@ def process_chat(
         if saved_facts:
             logger.info(f"Auto-saved {len(saved_facts)} master facts with V2.1 classification")
         
-        # === MEMORY V2.1: Sync ChromaDB to Profile (auto-migration) ===
+        # === MEMORY V2.1: Sync Mem0 to Profile (auto-migration) ===
         migrated = memory_manager.sync_chroma_to_profile()
         if migrated:
             logger.info(f"Auto-migrated {len(migrated)} facts to master_profile.json")
