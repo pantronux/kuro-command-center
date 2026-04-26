@@ -41,7 +41,8 @@ from kuro_backend import embedding_cache
 
 logger = logging.getLogger(__name__)
 
-ENABLED: Final[bool] = os.getenv("KURO_SEMANTIC_CACHE_ENABLED", "false").lower() in ("1", "true", "yes")
+# V6.0: Semantic Cache enabled by default for significant TTFB improvements on repeated intents
+ENABLED: Final[bool] = os.getenv("KURO_SEMANTIC_CACHE_ENABLED", "true").lower() in ("1", "true", "yes")
 _SIM_THRESHOLD: Final[float] = float(os.getenv("KURO_SEMANTIC_CACHE_SIM", "0.94"))
 _CACHE_TTL_S: Final[float] = float(os.getenv("KURO_SEMANTIC_CACHE_TTL", "900"))
 _CACHE_MAX: Final[int] = int(os.getenv("KURO_SEMANTIC_CACHE_MAX", "256"))
