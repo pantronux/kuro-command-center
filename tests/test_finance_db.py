@@ -81,3 +81,49 @@ def test_prediction_watch_and_hud(isolated_finance_db):
     hud = f.get_market_hud_items()
     assert any(x["id"] == "t1" for x in hud)
     f.delete_prediction_watch("t1")
+
+
+def test_financial_goal_upsert_and_retrieval(isolated_finance_db):
+    f = isolated_finance_db
+    gid = "emergency_fund"
+    f.upsert_financial_goal(gid, "Emergency Fund", 10000.0, 2500.0, "2026-12-31")
+
+    # Verify retrieval
+    goal = f.get_financial_goal(gid)
+    assert goal is not None
+    assert goal["name"] == "Emergency Fund"
+    assert float(goal["target_amount"]) == 10000.0
+    assert float(goal["current_amount"]) == 2500.0
+    assert goal["deadline"] == "2026-12-31"
+
+    # Verify update
+    f.upsert_financial_goal(gid, "Emergency Fund Revised", 12000.0, 3000.0)
+    updated = f.get_financial_goal(gid)
+    assert updated["name"] == "Emergency Fund Revised"
+    assert float(updated["target_amount"]) == 12000.0
+    assert float(updated["current_amount"]) == 3000.0
+    # Deadline should be NULL/None because it wasn't provided in the second upsert
+    assert updated["deadline"] is None
+
+
+def test_financial_goal_deletion(isolated_finance_db):
+    f = isolated_finance_db
+    gid = "test_goal"
+    f.upsert_financial_goal(gid, "Test Goal", 100.0)
+
+    assert f.get_financial_goal(gid) is not None
+    assert f.delete_financial_goal(gid) is True
+    assert f.get_financial_goal(gid) is None
+    assert f.delete_financial_goal(gid) is False
+
+
+def test_list_financial_goals(isolated_finance_db):
+    f = isolated_finance_db
+    f.upsert_financial_goal("g1", "Goal 1", 100.0)
+    f.upsert_financial_goal("g2", "Goal 2", 200.0)
+
+    goals = f.list_financial_goals()
+    assert len(goals) >= 2
+    slugs = [g["goal_id"] for g in goals]
+    assert "g1" in slugs
+    assert "g2" in slugs

@@ -4,7 +4,7 @@
 Purpose: Wire-level data contracts for API routes, services, and Gemini tool outputs.
 Caller: main.py FastAPI routes, services/core_service, finance_db helpers, tools/base_tools, tests.
 Dependencies: pydantic v2.
-Main Functions: ReminderRecord, HabitRecord, HabitCompletionStats, BudgetRecord, RecurringExpenseRecord, WatchedSymbolRecord, PredictionWatchRecord, MarketHudChip.
+Main Functions: ReminderRecord, HabitRecord, HabitCompletionStats, BudgetRecord, FinancialGoalRecord, RecurringExpenseRecord, WatchedSymbolRecord, PredictionWatchRecord, MarketHudChip.
 Side Effects: None (pure dataclass-like validation).
 """
 from __future__ import annotations
@@ -167,6 +167,18 @@ class MonthlyBudgetRecord(BaseModel):
     month: str
     amount_usd: float
     notes: str = ""
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class FinancialGoalRecord(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    goal_id: str
+    name: str
+    target_amount: float
+    current_amount: float = 0.0
+    deadline: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 
