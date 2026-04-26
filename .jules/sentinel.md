@@ -1,0 +1,4 @@
+## 2025-03-01 - [Path Traversal in system_tools.py]
+**Vulnerability:** A critical path traversal vulnerability was present in the `manage_files`, `generate_excel_report`, and `generate_report_template` tools in `kuro_backend/tools/system_tools.py`. They constructed paths via `os.path.join` without checking if the resolved path was inside the target `EXPORTS_DIR` directory.
+**Learning:** Constructing absolute paths without using `os.path.abspath` and validating against the base directory (`EXPORTS_DIR`) + `os.sep` allows attackers to bypass security checks and access/modify arbitrary system files with simple payload like `../../../etc/passwd`.
+**Prevention:** Use `os.path.abspath` to resolve paths and ensure that the constructed absolute file path starts with the absolute base directory path plus an `os.sep` separator to avoid edge case bypasses (e.g. `exports_secret`).
