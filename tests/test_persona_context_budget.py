@@ -104,12 +104,12 @@ def test_build_persona_section_quotas_partitions_layers() -> None:
     budget = personas.get_context_budget("advisor")
     quotas = token_budget.build_persona_section_quotas(budget)
     # Layer 1 section
-    assert quotas["summary"] == budget.layer1_tokens
+    assert quotas["memory_injection"] == budget.layer1_tokens
     # Layer 2 sections split adds up roughly to layer2_tokens
-    l2 = quotas["memory_injection"] + quotas["mem0"] + quotas["referent"]
+    l2 = quotas["mem0"] + quotas["referent"]
     assert abs(l2 - budget.layer2_tokens) <= 5
     # Layer 3 sections split adds up roughly to layer3_tokens
-    l3 = quotas["habit"] + quotas["compliance"] + quotas["ssot_factual"]
+    l3 = quotas["ssot_factual"]
     assert abs(l3 - budget.layer3_tokens) <= 5
 
 
@@ -117,11 +117,9 @@ def test_apply_persona_budget_respects_layer_quotas() -> None:
     budget = personas.get_context_budget("tactical")
     long_text = "x" * 50000  # definitely larger than any single quota
     sections = {
-        "summary": long_text,
         "memory_injection": long_text,
         "mem0": long_text,
-        "habit": long_text,
-        "compliance": long_text,
+        "ssot_factual": long_text,
     }
     out = token_budget.apply_persona_budget(sections, budget)
     for name, text in out.items():
@@ -160,7 +158,7 @@ def test_enforce_global_ceiling_protects_layer3_floor() -> None:
 
 def test_trim_priority_places_layer3_last() -> None:
     order = token_budget._TRIM_PRIORITY  # type: ignore[attr-defined]
-    assert order[-3:] == ("habit", "compliance", "ssot_factual")
+    assert order[-1:] == ("ssot_factual",)
 
 
 # ---------------------------------------------------------------------------
