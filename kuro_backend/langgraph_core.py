@@ -452,25 +452,60 @@ def get_system_instruction(persona_override: Optional[str] = None) -> str:
 
 def reflection_node(state: KuroState) -> Dict[str, Any]:
     """
-    Pre-Processing Reflection Node (V7.0 Task Continuity).
+    Pre-Processing Reflection Node (V7.0 Task Continuity) with LLM-Based Intent Router.
     Determines if the Master's intent is "Editing", "Adding", or "Revising".
     """
     user_input = state.get("user_input", "").lower()
-    # Expanded list of edit intents based on common phrasing for task continuity
-    edit_keywords = [
-        "edit", "add", "revise", "revisi", "tambah", "ubah", "perbaiki",
-        "lanjut", "sekali lagi", "update", "koreksi", "ganti",
-        "tambahin", "lanjutin", "terusin", "modify", "adjust"
-    ]
-
-    # Simple heuristic to determine edit intent
     intent = "new"
-    if any(kw in user_input for kw in edit_keywords):
-        # Additional check to ensure it refers to a previous response
-        referential_keywords = ["yang tadi", "sebelumnya", "hasil", "itu", "ini", "jawaban", "output", "the previous", "that"]
-        if any(ref in user_input for ref in referential_keywords) or len(user_input.split()) <= 15:
-            intent = "edit"
-            logger.info(f"[REFLECTION] Intent detected as Edit/Update based on input: {user_input[:50]}...")
+
+    # Fast LLM-Based Intent Router (using Gemini Flash via _get_genai_client)
+    try:
+        from kuro_backend.config import CLASSIFIER_MODEL
+        genai_client = _get_genai_client()
+
+        prompt = f"""
+Determine the user's intent based on this message: "{user_input}"
+
+If the user is asking to modify, revise, add to, or correct the PREVIOUS response (e.g., "jangan pakai itu", "tambahin bagian ini", "ubah warnanya", "yang tadi salah"), output ONLY the word "edit".
+If the user is asking a brand new question or starting a new topic, output ONLY the word "new".
+
+Intent:"""
+
+        response = genai_client.models.generate_content(
+            model=CLASSIFIER_MODEL,
+            contents=prompt,
+            config=genai_types.GenerateContentConfig(
+                temperature=0.0,
+                max_output_tokens=10,
+            ),
+        )
+
+        if response.text:
+            llm_intent = response.text.strip().lower()
+            if "edit" in llm_intent:
+                intent = "edit"
+                logger.info(f"[REFLECTION] LLM Router detected 'edit' intent for: {user_input[:50]}...")
+            elif "new" in llm_intent:
+                intent = "new"
+                logger.info(f"[REFLECTION] LLM Router detected 'new' intent for: {user_input[:50]}...")
+            else:
+                logger.warning(f"[REFLECTION] Unexpected LLM intent response: {llm_intent}. Falling back to heuristics.")
+                raise ValueError("Unexpected LLM output")
+
+    except Exception as e:
+        logger.warning(f"[REFLECTION] LLM Intent Router failed: {e}. Using heuristic fallback.")
+        # Fallback to simple heuristic
+        edit_keywords = [
+            "edit", "add", "revise", "revisi", "tambah", "ubah", "perbaiki",
+            "lanjut", "sekali lagi", "update", "koreksi", "ganti",
+            "tambahin", "lanjutin", "terusin", "modify", "adjust"
+        ]
+
+        if any(kw in user_input for kw in edit_keywords):
+            referential_keywords = ["yang tadi", "sebelumnya", "hasil", "itu", "ini", "jawaban", "output", "the previous", "that"]
+            if any(ref in user_input for ref in referential_keywords) or len(user_input.split()) <= 15:
+                intent = "edit"
+                logger.info(f"[REFLECTION] Heuristic fallback detected Edit/Update based on input: {user_input[:50]}...")
 
     return {"_intent": intent}
 
