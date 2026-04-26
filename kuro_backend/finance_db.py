@@ -28,7 +28,8 @@ Dependencies: sqlite3 (WAL), stdlib (threading, datetime).
 Main Functions: init_db(), upsert_budget, upsert_recurring_expense,
 list_active_recurring_expenses, add_api_usage, daily_api_usage_sum,
 upsert_watched_symbol, apply_watched_price, list_watched_symbols,
-upsert_prediction_watch, list_prediction_watch,
+upsert_financial_goal, get_financial_goal, list_financial_goals,
+delete_financial_goal, upsert_prediction_watch, list_prediction_watch,
 set_market_brief_and_note, get_market_brief_parts, get_market_hud_items,
 format_market_snapshot_for_prompt.
 Side Effects: Writes to `kuro_finances.db` (WAL); one-shot schema bootstrap
@@ -114,6 +115,19 @@ def _init_db_locked() -> None:
                 month TEXT NOT NULL UNIQUE,
                 amount_usd REAL NOT NULL,
                 notes TEXT DEFAULT '',
+                created_at TEXT DEFAULT (datetime('now')),
+                updated_at TEXT DEFAULT (datetime('now'))
+            )
+            """
+        )
+        c.execute(
+            """
+            CREATE TABLE IF NOT EXISTS financial_goals (
+                goal_id TEXT PRIMARY KEY NOT NULL,
+                name TEXT NOT NULL,
+                target_amount REAL NOT NULL,
+                current_amount REAL NOT NULL DEFAULT 0.0,
+                deadline TEXT,
                 created_at TEXT DEFAULT (datetime('now')),
                 updated_at TEXT DEFAULT (datetime('now'))
             )
@@ -498,6 +512,83 @@ def apply_watched_price(symbol: str, new_price: float) -> Dict[str, Any]:
         conn.close()
 
 
+def upsert_financial_goal(
+    goal_id: str,
+    name: str,
+    target_amount: float,
+    current_amount: float = 0.0,
+    deadline: Optional[str] = None,
+) -> None:
+    """Insert or replace a financial goal (e.g. 'Emergency Fund')."""
+    init_db()
+    gid = (goal_id or "").strip()
+    if not gid:
+        raise ValueError("goal_id required")
+    conn = _conn()
+    try:
+        c = conn.cursor()
+        c.execute(
+            """
+            INSERT INTO financial_goals
+                (goal_id, name, target_amount, current_amount, deadline, updated_at)
+            VALUES (?, ?, ?, ?, ?, datetime('now'))
+            ON CONFLICT(goal_id) DO UPDATE SET
+                name = excluded.name,
+                target_amount = excluded.target_amount,
+                current_amount = excluded.current_amount,
+                deadline = excluded.deadline,
+                updated_at = datetime('now')
+            """,
+            (
+                gid,
+                (name or gid).strip(),
+                float(target_amount),
+                float(current_amount),
+                (deadline or "").strip() or None,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_financial_goal(goal_id: str) -> Optional[Dict[str, Any]]:
+    init_db()
+    gid = (goal_id or "").strip()
+    conn = _conn()
+    try:
+        c = conn.cursor()
+        c.execute("SELECT * FROM financial_goals WHERE goal_id = ?", (gid,))
+        row = c.fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def list_financial_goals() -> List[Dict[str, Any]]:
+    init_db()
+    conn = _conn()
+    try:
+        c = conn.cursor()
+        c.execute("SELECT * FROM financial_goals ORDER BY created_at DESC")
+        return [dict(r) for r in c.fetchall()]
+    finally:
+        conn.close()
+
+
+def delete_financial_goal(goal_id: str) -> bool:
+    init_db()
+    gid = (goal_id or "").strip()
+    conn = _conn()
+    try:
+        c = conn.cursor()
+        c.execute("DELETE FROM financial_goals WHERE goal_id = ?", (gid,))
+        conn.commit()
+        return c.rowcount > 0
+    finally:
+        conn.close()
+
+
 def upsert_prediction_watch(
     slug: str,
     label: str,
@@ -755,6 +846,10 @@ __all__ = [
     "get_watched_symbol",
     "list_watched_symbols",
     "apply_watched_price",
+    "upsert_financial_goal",
+    "get_financial_goal",
+    "list_financial_goals",
+    "delete_financial_goal",
     "upsert_prediction_watch",
     "list_prediction_watch",
     "delete_prediction_watch",
