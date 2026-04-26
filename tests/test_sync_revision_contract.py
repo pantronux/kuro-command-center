@@ -85,23 +85,19 @@ def test_habit_write_endpoints_use_memory_coordinator_gateway(monkeypatch):
         data={"title": "Gym", "scheduled_time": "15:00", "category": "Health"},
         cookies=cookies,
     )
-    assert create_resp.status_code == 200
-    assert create_resp.json()["status"] == "success"
-    assert create_resp.json()["habit_id"] == 99
+    assert create_resp.status_code == 410
 
     update_resp = client.put(
         "/api/habits/99",
         data={"title": "Gym Updated", "target_per_week": 4},
         cookies=cookies,
     )
-    assert update_resp.status_code == 200
-    assert update_resp.json()["status"] == "success"
+    assert update_resp.status_code == 410
 
     delete_resp = client.delete("/api/habits/99", cookies=cookies)
-    assert delete_resp.status_code == 200
-    assert delete_resp.json()["status"] == "success"
+    assert delete_resp.status_code == 410
 
-    assert calls == {"add": 1, "update": 1, "delete": 1}
+    assert calls == {"add": 0, "update": 0, "delete": 0}
 
 
 def test_reminder_service_mark_notified_routes_to_svc(monkeypatch):

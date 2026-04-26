@@ -375,6 +375,21 @@ def init_short_term_db():
         )
     """)
 
+    # Active Buffer / Session File Store (V7.0)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS session_file_store (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            filename TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_session_file_store_session "
+        "ON session_file_store (session_id)"
+    )
+
     conn.commit()
     conn.close()
     logger.info("Short-term memory database initialized.")
@@ -717,6 +732,41 @@ def query_short_term_latest_timestamp() -> Optional[str]:
     if row is None:
         return None
     return str(row["timestamp"])
+
+# ---------------------------------------------------------------------------
+# Session File Store (Active Buffer V7.0)
+# ---------------------------------------------------------------------------
+def upsert_session_file(session_id: str, filename: str, content: str) -> None:
+    """Upsert file content for a specific session."""
+    conn = _get_short_term_conn()
+    try:
+        cursor = conn.cursor()
+        # Delete existing file with the same name in the same session
+        cursor.execute(
+            "DELETE FROM session_file_store WHERE session_id = ? AND filename = ?",
+            (session_id, filename)
+        )
+        cursor.execute(
+            "INSERT INTO session_file_store (session_id, filename, content) VALUES (?, ?, ?)",
+            (session_id, filename, content)
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+def get_session_files(session_id: str) -> List[Dict[str, str]]:
+    """Retrieve all files associated with a specific session."""
+    conn = _get_short_term_conn()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT filename, content FROM session_file_store WHERE session_id = ? ORDER BY created_at ASC",
+            (session_id,)
+        )
+        rows = cursor.fetchall()
+        return [{"filename": str(row["filename"]), "content": str(row["content"])} for row in rows]
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------------------------------

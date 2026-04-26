@@ -757,6 +757,12 @@ async def chat_endpoint(
                     ensure_ascii=False,
                 ),
             )
+            for ex in session_extractions:
+                memory_manager.upsert_session_file(
+                    session_id=session_scope,
+                    filename=ex["original_filename"],
+                    content=ex.get("extracted_content", "")
+                )
 
         # Save user message to chat history
         chat_history.add_message(
@@ -775,6 +781,7 @@ async def chat_endpoint(
             persona_override=resolved_persona,
             approval_scope=f"web:{session_scope}:{resolved_persona}",
             trace_id=trace_id,
+            session_id=session_scope,
         )
         
         # Save AI response to chat history
@@ -921,6 +928,12 @@ async def chat_stream_endpoint(
                         ensure_ascii=False,
                     ),
                 )
+                for ex in session_extractions:
+                    memory_manager.upsert_session_file(
+                        session_id=session_scope,
+                        filename=ex["original_filename"],
+                        content=ex.get("extracted_content", "")
+                    )
 
             # Save user message (post UI mode router cleanup)
             chat_history.add_message(
@@ -942,6 +955,7 @@ async def chat_stream_endpoint(
                 stream_metrics=stream_metrics,
                 approval_scope=f"web:{session_scope}:{resolved_persona}",
                 trace_id=trace_id,
+                session_id=session_scope,
             ):
                 full_response.append(chunk)
                 if first_chunk_ms is None:

@@ -451,12 +451,27 @@ def get_system_instruction(persona_override: Optional[str] = None) -> str:
 # ============================================
 
 def reflection_node(state: KuroState) -> Dict[str, Any]:
+    """
+    Pre-Processing Reflection Node (V7.0 Task Continuity).
+    Determines if the Master's intent is "Editing", "Adding", or "Revising".
+    """
     user_input = state.get("user_input", "").lower()
-    edit_keywords = ["edit", "add", "revise", "revisi", "tambah", "ubah", "perbaiki", "lanjut", "sekali lagi", "update"]
+    # Expanded list of edit intents based on common phrasing for task continuity
+    edit_keywords = [
+        "edit", "add", "revise", "revisi", "tambah", "ubah", "perbaiki",
+        "lanjut", "sekali lagi", "update", "koreksi", "ganti",
+        "tambahin", "lanjutin", "terusin", "modify", "adjust"
+    ]
+
+    # Simple heuristic to determine edit intent
     intent = "new"
     if any(kw in user_input for kw in edit_keywords):
-        intent = "edit"
-        logger.info("[REFLECTION] Intent detected as Edit/Update")
+        # Additional check to ensure it refers to a previous response
+        referential_keywords = ["yang tadi", "sebelumnya", "hasil", "itu", "ini", "jawaban", "output", "the previous", "that"]
+        if any(ref in user_input for ref in referential_keywords) or len(user_input.split()) <= 15:
+            intent = "edit"
+            logger.info(f"[REFLECTION] Intent detected as Edit/Update based on input: {user_input[:50]}...")
+
     return {"_intent": intent}
 
 
@@ -609,14 +624,24 @@ def memory_retrieval_node(state: KuroState) -> Dict[str, Any]:
 # ============================================
 
 def memory_extraction_node(state: KuroState) -> Dict[str, Any]:
+    """
+    V7.0 Memory Extraction Node: Consolidates Mem0 usage as a Declarative Fact Store.
+    Only triggers memory extraction when a task is successfully completed and NOT during an edit cycle.
+    """
     user_input = state.get("user_input", "")
     final_response = state.get("final_response", "")
     tool_result = state.get("tool_execution_result", {})
+    intent = state.get("_intent", "new")
 
     # 1. Guard Clause: Jangan jalankan ekstraksi jika respon asisten kosong
     # Ini mencegah penyimpanan memori yang tidak lengkap atau error API
     if not final_response or len(final_response.strip()) == 0:
         logger.warning("[MEM0_EXTRACTION] Skipped: No final_response found in state.")
+        return {}
+
+    # V7.0 Guard Clause: Skip extraction during edit/revision loops
+    if intent == "edit":
+        logger.info("[MEM0_EXTRACTION] Skipped: Currently in 'edit' intent cycle.")
         return {}
 
     task_success = False
@@ -636,6 +661,7 @@ def memory_extraction_node(state: KuroState) -> Dict[str, Any]:
                     "final_response": final_response,
                 }
             )
+            logger.info("[MEM0_EXTRACTION] Triggering Mem0 extraction (Task Completed successfully).")
     else:
         logger.info("[MEM0_EXTRACTION] Skipped: Task not explicitly completed.")
     return {}
@@ -669,6 +695,7 @@ def response_node(state: KuroState) -> Dict[str, Any]:
             user_input,
             persona_mode,
             mem0_retrieved_memories=mem0_memories or None,
+            session_id=session_id,
         )
         memory_injection = ctx["memory_injection"]
         mem0_context_block = ctx.get("mem0_context_block")
@@ -680,13 +707,32 @@ def response_node(state: KuroState) -> Dict[str, Any]:
         
         intent = state.get("_intent", "new")
         if intent == "edit":
-            system_prompt += (
-                "\n\n[TASK CONTINUITY LOCK]\n"
+            # Extract last assistant message for continuity lock
+            last_assistant_message = ""
+            recent_msgs = ctx.get("recent_messages", [])
+            for msg in reversed(recent_msgs):
+                if msg.get("role") == "assistant":
+                    last_assistant_message = msg.get("content", "")
+                    break
+
+            continuity_block = (
+                "\n\n[TASK CONTINUITY LOCK - EDIT MODE]\n"
                 "The Master is editing, revising, or adding to the previous turn. "
                 "You MUST act as an incremental update to the existing state. "
                 "DO NOT generate a 'New Conclusion' or restart the thought process. "
                 "Maintain the exact same context and only apply the requested delta."
             )
+
+            if last_assistant_message:
+                # Truncate to reasonable length to avoid overwhelming context
+                preview_len = min(len(last_assistant_message), 3000)
+                continuity_block += (
+                    f"\n\n[LAST GENERATED OUTPUT TO MODIFY]\n"
+                    f"{last_assistant_message[:preview_len]}"
+                    f"{'...' if len(last_assistant_message) > preview_len else ''}"
+                )
+
+            system_prompt += continuity_block
 
         # Assemble per-section context blocks so we can apply the token budget
         # uniformly. Each block is independently trimmed to its quota before
@@ -1349,6 +1395,7 @@ async def process_chat_with_graph_stream(
     stream_metrics: Optional[Dict[str, Any]] = None,
     approval_scope: str = "default",
     trace_id: str = "",
+    session_id: Optional[str] = None,
 ) -> AsyncGenerator[str, None]:
     """
     V5.5 STREAMING: Graph runs in asyncio.to_thread (sync stream) so the event loop can serve SSE.
@@ -1362,7 +1409,8 @@ async def process_chat_with_graph_stream(
     Yields:
         Response text chunks as they are generated (ONLY from response_node)
     """
-    session_id = str(uuid.uuid4())
+    if session_id is None:
+        session_id = str(uuid.uuid4())
     full_response = []
     response_text = ""
 
@@ -1409,6 +1457,7 @@ async def process_chat_with_graph_stream(
                 message,
                 persona_mode,
                 mem0_retrieved_memories=None,
+                session_id=session_id,
             )
             if stream_metrics is not None:
                 stream_metrics["memory_query_ms"] = round((time.perf_counter() - memory_started) * 1000, 2)
@@ -1429,6 +1478,34 @@ async def process_chat_with_graph_stream(
             full_message = f"{prefix}{memory_injection}"
             system_prompt = get_system_instruction(persona_override=persona_mode)
 
+            # Re-evaluate reflection node logic for fastpath
+            intent = reflection_node({"user_input": message}).get("_intent", "new")
+            if intent == "edit":
+                last_assistant_message = ""
+                recent_msgs = ctx.get("recent_messages", [])
+                for msg in reversed(recent_msgs):
+                    if msg.get("role") == "assistant":
+                        last_assistant_message = msg.get("content", "")
+                        break
+
+                continuity_block = (
+                    "\n\n[TASK CONTINUITY LOCK - EDIT MODE]\n"
+                    "The Master is editing, revising, or adding to the previous turn. "
+                    "You MUST act as an incremental update to the existing state. "
+                    "DO NOT generate a 'New Conclusion' or restart the thought process. "
+                    "Maintain the exact same context and only apply the requested delta."
+                )
+
+                if last_assistant_message:
+                    preview_len = min(len(last_assistant_message), 3000)
+                    continuity_block += (
+                        f"\n\n[LAST GENERATED OUTPUT TO MODIFY]\n"
+                        f"{last_assistant_message[:preview_len]}"
+                        f"{'...' if len(last_assistant_message) > preview_len else ''}"
+                    )
+
+                system_prompt += continuity_block
+
             emitted = 0
             response_acc: List[str] = []
             stream_llm_started = time.perf_counter()
@@ -1446,6 +1523,21 @@ async def process_chat_with_graph_stream(
                 yield response_text
                 emitted += 1
             _persist_short_term_and_enqueue_writes(message, response_text, persona_mode)
+
+            # V7.0 Mem0 Check inside streaming fast-path
+            if intent != "edit":
+                task_success = False
+                success_keywords = ["thanks", "terima kasih", "selesai", "fixed", "done", "berhasil", "sip", "ok", "confirmed"]
+                if any(kw in message.lower() for kw in success_keywords):
+                    task_success = True
+
+                if task_success:
+                    _enqueue_post_response_task({
+                        "kind": "mem0_extract",
+                        "user_input": message,
+                        "final_response": response_text,
+                    })
+
             # P3.1 — cache the fastpath response for near-duplicate queries.
             try:
                 from kuro_backend import semantic_cache
@@ -1644,6 +1736,7 @@ def process_chat_with_graph(
     persona_override: Optional[str] = None,
     approval_scope: str = "sync_default",
     trace_id: str = "",
+    session_id: Optional[str] = None,
 ) -> str:
     """
     Process chat message using LangGraph state machine.
@@ -1657,7 +1750,8 @@ def process_chat_with_graph(
         Generated response string
     """
     # Generate unique session ID for observability
-    session_id = str(uuid.uuid4())
+    if session_id is None:
+        session_id = str(uuid.uuid4())
     
     try:
         approval_response = _maybe_handle_pending_approval(message, approval_scope)

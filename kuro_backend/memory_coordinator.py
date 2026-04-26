@@ -834,6 +834,7 @@ def build_context_for_llm(
     include_referent_grounding: bool = True,
     chat_platform: Optional[str] = None,
     context_budget: Any = None,
+    session_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Single read path: raw short-term + optional Mem0 block (same inputs as response_node / stream).
@@ -863,6 +864,7 @@ def build_context_for_llm(
     # are independent from Mem0 context formatting.
     parallel_tasks: Dict[str, Any] = {
         "short_term": lambda: memory_manager.get_short_term(persona_scope=persona_mode),
+        "session_files": lambda: memory_manager.get_session_files(session_id) if session_id else [],
     }
     if include_referent_grounding:
         parallel_tasks["referent"] = lambda: build_referent_grounding_block(
@@ -877,6 +879,7 @@ def build_context_for_llm(
 
     fan_out = _parallel_gather_sync(parallel_tasks)
     all_recent_messages = fan_out.get("short_term") or []
+    # V7.0: Raw Episodic Buffer (Last 10 turns MUST be passed in raw, unsummarized form)
     recent_messages = all_recent_messages[-10:]
     referent_grounding_block = fan_out.get("referent") if include_referent_grounding else None
     mem0_context_block = fan_out.get("mem0_fmt") if mem0_retrieved_memories else None
@@ -889,14 +892,23 @@ def build_context_for_llm(
 
     # KURO V7.0: raw short-term window only (no summary compression) and Mem0 as
     # sole long-term semantic layer. Keep memory_injection focused on raw turns.
+    # Label explicitly as RAW EPISODIC BUFFER
     short_term_block = _format_entries_for_prompt(recent_messages, max_chars_per_entry=10000)
     memory = {
         "profile": "",
         "long_term": "",
-        "short_term": short_term_block,
+        "short_term": f"[RAW EPISODIC BUFFER - LAST 10 TURNS]\n{short_term_block}",
         "compliance": "",
     }
     memory_injection = memory_manager.format_memory_with_temporal_grounding(memory)
+
+    # V7.0 Active Buffer (Session Files)
+    session_files = fan_out.get("session_files") or []
+    if session_files:
+        session_files_block = "[ACTIVE BUFFER - SESSION FILES]\n"
+        for sf in session_files:
+            session_files_block += f"\n--- File: {sf['filename']} ---\n{sf['content']}\n"
+        memory_injection = f"{session_files_block}\n\n{memory_injection}"
 
     finance_block = ""
     market_block = ""
@@ -930,6 +942,7 @@ async def build_context_for_llm_async(
     include_referent_grounding: bool = True,
     chat_platform: Optional[str] = None,
     context_budget: Any = None,
+    session_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Async variant of :func:`build_context_for_llm`.
 
@@ -947,6 +960,7 @@ async def build_context_for_llm_async(
         include_referent_grounding=include_referent_grounding,
         chat_platform=chat_platform,
         context_budget=context_budget,
+        session_id=session_id,
     )
 
 

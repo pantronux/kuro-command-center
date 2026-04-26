@@ -116,8 +116,11 @@ def extract_json_from_text(text: str) -> Optional[Dict]:
     return None
 
 # Mem0 storage directory
-MEM0_STORAGE_DIR = "/home/kuro/kuro_mem0"
-os.makedirs(MEM0_STORAGE_DIR, exist_ok=True)
+MEM0_STORAGE_DIR = os.getenv("KURO_MEM0_STORAGE_DIR", "/home/kuro/kuro_mem0")
+try:
+    os.makedirs(MEM0_STORAGE_DIR, exist_ok=True)
+except Exception as e:
+    logger.warning(f"Could not create MEM0_STORAGE_DIR at {MEM0_STORAGE_DIR}: {e}")
 
 # Pantronux user ID (privacy: only store data for this user)
 MASTER_USER_ID = "pantronux"
