@@ -364,15 +364,22 @@ async def _stream_direct_llm_chunks(
     def _worker() -> None:
         try:
             client = _get_genai_client()
+
+            # Use cached content if configured
+            config_kwargs = {
+                "system_instruction": system_prompt,
+                "temperature": profile.temperature,
+                "top_p": profile.top_p,
+                "top_k": profile.top_k,
+            }
+
+            if settings.GEMINI_CACHED_CONTENT:
+                config_kwargs["cached_content"] = settings.GEMINI_CACHED_CONTENT
+
             stream = client.models.generate_content_stream(
                 model=PRIMARY_MODEL,
                 contents=full_message,
-                config=genai_types.GenerateContentConfig(
-                    system_instruction=system_prompt,
-                    temperature=profile.temperature,
-                    top_p=profile.top_p,
-                    top_k=profile.top_k,
-                ),
+                config=genai_types.GenerateContentConfig(**config_kwargs),
             )
             for event in stream:
                 chunk = getattr(event, "text", None)
@@ -825,15 +832,21 @@ def response_node(state: KuroState) -> Dict[str, Any]:
             genai_client = _get_genai_client()
 
             profile = personas.get_sampling_profile(persona_mode)
+
+            # Use cached content if configured
+            config_kwargs = {
+                "system_instruction": system_prompt,
+                "temperature": profile.temperature,
+                "top_p": profile.top_p,
+                "top_k": profile.top_k,
+            }
+            if settings.GEMINI_CACHED_CONTENT:
+                config_kwargs["cached_content"] = settings.GEMINI_CACHED_CONTENT
+
             response = genai_client.models.generate_content(
                 model=PRIMARY_MODEL,
                 contents=contents_parts,
-                config=genai_types.GenerateContentConfig(
-                    system_instruction=system_prompt,
-                    temperature=profile.temperature,
-                    top_p=profile.top_p,
-                    top_k=profile.top_k,
-                ),
+                config=genai_types.GenerateContentConfig(**config_kwargs),
             )
             # #region agent log
             candidates = getattr(response, "candidates", None) or []
