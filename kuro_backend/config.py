@@ -22,7 +22,9 @@ load_dotenv()
 # ============================================
 # CRITICAL: gemini-2.0-flash is DEPRECATED. Use gemini-3-flash-preview.
 PRIMARY_MODEL = "gemini-3-flash-preview"
-CLASSIFIER_MODEL = "gemini-3-flash-preview"  # For fact classification
+# V6.0 Perf Optimization: Use 2.5-flash for background tasks like memory extraction/classification
+# to save latency and token costs, while preserving 3-flash for the primary responses.
+CLASSIFIER_MODEL = "gemini-2.5-flash"  # For fact classification and internal routing tasks
 
 class Settings:
     """
