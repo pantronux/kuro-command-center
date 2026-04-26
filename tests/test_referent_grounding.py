@@ -109,13 +109,7 @@ def test_build_context_includes_referent_when_deictic(monkeypatch):
     def _stub_query_memory(*args, **kwargs):
         return {"short_term": "", "long_term": "", "profile": ""}
 
-    def _stub_format(mem):
-        return ""
-
     monkeypatch.setattr("kuro_backend.memory_manager.query_memory", _stub_query_memory)
-    monkeypatch.setattr(
-        "kuro_backend.memory_manager.format_memory_with_temporal_grounding", _stub_format
-    )
     monkeypatch.setattr("kuro_backend.memory_manager.get_short_term", lambda **kw: [])
 
     ctx = memory_coordinator.build_context_for_llm(

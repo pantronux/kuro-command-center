@@ -71,7 +71,7 @@ def list_my_files(directory: str = None) -> str:
     """
     List all files in a directory with physical verification.
     Default: uploaded_files directory.
-    This function ALWAYS checks the actual filesystem - no memory/ChromaDB reliance.
+    This function ALWAYS checks the actual filesystem - no memory/Mem0 reliance.
     """
     target_dir = directory if directory else UPLOAD_DIR
     
@@ -1047,7 +1047,7 @@ def parse_datetime(text: str) -> Optional[datetime]:
 
 def lookup_chroma_context(query: str) -> str:
     """
-    Look up context from ChromaDB long-term memory for a reminder query.
+    Look up context from Mem0 long-term memory for a reminder query.
     Returns relevant context to enrich the reminder description.
     """
     try:
@@ -1056,7 +1056,7 @@ def lookup_chroma_context(query: str) -> str:
         if results:
             return "\n".join(results)[:1000]  # Limit context length
     except Exception as e:
-        logger.warning(f"ChromaDB context lookup failed: {e}")
+        logger.warning(f"Mem0 context lookup failed: {e}")
     return ""
 
 

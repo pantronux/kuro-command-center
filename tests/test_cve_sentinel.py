@@ -228,16 +228,21 @@ def test_publish_event_uses_security_cve_kind_and_dedup(
 def test_persist_cve_alert_writes_chroma_metadata(monkeypatch):
     captured = {}
 
-    def fake_add_long_term_v2(content, metadata=None):
-        captured["content"] = content
-        captured["metadata"] = metadata
+    class FakeMemoryClient:
+        def store_memories(self, memories):
+            captured["memories"] = memories
+            return True
 
-    from kuro_backend import memory_manager as mm
-    monkeypatch.setattr(mm, "add_long_term_v2", fake_add_long_term_v2)
+    class FakePerpetualMemory:
+        def get_memory_client(self):
+            return FakeMemoryClient()
+
+    from kuro_backend import perpetual_memory
+    monkeypatch.setattr(perpetual_memory, "get_memory_client", FakePerpetualMemory().get_memory_client)
     cve = _cve(id_="CVE-CHROMA", cvss=8.1, target="vm101")
     assert dreaming_worker._persist_cve_alert(cve, cycle_id=7) is True
-    assert "CVE-CHROMA" in captured["content"]
-    md = captured["metadata"]
+    assert "CVE-CHROMA" in captured["memories"][0]["memory"]
+    md = captured["memories"][0]["metadata"]
     assert md["tag"] == "cve-alert"
     assert md["source"] == "cve_sentinel"
     assert md["cve_id"] == "CVE-CHROMA"

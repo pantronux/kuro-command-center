@@ -201,7 +201,7 @@ def add_reminder(event_name: str, event_time: str, description: str = "",
         event_time: ISO format datetime string
         description: Description of the event
         source: 'web' or 'telegram'
-        context: Additional context from ChromaDB lookup
+        context: Additional context from Mem0 lookup
     
     Returns:
         The ID of the newly created reminder

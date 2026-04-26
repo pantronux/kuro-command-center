@@ -162,7 +162,7 @@ _SSOT_PRIORITY_DIRECTIVE: Final[str] = (
     "- If the SSoT does not mention a given operational fact about the "
     "Master, respond with 'not yet recorded in SSoT' rather than inventing "
     "counts, dates, or times.\n"
-    "- DO NOT blend non-SSoT facts (Mem0 / ChromaDB / general knowledge) as "
+    "- DO NOT blend non-SSoT facts (Mem0 / general knowledge) as "
     "though they originated from SSoT. Name the source explicitly when needed.\n"
     "- DO NOT quote streak counts, completed-habit counts, or reminder times "
     "that are absent from [HABIT TRACKER] / [REMINDER LIST]."
@@ -190,7 +190,7 @@ _CORE_COMMON_TAIL: Final[str] = (
     "2. Inspect [ACTIVE_CONVERSATION_CONTEXT] for pronouns ('this', 'that', 'it', 'earlier').\n"
     "3. Verify on-disk facts with os.path.exists() when the question concerns a file.\n"
     "4. Check memory in order of trust (Tier 1 > Tier 2 > Tier 3).\n"
-    "5. Cross-verify SQLite and ChromaDB for consistency.\n"
+    "5. Cross-verify SQLite and Mem0 for consistency.\n"
     "6. Only then deliver an accurate, verified answer.\n\n"
     "7. When factual data is sparse or uncertain, explore alternative angles and offer the best reasoned estimate while remaining rational.\n\n"
     "ANAPHORA RESOLUTION (PRONOUNS):\n"
@@ -207,12 +207,12 @@ _CORE_COMMON_TAIL: Final[str] = (
     "Treat the memory injected into the prompt as your primary source of truth. "
     "[MASTER PROFILE] holds Pantronux's permanent identity. "
     "[ACTIVE_CONVERSATION_CONTEXT] contains the last five interactions — HIGHEST PRIORITY for context. "
-    "[SUPPORTING FACTS] holds long-term memory from ChromaDB. "
+    "[SUPPORTING FACTS] holds long-term memory from Mem0. "
     "ANTI-HALLUCINATION: For the Master's operational/personal data, if it is absent from memory and tools, NEVER fabricate — ask or acknowledge. "
     "For general compliance/ISO/regulation knowledge, local memory is only supplementary; the main answer may come from model knowledge. "
     "If memory contradicts general knowledge, prioritise memory for personal facts but attach a brief disclaimer.\n\n"
     "OUTPUT FORMAT REQUIREMENT:\n"
-    "- For grounded personal/operational history data (SQLite / ChromaDB / tool), DO NOT add special tags; answer directly without a format label.\n"
+    "- For grounded personal/operational history data (SQLite / Mem0 / tool), DO NOT add special tags; answer directly without a format label.\n"
     "- Prefix with '[Kuro Analysis]:' when the answer draws on Gemini general knowledge, estimates, or incomplete data.\n"
     "- When database facts are minimal, still respond in '[Kuro Analysis]' mode with a disclaimer that this is general analysis rather than personal-history data.\n\n"
     "CAPABILITIES:\n"
@@ -238,13 +238,13 @@ _GRAPH_COMMON_TAIL: Final[str] = (
     "2. Inspect the conversation context for pronouns ('this', 'that', 'it', 'earlier').\n"
     "3. Verify on-disk facts with os.path.exists() when the question concerns a file.\n"
     "4. Check memory in order of trust (Tier 1 > Tier 2 > Tier 3).\n"
-    "5. Cross-verify SQLite and ChromaDB for consistency.\n"
+    "5. Cross-verify SQLite and Mem0 for consistency.\n"
     "6. Only then deliver an accurate, verified answer.\n\n"
     "NEGATIVE CONSTRAINTS & HALLUCINATION CHECK:\n"
     "- DO NOT assume a file exists when os.path.exists() returns False.\n"
     "- If you do not know, say so plainly and offer to search another folder.\n"
     "- DO NOT fabricate facts, data, or clause references.\n"
-    "- Always cross-verify Tier-1 memory (SQLite) against Tier-2 memory (ChromaDB).\n\n"
+    "- Always cross-verify Tier-1 memory (SQLite) against Tier-2 memory (Mem0).\n\n"
     "HITL SECURITY POLICY (MANDATORY):\n"
     "- Whenever a destructive command reaches advanced_execution_tool (e.g. 'delete', 'format', 'rm -rf'), you MUST halt for approval.\n"
     "- DO NOT invoke the OpenClaw bridge until the Master replies with exactly 'y'.\n"
@@ -307,7 +307,7 @@ def get_sampling_profile(persona: str | None) -> SamplingProfile:
 # Each persona owns its own token budget + weighting across the 3 memory
 # layers:
 #   - Layer 1 (Recent Chat) : short-term buffer + sliding-window summary
-#   - Layer 2 (Semantic)    : Chroma RAG + Mem0 formatted block + referent
+#   - Layer 2 (Semantic)    : Mem0 RAG + Mem0 formatted block + referent
 #   - Layer 3 (Factual SSoT): habits, reminders, compliance refs (IMMUTABLE)
 #
 # Weights MUST sum to 1.0 and Layer 3 is treated as a FLOOR (never trimmed

@@ -18,7 +18,7 @@ Purpose: Central memory-read orchestration + post-response write fan-out across 
 Caller: langgraph_core response_node, main.py chat routes, dreaming_worker, services/core_service.
 Dependencies: memory_manager, perpetual_memory, finance_db, reminder_service, habit_service, intelligence_engine, observability, Mem0 (optional).
 Main Functions: build_context_for_llm(), post_response_memory_writes(), record_mutation(), build_gemini_contents_parts(), build_referent_grounding_block().
-Side Effects: Reads + writes across sqlite + ChromaDB, Mem0 HTTP calls, SSoT revision bumps via core_service.bump_data_revision.
+Side Effects: Reads + writes across sqlite + Mem0, Mem0 HTTP calls, SSoT revision bumps via core_service.bump_data_revision.
 """
 from __future__ import annotations
 
@@ -894,13 +894,10 @@ def build_context_for_llm(
     # sole long-term semantic layer. Keep memory_injection focused on raw turns.
     # Label explicitly as RAW EPISODIC BUFFER
     short_term_block = _format_entries_for_prompt(recent_messages, max_chars_per_entry=10000)
-    memory = {
-        "profile": "",
-        "long_term": "",
-        "short_term": f"[RAW EPISODIC BUFFER - LAST 10 TURNS]\n{short_term_block}",
-        "compliance": "",
-    }
-    memory_injection = memory_manager.format_memory_with_temporal_grounding(memory)
+
+    memory_injection = ""
+    if short_term_block:
+        memory_injection = f"[RAW EPISODIC BUFFER - LAST 10 TURNS]\n{short_term_block}"
 
     # V7.0 Active Buffer (Session Files)
     session_files = fan_out.get("session_files") or []
