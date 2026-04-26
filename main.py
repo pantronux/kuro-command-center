@@ -713,6 +713,7 @@ async def chat_endpoint(
                         "stored_filename": stored_filename,
                         "path": file_path,
                     })
+                    file_contents.append(f"\n--- Gambar Dilampirkan: {saved_file['original_filename']} ---\n(Gambar ini telah diteruskan ke modul Vision Anda untuk dianalisis)")
                 else:
                     # Use smart_read facade for Office/PDF/text/log files
                     read_result = tools.smart_read(file_ref=file_path, instruction="ekstrak konten utama file ini", max_chars=10000)
@@ -887,6 +888,7 @@ async def chat_stream_endpoint(
                             "stored_filename": stored_filename,
                             "path": file_path,
                         })
+                        file_contents.append(f"\n--- Gambar Dilampirkan: {saved_file['original_filename']} ---\n(Gambar ini telah diteruskan ke modul Vision Anda untuk dianalisis)")
                     else:
                         read_result = tools.smart_read(file_ref=file_path, instruction="ekstrak konten utama file ini", max_chars=10000)
                         parsed_content = read_result.get("summary") or read_result.get("content")
