@@ -470,7 +470,7 @@
         });
         
         function populateYearFilters() {
-            const currentYear = new Date().getFullYear();
+            const currentYear = new Date().getUTCFullYear();
             const yearSelect = document.getElementById('filter-year');
             const weekYearSelect = document.getElementById('filter-week-year');
             
@@ -489,12 +489,12 @@
         
         function setDefaultFilters() {
             const now = new Date();
-            document.getElementById('filter-month').value = now.getMonth() + 1;
+            document.getElementById('filter-month').value = now.getUTCMonth() + 1;
             document.getElementById('filter-week').value = getISOWeek(now);
         }
         
         function getISOWeek(date) {
-            const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+            const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
             const dayNum = d.getUTCDay() || 7;
             d.setUTCDate(d.getUTCDate() + 4 - dayNum);
             const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
@@ -583,7 +583,6 @@
         
         function renderMonthlyGrid(data) {
             const { habits, days_in_month, daily_totals } = data;
-            // FIX: Use UTC date to match backend's date format (YYYY-MM-DD)
             const now = new Date();
             const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
             const isCurrentMonth = todayUTC.getUTCFullYear() === data.year && todayUTC.getUTCMonth() + 1 === data.month;
@@ -598,7 +597,6 @@
             // Header row with day numbers
             html += '<thead><tr><th class="text-left p-2 w-48">Habit</th>';
             for (let d = 1; d <= days_in_month; d++) {
-                // FIX: Use UTC date for day-of-week calculation
                 const dayOfWeek = new Date(Date.UTC(data.year, data.month - 1, d)).getUTCDay();
                 const dayLabel = ['S', 'M', 'T', 'W', 'T', 'F', 'S'][dayOfWeek];
                 const isToday = isCurrentMonth && d === todayDate;
@@ -646,7 +644,6 @@
             
             document.getElementById('grid-title').textContent = `📆 Week ${data.week}, ${data.year} - Habit Grid`;
             
-            // FIX: Use UTC date for week comparison
             const now = new Date();
             const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
             const weekStartUTC = new Date(week_start + 'T00:00:00Z');
