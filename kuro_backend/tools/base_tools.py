@@ -951,32 +951,6 @@ def process_video(video_path: str):
 
 
 # ============================================
-# COMPLIANCE & AUDIT MODULE
-# ============================================
-COMPLIANCE_STANDARDS = {
-    "iso27001": {
-        "name": "ISO/IEC 27001:2022",
-        "prompt": "Analyze the following document against ISO/IEC 27001:2022 requirements. For each clause, provide: clause_id, status (compliant/non_compliant/partial), finding, recommendation, confidence (0-1). Return JSON array."
-    },
-    "nist80053": {
-        "name": "NIST SP 800-53 Rev. 5",
-        "prompt": "Analyze the following document against NIST SP 800-53 Rev. 5 security controls. For each control family, provide: clause_id, status, finding, recommendation, confidence. Return JSON array."
-    },
-    "gdpr": {
-        "name": "GDPR (EU) 2016/679",
-        "prompt": "Analyze the following document against GDPR requirements. For each relevant article, provide: clause_id, status, finding, recommendation, confidence. Return JSON array."
-    }
-}
-
-def analyze_compliance(document_text: str, standard_type: str = "iso27001") -> Dict:
-    return {"success": False, "error": "Compliance module purged in KURO V7.0"}
-
-
-def search_compliance_clause(query: str, standard: str = None) -> List[Dict]:
-    return []
-
-
-# ============================================
 # REMINDER & SCHEDULING TOOLS
 # ============================================
 def parse_datetime(text: str) -> Optional[datetime]:

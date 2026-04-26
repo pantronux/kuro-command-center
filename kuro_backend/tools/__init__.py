@@ -21,8 +21,6 @@ from kuro_backend.tools.base_tools import (
     index_system_path,
     analyze_system_health,
     process_video,
-    analyze_compliance,
-    search_compliance_clause,
     parse_datetime,
     lookup_chroma_context,
     add_reminder_tool,
