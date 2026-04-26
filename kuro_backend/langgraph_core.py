@@ -91,7 +91,6 @@ _TRUE_TOKEN_STREAMING_ENABLED = (
 )
 _POST_RESPONSE_QUEUE_MAXSIZE = int(os.getenv("KURO_POST_RESPONSE_QUEUE_MAXSIZE", "500"))
 _post_response_queue = queue.Queue(maxsize=_POST_RESPONSE_QUEUE_MAXSIZE)  # type: ignore[assignment]
-_DEBUG_LOG_PATH = "/home/kuro/projects/kuro/.cursor/debug-0dd1b5.log"
 
 
 @functools.lru_cache(maxsize=1)
@@ -107,25 +106,6 @@ def _parse_approval_token(user_input: str) -> Optional[str]:
         if len(parts) == 2 and parts[1].strip():
             return parts[1].strip()
     return None
-
-
-def _debug_log(run_id: str, hypothesis_id: str, location: str, message: str, data: Dict[str, Any]) -> None:
-    # #region agent log
-    try:
-        payload = {
-            "sessionId": "0dd1b5",
-            "runId": run_id,
-            "hypothesisId": hypothesis_id,
-            "location": location,
-            "message": message,
-            "data": data,
-            "timestamp": int(time.time() * 1000),
-        }
-        with open(_DEBUG_LOG_PATH, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-    # #endregion
 
 
 def _contains_destructive_keyword(text: str) -> bool:
@@ -364,15 +344,22 @@ async def _stream_direct_llm_chunks(
     def _worker() -> None:
         try:
             client = _get_genai_client()
+
+            # Use cached content if configured
+            config_kwargs = {
+                "system_instruction": system_prompt,
+                "temperature": profile.temperature,
+                "top_p": profile.top_p,
+                "top_k": profile.top_k,
+            }
+
+            if settings.GEMINI_CACHED_CONTENT:
+                config_kwargs["cached_content"] = settings.GEMINI_CACHED_CONTENT
+
             stream = client.models.generate_content_stream(
                 model=PRIMARY_MODEL,
                 contents=full_message,
-                config=genai_types.GenerateContentConfig(
-                    system_instruction=system_prompt,
-                    temperature=profile.temperature,
-                    top_p=profile.top_p,
-                    top_k=profile.top_k,
-                ),
+                config=genai_types.GenerateContentConfig(**config_kwargs),
             )
             for event in stream:
                 chunk = getattr(event, "text", None)
@@ -573,20 +560,6 @@ def supervisor_node(state: KuroState) -> Dict[str, Any]:
         is_tool_query = any(kw in user_input for kw in tool_keywords)
         is_finance_query = any(kw in user_input for kw in finance_keywords)
         is_market_query = any(kw in user_input for kw in market_keywords)
-        # #region agent log
-        _debug_log(
-            state.get("_trace_id", "") or state.get("_session_id", "unknown"),
-            "H1",
-            "langgraph_core.py:supervisor_node",
-            "routing_signals",
-            {
-                "is_tool_query": is_tool_query,
-                "is_finance_query": is_finance_query,
-                "is_market_query": is_market_query,
-                "input_preview": user_input[:160],
-            },
-        )
-        # #endregion
         
         # Route to tool node for file actions
         if is_tool_query:
@@ -840,19 +813,6 @@ def response_node(state: KuroState) -> Dict[str, Any]:
         contents_parts = memory_coordinator.build_gemini_contents_parts(
             full_message, image_paths if image_paths else None
         )
-        # #region agent log
-        _debug_log(
-            state.get("_trace_id", "") or state.get("_session_id", "unknown"),
-            "H6",
-            "langgraph_core.py:response_node",
-            "prompt_assembly_stats",
-            {
-                "full_message_chars": len(full_message),
-                "sections_present": sorted([k for k, v in sections.items() if v]),
-                "image_parts_count": len(image_paths or []),
-            },
-        )
-        # #endregion
 
         # Generate response using direct google-genai SDK (more reliable)
         response_text: Optional[str] = None  # Initialize to detect if generation fails
@@ -860,46 +820,22 @@ def response_node(state: KuroState) -> Dict[str, Any]:
             genai_client = _get_genai_client()
 
             profile = personas.get_sampling_profile(persona_mode)
+
+            # Use cached content if configured
+            config_kwargs = {
+                "system_instruction": system_prompt,
+                "temperature": profile.temperature,
+                "top_p": profile.top_p,
+                "top_k": profile.top_k,
+            }
+            if settings.GEMINI_CACHED_CONTENT:
+                config_kwargs["cached_content"] = settings.GEMINI_CACHED_CONTENT
+
             response = genai_client.models.generate_content(
                 model=PRIMARY_MODEL,
                 contents=contents_parts,
-                config=genai_types.GenerateContentConfig(
-                    system_instruction=system_prompt,
-                    temperature=profile.temperature,
-                    top_p=profile.top_p,
-                    top_k=profile.top_k,
-                ),
+                config=genai_types.GenerateContentConfig(**config_kwargs),
             )
-            # #region agent log
-            candidates = getattr(response, "candidates", None) or []
-            finish_reason = ""
-            if candidates:
-                finish_reason = str(getattr(candidates[0], "finish_reason", "") or "")
-            prompt_feedback = getattr(response, "prompt_feedback", None)
-            block_reason = ""
-            if prompt_feedback:
-                block_reason = str(getattr(prompt_feedback, "block_reason", "") or "")
-            text_len = -1
-            try:
-                text_preview_val = response.text or ""
-                text_len = len(text_preview_val)
-            except Exception:
-                text_preview_val = ""
-            _debug_log(
-                state.get("_trace_id", "") or state.get("_session_id", "unknown"),
-                "H7",
-                "langgraph_core.py:response_node",
-                "raw_model_response_shape",
-                {
-                    "candidates_count": len(candidates),
-                    "finish_reason": finish_reason,
-                    "has_prompt_feedback": bool(prompt_feedback),
-                    "block_reason": block_reason,
-                    "response_text_len": text_len,
-                    "response_text_preview": text_preview_val[:160],
-                },
-            )
-            # #endregion
             
             # SAFETY CHECK: Check prompt_feedback BEFORE accessing response.text
             # When content is blocked by safety filters, response.text raises AttributeError
@@ -918,37 +854,12 @@ def response_node(state: KuroState) -> Dict[str, Any]:
                         response_text = "Maaf, Pantronux. Respons diblokir oleh filter keamanan Gemini."
                     else:
                         raise text_err
-            # #region agent log
-            _debug_log(
-                state.get("_trace_id", "") or state.get("_session_id", "unknown"),
-                "H5",
-                "langgraph_core.py:response_node",
-                "response_text_resolution",
-                {
-                    "response_text_is_none_after_resolution": response_text is None,
-                    "response_text_preview": (response_text or "")[:200],
-                },
-            )
-            # #endregion
             
             # Track token usage
             if hasattr(response, 'usage_metadata') and response.usage_metadata:
                 prompt_tokens = response.usage_metadata.prompt_token_count or 0
                 completion_tokens = response.usage_metadata.candidates_token_count or 0
                 total_tokens = response.usage_metadata.total_token_count or (prompt_tokens + completion_tokens)
-                # #region agent log
-                _debug_log(
-                    state.get("_trace_id", "") or state.get("_session_id", "unknown"),
-                    "H8",
-                    "langgraph_core.py:response_node",
-                    "usage_metadata",
-                    {
-                        "prompt_tokens": prompt_tokens,
-                        "completion_tokens": completion_tokens,
-                        "total_tokens": total_tokens,
-                    },
-                )
-                # #endregion
                 
                 observability.track_token_usage(session_id, prompt_tokens, completion_tokens, total_tokens)
                 
@@ -1089,23 +1000,6 @@ def tool_node(state: KuroState) -> Dict[str, Any]:
             )
 
             function_calls = _collect_tool_calls(response)
-            # #region agent log
-            finish_reason = ""
-            candidates = getattr(response, "candidates", None) or []
-            if candidates:
-                finish_reason = str(getattr(candidates[0], "finish_reason", "") or "")
-            _debug_log(
-                state.get("_trace_id", "") or state.get("_session_id", "unknown"),
-                "H2",
-                "langgraph_core.py:tool_node",
-                "tool_router_response_shape",
-                {
-                    "function_calls_count": len(function_calls),
-                    "finish_reason": finish_reason,
-                    "response_text_preview": (getattr(response, "text", "") or "")[:160],
-                },
-            )
-            # #endregion
             if not function_calls:
                 reason = ""
                 try:
@@ -1113,15 +1007,6 @@ def tool_node(state: KuroState) -> Dict[str, Any]:
                 except Exception:
                     reason = ""
                 logger.info("[TOOL_NODE] No function_call returned; falling through.")
-                # #region agent log
-                _debug_log(
-                    state.get("_trace_id", "") or state.get("_session_id", "unknown"),
-                    "H3",
-                    "langgraph_core.py:tool_node",
-                    "no_function_call_fallback",
-                    {"reason_preview": reason[:160]},
-                )
-                # #endregion
                 if span is not None:
                     span.set_attribute("tool_node.tool_used", "none")
                 return {
@@ -1133,19 +1018,6 @@ def tool_node(state: KuroState) -> Dict[str, Any]:
             tool_name = getattr(fc, "name", None) or ""
             raw_args = getattr(fc, "args", None) or {}
             args: Dict[str, Any] = dict(raw_args) if isinstance(raw_args, dict) else {}
-            # #region agent log
-            _debug_log(
-                state.get("_trace_id", "") or state.get("_session_id", "unknown"),
-                "H4",
-                "langgraph_core.py:tool_node",
-                "selected_tool_call",
-                {
-                    "tool_name": tool_name,
-                    "args_keys": sorted(list(args.keys()))[:20],
-                    "args_type": str(type(raw_args)),
-                },
-            )
-            # #endregion
 
             if not tool_name:
                 if span is not None:
