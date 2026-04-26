@@ -298,17 +298,9 @@
                         <p class="px-4 text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Tools</p>
                     </div>
                     
-                    <a href="/habits" class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-all" title="Daily Habits">
-                        <i data-lucide="target" class="w-5 h-5 flex-shrink-0"></i>
-                        <span class="sidebar-text">Daily Habits</span>
-                    </a>
-                    <a href="/reminders" class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-all" title="Reminders">
-                        <i data-lucide="clock" class="w-5 h-5 flex-shrink-0"></i>
-                        <span class="sidebar-text">Reminders</span>
-                    </a>
-                    <a href="/compliance" class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-all" title="Compliance">
-                        <i data-lucide="shield-check" class="w-5 h-5 flex-shrink-0"></i>
-                        <span class="sidebar-text">Compliance</span>
+                    <a href="/tutorial" class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-all" title="Tutorial">
+                        <i data-lucide="book-open" class="w-5 h-5 flex-shrink-0"></i>
+                        <span class="sidebar-text">Tutorial</span>
                     </a>
                     <a href="/intelligence" class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-all" title="Intelligence Hub">
                         <i data-lucide="radar" class="w-5 h-5 flex-shrink-0"></i>
@@ -649,6 +641,29 @@
         import("/static/js/live2d_manager.js")
             .then((mod) => { mod.initLive2D && mod.initLive2D(); })
             .catch((err) => { console.warn("[Kuro] Live2D manager unavailable:", err); });
+    </script>
+
+    <!-- Nuclear Purge: Remove any ghost speaker buttons or voice artifacts -->
+    <script>
+        (function() {
+            const purge = () => {
+                const targets = [
+                    '.kuro-speak-btn', 
+                    '#kuro-speak-btn', 
+                    '[class*="speak-btn"]', 
+                    '[id*="speak-btn"]',
+                    'button:has(i[data-lucide="volume-2"])',
+                    'button:has(i[data-lucide="volume-x"])'
+                ];
+                targets.forEach(selector => {
+                    document.querySelectorAll(selector).forEach(el => el.remove());
+                });
+            };
+            // Run immediately and then occasionally to catch dynamic injections
+            purge();
+            const observer = new MutationObserver(purge);
+            observer.observe(document.body, { childList: true, subtree: true });
+        })();
     </script>
 </body>
 </html>

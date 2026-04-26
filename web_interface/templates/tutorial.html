@@ -46,6 +46,7 @@
 
     <!-- Mark.js for Search Highlighting -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/mark.js/8.11.1/mark.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js"></script>
 
     <style>
         body {
@@ -194,7 +195,7 @@
                 </div>
                 <div>
                     <h1 class="font-bold text-slate-100 tracking-wide flex items-center gap-2">
-                        KURO V7.0 <span class="text-xs font-mono text-cyan-400 bg-cyan-900/30 px-2 py-0.5 rounded-full border border-cyan-800/50">DOCS</span>
+                        KURO V7.0 <span class="text-xs font-mono text-cyan-400 bg-cyan-900/30 px-2 py-0.5 rounded-full border border-cyan-800/50">TUTORIAL</span>
                     </h1>
                 </div>
             </div>
@@ -315,8 +316,17 @@
         
         renderer.code = function({text, lang}) {
             if (lang === 'mermaid') {
-                // Return a placeholder div that we will process after DOM injection
-                return `<div class="mermaid-container my-6"><div class="mermaid">${text}</div></div>`;
+                return `
+                <div class="mermaid-container relative group my-8">
+                    <div class="mermaid bg-gray-900/50 rounded-xl p-4 overflow-hidden border border-gray-700/50" style="height: 500px;">
+                        ${text}
+                    </div>
+                    <div class="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                        <button onclick="resetZoom(this)" class="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-white border border-slate-600 shadow-xl" title="Reset Zoom">
+                            <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+                        </button>
+                    </div>
+                </div>`;
             }
             // Syntax highlighting using highlight.js
             const validLanguage = hljs.getLanguage(lang) ? lang : 'plaintext';
@@ -395,7 +405,7 @@
         // Load Content
         async function loadDocumentation() {
             try {
-                const response = await fetch('/api/docs/content');
+                const response = await fetch('/api/tutorial/content');
                 const data = await response.json();
                 
                 if (data.status === 'success') {
@@ -413,6 +423,10 @@
                         await mermaid.run({
                             querySelector: '.mermaid'
                         });
+                        // Initialize pan-zoom for all rendered mermaids
+                        document.querySelectorAll('.mermaid svg').forEach(svg => {
+                            initPanZoom(svg);
+                        });
                     } catch (mermaidErr) {
                         console.error('Mermaid render error:', mermaidErr);
                     }
@@ -422,6 +436,9 @@
                     
                     // 5. Initialize search
                     markInstance = new window.Mark(docContent);
+
+                    // 6. Final cleanup: Purge kuro-speak-btn if it ever appeared dynamically
+                    document.querySelectorAll('.kuro-speak-btn, #kuro-speak-btn, [class*="speak-btn"]').forEach(el => el.remove());
                     
                 } else {
                     throw new Error(data.message || 'Failed to load documentation');
@@ -436,6 +453,36 @@
                 lucide.createIcons();
             }
         }
+
+        const panZoomInstances = new Map();
+
+        function initPanZoom(svg) {
+            if (!svg) return;
+            svg.setAttribute('width', '100%');
+            svg.setAttribute('height', '100%');
+            
+            const pz = svgPanZoom(svg, {
+                zoomEnabled: true,
+                controlIconsEnabled: false,
+                fit: true,
+                center: true,
+                minZoom: 0.1,
+                maxZoom: 10,
+            });
+            
+            const container = svg.closest('.mermaid-container');
+            panZoomInstances.set(container, pz);
+        }
+
+        window.resetZoom = function(btn) {
+            const container = btn.closest('.mermaid-container');
+            const pz = panZoomInstances.get(container);
+            if (pz) {
+                pz.reset();
+                pz.fit();
+                pz.center();
+            }
+        };
 
         // Search Implementation
         function performSearch(keyword) {

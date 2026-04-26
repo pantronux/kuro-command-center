@@ -507,7 +507,7 @@ async def auth_middleware(request: Request, call_next):
         # Already handled in login_page endpoint, just pass through
         return await call_next(request)
     
-    if path == "/" or path in ["/chat", "/compliance", "/reminders", "/habits"]:
+    if path == "/" or path in ["/chat"] :
         if not is_authenticated:
             logger.info(f"Unauthenticated access to {path} from {request.client.host}, redirecting to /login")
             return RedirectResponse(url="/login", status_code=302)
@@ -1294,13 +1294,13 @@ async def list_files(directory: str = None):
     return {"status": "success", "data": result}
 
 # --- Documentation Routes ---
-@app.get("/docs", response_class=HTMLResponse)
-async def docs_frontend():
-    """Serve the documentation frontend."""
-    return FileResponse(os.path.join(WEB_DIR, "templates", "docs.html"))
+@app.get("/tutorial", response_class=HTMLResponse)
+async def tutorial_frontend():
+    """Serve the documentation/tutorial frontend."""
+    return FileResponse(os.path.join(WEB_DIR, "templates", "tutorial.html"))
 
-@app.get("/api/docs/content")
-async def docs_content():
+@app.get("/api/tutorial/content")
+async def tutorial_content():
     """Return the raw markdown content of SYSTEM_MAP.md."""
     try:
         map_path = os.path.join(BASE_DIR, "SYSTEM_MAP.md")
@@ -1313,10 +1313,9 @@ async def docs_content():
         return {"status": "error", "message": str(e)}
 
 # --- Compliance Routes ---
-@app.get("/compliance", response_class=HTMLResponse)
+@app.get("/compliance")
 async def compliance_dashboard():
-    """Serve the compliance dashboard."""
-    return FileResponse(os.path.join(WEB_DIR, "templates", "compliance.html"))
+    return RedirectResponse(url="/tutorial")
 
 @app.get("/api/compliance/progress/{standard}")
 async def compliance_progress(standard: str):
@@ -1339,10 +1338,9 @@ async def audit_trail(limit: int = 50):
     return JSONResponse(status_code=410, content={"status": "disabled", "message": "Compliance module purged in KURO V7.0"})
 
 # --- Reminder Routes ---
-@app.get("/reminders", response_class=HTMLResponse)
+@app.get("/reminders")
 async def reminder_dashboard():
-    """Serve the reminder dashboard."""
-    return FileResponse(os.path.join(WEB_DIR, "templates", "reminder.html"))
+    return RedirectResponse(url="/tutorial")
 
 @app.get("/api/reminders/upcoming")
 async def get_upcoming_reminders():
@@ -1396,10 +1394,9 @@ async def get_pending_notifications():
     return JSONResponse(status_code=410, content={"status": "disabled", "message": "Reminders moved to OpenClaw Skills in KURO V7.0"})
 
 # --- Daily Habits Routes ---
-@app.get("/habits", response_class=HTMLResponse)
+@app.get("/habits")
 async def habits_dashboard():
-    """Serve the daily habits dashboard."""
-    return FileResponse(os.path.join(WEB_DIR, "templates", "daily_habits.html"))
+    return RedirectResponse(url="/tutorial")
 
 @app.get("/api/habits")
 async def get_habits():
