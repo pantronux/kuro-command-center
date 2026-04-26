@@ -969,96 +969,11 @@ COMPLIANCE_STANDARDS = {
 }
 
 def analyze_compliance(document_text: str, standard_type: str = "iso27001") -> Dict:
-    """
-    Automated Gap Analysis Tool.
-    Compares document_text against a compliance standard using Gemini AI.
-    """
-    from kuro_backend.core import client
-    from google.genai import types
-    from kuro_backend.config import settings
-    
-    standard = COMPLIANCE_STANDARDS.get(standard_type, COMPLIANCE_STANDARDS["iso27001"])
-    
-    prompt = f"""{standard['prompt']}
-
-Document to analyze:
-{document_text[:15000]}
-
-Return ONLY a valid JSON array with this structure:
-[
-  {{"clause_id": "A.5.1", "status": "compliant", "finding": "Description", "recommendation": "Action", "confidence": 0.85}}
-]
-"""
-    
-    try:
-        response = client.models.generate_content(
-            model=settings.MODEL_NAME,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                temperature=0.1,
-                response_mime_type="application/json"
-            )
-        )
-        
-        # SAFETY CHECK: Check prompt_feedback before accessing response.text
-        if hasattr(response, 'prompt_feedback') and response.prompt_feedback:
-            block_reason = getattr(response.prompt_feedback, 'block_reason', 'UNKNOWN')
-            logger.warning(f"[COMPLIANCE] Content blocked by safety filter: {block_reason}")
-            return {"error": f"Content blocked by safety filter: {block_reason}", "standard": standard["name"]}
-        
-        try:
-            import json
-            results = json.loads(response.text)
-        except Exception as text_err:
-            if "WARNING" in str(text_err) or "Safety" in str(text_err) or "blocked" in str(text_err).lower():
-                logger.warning(f"[COMPLIANCE] response.text blocked: {text_err}")
-                return {"error": "Content blocked by safety filter", "standard": standard["name"]}
-            raise text_err
-        
-        return {
-            "standard": standard["name"],
-            "document": "Uploaded Document",
-            "results": results
-        }
-        
-    except Exception as e:
-        logger.exception(f"Compliance analysis error: {e}")
-        return {"error": str(e), "standard": standard["name"]}
+    return {"success": False, "error": "Compliance module purged in KURO V7.0"}
 
 
 def search_compliance_clause(query: str, standard: str = None) -> List[Dict]:
-    """Quick Search: Find compliance clauses with human-readable explanations."""
-    from kuro_backend.memory_manager import load_master_profile
-    
-    profile = load_master_profile()
-    standards = profile.get("compliance_standards", {})
-    results = []
-    
-    query_lower = query.lower()
-    
-    for std_name, std_data in standards.items():
-        if standard and std_name != standard:
-            continue
-        
-        for clause in std_data.get("key_clauses", []):
-            if query_lower in clause.get("title", "").lower() or query_lower in clause.get("id", "").lower():
-                results.append({
-                    "standard": std_data["name"],
-                    "clause_id": clause["id"],
-                    "title": clause["title"],
-                    "description": std_data.get("description", "")
-                })
-        
-        for article in std_data.get("key_articles", []):
-            if query_lower in article.get("title", "").lower() or query_lower in article.get("id", "").lower():
-                results.append({
-                    "standard": std_data["name"],
-                    "clause_id": f"Article {article['id']}",
-                    "title": article["title"],
-                    "description": std_data.get("description", "")
-                })
-    
-    return results
+    return []
 
 
 # ============================================
@@ -1172,77 +1087,11 @@ def lookup_chroma_context(query: str) -> str:
 
 
 def add_reminder_tool(event_name: str, datetime_text: str, description: str = "", source: str = "web") -> Dict:
-    """
-    Add a reminder with ChromaDB context enrichment.
-    
-    Args:
-        event_name: Name of the event
-        datetime_text: Natural language datetime (e.g., "jam 2 siang", "besok jam 10")
-        description: Optional description
-        source: 'web' or 'telegram'
-    
-    Returns:
-        Dict with reminder details and confirmation message
-    """
-    # Parse datetime
-    event_time = parse_datetime(datetime_text)
-    if event_time is None:
-        return {
-            "success": False,
-            "error": f"Master, saya tidak bisa memahami waktu '{datetime_text}'. Mohon gunakan format seperti 'jam 2 siang', 'besok jam 10', atau '2026-04-06 14:00'."
-        }
-    
-    # Lookup context from ChromaDB
-    context = lookup_chroma_context(event_name)
-    
-    # Enrich description with context
-    full_description = description
-    if context:
-        full_description += f"\n\n[Konteks dari Memori]:\n{context}"
-    
-    from kuro_backend.services.core_service import add_reminder_svc as persist_reminder
-
-    reminder_id = persist_reminder(
-        event_name=event_name,
-        event_time=event_time.isoformat(),
-        description=full_description,
-        source=source,
-        context=context,
-    )
-    
-    # Format confirmation
-    time_str = event_time.strftime("%A, %d %B %Y pukul %H:%M WIB")
-    
-    confirmation = f"Baik Pantronux, saya catat pengingat untuk **{event_name}** pada {time_str}."
-    if context:
-        confirmation += f"\n\nIni berkaitan dengan: {context[:200]}..."
-    confirmation += "\n\nBenar, Master?"
-    
-    return {
-        "success": True,
-        "reminder_id": reminder_id,
-        "event_name": event_name,
-        "event_time": event_time.isoformat(),
-        "event_time_formatted": time_str,
-        "description": full_description,
-        "context_found": bool(context),
-        "confirmation": confirmation
-    }
+    return {"success": False, "error": "Reminders moved to OpenClaw Skills in KURO V7.0"}
 
 
 def get_reminders_tool() -> Dict:
-    """Get all active reminders for display."""
-    from kuro_backend.services.core_service import (
-        get_reminder_stats_validated as get_reminder_stats,
-        list_reminders_upcoming_validated as get_upcoming_reminders,
-    )
-    upcoming = get_upcoming_reminders()
-    stats = get_reminder_stats()
-    
-    return {
-        "upcoming": upcoming,
-        "stats": stats
-    }
+    return {"success": False, "error": "Reminders moved to OpenClaw Skills in KURO V7.0"}
 
 
 # ============================================
@@ -1465,50 +1314,11 @@ def mark_habit_done_tool(habit_title: str) -> Dict:
     Mark a daily habit as done via natural language.
     E.g., "Aku udah gym ya hari ini" -> marks "Gym" as done.
     """
-    from kuro_backend.services.core_service import (
-        get_completion_stats_validated as get_completion_stats,
-        get_habit_by_title,
-        mark_habit_done_svc as persist_mark_done,
-    )
-
-    habit = get_habit_by_title(habit_title)
-    if not habit:
-        return {
-            "success": False,
-            "error": f"Master, saya tidak menemukan habit '{habit_title}'. Mungkin belum ditambahkan?"
-        }
-    
-    success = persist_mark_done(habit['id'])
-    if success:
-        stats = get_completion_stats()
-        return {
-            "success": True,
-            "habit": habit['title'],
-            "category": habit['category'],
-            "message": f"✅ Habit '{habit['title']}' ({habit['category']}) sudah dicatat selesai! Progress hari ini: {stats['percentage']}%",
-            "stats": stats
-        }
-    else:
-        return {
-            "success": False,
-            "message": f"Habit '{habit['title']}' sudah dicatat selesai hari ini, Master."
-        }
+    return {"success": False, "error": "Habits moved to OpenClaw Skills in KURO V7.0"}
 
 
 def get_habits_status_tool() -> Dict:
-    """Get today's habit status for reporting (same validated shapes as /api/habits*)."""
-    from kuro_backend.services.core_service import (
-        get_completion_stats_validated,
-        list_habits_validated,
-    )
-
-    habits = list_habits_validated()
-    stats = get_completion_stats_validated()
-
-    return {
-        "habits": habits,
-        "stats": stats
-    }
+    return {"success": False, "error": "Habits moved to OpenClaw Skills in KURO V7.0"}
 
 
 EMPTY_HABIT_FACTUAL_MESSAGE = "Saya tidak menemukan catatan data faktual."
@@ -1520,54 +1330,12 @@ def get_habit_history_tool(habit_title: str, days: int = 30) -> Dict:
     reply to the user with exactly: 'Saya tidak menemukan catatan data faktual.' — no ISO clauses,
     no IP addresses, no invented activities.
     """
-    from kuro_backend.services import core_service as core_data
-
-    habit = core_data.get_habit_by_title(habit_title)
-    if not habit:
-        return {
-            "success": True,
-            "has_factual_data": False,
-            "ai_required_reply": EMPTY_HABIT_FACTUAL_MESSAGE,
-            "habit_logs": [],
-            "completion_dates": [],
-            "strict_instruction": (
-                "Jika has_factual_data=false, jawab PERSIS ai_required_reply tanpa tambahan."
-            ),
-        }
-
-    snap = core_data.fetch_habit_activity_snapshot(days)
-    title_lower = (habit.get("title") or "").lower()
-    logs = [
-        r
-        for r in (snap.get("habit_log_rows") or [])
-        if (r.get("title") or "").lower() == title_lower
-    ]
-    completions = [
-        r
-        for r in (snap.get("completion_samples") or [])
-        if (r.get("title") or "").lower() == title_lower
-    ]
-
-    if not logs and not completions:
-        return {
-            "success": True,
-            "has_factual_data": False,
-            "ai_required_reply": EMPTY_HABIT_FACTUAL_MESSAGE,
-            "habit_logs": [],
-            "completion_dates": [],
-            "strict_instruction": (
-                "Jika has_factual_data=false, jawab PERSIS ai_required_reply. "
-                "Dilarang mengarang ISO, IP, atau aktivitas."
-            ),
-        }
-
     return {
-        "success": True,
-        "has_factual_data": True,
-        "habit": habit.get("title"),
-        "habit_logs": logs,
-        "completion_dates": completions,
-        "strict_instruction": "Hanya gunakan field habit_logs dan completion_dates di atas.",
+        "success": False,
+        "has_factual_data": False,
+        "ai_required_reply": "Habits moved to OpenClaw Skills in KURO V7.0",
+        "habit_logs": [],
+        "completion_dates": [],
     }
 
 

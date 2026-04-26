@@ -130,7 +130,7 @@ MASTER_PROFILE_PATH = os.path.join(BASE_DIR, "master_profile.json")
 COMPLIANCE_DOC_DIR = "/home/kuro/ComplianceDoc"
 COMPLIANCE_CHROMA_DIR = os.path.join(BASE_DIR, "kuro_compliance_chroma")
 
-SHORT_TERM_LIMIT = 20  # Last 20 interactions
+SHORT_TERM_LIMIT = 15  # Last 15 raw turns
 IMPORTANCE_THRESHOLD = 7  # Only store to ChromaDB if importance > 7
 MEMORY_DECAY_DAYS = 30  # Facts older than 30 days marked as potentially outdated
 CONVERSATION_SUMMARY_THRESHOLD = 15  # Summarize short-term after this many entries
@@ -1176,14 +1176,13 @@ def query_memory(
     current_message: str,
     recent_messages: List[Dict] = None,
     persona_scope: str = None,
-    include_compliance: bool = True,
+    include_compliance: bool = False,
 ) -> Dict[str, str]:
     """
     Pre-process memory before AI response.
     
-    V3.0 Update: Accepts recent_messages for query expansion.
-    V3.1 Update: Includes compliance knowledge base with boosted weighting.
-    Returns formatted memory sections for prompt injection.
+    KURO V7.0: Preserve only short-term raw context + master profile.
+    Long-term semantic context is handled by Mem0 in memory_coordinator.
     """
     # Tier 1: Short-term
     scope = normalize_persona(persona_scope or get_active_persona())
@@ -1191,51 +1190,19 @@ def query_memory(
     short_term_text = ""
     if short_term_entries:
         summaries = []
-        for entry in short_term_entries[-5:]:  # Last 5
+        for entry in short_term_entries[-15:]:
             role_label = "User" if entry["role"] == "user" else "Kuro"
-            summaries.append(f"{role_label}: {entry['content'][:100]}")
+            summaries.append(f"{role_label}: {entry['content'][:800]}")
         short_term_text = "\n".join(summaries)
-    
-    # Tier 2: Long-term semantic search (V3.0 contextual with query expansion)
-    long_term_facts = search_long_term_contextual(current_message, top_k=5, recent_messages=recent_messages)
-    long_term_text = "\n".join(long_term_facts) if long_term_facts else ""
-    
+
     # Tier 3: Master profile
     profile_text = get_master_profile_formatted()
-    
-    # V3.1: Compliance Knowledge Base (Boosted for compliance queries)
-    compliance_text = ""
-    compliance_keywords = ["compliance", "audit", "iso", "iso 27001", "iso 27002", "nist", "gdpr",
-                          "kontrol", "control", "a.5", "a.6", "a.7", "a.8", "a.9", "a.10",
-                          "klausul", "clause", "annex", "lampiran", "sertifikasi", "certification",
-                          "risk assessment", "risk treatment", "soa", "statement of applicability",
-                          "isms", "smsi", "pims", "ai management", "togaf", "business continuity"]
-    
-    msg_lower = current_message.lower()
-    is_compliance_query = any(kw in msg_lower for kw in compliance_keywords)
-    
-    if include_compliance and is_compliance_query:
-        # Boosted search: get more results for compliance queries
-        compliance_results = search_compliance_base(current_message, top_k=8)
-        if compliance_results:
-            compliance_parts = []
-            for result in compliance_results:
-                clause_info = f" (Klausul: {result['clauses']})" if result.get("clauses") else ""
-                compliance_parts.append(
-                    f"[{result['iso_name']}{clause_info}]\n{result['content'][:500]}"
-                )
-            compliance_text = "\n\n".join(compliance_parts)
-            logger.debug(
-                "[COMPLIANCE_BOOST] compliance query: %s results injected (min_sim=%s)",
-                len(compliance_results),
-                MEMORY_INJECTION_MIN_SIMILARITY,
-            )
-    
+
     return {
         "short_term": short_term_text,
-        "long_term": long_term_text,
+        "long_term": "",
         "profile": profile_text,
-        "compliance": compliance_text
+        "compliance": "",
     }
 
 def format_memory_injection(memory: Dict[str, str]) -> str:
@@ -1246,7 +1213,7 @@ def format_memory_injection(memory: Dict[str, str]) -> str:
         parts.append(f"\n[PROFIL MASTER]\n{memory['profile']}")
     
     if memory["short_term"]:
-        parts.append(f"\n[MEMORI JANGKA PENDEK - 5 Interaksi Terakhir]\n{memory['short_term']}")
+        parts.append(f"\n[MEMORI JANGKA PENDEK - 15 Turn Terakhir]\n{memory['short_term']}")
     
     if memory["long_term"]:
         parts.append(f"\n[FAKTA PENDUKUNG - Memori Jangka Panjang]\n{memory['long_term']}")

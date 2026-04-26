@@ -41,12 +41,9 @@ MAX_CONTEXT_TOKENS: Final[int] = int(os.getenv("KURO_MAX_CONTEXT_TOKENS", "6000"
 # priority-based fallback trimming when over the global ceiling.
 SECTION_QUOTAS: Final[Mapping[str, int]] = {
     "memory_injection": 1800,
-    "mem0":             900,
-    "compliance":       1500,
-    "habit":            800,
+    "mem0":             700,
     "tool_result":      600,
-    "referent":         300,
-    "summary":          600,
+    "referent":         700,
     "finance":          450,
     "market":           350,
     # catch-all bucket for ad-hoc blocks not matching the above
@@ -58,17 +55,13 @@ SECTION_QUOTAS: Final[Mapping[str, int]] = {
 # the final candidate for trimming — see Persona-Aware Context Management
 # (V5.5) L3 immutability contract.
 _TRIM_PRIORITY: Final[tuple[str, ...]] = (
-    "referent",
     "tool_result",
     "mem0",
-    "summary",
-    "memory_injection",
-    "other",
     "finance",
     "market",
-    # Layer 3 — protected floor, trimmed last
-    "habit",
-    "compliance",
+    "memory_injection",
+    "referent",
+    "other",
     "ssot_factual",
 )
 
@@ -127,14 +120,14 @@ def apply_section_budget(sections: Mapping[str, str]) -> dict[str, str]:
 # contract can be used dynamically instead of the static table above.
 #
 # Layer mapping (must stay in sync with memory_coordinator):
-#   Layer 1 (recent)   -> summary  (the compressed short-term block)
-#   Layer 2 (semantic) -> mem0, memory_injection, referent
-#   Layer 3 (factual)  -> habit, compliance, ssot_factual
+#   Layer 1 (recent)   -> memory_injection (raw recent turns)
+#   Layer 2 (semantic) -> mem0, referent
+#   Layer 3 (factual)  -> ssot_factual
 #   Other tool metadata falls through to ``tool_result`` / ``other``.
 
-_LAYER1_SECTIONS: Final[tuple[str, ...]] = ("summary",)
-_LAYER2_SECTIONS: Final[tuple[str, ...]] = ("mem0", "memory_injection", "referent")
-_LAYER3_SECTIONS: Final[tuple[str, ...]] = ("habit", "compliance", "ssot_factual")
+_LAYER1_SECTIONS: Final[tuple[str, ...]] = ("memory_injection",)
+_LAYER2_SECTIONS: Final[tuple[str, ...]] = ("mem0", "referent")
+_LAYER3_SECTIONS: Final[tuple[str, ...]] = ("ssot_factual",)
 _FIXED_SECTIONS: Final[Mapping[str, int]] = {
     # Non-layer buckets keep small, fixed quotas independent of persona.
     "tool_result": 600,
@@ -143,14 +136,11 @@ _FIXED_SECTIONS: Final[Mapping[str, int]] = {
 
 # Within each layer, split the total layer quota across its sections.
 _LAYER2_SPLIT: Final[Mapping[str, float]] = {
-    "memory_injection": 0.55,
-    "mem0":             0.30,
-    "referent":         0.15,
+    "mem0":             0.35,
+    "referent":         0.65,
 }
 _LAYER3_SPLIT: Final[Mapping[str, float]] = {
-    "habit":        0.45,
-    "compliance":   0.40,
-    "ssot_factual": 0.15,
+    "ssot_factual": 1.0,
 }
 
 

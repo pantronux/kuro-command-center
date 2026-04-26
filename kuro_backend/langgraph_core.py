@@ -38,7 +38,6 @@ from langgraph.graph import END, START, StateGraph
 # Kuro imports
 from kuro_backend import (
     chat_history,
-    habit_service,
     memory_coordinator,
     memory_manager,
     observability,
@@ -49,7 +48,6 @@ from kuro_backend.config import PRIMARY_MODEL, settings
 from kuro_backend.guardrails import sniper_pipeline
 from kuro_backend import personas, token_budget
 from kuro_backend.personas import build_system_instruction
-from kuro_backend.services import core_service as core_data
 
 logger = logging.getLogger(__name__)
 logger.propagate = False  # Prevent double-reporting to root logger
@@ -86,11 +84,14 @@ OPENCLAW_READONLY_KEYWORDS = [
 _approval_lock = threading.Lock()
 _pending_tool_approval: Dict[str, Dict[str, Any]] = {}
 _post_response_worker_started = False
+_v7_reset_announcement_sent = False
+_v7_reset_announcement_lock = threading.Lock()
 _TRUE_TOKEN_STREAMING_ENABLED = (
     os.getenv("KURO_TRUE_TOKEN_STREAMING", "1").strip().lower() in {"1", "true", "yes", "on"}
 )
 _POST_RESPONSE_QUEUE_MAXSIZE = int(os.getenv("KURO_POST_RESPONSE_QUEUE_MAXSIZE", "500"))
 _post_response_queue = queue.Queue(maxsize=_POST_RESPONSE_QUEUE_MAXSIZE)  # type: ignore[assignment]
+_DEBUG_LOG_PATH = "/home/kuro/projects/kuro/.cursor/debug-0dd1b5.log"
 
 
 @functools.lru_cache(maxsize=1)
@@ -106,6 +107,25 @@ def _parse_approval_token(user_input: str) -> Optional[str]:
         if len(parts) == 2 and parts[1].strip():
             return parts[1].strip()
     return None
+
+
+def _debug_log(run_id: str, hypothesis_id: str, location: str, message: str, data: Dict[str, Any]) -> None:
+    # #region agent log
+    try:
+        payload = {
+            "sessionId": "0dd1b5",
+            "runId": run_id,
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "message": message,
+            "data": data,
+            "timestamp": int(time.time() * 1000),
+        }
+        with open(_DEBUG_LOG_PATH, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+    # #endregion
 
 
 def _contains_destructive_keyword(text: str) -> bool:
@@ -264,11 +284,6 @@ def _execute_post_response_task(task: Dict[str, Any]) -> None:
         user_input = task.get("user_input", "")
         final_response = task.get("final_response", "")
         memory_coordinator.execute_mem0_extract_task(user_input, final_response)
-    elif kind == "refresh_summary":
-        # Persona-Aware Context Management (V5.5) — proactive warm cache so
-        # the next turn never pays the summarizer LLM cost on the hot path.
-        persona_scope = task.get("persona_scope") or memory_manager.get_active_persona()
-        memory_coordinator.refresh_short_term_summary_background(persona_scope)
     else:
         logger.warning("[POST_RESPONSE_WORKER] Unknown task kind=%s", kind)
 
@@ -346,14 +361,6 @@ def _persist_short_term_and_enqueue_writes(user_input: str, response_text: str, 
             "final_response": response_text,
         }
     )
-    # V5.5 — keep the structured short-term summary cache warm so the next
-    # foreground turn never pays the summarizer LLM on the hot path.
-    _enqueue_post_response_task(
-        {
-            "kind": "refresh_summary",
-            "persona_scope": persona_mode,
-        }
-    )
 
 
 async def _stream_direct_llm_chunks(
@@ -413,12 +420,8 @@ class KuroState(TypedDict):
     Fields:
     - messages: Conversation history (list of dicts with role/content)
     - next_step: Next node to route to (supervisor decision)
-    - compliance_data: Results from compliance RAG search
-    - habit_data: Results from habit database query
-    - is_scolding_needed: Flag for habit evaluation trigger
     - user_input: Original user message
     - final_response: Generated response to return
-    - query_expansion_count: Track self-correction iterations
     - persona_mode: Current active persona
     - mem0_retrieved_memories: Memories retrieved from Mem0 for context
     - tool_execution_result: Result from tool execution (ToolNode output)
@@ -426,12 +429,8 @@ class KuroState(TypedDict):
     """
     messages: Annotated[List[Dict], lambda x, y: x + y]
     next_step: str
-    compliance_data: List[Dict]
-    habit_data: Dict
-    is_scolding_needed: bool
     user_input: str
     final_response: str
-    query_expansion_count: int
     persona_mode: str
     image_paths: Optional[List[str]]
     mem0_retrieved_memories: List[Dict]
@@ -470,15 +469,10 @@ def supervisor_node(state: KuroState) -> Dict[str, Any]:
     Supervisor Node: Analyzes user input and decides which node to route to.
     
     Routing Logic:
-    - If query mentions ISO/compliance/audit -> route to compliance_node
-    - If query mentions habit/gym/tryhackme/belajar -> route to habit_node
     - If query mentions file actions (buat, generate, excel, export) -> route to tool_node
     - If query is general conversation -> route directly to response_node
-    - If compliance search returned empty -> route to compliance_node with expanded query
     """
     user_input = state.get("user_input", "").lower()
-    compliance_data = state.get("compliance_data", [])
-    query_expansion_count = state.get("query_expansion_count", 0)
     
     # Observability tracing
     session_id = state.get("_session_id", "unknown")
@@ -493,25 +487,23 @@ def supervisor_node(state: KuroState) -> Dict[str, Any]:
         except Exception as exc:
             logger.debug("[SUPERVISOR] mem0 prefetch skipped: %s", exc)
 
-        # Compliance keywords detection
-        compliance_keywords = [
-            "iso", "iso 27001", "iso 27002", "nist", "gdpr", "audit", "compliance",
-            "kontrol", "control", "klausul", "clause", "annex", "lampiran",
-            "sertifikasi", "certification", "risk assessment", "isms", "pims",
-            "togaf", "business continuity", "a.5", "a.6", "a.7", "a.8"
-        ]
-        
-        # Habit keywords detection
-        habit_keywords = [
-            "habit", "gym", "tryhackme", "belajar", "olahraga", "done", "selesai",
-            "sudah", "progress", "streak", "evaluation", "evaluasi", "raport"
-        ]
-        
-        # Tool action keywords detection
+        # Tool action keywords detection (strict): only explicit file/tool operations.
+        # Avoid broad creators like "buatkan/generate/report" which are common
+        # in normal chat requests and can misroute to tool_node.
         tool_keywords = [
-            "buatkan", "buat", "generate", "export", "eksport", "excel",
-            "spreadsheet", "file", "laporan", "report", "template",
-            "list file", "daftar file", "simpan", "save", "delete", "hapus"
+            "export",
+            "eksport",
+            "excel",
+            "spreadsheet",
+            "template file",
+            "list file",
+            "daftar file",
+            "simpan file",
+            "save file",
+            "delete file",
+            "hapus file",
+            "manage file",
+            "buat file",
         ]
 
         # Chancellor / finances — route to tool_node for ledger tools
@@ -527,27 +519,24 @@ def supervisor_node(state: KuroState) -> Dict[str, Any]:
             "earnings", "bullish", "bearish", "hedge",
         ]
         
-        # Check for compliance query
-        is_compliance_query = any(kw in user_input for kw in compliance_keywords)
-        
-        # Check for habit query
-        is_habit_query = any(kw in user_input for kw in habit_keywords)
-        
         # Check for tool action query
         is_tool_query = any(kw in user_input for kw in tool_keywords)
         is_finance_query = any(kw in user_input for kw in finance_keywords)
         is_market_query = any(kw in user_input for kw in market_keywords)
-        
-        # Self-correction loop: if compliance search was empty and we haven't expanded too many times
-        if is_compliance_query and not compliance_data and query_expansion_count < 3:
-            logger.info(f"[SUPERVISOR] Compliance query detected, but no results. Expanding query (attempt {query_expansion_count + 1}/3)")
-            if span:
-                span.set_attribute("supervisor_node.decision", "compliance_node_expanded")
-                span.set_attribute("supervisor_node.expansion_count", query_expansion_count + 1)
-            return {
-                "next_step": "compliance_node",
-                "query_expansion_count": query_expansion_count + 1
-            }
+        # #region agent log
+        _debug_log(
+            state.get("_trace_id", "") or state.get("_session_id", "unknown"),
+            "H1",
+            "langgraph_core.py:supervisor_node",
+            "routing_signals",
+            {
+                "is_tool_query": is_tool_query,
+                "is_finance_query": is_finance_query,
+                "is_market_query": is_market_query,
+                "input_preview": user_input[:160],
+            },
+        )
+        # #endregion
         
         # Route to tool node for file actions
         if is_tool_query:
@@ -556,20 +545,6 @@ def supervisor_node(state: KuroState) -> Dict[str, Any]:
                 span.set_attribute("supervisor_node.decision", "tool_node")
             return {"next_step": "tool_node"}
         
-        # Route to compliance node
-        if is_compliance_query:
-            logger.info("[SUPERVISOR] Routing to compliance_node")
-            if span:
-                span.set_attribute("supervisor_node.decision", "compliance_node")
-            return {"next_step": "compliance_node"}
-        
-        # Route to habit node
-        if is_habit_query:
-            logger.info("[SUPERVISOR] Routing to habit_node")
-            if span:
-                span.set_attribute("supervisor_node.decision", "habit_node")
-            return {"next_step": "habit_node"}
-
         if is_finance_query or is_market_query:
             logger.info(
                 "[SUPERVISOR] Routing to tool_node (finance=%s market=%s)",
@@ -609,12 +584,9 @@ def memory_retrieval_node(state: KuroState) -> Dict[str, Any]:
 
             if not isinstance(raw_memories, list):
                 logger.warning("[MEM0] Unexpected output format: %s", type(raw_memories))
-                processed_memories: List[Any] = []
+                processed_memories: List[Dict[str, Any]] = []
             else:
-                processed_memories = [
-                    m.get("text", str(m)) if isinstance(m, dict) else str(m)
-                    for m in raw_memories
-                ]
+                processed_memories = [m for m in raw_memories if isinstance(m, dict)]
 
             if span is not None:
                 span.set_attribute("mem0.ok", True)
@@ -657,157 +629,7 @@ def memory_extraction_node(state: KuroState) -> Dict[str, Any]:
                 "final_response": final_response,
             }
         )
-        # V5.5 — proactively warm the structured short-term summary cache.
-        _enqueue_post_response_task(
-            {
-                "kind": "refresh_summary",
-                "persona_scope": persona_mode,
-            }
-        )
         return {}
-
-
-
-# ============================================
-# NODE: COMPLIANCE (RAG Search)
-# ============================================
-
-def compliance_node(state: KuroState) -> Dict[str, Any]:
-    """
-    Compliance Node: Searches ChromaDB for compliance/ISO references.
-    Wraps the existing RAG functionality from memory_manager.py.
-    """
-    user_input = state.get("user_input", "")
-    query_expansion_count = state.get("query_expansion_count", 0)
-    session_id = state.get("_session_id", "unknown")
-    trace_attrs = observability.create_session_context(session_id=session_id)
-    trace_attrs = observability.add_client_label(trace_attrs, user_input)
-    
-    with observability.trace_node("compliance_node", trace_attrs) as span:
-        # P1.4 — in expansion mode, fire the baseline + expanded Chroma queries in
-        # parallel so we don't pay two sequential Chroma round-trips.
-        if query_expansion_count > 0:
-            expanded_query = f"{user_input} ISO standard control requirement"
-            fan_out = memory_coordinator._parallel_gather_sync({
-                "base": lambda: memory_manager.search_compliance_base(user_input, top_k=5),
-                "expanded": lambda: memory_manager.search_compliance_base(expanded_query, top_k=5),
-            })
-            compliance_results = fan_out.get("base") or []
-            if not compliance_results:
-                compliance_results = fan_out.get("expanded") or []
-                logger.info(f"[COMPLIANCE] Query expanded to: {expanded_query}")
-        else:
-            compliance_results = memory_manager.search_compliance_base(user_input, top_k=5)
-        
-        # Format compliance data for state
-        formatted_data = []
-        for result in compliance_results:
-            formatted_data.append({
-                "content": result.get("content", "")[:500],
-                "iso_name": result.get("iso_name", "Unknown"),
-                "clauses": result.get("clauses", ""),
-                "relevance": result.get("relevance", 0)
-            })
-        
-        logger.info(f"[COMPLIANCE] Found {len(formatted_data)} results for query")
-        
-        if span:
-            span.set_attribute("compliance_node.results_count", len(formatted_data))
-            span.set_attribute("compliance_node.query_expanded", query_expansion_count > 0)
-        
-        return {
-            "compliance_data": formatted_data,
-            "next_step": "response_node"  # After compliance, go to response
-        }
-
-
-# ============================================
-# NODE: HABIT (SQLite Query)
-# ============================================
-
-def habit_node(state: KuroState) -> Dict[str, Any]:
-    """
-    Habit Node: Queries SQLite for habit data and calculates success rates.
-    Wraps the existing daily_habits_db functionality.
-    """
-    user_input = state.get("user_input", "").lower()
-    session_id = state.get("_session_id", "unknown")
-    trace_attrs = observability.create_session_context(session_id=session_id)
-    
-    with observability.trace_node("habit_node", trace_attrs) as span:
-        # P1.4 — the three SQLite reads below are independent; run them
-        # concurrently on the fan-out pool so habit_node latency = max() rather
-        # than sum().
-        fan_out = memory_coordinator._parallel_gather_sync({
-            "habits": core_data.get_all_habits,
-            "stats": core_data.get_completion_stats,
-            "snapshot": lambda: habit_service.fetch_sqlite_habit_snapshot(days=30),
-        })
-        habits = fan_out.get("habits") or []
-        stats = fan_out.get("stats") or {}
-        sqlite_snapshot = fan_out.get("snapshot") or {}
-        habit_service.log_snapshot_debug(sqlite_snapshot)
-
-        # Check if user is asking for evaluation
-        is_evaluation_request = any(kw in user_input for kw in ["evaluasi", "evaluation", "raport", "report", "laporan"])
-        
-        habit_data = {
-            "habits": habits,
-            "stats": stats,
-            "is_evaluation_request": is_evaluation_request,
-            "evaluation_text": "",
-            "from_sqlite": True,
-            "sqlite_snapshot_empty_activity": habit_service.snapshot_has_no_positive_activity(sqlite_snapshot),
-        }
-        
-        # If evaluation requested, generate AI evaluation
-        if is_evaluation_request and habits:
-            try:
-                client = _get_genai_client()
-
-                today = datetime.now()
-                monthly_data = core_data.get_monthly_report_data(today.year, today.month)
-
-                eval_user_prompt = habit_service.build_monthly_eval_user_prompt(monthly_data)
-
-                response = client.models.generate_content(
-                    model=PRIMARY_MODEL,
-                    contents=eval_user_prompt,
-                    config=genai_types.GenerateContentConfig(
-                        system_instruction=habit_service.STRICT_HABIT_NARRATIVE_INSTRUCTION,
-                        temperature=personas.HABIT_EVAL_SAMPLING_PROFILE.temperature,
-                        top_p=personas.HABIT_EVAL_SAMPLING_PROFILE.top_p,
-                        top_k=personas.HABIT_EVAL_SAMPLING_PROFILE.top_k,
-                        max_output_tokens=personas.HABIT_EVAL_SAMPLING_PROFILE.max_output_tokens,
-                    ),
-                )
-                
-                habit_data["evaluation_text"] = response.text if response.text else ""
-                
-                # Check if scolding is needed
-                overall_score = float(monthly_data.get("overall_score", "100").replace("%", ""))
-                habit_data["is_scolding_needed"] = overall_score < 90
-                
-            except Exception as e:
-                logger.error(f"[HABIT] Evaluation generation failed: {e}")
-                habit_data["evaluation_text"] = f"Maaf, gagal membuat evaluasi: {e}"
-                habit_data["is_scolding_needed"] = False
-        
-        # Determine if scolding is needed based on user input
-        if any(kw in user_input for kw in ["udah gym", "done tryhackme", "selesai belajar"]):
-            habit_data["is_scolding_needed"] = False
-        
-        logger.info(f"[HABIT] Retrieved {len(habits)} habits, stats: {stats}")
-        
-        if span:
-            span.set_attribute("habit_node.habits_count", len(habits))
-            span.set_attribute("habit_node.evaluation_requested", is_evaluation_request)
-        
-        return {
-            "habit_data": habit_data,
-            "is_scolding_needed": habit_data.get("is_scolding_needed", False),
-            "next_step": "response_node"
-        }
 
 
 # ============================================
@@ -820,13 +642,10 @@ def response_node(state: KuroState) -> Dict[str, Any]:
     V5.5: Guardrails validation removed. Direct LLM response is returned.
     """
     user_input = state.get("user_input", "")
-    compliance_data = state.get("compliance_data", [])
-    habit_data = state.get("habit_data", {})
     persona_mode = memory_manager.normalize_persona(
         state.get("persona_mode", memory_manager.get_active_persona())
     )
     image_paths = state.get("image_paths")
-    is_scolding_needed = state.get("is_scolding_needed", False)
     mem0_memories = state.get("mem0_retrieved_memories", [])
     tool_result = state.get("tool_execution_result", {})
     session_id = state.get("_session_id", "unknown")
@@ -840,7 +659,6 @@ def response_node(state: KuroState) -> Dict[str, Any]:
         ctx = memory_coordinator.build_context_for_llm(
             user_input,
             persona_mode,
-            compliance_data=compliance_data or None,
             mem0_retrieved_memories=mem0_memories or None,
         )
         memory_injection = ctx["memory_injection"]
@@ -862,22 +680,6 @@ def response_node(state: KuroState) -> Dict[str, Any]:
         if mem0_context_block:
             sections["mem0"] = f"\n\n[USER_CONTEXT - PERPETUAL MEMORY]\n{mem0_context_block}"
             logger.info("[MEM0] Injected %s memories into context", len(mem0_memories or []))
-
-        if compliance_data:
-            compliance_context = "\n\n[COMPLIANCE REFERENCES]\n"
-            for i, ref in enumerate(compliance_data, 1):
-                compliance_context += f"{i}. [{ref['iso_name']}] Klausul: {ref['clauses']}\n{ref['content'][:300]}\n\n"
-            sections["compliance"] = compliance_context
-
-        # Habit grounding: must run for habit_node path even when habits=[] (avoid Tier-1 hallucinations)
-        if habit_data.get("from_sqlite"):
-            snap = habit_service.fetch_sqlite_habit_snapshot(days=30)
-            habit_service.log_snapshot_debug(snap, prefix="[RESPONSE]")
-            habit_block = habit_service.format_habit_block_for_llm(
-                snap,
-                evaluation_text=habit_data.get("evaluation_text") or "",
-            )
-            sections["habit"] = "\n\n" + habit_block
 
         if memory_injection:
             sections["memory_injection"] = memory_injection
@@ -918,8 +720,6 @@ def response_node(state: KuroState) -> Dict[str, Any]:
         ordered_names = (
             "referent",
             "mem0",
-            "compliance",
-            "habit",
             "memory_injection",
             "finance",
             "market",
@@ -940,6 +740,19 @@ def response_node(state: KuroState) -> Dict[str, Any]:
         contents_parts = memory_coordinator.build_gemini_contents_parts(
             full_message, image_paths if image_paths else None
         )
+        # #region agent log
+        _debug_log(
+            state.get("_trace_id", "") or state.get("_session_id", "unknown"),
+            "H6",
+            "langgraph_core.py:response_node",
+            "prompt_assembly_stats",
+            {
+                "full_message_chars": len(full_message),
+                "sections_present": sorted([k for k, v in sections.items() if v]),
+                "image_parts_count": len(image_paths or []),
+            },
+        )
+        # #endregion
 
         # Generate response using direct google-genai SDK (more reliable)
         response_text: Optional[str] = None  # Initialize to detect if generation fails
@@ -957,6 +770,36 @@ def response_node(state: KuroState) -> Dict[str, Any]:
                     top_k=profile.top_k,
                 ),
             )
+            # #region agent log
+            candidates = getattr(response, "candidates", None) or []
+            finish_reason = ""
+            if candidates:
+                finish_reason = str(getattr(candidates[0], "finish_reason", "") or "")
+            prompt_feedback = getattr(response, "prompt_feedback", None)
+            block_reason = ""
+            if prompt_feedback:
+                block_reason = str(getattr(prompt_feedback, "block_reason", "") or "")
+            text_len = -1
+            try:
+                text_preview_val = response.text or ""
+                text_len = len(text_preview_val)
+            except Exception:
+                text_preview_val = ""
+            _debug_log(
+                state.get("_trace_id", "") or state.get("_session_id", "unknown"),
+                "H7",
+                "langgraph_core.py:response_node",
+                "raw_model_response_shape",
+                {
+                    "candidates_count": len(candidates),
+                    "finish_reason": finish_reason,
+                    "has_prompt_feedback": bool(prompt_feedback),
+                    "block_reason": block_reason,
+                    "response_text_len": text_len,
+                    "response_text_preview": text_preview_val[:160],
+                },
+            )
+            # #endregion
             
             # SAFETY CHECK: Check prompt_feedback BEFORE accessing response.text
             # When content is blocked by safety filters, response.text raises AttributeError
@@ -975,12 +818,37 @@ def response_node(state: KuroState) -> Dict[str, Any]:
                         response_text = "Maaf, Pantronux. Respons diblokir oleh filter keamanan Gemini."
                     else:
                         raise text_err
+            # #region agent log
+            _debug_log(
+                state.get("_trace_id", "") or state.get("_session_id", "unknown"),
+                "H5",
+                "langgraph_core.py:response_node",
+                "response_text_resolution",
+                {
+                    "response_text_is_none_after_resolution": response_text is None,
+                    "response_text_preview": (response_text or "")[:200],
+                },
+            )
+            # #endregion
             
             # Track token usage
             if hasattr(response, 'usage_metadata') and response.usage_metadata:
                 prompt_tokens = response.usage_metadata.prompt_token_count or 0
                 completion_tokens = response.usage_metadata.candidates_token_count or 0
                 total_tokens = response.usage_metadata.total_token_count or (prompt_tokens + completion_tokens)
+                # #region agent log
+                _debug_log(
+                    state.get("_trace_id", "") or state.get("_session_id", "unknown"),
+                    "H8",
+                    "langgraph_core.py:response_node",
+                    "usage_metadata",
+                    {
+                        "prompt_tokens": prompt_tokens,
+                        "completion_tokens": completion_tokens,
+                        "total_tokens": total_tokens,
+                    },
+                )
+                # #endregion
                 
                 observability.track_token_usage(session_id, prompt_tokens, completion_tokens, total_tokens)
                 
@@ -997,6 +865,17 @@ def response_node(state: KuroState) -> Dict[str, Any]:
             if response_text is None:
                     response_text = "Maaf, Pantronux. Terjadi kesalahan saat menghasilkan respons. Silakan coba lagi."
 
+        # One-time V7 reset migration confirmation (Sebastian persona policy).
+        global _v7_reset_announcement_sent
+        with _v7_reset_announcement_lock:
+            if not _v7_reset_announcement_sent:
+                response_text = (
+                    "Master, I have purged the unnecessary modules. "
+                    "My memory is now focused solely on your core directives and facts.\n\n"
+                    f"{response_text}"
+                )
+                _v7_reset_announcement_sent = True
+
         # Canonical served response must match persisted response for integrity.
         try:
             response_text = sniper_pipeline.sniper_postprocess_output(user_input, response_text)
@@ -1007,7 +886,6 @@ def response_node(state: KuroState) -> Dict[str, Any]:
         # when the reply mentions numbers/times absent from any SSoT block.
         try:
             ssot_blocks = [
-                sections.get("habit", ""),
                 sections.get("memory_injection", ""),
                 sections.get("referent", ""),
                 sections.get("finance", ""),
@@ -1130,6 +1008,23 @@ def tool_node(state: KuroState) -> Dict[str, Any]:
             )
 
             function_calls = _collect_tool_calls(response)
+            # #region agent log
+            finish_reason = ""
+            candidates = getattr(response, "candidates", None) or []
+            if candidates:
+                finish_reason = str(getattr(candidates[0], "finish_reason", "") or "")
+            _debug_log(
+                state.get("_trace_id", "") or state.get("_session_id", "unknown"),
+                "H2",
+                "langgraph_core.py:tool_node",
+                "tool_router_response_shape",
+                {
+                    "function_calls_count": len(function_calls),
+                    "finish_reason": finish_reason,
+                    "response_text_preview": (getattr(response, "text", "") or "")[:160],
+                },
+            )
+            # #endregion
             if not function_calls:
                 reason = ""
                 try:
@@ -1137,6 +1032,15 @@ def tool_node(state: KuroState) -> Dict[str, Any]:
                 except Exception:
                     reason = ""
                 logger.info("[TOOL_NODE] No function_call returned; falling through.")
+                # #region agent log
+                _debug_log(
+                    state.get("_trace_id", "") or state.get("_session_id", "unknown"),
+                    "H3",
+                    "langgraph_core.py:tool_node",
+                    "no_function_call_fallback",
+                    {"reason_preview": reason[:160]},
+                )
+                # #endregion
                 if span is not None:
                     span.set_attribute("tool_node.tool_used", "none")
                 return {
@@ -1148,6 +1052,19 @@ def tool_node(state: KuroState) -> Dict[str, Any]:
             tool_name = getattr(fc, "name", None) or ""
             raw_args = getattr(fc, "args", None) or {}
             args: Dict[str, Any] = dict(raw_args) if isinstance(raw_args, dict) else {}
+            # #region agent log
+            _debug_log(
+                state.get("_trace_id", "") or state.get("_session_id", "unknown"),
+                "H4",
+                "langgraph_core.py:tool_node",
+                "selected_tool_call",
+                {
+                    "tool_name": tool_name,
+                    "args_keys": sorted(list(args.keys()))[:20],
+                    "args_type": str(type(raw_args)),
+                },
+            )
+            # #endregion
 
             if not tool_name:
                 if span is not None:
@@ -1300,10 +1217,7 @@ def build_kuro_graph() -> StateGraph:
     Build the Kuro LangGraph state machine.
     
     Graph Structure:
-    START -> supervisor_node -> memory_retrieval -> [compliance_node | habit_node | tool_node | response_node] -> response_node -> memory_extraction -> END
-    
-    Self-Correction Loop:
-    compliance_node -> (if empty) -> supervisor_node (with expanded query)
+    START -> supervisor_node -> memory_retrieval -> [tool_node | response_node] -> response_node -> memory_extraction -> END
     """
     
     # Initialize checkpointer for persistence
@@ -1315,8 +1229,6 @@ def build_kuro_graph() -> StateGraph:
     # Add nodes
     graph_builder.add_node("supervisor_node", supervisor_node)
     graph_builder.add_node("memory_retrieval_node", memory_retrieval_node)
-    graph_builder.add_node("compliance_node", compliance_node)
-    graph_builder.add_node("habit_node", habit_node)
     graph_builder.add_node("tool_node", tool_node)
     graph_builder.add_node("response_node", response_node)
     graph_builder.add_node("memory_extraction_node", memory_extraction_node)
@@ -1332,8 +1244,6 @@ def build_kuro_graph() -> StateGraph:
         "memory_retrieval_node",
         route_after_supervisor,
         {
-            "compliance_node": "compliance_node",
-            "habit_node": "habit_node",
             "tool_node": "tool_node",
             "response_node": "response_node",
             "__end__": END,
@@ -1341,8 +1251,6 @@ def build_kuro_graph() -> StateGraph:
     )
     
     # Add edges from worker nodes to response
-    graph_builder.add_edge("compliance_node", "response_node")
-    graph_builder.add_edge("habit_node", "response_node")
     graph_builder.add_edge("tool_node", "response_node")
     
     # V5.5: Direct edge from response_node to memory_extraction_node (no re-ask loop)
@@ -1476,26 +1384,6 @@ async def process_chat_with_graph_stream(
             persona_override or memory_manager.get_active_persona()
         )
 
-        # P3.2 — Try SSoT shortcut first. If the query is a pure factual ask
-        # about habits/reminders and the persona isn't generative, respond
-        # entirely from SQLite without paying for the LLM. The shortcut result
-        # is still persisted as short-term memory so conversation continuity
-        # is preserved.
-        if not image_paths:
-            from kuro_backend import ssot_shortcuts
-            shortcut = ssot_shortcuts.try_shortcut(message, persona_mode)
-            if shortcut is not None:
-                logger.info("[SSOT_SHORTCUT] hit source=%s — bypassing LLM", shortcut.source)
-                if stream_metrics is not None:
-                    stream_metrics["stream_mode"] = "ssot_shortcut"
-                    stream_metrics["ssot_shortcut_source"] = shortcut.source
-                yield shortcut.response
-                try:
-                    _persist_short_term_and_enqueue_writes(message, shortcut.response, persona_mode)
-                except Exception as exc:
-                    logger.warning("[SSOT_SHORTCUT] persist failed: %s", exc)
-                return
-
         # P3.1 — Semantic cache lookup BEFORE committing to any LLM path.
         # Disabled by default; opt-in via KURO_SEMANTIC_CACHE_ENABLED.
         if not image_paths:
@@ -1526,7 +1414,6 @@ async def process_chat_with_graph_stream(
             ctx = await memory_coordinator.build_context_for_llm_async(
                 message,
                 persona_mode,
-                compliance_data=None,
                 mem0_retrieved_memories=None,
             )
             if stream_metrics is not None:
@@ -1584,12 +1471,8 @@ async def process_chat_with_graph_stream(
         initial_state = {
             "messages": [{"role": "user", "content": message}],
             "next_step": "",
-            "compliance_data": [],
-            "habit_data": {},
-            "is_scolding_needed": False,
             "user_input": message,
             "final_response": "",
-            "query_expansion_count": 0,
             "persona_mode": persona_mode,
             "image_paths": image_paths,
             "mem0_retrieved_memories": [],
@@ -1797,19 +1680,6 @@ def process_chat_with_graph(
             persona_override or memory_manager.get_active_persona()
         )
 
-        # P3.2 — same SSoT shortcut as the stream path. Bypasses the full graph
-        # for clearly-factual habit/reminder queries.
-        if not image_paths:
-            from kuro_backend import ssot_shortcuts
-            shortcut = ssot_shortcuts.try_shortcut(message, persona_mode)
-            if shortcut is not None:
-                logger.info("[SSOT_SHORTCUT] hit source=%s (sync) — bypassing LLM", shortcut.source)
-                try:
-                    _persist_short_term_and_enqueue_writes(message, shortcut.response, persona_mode)
-                except Exception as exc:
-                    logger.warning("[SSOT_SHORTCUT] persist failed: %s", exc)
-                return shortcut.response
-
         # P3.1 — semantic cache lookup on the sync path as well.
         if not image_paths:
             from kuro_backend import semantic_cache
@@ -1825,12 +1695,8 @@ def process_chat_with_graph(
         initial_state = {
             "messages": [{"role": "user", "content": message}],
             "next_step": "",
-            "compliance_data": [],
-            "habit_data": {},
-            "is_scolding_needed": False,
             "user_input": message,
             "final_response": "",
-            "query_expansion_count": 0,
             "persona_mode": persona_mode,
             "image_paths": image_paths,
             "mem0_retrieved_memories": [],

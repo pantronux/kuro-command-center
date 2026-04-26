@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import hashlib
+import json
 import logging
 import os
 import re
@@ -100,7 +101,9 @@ def _parallel_gather_sync(
 
 _DEICTIC_HINT_RE = re.compile(
     r"\b(ini|itu|tersebut|tadi|barusan|yang\s+dimaksud|maksudnya|gambar\s+ini|"
-    r"gambar\s+itu|lampiran|terlampir|yang\s+baru\s+saja|nomor\s+[12])\b",
+    r"gambar\s+itu|lampiran|terlampir|yang\s+baru\s+saja|nomor\s+[12]|"
+    r"edit\s+the\s+previous\s+result|edit\s+previous|add\s+to\s+that|"
+    r"tambah(kan)?\s+ke\s+yang\s+sebelumnya|edit\s+hasil\s+sebelumnya)\b",
     re.IGNORECASE,
 )
 _PATH_OR_BASENAME_RE = re.compile(
@@ -204,6 +207,7 @@ def build_referent_grounding_block(
     history_limit: int = 16,
 ) -> Optional[str]:
     from kuro_backend import chat_history
+    from kuro_backend import memory_manager
 
     deictic = user_message_looks_deictic(user_input)
     history = chat_history.get_history(
@@ -222,6 +226,25 @@ def build_referent_grounding_block(
         "Aturan: untuk 'ini/itu/gambar tadi', rujuk entri user terbaru yang punya lampiran; "
         "jika masih ambigu, tanyakan jangan menebak.",
     ]
+    raw_session_state = memory_manager.get_runtime_context_value("current_session_state", "")
+    if raw_session_state:
+        try:
+            session_state = json.loads(raw_session_state)
+            if isinstance(session_state, dict):
+                lines.append(
+                    "Prioritas utama: gunakan CURRENT_SESSION_STATE berikut sebelum memakai memori lain."
+                )
+                lines.append(
+                    f"- request_id={session_state.get('request_id', '')} user_message={session_state.get('user_message', '')!r}"
+                )
+                extractions = session_state.get("file_extractions") or []
+                for item in extractions[:6]:
+                    fname = item.get("original_filename", "")
+                    summary = str(item.get("extracted_content", "")).replace("\n", " ")[:220]
+                    lines.append(f"- current_session_file={fname!r} extracted={summary!r}")
+        except Exception as exc:
+            logger.debug("[MEMORY_COORD] current_session_state parse skipped: %s", exc)
+
     found_any = False
     idx = 0
     for row in history:
@@ -807,14 +830,13 @@ def build_context_for_llm(
     user_input: str,
     persona_mode: str,
     *,
-    compliance_data: Optional[List[Any]] = None,
     mem0_retrieved_memories: Optional[List[Any]] = None,
     include_referent_grounding: bool = True,
     chat_platform: Optional[str] = None,
     context_budget: Any = None,
 ) -> Dict[str, Any]:
     """
-    Single read path: short-term + RAG memory + optional Mem0 block (same inputs as response_node / stream).
+    Single read path: raw short-term + optional Mem0 block (same inputs as response_node / stream).
     Returns keys: recent_messages, memory_injection, mem0_context_block,
     referent_grounding_block, budget.
 
@@ -832,16 +854,13 @@ def build_context_for_llm(
         "build_context_for_llm",
         {
             "persona": persona_mode,
-            "has_compliance": bool(compliance_data),
             "mem0_n": len(mem0_retrieved_memories or []),
             "budget_total": budget.total_tokens,
         },
     )
 
-    # P1.1 — Parallelize independent I/O. `get_short_term` (SQLite), the Mem0
-    # formatter (CPU-only but cheap), and the referent grounding block are
-    # independent of each other. `query_memory` depends on `recent_messages`
-    # so it runs after the short-term fetch.
+    # Parallelize independent I/O. Short-term retrieval and referent grounding
+    # are independent from Mem0 context formatting.
     parallel_tasks: Dict[str, Any] = {
         "short_term": lambda: memory_manager.get_short_term(persona_scope=persona_mode),
     }
@@ -857,7 +876,8 @@ def build_context_for_llm(
         )
 
     fan_out = _parallel_gather_sync(parallel_tasks)
-    recent_messages = fan_out.get("short_term") or []
+    all_recent_messages = fan_out.get("short_term") or []
+    recent_messages = all_recent_messages[-15:]
     referent_grounding_block = fan_out.get("referent") if include_referent_grounding else None
     mem0_context_block = fan_out.get("mem0_fmt") if mem0_retrieved_memories else None
     if mem0_context_block:
@@ -867,27 +887,15 @@ def build_context_for_llm(
             len(mem0_context_block),
         )
 
-    # query_memory depends on recent_messages (used for expansion), so it runs
-    # after the fan-out completes. Chroma calls are already internally parallel.
-    memory = memory_manager.query_memory(
-        user_input,
-        recent_messages=recent_messages,
-        persona_scope=persona_mode,
-        include_compliance=not bool(compliance_data),
-    )
-    # Persona-aware hybrid trigger: fire summarization when either the turn
-    # count exceeds the window OR the raw L1 text exceeds the persona's L1
-    # utilization threshold.
-    try:
-        compressed_short_term = build_compressed_short_term_text(
-            persona_mode,
-            layer1_threshold_tokens=budget.summarize_threshold_tokens,
-        )
-        if compressed_short_term:
-            memory["short_term"] = compressed_short_term
-    except Exception as exc:
-        logger.warning("[SLIDING_WINDOW] fallback to raw short-term: %s", exc)
-
+    # KURO V7.0: raw short-term window only (no summary compression) and Mem0 as
+    # sole long-term semantic layer. Keep memory_injection focused on raw turns.
+    short_term_block = _format_entries_for_prompt(recent_messages, max_chars_per_entry=800)
+    memory = {
+        "profile": "",
+        "long_term": "",
+        "short_term": short_term_block,
+        "compliance": "",
+    }
     memory_injection = memory_manager.format_memory_with_temporal_grounding(memory)
 
     finance_block = ""
@@ -918,7 +926,6 @@ async def build_context_for_llm_async(
     user_input: str,
     persona_mode: str,
     *,
-    compliance_data: Optional[List[Any]] = None,
     mem0_retrieved_memories: Optional[List[Any]] = None,
     include_referent_grounding: bool = True,
     chat_platform: Optional[str] = None,
@@ -936,7 +943,6 @@ async def build_context_for_llm_async(
         build_context_for_llm,
         user_input,
         persona_mode,
-        compliance_data=compliance_data,
         mem0_retrieved_memories=mem0_retrieved_memories,
         include_referent_grounding=include_referent_grounding,
         chat_platform=chat_platform,
@@ -1061,18 +1067,19 @@ def execute_memory_write_task(
     final_response: str,
     persona_scope: str,
 ) -> None:
-    """Post-response long-term + Chroma summary + master facts (was memory_write worker)."""
-    from kuro_backend import memory_manager
+    """Post-response memory writer for Mem0-only long-term semantic storage."""
+    from kuro_backend import perpetual_memory
 
     _trace_coordinator_span(
         "execute_memory_write_task",
         {"persona": persona_scope, "chars_in": len(user_input or ""), "chars_out": len(final_response or "")},
     )
-    logger.info("[MEMORY_COORD] memory_write start persona=%s", persona_scope)
-    memory_manager.add_long_term_v2(f"User: {user_input}\nKuro: {final_response}")
-    memory_manager.summarize_conversation_to_chroma(persona_scope=persona_scope)
-    memory_manager.detect_and_save_master_facts(user_input, final_response)
-    logger.info("[MEMORY_COORD] memory_write done persona=%s", persona_scope)
+    logger.info("[MEMORY_COORD] memory_write start persona=%s (mem0-only)", persona_scope)
+    payload = f"User: {user_input}\nKuro: {final_response}"
+    perpetual_memory.perpetual_memory.store_memories(
+        [{"text": payload, "metadata": {"source": "conversation_turn", "persona_scope": persona_scope}}]
+    )
+    logger.info("[MEMORY_COORD] memory_write done persona=%s (mem0-only)", persona_scope)
 
 
 def execute_mem0_extract_task(user_input: str, final_response: str) -> None:

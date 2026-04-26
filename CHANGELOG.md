@@ -37,6 +37,37 @@ outside the finance_db schema-guard and new indexes.
 
 ---
 
+## V7.0.1 - Leviathan: Mem0 Supremacy Reset (2026-04-25)
+
+### Summary
+Architectural reset for memory and reasoning flow. LangGraph is reduced to
+`Input -> Memory Retrieval -> Tool/Action -> Response`, compliance and
+habit/reminder logic are purged from the core brain path, and Mem0 is now the
+sole long-term semantic layer. Short-term prompt context now uses the last
+15 raw turns without summarization. Session-local attachment extraction is
+persisted and prioritized for deictic follow-up requests ("edit previous",
+"add to that").
+
+### Highlights
+- **LangGraph purge:** removed compliance/habit nodes and routing, removed
+  summary-refresh post-response task, and simplified response context assembly
+  to referent + Mem0 + memory injection + finance/market/tool sections.
+- **Memory coordinator:** `build_context_for_llm*` no longer depends on
+  compliance/Chroma conversational retrieval and no longer injects compressed
+  short-term summaries in runtime path.
+- **Raw short-term window:** conversational short-term window standardized to
+  15 turns (`SHORT_TERM_LIMIT=15`) and prompt labels updated accordingly.
+- **Attachment continuity:** `/api/chat` and `/api/chat/stream` now persist
+  `current_session_state` (attachments + extracted snippets) in runtime
+  context to anchor follow-up edits to the current session.
+- **Product surface purge (disabled):** compliance, reminder, and habits APIs
+  return `410 disabled`; corresponding legacy tools are stubbed with explicit
+  "moved/purged in KURO V7.0" responses.
+- **Sebastian migration phrase:** one-time runtime confirmation message added
+  after reset deployment.
+
+---
+
 ## V6.3.0 - Sovereign: Market Sentinel & Chancellor Oracle (2026-04-22)
 
 ### Summary

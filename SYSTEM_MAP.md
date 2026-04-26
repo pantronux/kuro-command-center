@@ -32,6 +32,23 @@
   alongside the request loop. A separate `OpenClaw` process is reached via
   HTTP bridge for privileged skill execution.
 
+## V7.0 Reset Notes
+
+- **Core DAG simplified:** `kuro_backend/langgraph_core.py` now follows
+  `Input -> Memory Retrieval -> Tool/Action -> Response -> Memory Extraction`.
+  Compliance and habit/reminder nodes are removed from runtime graph routing.
+- **Long-term semantic memory:** `kuro_backend/memory_coordinator.py` +
+  `kuro_backend/perpetual_memory.py` use Mem0 as the only long-term semantic
+  source for chat context.
+- **Short-term context policy:** prompt injection now prioritizes raw
+  last-15-turn context (no summary compression in hot path).
+- **Attachment continuity:** `main.py` persists `current_session_state`
+  runtime context (attachments + extracted snippets) and
+  `memory_coordinator.build_referent_grounding_block` prioritizes this state
+  for deictic follow-ups like "edit previous result" / "add to that".
+- **Legacy modules:** compliance/habits/reminders product routes are retained
+  as disabled endpoints (`410`) pending full module excision in a follow-up.
+
 ## Core Logic Flow (Function-Level Flowchart)
 
 ```mermaid

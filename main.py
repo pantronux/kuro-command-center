@@ -685,6 +685,7 @@ async def chat_endpoint(
         image_paths = []
         file_contents = []
         file_attachments = []
+        session_extractions = []
         
         for file in files:
             if file.filename:
@@ -718,14 +719,12 @@ async def chat_endpoint(
                     parsed_content = read_result.get("summary") or read_result.get("content")
                     if parsed_content:
                         file_contents.append(f"\n--- File: {saved_file['original_filename']} ---\n{parsed_content}")
-                        
-                        # Store PDF content in ChromaDB for semantic search
-                        if (read_result.get("file_type") or "").lower().startswith("pdf"):
-                            memory_manager.add_long_term(
-                                f"PDF Document: {stored_filename}\nContent: {parsed_content[:5000]}",
-                                metadata={"type": "pdf", "filename": stored_filename, "path": file_path}
-                            )
-                            logger.info(f"Stored PDF content in ChromaDB: {stored_filename}")
+                    session_extractions.append({
+                        "original_filename": saved_file["original_filename"],
+                        "stored_filename": stored_filename,
+                        "path": file_path,
+                        "extracted_content": (parsed_content or "")[:5000],
+                    })
                     
                     file_attachments.append({
                         "type": "file",
@@ -745,6 +744,19 @@ async def chat_endpoint(
             enhanced_message += "\n\n" + att_idx
         if image_paths:
             memory_manager.set_runtime_context_value("last_accessed_file", image_paths[-1])
+        if file_attachments:
+            memory_manager.set_runtime_context_value(
+                "current_session_state",
+                json.dumps(
+                    {
+                        "request_id": request_id,
+                        "user_message": message,
+                        "attachments": file_attachments,
+                        "file_extractions": session_extractions,
+                    },
+                    ensure_ascii=False,
+                ),
+            )
 
         # Save user message to chat history
         chat_history.add_message(
@@ -840,6 +852,7 @@ async def chat_stream_endpoint(
             image_paths = []
             file_contents = []
             file_attachments = []
+            session_extractions = []
             
             for file in files:
                 if file.filename:
@@ -872,6 +885,12 @@ async def chat_stream_endpoint(
                         parsed_content = read_result.get("summary") or read_result.get("content")
                         if parsed_content:
                             file_contents.append(f"\n--- File: {saved_file['original_filename']} ---\n{parsed_content}")
+                        session_extractions.append({
+                            "original_filename": saved_file["original_filename"],
+                            "stored_filename": stored_filename,
+                            "path": file_path,
+                            "extracted_content": (parsed_content or "")[:5000],
+                        })
                         file_attachments.append({
                             "type": "file",
                             "original_filename": saved_file["original_filename"],
@@ -889,6 +908,19 @@ async def chat_stream_endpoint(
                 enhanced_message += "\n\n" + att_idx
             if image_paths:
                 memory_manager.set_runtime_context_value("last_accessed_file", image_paths[-1])
+            if file_attachments:
+                memory_manager.set_runtime_context_value(
+                    "current_session_state",
+                    json.dumps(
+                        {
+                            "request_id": request_id,
+                            "user_message": user_message,
+                            "attachments": file_attachments,
+                            "file_extractions": session_extractions,
+                        },
+                        ensure_ascii=False,
+                    ),
+                )
 
             # Save user message (post UI mode router cleanup)
             chat_history.add_message(
@@ -1236,67 +1268,15 @@ async def memory_stats():
 
 @app.post("/api/compliance/ingest")
 async def compliance_ingest(clear: bool = Form(False)):
-    """
-    V3.1 COMPLIANCE KNOWLEDGE BASE INGESTION:
-    Trigger batch ingestion of compliance documents from /home/kuro/ComplianceDoc.
-    
-    clear: If true, clear existing compliance database before ingestion.
-    """
-    try:
-        import time
-        start_time = time.time()
-        
-        # Clear if requested
-        if clear:
-            collection = memory_manager._get_compliance_collection()
-            if collection:
-                existing = collection.get()
-                if existing and existing.get("ids"):
-                    collection.delete(ids=existing["ids"])
-                    logger.info(f"[COMPLIANCE_API] Cleared {len(existing['ids'])} existing chunks")
-        
-        # Run ingestion
-        result = memory_manager.ingest_compliance_base()
-        elapsed = time.time() - start_time
-        
-        return {
-            "status": "success" if result["success"] else "partial",
-            "files_processed": result["files_processed"],
-            "total_chunks": result["total_chunks"],
-            "iso_standards": result["iso_standards"],
-            "documents": result.get("documents", []),
-            "errors": result["errors"],
-            "elapsed_seconds": round(elapsed, 2)
-        }
-        
-    except Exception as e:
-        logger.error(f"Compliance ingestion failed: {e}")
-        return {
-            "status": "error",
-            "message": str(e)
-        }
+    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Compliance module purged in KURO V7.0"})
 
 @app.get("/api/compliance/stats")
 async def compliance_stats():
-    """V3.1 Compliance knowledge base statistics."""
-    return {
-        "status": "success",
-        "data": memory_manager.get_compliance_stats()
-    }
+    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Compliance module purged in KURO V7.0"})
 
 @app.get("/api/compliance/search")
 async def compliance_search(query: str):
-    """V3.1 Search compliance knowledge base."""
-    if not query:
-        return {"status": "error", "message": "No query provided"}
-    
-    results = memory_manager.search_compliance_base(query, top_k=5)
-    return {
-        "status": "success",
-        "query": query,
-        "results": results,
-        "count": len(results)
-    }
+    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Compliance module purged in KURO V7.0"})
 
 # --- Intelligence Hub Routes ---
 @app.get("/api/intelligence/history")
@@ -1367,32 +1347,23 @@ async def compliance_dashboard():
 
 @app.get("/api/compliance/progress/{standard}")
 async def compliance_progress(standard: str):
-    """Get compliance progress for a standard."""
-    return {"status": "success", "data": compliance_db.get_compliance_progress(standard)}
+    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Compliance module purged in KURO V7.0"})
 
 @app.get("/api/compliance/evidence")
 async def compliance_evidence(standard: str = None):
-    """Get evidence matrix."""
-    return {"status": "success", "data": compliance_db.get_evidence_matrix(standard)}
+    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Compliance module purged in KURO V7.0"})
 
 @app.get("/api/compliance/search")
 async def compliance_search(query: str, standard: str = None):
-    """Search compliance clauses."""
-    return {"status": "success", "data": tools.search_compliance_clause(query, standard)}
+    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Compliance module purged in KURO V7.0"})
 
 @app.post("/api/compliance/analyze")
 async def compliance_analyze(document: str = Form(""), standard: str = Form("iso27001")):
-    """Run gap analysis on a document."""
-    result = tools.analyze_compliance(document, standard)
-    if "results" in result:
-        compliance_db.add_gap_analysis("Uploaded Document", standard, result["results"])
-    compliance_db.add_audit_trail("compliance_analysis", f"Analyzed document against {standard}", standard)
-    return result
+    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Compliance module purged in KURO V7.0"})
 
 @app.get("/api/compliance/audit-trail")
 async def audit_trail(limit: int = 50):
-    """Get audit trail entries."""
-    return {"status": "success", "data": compliance_db.get_audit_trail(limit)}
+    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Compliance module purged in KURO V7.0"})
 
 # --- Reminder Routes ---
 @app.get("/reminders", response_class=HTMLResponse)
@@ -1402,26 +1373,15 @@ async def reminder_dashboard():
 
 @app.get("/api/reminders/upcoming")
 async def get_upcoming_reminders():
-    """Get upcoming reminders."""
-    reminders = await run_db(reminder_service.get_upcoming_reminders)
-    return {"status": "success", "reminders": reminders}
+    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Reminders moved to OpenClaw Skills in KURO V7.0"})
 
 @app.get("/api/reminders/history")
 async def get_reminder_history():
-    """Get reminder history (read-only)."""
-    reminders = await run_db(reminder_service.get_reminder_history)
-    logger.debug(
-        "api reminders/history: returning %s rows (revision=%s)",
-        len(reminders),
-        await run_db(reminder_service.get_data_revision),
-    )
-    return {"status": "success", "reminders": reminders}
+    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Reminders moved to OpenClaw Skills in KURO V7.0"})
 
 @app.get("/api/reminders/stats")
 async def get_reminder_stats():
-    """Get reminder statistics."""
-    stats = await run_db(reminder_service.get_reminder_stats)
-    return {"status": "success", "stats": stats}
+    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Reminders moved to OpenClaw Skills in KURO V7.0"})
 
 @app.get("/api/dashboard/data-revision")
 async def dashboard_data_revision():
@@ -1460,28 +1420,7 @@ async def dashboard_sync_websocket(websocket: WebSocket):
 
 @app.get("/api/reminders/notifications")
 async def get_pending_notifications():
-    """Check for reminders that need notification."""
-    notifications = []
-
-    ten_min_reminders = await run_db(reminder_service.get_reminders_needing_10m_notification)
-    for r in ten_min_reminders:
-        await run_db(reminder_service.mark_notified_10m, r['id'])
-        notifications.append({
-            "type": "warning",
-            "message": f"A gentle reminder, Master — the event '{r['event_name']}' begins in 10 minutes.",
-            "reminder_id": r['id']
-        })
-
-    event_reminders = await run_db(reminder_service.get_reminders_needing_event_notification)
-    for r in event_reminders:
-        await run_db(reminder_service.mark_notified_event, r['id'])
-        notifications.append({
-            "type": "urgent",
-            "message": f"Waktunya event '{r['event_name']}' dimulai, Master!",
-            "reminder_id": r['id']
-        })
-
-    return {"status": "success", "notifications": notifications}
+    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Reminders moved to OpenClaw Skills in KURO V7.0"})
 
 # --- Daily Habits Routes ---
 @app.get("/habits", response_class=HTMLResponse)
@@ -1491,9 +1430,7 @@ async def habits_dashboard():
 
 @app.get("/api/habits")
 async def get_habits():
-    """Get all daily habits (Pydantic-validated; same data path as Telegram/schedulers)."""
-    habits = await run_db(core_data.list_habits_validated)
-    return {"status": "success", "habits": habits}
+    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Habits moved to OpenClaw Skills in KURO V7.0"})
 
 
 @app.post("/api/habits")
@@ -1502,22 +1439,7 @@ async def create_habit(
     scheduled_time: str = Form(...),
     category: str = Form("General"),
 ):
-    """Create a new habit via single service gateway (with revision bump)."""
-    try:
-        habit_id = await run_db(
-            memory_coordinator.habit_create,
-            title=title,
-            scheduled_time=scheduled_time,
-            category=category,
-            source="web_api",
-        )
-        return {"status": "success", "habit_id": habit_id}
-    except Exception as e:
-        logger.error("Error creating habit: %s", e)
-        return JSONResponse(
-            status_code=500,
-            content={"status": "error", "message": str(e)},
-        )
+    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Habits moved to OpenClaw Skills in KURO V7.0"})
 
 
 @app.put("/api/habits/{habit_id}")
@@ -1529,147 +1451,35 @@ async def update_habit(
     target_per_month: Optional[int] = Form(None),
     target_per_week: Optional[int] = Form(None),
 ):
-    """Update a habit via service gateway (with revision bump)."""
-    try:
-        updates = {
-            "title": title,
-            "scheduled_time": scheduled_time,
-            "category": category,
-            "target_per_month": target_per_month,
-            "target_per_week": target_per_week,
-        }
-        filtered_updates = {k: v for k, v in updates.items() if v is not None}
-        if not filtered_updates:
-            return JSONResponse(
-                status_code=400,
-                content={"status": "error", "message": "No update fields provided"},
-            )
-        await run_db(
-            memory_coordinator.habit_update,
-            habit_id,
-            source="web_api",
-            **filtered_updates,
-        )
-        return {"status": "success", "habit_id": habit_id}
-    except Exception as e:
-        logger.error("Error updating habit %s: %s", habit_id, e)
-        return JSONResponse(
-            status_code=500,
-            content={"status": "error", "message": str(e)},
-        )
+    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Habits moved to OpenClaw Skills in KURO V7.0"})
 
 
 @app.delete("/api/habits/{habit_id}")
 async def delete_habit(habit_id: int):
-    """Delete a habit via service gateway (with revision bump)."""
-    try:
-        await run_db(memory_coordinator.habit_delete, habit_id, source="web_api")
-        return {"status": "success", "habit_id": habit_id}
-    except Exception as e:
-        logger.error("Error deleting habit %s: %s", habit_id, e)
-        return JSONResponse(
-            status_code=500,
-            content={"status": "error", "message": str(e)},
-        )
+    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Habits moved to OpenClaw Skills in KURO V7.0"})
 
 @app.get("/api/habits/stats")
 async def get_habits_stats():
-    """Get today's habit completion stats."""
-    stats = await run_db(core_data.get_completion_stats_validated)
-    return {"status": "success", "stats": stats}
+    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Habits moved to OpenClaw Skills in KURO V7.0"})
 
 @app.get("/api/habits/report")
 async def get_end_of_day_report():
-    """Get end-of-day narrative report."""
-    report = await run_db(core_data.get_end_of_day_report)
-    return {"status": "success", "report": report}
+    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Habits moved to OpenClaw Skills in KURO V7.0"})
 
 # --- V2.0: Monthly/Weekly Analytics Endpoints ---
 
 @app.get("/api/habits/monthly")
 async def get_monthly_habits(year: int = None, month: int = None):
-    """V2.0: Get monthly habit grid data."""
-    from datetime import date
-    if year is None or month is None:
-        today = date.today()
-        year = today.year
-        month = today.month
-    
-    try:
-        data = await run_db(core_data.get_monthly_data_validated, year, month)
-        return {"status": "success", "data": data}
-    except Exception as e:
-        logger.error(f"Error getting monthly data: {e}")
-        return {"status": "error", "message": str(e)}
+    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Habits moved to OpenClaw Skills in KURO V7.0"})
 
 @app.get("/api/habits/weekly")
 async def get_weekly_habits(year: int = None, week: int = None):
-    """V2.0: Get weekly habit grid data."""
-    from datetime import date
-    if year is None or week is None:
-        today = date.today()
-        year = today.year
-        week = today.isocalendar()[1]
-    
-    try:
-        data = await run_db(core_data.get_weekly_data_validated, year, week)
-        return {"status": "success", "data": data}
-    except Exception as e:
-        logger.error(f"Error getting weekly data: {e}")
-        return {"status": "error", "message": str(e)}
+    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Habits moved to OpenClaw Skills in KURO V7.0"})
 
 
 @app.get("/api/habits/evaluation-cached")
 async def get_habits_evaluation_cached(period_type: str, year: int, period: int):
-    """Read-only: cached aggregate AI evaluation for a month or ISO week (if any)."""
-    rev_headers = {
-        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-        "Pragma": "no-cache",
-        "X-Data-Revision": str(await run_db(core_data.get_data_revision)),
-    }
-    try:
-        if period_type == "monthly":
-            meta = await run_db(core_data.get_monthly_report_data, year, period)
-        elif period_type == "weekly":
-            meta = await run_db(core_data.get_weekly_report_data, year, period)
-        else:
-            return JSONResponse(
-                status_code=400,
-                content={"status": "error", "message": "period_type must be monthly or weekly"},
-                headers=rev_headers,
-            )
-        row = await run_db(
-            core_data.get_ai_evaluation,
-            None,
-            meta["period_type"],
-            meta["period_start"],
-            meta["period_end"],
-        )
-        text = (row or {}).get("evaluation_text") or ""
-        if not row or not str(text).strip():
-            return JSONResponse(
-                content={"status": "success", "cached": False},
-                headers=rev_headers,
-            )
-        rec = AiEvaluationRecord.model_validate(dict(row))
-        return JSONResponse(
-            content={
-                "status": "success",
-                "cached": True,
-                "evaluation": text,
-                "score": rec.overall_score,
-                "period_start": meta["period_start"],
-                "period_end": meta["period_end"],
-            },
-            headers=rev_headers,
-        )
-    except Exception as e:
-        logger.error("evaluation-cached failed: %s", e)
-        return JSONResponse(
-            status_code=500,
-            content={"status": "error", "message": str(e)},
-            headers=rev_headers,
-        )
+    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Habits moved to OpenClaw Skills in KURO V7.0"})
 
 
 # --- Finances SSoT (The Chancellor) ---
