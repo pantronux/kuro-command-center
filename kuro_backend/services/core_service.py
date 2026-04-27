@@ -186,6 +186,8 @@ def _init_reminders_schema():
             CHECK (notified_event IN (0, 1))
         )
     """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_reminders_event_time ON reminders(event_time)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_reminders_status ON reminders(status)")
     conn.commit()
     conn.close()
     logger.info("Reminder database initialized.")
@@ -513,6 +515,11 @@ def _init_habits_schema():
             UNIQUE(habit_id, period_type, period_start, period_end)
         )
     """)
+
+    # Performance indices
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_daily_habits_scheduled_time ON daily_habits(scheduled_time)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_habit_logs_log_date ON habit_logs(log_date)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_completion_history_date ON completion_history(completed_date)")
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS app_sync_metadata (
