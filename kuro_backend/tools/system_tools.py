@@ -53,7 +53,12 @@ def generate_excel_report(data: Optional[Dict] = None, filename: str = "report.x
             for col, header in enumerate(headers, 1):
                 ws.cell(row=2, column=col, value=str(data.get(header, "")))
         
-        filepath = os.path.join(EXPORTS_DIR, filename if filename.endswith('.xlsx') else f"{filename}.xlsx")
+        # Security: Prevent path traversal
+        abs_exports_dir = os.path.abspath(EXPORTS_DIR)
+        filepath = os.path.abspath(os.path.join(abs_exports_dir, filename if filename.endswith('.xlsx') else f"{filename}.xlsx"))
+        if not filepath.startswith(abs_exports_dir + os.sep):
+            return {"status": "error", "message": "Invalid filename: Path traversal is not allowed"}
+
         wb.save(filepath)
         
         return {"status": "success", "filepath": filepath, "message": f"Excel report saved to {filepath}"}
@@ -72,8 +77,12 @@ def manage_files(action: str, filename: str = None, content: str = None) -> Dict
         if not filename:
             return {"status": "error", "message": "Filename required for this action"}
         
-        filepath = os.path.join(EXPORTS_DIR, filename)
-        
+        # Security: Prevent path traversal
+        abs_exports_dir = os.path.abspath(EXPORTS_DIR)
+        filepath = os.path.abspath(os.path.join(abs_exports_dir, filename))
+        if not filepath.startswith(abs_exports_dir + os.sep):
+            return {"status": "error", "message": "Invalid filename: Path traversal is not allowed"}
+
         if action == "read":
             if not os.path.exists(filepath):
                 return {"status": "error", "message": f"File not found: {filename}"}
@@ -173,8 +182,12 @@ def generate_report_template(template_type: str, filename: str, data: Optional[D
         )
         
         ext = format if format.startswith('.') else f".{format}"
-        filepath = os.path.join(EXPORTS_DIR, filename if filename.endswith(ext) else f"{filename}{ext}")
-        
+        # Security: Prevent path traversal
+        abs_exports_dir = os.path.abspath(EXPORTS_DIR)
+        filepath = os.path.abspath(os.path.join(abs_exports_dir, filename if filename.endswith(ext) else f"{filename}{ext}"))
+        if not filepath.startswith(abs_exports_dir + os.sep):
+            return {"status": "error", "message": "Invalid filename: Path traversal is not allowed"}
+
         with open(filepath, 'w') as f:
             f.write(filled)
         
