@@ -1,7 +1,6 @@
 """Kuro AI V6.0 "Sovereign" — Telegram notifier.
 
-Dedicated outbound Telegram client used by both:
-  - reminder / habit notifications (legacy path from ``main.py``), and
+Dedicated outbound Telegram client used by:
   - autonomous dreaming alerts (``dreaming_worker``).
 
 Design goals:
@@ -14,7 +13,7 @@ Design goals:
 
 --- Header Doc ---
 Purpose: Resilient outbound Telegram notifier (bot token + chat id) for proactive events.
-Caller: proactive_events._dispatch_async, reminder_service due-reminder loop, dreaming_worker alerts.
+Caller: proactive_events._dispatch_async, dreaming_worker alerts.
 Dependencies: requests/httpx, kuro_backend.config.
 Main Functions: send_message(text, *, dry_run), is_configured(), _post_with_retry().
 Side Effects: HTTPS call to api.telegram.org; logs redacted request/response.

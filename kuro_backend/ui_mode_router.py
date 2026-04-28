@@ -2,7 +2,7 @@
 
 Detects natural-language "mode" commands in the chat pipeline (primarily
 English as of V6.1, with legacy Bahasa Indonesia patterns retained so old
-habits keep working) and returns the canonical :mod:`dashboard_broadcast`
+commands keep working) and returns the canonical :mod:`dashboard_broadcast`
 UI command so the caller can relay it to the frontend.
 
 Handlers must:

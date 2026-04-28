@@ -2,7 +2,7 @@
 Kuro AI V6.0 Sovereign - Tools [2026-04-17]
 ============================================================
 Kuro OS Sentinel - Universal File Parser & System Analyzer
-Butler + System Administrator capabilities.
+Sovereign + System Administrator capabilities.
 Supports: Text, Code, PDF, Images (Vision), Logs, and recursive crawling.
 
 PHASE 1 Fixes [2026-04-05]:
@@ -10,10 +10,10 @@ PHASE 1 Fixes [2026-04-05]:
 - Physical Validation: os.path.exists() checks before file operations
 
 --- Header Doc ---
-Purpose: All Gemini-callable tools (filesystem, system inspection, reminders, habits, finance, market, OpenClaw advanced execution).
+Purpose: All Gemini-callable tools (filesystem, system inspection, finance, market, OpenClaw advanced execution).
 Caller: core.py, langgraph_core tool_node, services/core_service (some delegated helpers), tests.
-Dependencies: reminder_service, finance_db, execution.openclaw_bridge, chromadb (context lookup), PDF/DOCX parsers, requests, threading.
-Main Functions: get_system_status, universal_read, smart_read, analyze_compliance, add_reminder_tool, set_monthly_budget_tool, get_ticker_price_tool, get_market_news_tool, prediction_market_scan_tool, advanced_execution_tool.
+Dependencies: finance_db, execution.openclaw_bridge, chromadb (context lookup), PDF/DOCX parsers, requests, threading.
+Main Functions: get_system_status, universal_read, smart_read, analyze_compliance, set_monthly_budget_tool, get_ticker_price_tool, get_market_news_tool, prediction_market_scan_tool, advanced_execution_tool.
 Side Effects: Filesystem reads under PROJECT_ROOT whitelist, subprocess calls, finance_db writes for price/prediction cache, OpenClaw HTTP calls via bridge.
 """
 import asyncio
@@ -951,121 +951,13 @@ def process_video(video_path: str):
 
 
 # ============================================
-# REMINDER & SCHEDULING TOOLS
-# ============================================
-def parse_datetime(text: str) -> Optional[datetime]:
-    """
-    Parse natural language datetime text into a datetime object.
-    Supports: "jam 2 siang", "besok jam 10", "nanti malam", "10 menit lagi", etc.
-    Uses settings.TIMEZONE for timezone awareness.
-    """
-    import pytz
-    from kuro_backend.config import settings
-    
-    tz = settings.tz
-    now = datetime.now(tz)
-    text_lower = text.lower().strip()
-    
-    # Relative time patterns
-    relative_patterns = {
-        "10 menit lagi": lambda: now + timedelta(minutes=10),
-        "15 menit lagi": lambda: now + timedelta(minutes=15),
-        "30 menit lagi": lambda: now + timedelta(minutes=30),
-        "1 jam lagi": lambda: now + timedelta(hours=1),
-        "2 jam lagi": lambda: now + timedelta(hours=2),
-        "besok": lambda: now + timedelta(days=1),
-        "lusa": lambda: now + timedelta(days=2),
-        "nanti pagi": lambda: now.replace(hour=8, minute=0, second=0) if now.hour < 8 else (now + timedelta(days=1)).replace(hour=8, minute=0, second=0),
-        "nanti siang": lambda: now.replace(hour=12, minute=0, second=0) if now.hour < 12 else (now + timedelta(days=1)).replace(hour=12, minute=0, second=0),
-        "nanti sore": lambda: now.replace(hour=16, minute=0, second=0) if now.hour < 16 else (now + timedelta(days=1)).replace(hour=16, minute=0, second=0),
-        "nanti malam": lambda: now.replace(hour=20, minute=0, second=0) if now.hour < 20 else (now + timedelta(days=1)).replace(hour=20, minute=0, second=0),
-        "hari ini": lambda: now,
-    }
-    
-    for pattern, func in relative_patterns.items():
-        if pattern in text_lower:
-            return func()
-    
-    # Time-only patterns: "jam 2 siang", "jam 14:00", "pukul 10"
-    time_patterns = [
-        r'jam\s+(\d{1,2})[:.](\d{2})',  # jam 14.00
-        r'jam\s+(\d{1,2})\s*(pagi|siang|sore|malam)?',  # jam 2 siang
-        r'pukul\s+(\d{1,2})[:.](\d{2})',  # pukul 14.00
-        r'pukul\s+(\d{1,2})\s*(pagi|siang|sore|malam)?',  # pukul 2 siang
-    ]
-    
-    for pattern in time_patterns:
-        match = re.search(pattern, text_lower)
-        if match:
-            hour = int(match.group(1))
-            minute = int(match.group(2)) if match.lastindex >= 2 and match.group(2) else 0
-            period = match.group(2) if match.lastindex >= 2 and match.group(2) in ['pagi', 'siang', 'sore', 'malam'] else None
-            
-            # Adjust hour based on period
-            if period:
-                if period == 'pagi' and hour < 12:
-                    pass  # Already correct
-                elif period == 'siang' and hour < 12:
-                    hour += 12 if hour != 12 else 0
-                elif period == 'sore' and hour < 12:
-                    hour += 12
-                elif period == 'malam' and hour < 12:
-                    hour += 12
-            
-            target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-            if target < now:
-                target += timedelta(days=1)
-            return target
-    
-    # Full datetime: "2026-04-06 14:00"
-    datetime_patterns = [
-        r'(\d{4}-\d{2}-\d{2})\s+(\d{1,2})[:.](\d{2})',
-        r'(\d{2}/\d{2}/\d{4})\s+(\d{1,2})[:.](\d{2})',
-    ]
-    
-    for pattern in datetime_patterns:
-        match = re.search(pattern, text_lower)
-        if match:
-            try:
-                date_str = match.group(1)
-                hour = int(match.group(2))
-                minute = int(match.group(3))
-                
-                # Try different date formats
-                for fmt in ['%Y-%m-%d', '%d/%m/%Y']:
-                    try:
-                        dt = datetime.strptime(date_str, fmt)
-                        target = dt.replace(hour=hour, minute=minute, tzinfo=tz)
-                        return target
-                    except ValueError:
-                        continue
-            except Exception:
-                pass
-    
-    return None
 
 
-def lookup_chroma_context(query: str) -> str:
-    """
-    Look up context from Mem0 long-term memory for a reminder query.
-    Returns relevant context to enrich the reminder description.
-    """
-    try:
-        from kuro_backend.memory_manager import search_long_term
-        results = search_long_term(query, top_k=3)
-        if results:
-            return "\n".join(results)[:1000]  # Limit context length
-    except Exception as e:
-        logger.warning(f"Mem0 context lookup failed: {e}")
-    return ""
 
 
-def add_reminder_tool(event_name: str, datetime_text: str, description: str = "", source: str = "web") -> Dict:
-    return {"success": False, "error": "Reminders moved to OpenClaw Skills in KURO V7.0"}
 
 
-def get_reminders_tool() -> Dict:
-    return {"success": False, "error": "Reminders moved to OpenClaw Skills in KURO V7.0"}
+
 
 
 # ============================================
@@ -1280,37 +1172,7 @@ def prediction_market_scan_tool(topics: str = "") -> Dict[str, Any]:
     return {"success": True, "openclaw": True, **raw}
 
 
-# ============================================
-# DAILY HABIT TOOLS
-# ============================================
-def mark_habit_done_tool(habit_title: str) -> Dict:
-    """
-    Mark a daily habit as done via natural language.
-    E.g., "Aku udah gym ya hari ini" -> marks "Gym" as done.
-    """
-    return {"success": False, "error": "Habits moved to OpenClaw Skills in KURO V7.0"}
 
-
-def get_habits_status_tool() -> Dict:
-    return {"success": False, "error": "Habits moved to OpenClaw Skills in KURO V7.0"}
-
-
-EMPTY_HABIT_FACTUAL_MESSAGE = "Saya tidak menemukan catatan data faktual."
-
-
-def get_habit_history_tool(habit_title: str, days: int = 30) -> Dict:
-    """
-    Factual habit log rows from SQLite for one habit. If has_factual_data is false, you MUST
-    reply to the user with exactly: 'Saya tidak menemukan catatan data faktual.' — no ISO clauses,
-    no IP addresses, no invented activities.
-    """
-    return {
-        "success": False,
-        "has_factual_data": False,
-        "ai_required_reply": "Habits moved to OpenClaw Skills in KURO V7.0",
-        "habit_logs": [],
-        "completion_dates": [],
-    }
 
 
 # ============================================

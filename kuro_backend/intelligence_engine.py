@@ -75,7 +75,7 @@ def synthesize_intelligence(research_results: Dict[str, Any]) -> Dict[str, Any]:
     # Prepare research data for synthesis
     research_summary = json.dumps(research_results, ensure_ascii=False, indent=2)[:8000]
     
-    prompt = f"""Kamu adalah Kuro, AI Butler dan Analis Intelijen Pantronux. Tugasmu adalah menganalisis hasil riset dan menyusun Laporan Intelijen Harian yang formal dan profesional.
+    prompt = f"""Kamu adalah Kuro, AI Sovereign dan Analis Intelijen Pantronux. Tugasmu adalah menganalisis hasil riset dan menyusun Laporan Intelijen Harian yang formal dan profesional.
 
 DATA RISET MENTAH:
 {research_summary}
@@ -209,7 +209,7 @@ def format_telegram_message(briefing: Dict[str, Any]) -> str:
 {briefing.get('penutup', 'N/A')}
 
 ━━━━━━━━━━━━━━━━━━━━
-_Dikirim otomatis oleh Kuro AI Butler_"""
+_Dikirim otomatis oleh Kuro AI Sovereign_"""
     
     return message
 

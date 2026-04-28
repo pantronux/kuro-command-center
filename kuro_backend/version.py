@@ -1,4 +1,4 @@
-"""Kuro AI V7.0 — Single-source-of-truth version metadata.
+"""Kuro AI V7.1 — Single-source-of-truth version metadata.
 
 Importers should prefer :data:`VERSION_BANNER` when rendering in the UI
 and :data:`VERSION` for machine-readable comparisons. Bumping a new
@@ -16,8 +16,8 @@ from __future__ import annotations
 
 from typing import Dict
 
-VERSION: str = "7.0.0"
-CODENAME: str = "Leviathan"
+VERSION: str = "7.1.0"
+CODENAME: str = "Sovereign Unbound"
 VERSION_LABEL: str = f"V{VERSION.split('.')[0]}.{VERSION.split('.')[1]}"
 VERSION_BANNER: str = f"Kuro {VERSION_LABEL} — {CODENAME}"
 

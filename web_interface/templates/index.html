@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
   Header Doc ---
-  Purpose: Primary dashboard / chat UI for Kuro AI (Leviathan V7.0).
+  Purpose: Primary dashboard / chat UI for Kuro AI (Sovereign Unbound V7.1).
   Caller: main.py GET "/" (HTMLResponse via Jinja2).
-  Dependencies: static/js/app.js, static/js/live2d_manager.js, static/css/style.css, Tailwind CDN, Lucide, Live2D runtime.
+  Dependencies: static/js/app.js, static/css/style.css, Tailwind CDN, Lucide.
   Main Sections: persona picker, chat log, HUD chips bar (market), settings/nav.
-  Side Effects: Opens /ws/dashboard WebSocket, polls /api/market/hud on a timer, loads Live2D avatar assets.
+  Side Effects: Opens /ws/dashboard WebSocket, polls /api/market/hud on a timer.
 -->
 <html lang="en" class="scroll-smooth">
 <head>
@@ -130,96 +130,8 @@
         .kuro-avatar .kuro-avatar-fallback { display: none; }
         .kuro-avatar--fallback .kuro-avatar-fallback { display: inline; }
 
-        /* V6.1 Live2D dock — pinned to bottom-left above the profile area */
-        .live2d-dock {
-            position: fixed;
-            left: 0;
-            bottom: 72px; /* sits just above the 72px profile footer */
-            width: 288px; /* matches sidebar width (lg:w-72 = 18rem = 288px) */
-            height: 260px;
-            z-index: 38;
-            pointer-events: none;
-            opacity: 0.97;
-            transition: opacity 280ms ease, transform 280ms ease;
-        }
-        .live2d-dock canvas {
-            width: 100%;
-            height: 100%;
-            display: block;
-            pointer-events: auto;
-            background: transparent;
-        }
-        /* Auto-hide when sidebar is collapsed / viewport too narrow */
-        .live2d-dock.live2d-dock--hidden { display: none; }
-        @media (max-width: 1024px) {
-            .live2d-dock { display: none; }
-        }
 
         /* ── Kuro tips bubble ────────────────────────────────────────── */
-        #kuroBubble {
-            position: fixed;
-            left: 14px;
-            bottom: 344px; /* above the dock */
-            width: 256px;
-            z-index: 39;
-            pointer-events: auto;
-            display: none; /* shown by JS */
-        }
-        #kuroBubble.bubble-visible { display: block; animation: bubbleFadeIn 0.4s cubic-bezier(.22,1,.36,1) both; }
-        #kuroBubble.bubble-hiding  { animation: bubbleFadeOut 0.35s ease forwards; }
-        #kuroBubbleInner {
-            background: rgba(15,23,42,0.88);
-            backdrop-filter: blur(14px);
-            border: 1px solid rgba(125,211,252,0.25);
-            border-radius: 16px;
-            padding: 14px 16px 12px;
-            color: #e0f2fe;
-            font-size: 13px;
-            line-height: 1.55;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.45), 0 0 0 1px rgba(125,211,252,0.08) inset;
-            position: relative;
-        }
-        /* speech-bubble tail pointing down-left toward avatar */
-        #kuroBubbleInner::after {
-            content: '';
-            position: absolute;
-            bottom: -9px;
-            left: 28px;
-            border: 5px solid transparent;
-            border-top-color: rgba(15,23,42,0.88);
-        }
-        #kuroBubbleLabel {
-            font-size: 10px;
-            text-transform: uppercase;
-            letter-spacing: 0.08em;
-            color: #7dd3fc;
-            font-weight: 700;
-            margin-bottom: 6px;
-            display: flex;
-            align-items: center;
-            gap: 5px;
-        }
-        #kuroBubbleClose {
-            position: absolute;
-            top: 8px; right: 10px;
-            background: none; border: none;
-            color: #94a3b8; cursor: pointer;
-            font-size: 16px; line-height: 1;
-            padding: 0 2px;
-            transition: color 150ms ease;
-        }
-        #kuroBubbleClose:hover { color: #e0f2fe; }
-        @keyframes bubbleFadeIn {
-            from { opacity: 0; transform: translateY(12px) scale(0.95); }
-            to   { opacity: 1; transform: translateY(0)   scale(1); }
-        }
-        @keyframes bubbleFadeOut {
-            from { opacity: 1; transform: translateY(0)   scale(1); }
-            to   { opacity: 0; transform: translateY(8px)  scale(0.95); }
-        }
-        @media (max-width: 1024px) {
-            #kuroBubble { display: none !important; }
-        }
         html.theme-hud .kuro-avatar {
             background: radial-gradient(circle at 35% 35%, #22d3ee, #0f172a 85%);
             color: #e0f2fe;
@@ -270,7 +182,7 @@
                         <div class="sidebar-text">
                             <h1 class="text-lg font-bold text-gray-800 dark:text-white">Kuro AI</h1>
                             <p class="text-xs text-gray-500 dark:text-gray-400">
-                                <span id="kuroVersionBadge">Leviathan V7.0</span>
+                                <span id="kuroVersionBadge">Sovereign Unbound V7.1</span>
                             </p>
                         </div>
                     </div>
@@ -404,13 +316,6 @@
                                     <div>
                                         <p class="font-medium text-gray-800 dark:text-white">Advisor</p>
                                         <p class="text-xs text-gray-500">Socratic scholar for PhD research</p>
-                                    </div>
-                                </button>
-                                <button class="persona-option w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-2" data-persona="butler">
-                                    <span class="text-lg">🛡️</span>
-                                    <div>
-                                        <p class="font-medium text-gray-800 dark:text-white">Butler</p>
-                                        <p class="text-xs text-gray-500">SSoT integrity, habits, and reminders</p>
                                     </div>
                                 </button>
                                 <button class="persona-option w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-2" data-persona="chancellor">
@@ -595,7 +500,6 @@
                                         <option value="advisor">advisor</option>
                                         <option value="chill">chill</option>
                                         <option value="tactical">tactical</option>
-                                        <option value="butler">butler</option>
                                         <option value="chancellor">chancellor</option>
                                         <option value="auditor">auditor</option>
                                     </select>
@@ -616,54 +520,9 @@
         </div>
     </div>
     
-    <!-- V6.1 Live2D Hijiki mascot dock. Fixed to bottom-left above profile, hidden on narrow viewports. -->
-    <div id="live2dDock" class="live2d-dock" aria-hidden="true">
-        <canvas id="live2d-canvas" width="288" height="260"></canvas>
-    </div>
-
-    <!-- Kuro tips/trivia bubble — appears every 10 min while dashboard is open -->
-    <div id="kuroBubble" role="status" aria-live="polite">
-        <div id="kuroBubbleInner">
-            <button id="kuroBubbleClose" aria-label="Dismiss" title="Dismiss">&times;</button>
-            <div id="kuroBubbleLabel">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#7dd3fc" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-                <span id="kuroBubbleCategory">Tip from Kuro</span>
-            </div>
-            <div id="kuroBubbleText"></div>
-        </div>
-    </div>
 
     <!-- Custom JS -->
     <script src="/static/js/app.js"></script>
 
-    <!-- V6.1 Live2D manager (deferred; fails silently when SDK assets unavailable). -->
-    <script type="module">
-        import("/static/js/live2d_manager.js")
-            .then((mod) => { mod.initLive2D && mod.initLive2D(); })
-            .catch((err) => { console.warn("[Kuro] Live2D manager unavailable:", err); });
-    </script>
-
-    <!-- Nuclear Purge: Remove any ghost speaker buttons or voice artifacts -->
-    <script>
-        (function() {
-            const purge = () => {
-                const targets = [
-                    '.kuro-speak-btn', 
-                    '#kuro-speak-btn', 
-                    '[class*="speak-btn"]', 
-                    '[id*="speak-btn"]',
-                    'button:has(i[data-lucide="volume-2"])',
-                    'button:has(i[data-lucide="volume-x"])'
-                ];
-                targets.forEach(selector => {
-                    document.querySelectorAll(selector).forEach(el => el.remove());
-                });
-            };
-            // Run immediately and then occasionally to catch dynamic injections
-            purge();
-            const observer = new MutationObserver(purge);
-            observer.observe(document.body, { childList: true, subtree: true });
-        })();
-    </script>
 </body>
 </html>

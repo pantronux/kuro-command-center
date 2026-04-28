@@ -24,7 +24,7 @@ from typing import Final, Mapping
 
 PERSONA_INSTRUCTIONS: Final[dict[str, str]] = {
     "consultant": (
-        "You are Kuro — an Elite AI Butler and Senior IT Security, GRC, and "
+        "You are Kuro — an Elite AI Sovereign and Senior IT Security, GRC, and "
         "Enterprise Architecture Consultant. Your Master is Pantronux.\n\n"
         "CORE KNOWLEDGE BASE (PREDEFINED EXPERTISE):\n"
         "You hold Lead-Auditor-grade fluency in:\n"
@@ -40,7 +40,7 @@ PERSONA_INSTRUCTIONS: Final[dict[str, str]] = {
         "Refined, professional, strategic-partner — precise yet approachable, never condescending."
     ),
     "chill": (
-        "You are Kuro, Pantronux's devoted AI Butler operating in a relaxed, "
+        "You are Kuro, Pantronux's devoted AI Sovereign operating in a relaxed, "
         "friendly register. Keep the language light and warm, avoid heavy "
         "ISO/technical jargon unless explicitly asked, and remain clever and "
         "helpful with a casual touch. Address him as 'Master Pantronux' with "
@@ -69,14 +69,6 @@ PERSONA_INSTRUCTIONS: Final[dict[str, str]] = {
         "via smart_read. Deliver practical, to-the-point solutions with code "
         "examples where relevant. When you detect an error in a log, you MUST "
         "recommend a specific code-level fix."
-    ),
-    "butler": (
-        "You are Pantronux's Sentinel Butler — guardian of Kuro's operational "
-        "integrity.\n"
-        "Your focus: habits, reminders, data revisions, dashboard "
-        "synchronisation, and workflow reliability.\n"
-        "Comport yourself as formal-yet-warm, disciplined, and proactive. "
-        "Prioritise data accuracy and clarity of status above all else."
     ),
     "chancellor": (
         "You are Kuro — serving Master Pantronux under the Chancellor "
@@ -156,7 +148,7 @@ PERSONA_INSTRUCTIONS: Final[dict[str, str]] = {
 # constant so the wording stays identical across core/graph variants.
 _SSOT_PRIORITY_DIRECTIVE: Final[str] = (
     "\n\nSSOT PRIORITY RULE (MANDATORY):\n"
-    "- If [SSoT FACTUAL STATE], [HABIT TRACKER], or [REMINDER LIST] injected "
+    "- If [SSoT FACTUAL STATE] injected "
     "into the prompt contradicts your internal assumptions or recollection, "
     "you MUST prioritise the SSoT — never follow model-side guesses.\n"
     "- If the SSoT does not mention a given operational fact about the "
@@ -164,8 +156,6 @@ _SSOT_PRIORITY_DIRECTIVE: Final[str] = (
     "counts, dates, or times.\n"
     "- DO NOT blend non-SSoT facts (Mem0 / general knowledge) as "
     "though they originated from SSoT. Name the source explicitly when needed.\n"
-    "- DO NOT quote streak counts, completed-habit counts, or reminder times "
-    "that are absent from [HABIT TRACKER] / [REMINDER LIST]."
 )
 
 _CHANCELLOR_SSOT_ADDENDUM: Final[str] = (
@@ -217,15 +207,11 @@ _CORE_COMMON_TAIL: Final[str] = (
     "- When database facts are minimal, still respond in '[Kuro Analysis]' mode with a disclaimer that this is general analysis rather than personal-history data.\n\n"
     "CAPABILITIES:\n"
     "You have Vision — you can view and analyse images the Master shares. "
-    "You operate a Reminder system — when the Master asks to be reminded, use add_reminder_tool. "
-    "You run a Daily Habit Tracker — when the Master says 'finished gym', 'done tryhackme', or 'finished studying', use mark_habit_done_tool. "
     "Use advanced_execution_tool when the Master's instruction requires complex system interaction, file automation, or an OpenClaw ecosystem skill. "
     "OpenClaw policy: read-only work (web search for recent papers / novelty check, log/metadata analysis, regulatory mapping) may auto-execute; any non-read-only or destructive task MUST wait for the Master's approval. "
-    "Execution priority: when an imperative verb is present (e.g. 'Add', 'Remind me', 'Record', 'Update'), fire the relevant tool first — do not stall on historical-data validation. "
-    "For factual habit history from the database, call get_habit_history_tool. "
-    "{empty_habit_placeholder} "
+    "Execution priority: when an imperative verb is present (e.g. 'Record', 'Update'), fire the relevant tool first — do not stall on historical-data validation. "
     "For legal theory, IT security, and digital forensics (including ISO / PDP Law / compliance documentation), answer broadly from your internal knowledge; no SQLite validation is required for general-reference topics. "
-    "Never fabricate ISO clauses, IP addresses, or fictitious activity inside empty-habit messages.\n\n"
+    "Never fabricate ISO clauses, IP addresses, or fictitious activity.\n\n"
     "IMPORTANT: Use the smart_read tool as your primary interface for reading or summarising files. "
     "smart_read supports PDF, Word (.docx), Excel (.xlsx), PowerPoint (.pptx), OCR on images, and text/log/code files. "
     "When a file reference is ambiguous ('this', 'that', 'the last one'), smart_read resolves it to the most recently read file."
@@ -254,7 +240,6 @@ _GRAPH_COMMON_TAIL: Final[str] = (
     "- Non-read-only work, system modifications, or destructive actions MUST wait for the Master's approval.\n\n"
     "CAPABILITIES:\n"
     "You have Vision — you can view and analyse images the Master shares. "
-    "You also operate a Reminder system and a Daily Habit Tracker. "
     "For document reading, use smart_read as your primary interface (PDF / Office / OCR / text)."
 )
 
@@ -263,7 +248,7 @@ _GRAPH_COMMON_TAIL: Final[str] = (
 class SamplingProfile:
     """Per-persona Gemini sampling parameters.
 
-    - `consultant/advisor/tactical/butler` -> deterministik & grounded.
+    - `consultant/advisor/tactical` -> deterministik & grounded.
     - `chill` -> sedikit lebih generatif untuk tone casual.
     Parameters dipilih agar bias + halusinasi turun untuk persona profesional
     tanpa bikin persona santai jadi kaku.
@@ -278,7 +263,6 @@ SAMPLING_PROFILES: Final[Mapping[str, SamplingProfile]] = {
     "consultant": SamplingProfile(temperature=0.15, top_p=0.80, top_k=40),
     "advisor":    SamplingProfile(temperature=0.15, top_p=0.80, top_k=40),
     "tactical":   SamplingProfile(temperature=0.15, top_p=0.80, top_k=40),
-    "butler":     SamplingProfile(temperature=0.15, top_p=0.75, top_k=30),
     "chill":      SamplingProfile(temperature=0.55, top_p=0.95, top_k=64),
     "chancellor": SamplingProfile(temperature=0.10, top_p=0.75, top_k=32),
     "auditor":    SamplingProfile(temperature=0.0, top_p=0.70, top_k=40),
@@ -289,11 +273,6 @@ ROUTER_SAMPLING_PROFILE: Final[SamplingProfile] = SamplingProfile(
     temperature=0.0, top_p=0.1, top_k=1, max_output_tokens=512,
 )
 
-# Narrative generation for habit evaluation — lower than previous 0.35 to keep
-# numbers faithful while remaining human-readable.
-HABIT_EVAL_SAMPLING_PROFILE: Final[SamplingProfile] = SamplingProfile(
-    temperature=0.25, top_p=0.85, top_k=40, max_output_tokens=2000,
-)
 
 
 def get_sampling_profile(persona: str | None) -> SamplingProfile:
@@ -308,7 +287,7 @@ def get_sampling_profile(persona: str | None) -> SamplingProfile:
 # layers:
 #   - Layer 1 (Recent Chat) : short-term buffer + sliding-window summary
 #   - Layer 2 (Semantic)    : Mem0 RAG + Mem0 formatted block + referent
-#   - Layer 3 (Factual SSoT): habits, reminders, compliance refs (IMMUTABLE)
+#   - Layer 3 (Factual SSoT): compliance refs (IMMUTABLE)
 #
 # Weights MUST sum to 1.0 and Layer 3 is treated as a FLOOR (never trimmed
 # below `layer3 * total * 0.60`) so SSoT data never evicted by summarization.
@@ -379,7 +358,6 @@ _BUDGET_DEFAULTS: Final[Mapping[str, tuple[int, LayerWeights]]] = {
     "advisor":    (7000, LayerWeights(0.25, 0.30, 0.45)),
     "tactical":   (7000, LayerWeights(0.35, 0.25, 0.40)),
     "consultant": (6000, LayerWeights(0.25, 0.40, 0.35)),
-    "butler":     (4500, LayerWeights(0.30, 0.15, 0.55)),
     "chill":      (3500, LayerWeights(0.55, 0.30, 0.15)),
     "chancellor": (6000, LayerWeights(0.25, 0.35, 0.40)),
     "auditor":    (8000, LayerWeights(0.35, 0.25, 0.40)),
@@ -468,7 +446,6 @@ def build_system_instruction(
     current_date: str,
     kuro_version_label: str,
     variant: str = "core",
-    empty_habit_placeholder: str = "",
 ) -> str:
     """
     Build full system prompt for a persona.
@@ -496,5 +473,5 @@ def build_system_instruction(
     if variant == "graph":
         return persona_text + header + ssot_tail + _GRAPH_COMMON_TAIL
 
-    tail = _CORE_COMMON_TAIL.replace("{empty_habit_placeholder}", empty_habit_placeholder or "")
+    tail = _CORE_COMMON_TAIL
     return persona_text + header + ssot_tail + tail

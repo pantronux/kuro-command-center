@@ -183,23 +183,13 @@ def clear() -> None:
 def classify_tags(query: str) -> frozenset[str]:
     """Cheap heuristic to tag a query for revision-aware invalidation.
 
-    Queries about habits/reminders carry the ``ssot`` tag so they get dropped
-    when the SSoT revision bumps. Everything else is tag-less (never
-    invalidated by SSoT writes).
+    Currently only handles generic SSoT tagging.
     """
     if not query:
         return frozenset()
     q = query.lower()
-    habit_tokens = ("habit", "kebiasaan", "streak", "gym", "tryhackme")
-    reminder_tokens = ("jadwal", "reminder", "pengingat", "agenda", "besok", "hari ini")
-    tags: set[str] = set()
-    if any(t in q for t in habit_tokens):
-        tags.add("habits")
-        tags.add("ssot")
-    if any(t in q for t in reminder_tokens):
-        tags.add("reminders")
-        tags.add("ssot")
-    return frozenset(tags)
+    # Habit and reminder tokens removed in V7.0
+    return frozenset()
 
 
 __all__ = [

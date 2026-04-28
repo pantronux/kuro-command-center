@@ -7,17 +7,16 @@
 
 ## Project Summary
 
-- **Purpose**: Kuro is Master Pantronux's personal AI Butler — a unified
+- **Purpose**: Kuro is Master Pantronux's personal AI Sovereign — a unified
   FastAPI application that fuses a LangGraph reasoning loop, a 3-layer memory
   system (recent chat → short-term summary → long-term semantic + SSoT),
-  proactive sentinels (CVE, fitness, reminders), a habit tracker, and a Live2D (Hijiki)
-  mascot into one cohesive assistant accessible from a web dashboard and Telegram.
+  and proactive sentinels (CVE, fitness) into one cohesive assistant accessible
+  from a web dashboard and Telegram.
 - **Tech stack**:
   - Backend: FastAPI, LangGraph, `google-genai` (Gemini),
     APScheduler, SQLite, ChromaDB, Mem0 (via `perpetual_memory.py`),
     Arize Phoenix + OpenTelemetry.
-  - Frontend: Vanilla JS on Jinja2 templates, PIXI.js +
-    `pixi-live2d-display` for Hijiki.
+  - Frontend: Vanilla JS on Jinja2 templates.
   - External: Telegram Bot API, Serper.dev, Proxmox VE API, NVD CVE feed,
     OpenClaw skill bridge.
 - **Architecture pattern**: Monolithic FastAPI process (`main.py`) owning
@@ -25,7 +24,7 @@
   a LangGraph state machine (`kuro_backend/langgraph_core.py`) whose nodes
   call into a layered memory stack (`memory_coordinator` → `memory_manager`
   + `perpetual_memory`) and feature services. Background sentinels
-  (reminders, CVE dreaming, fitness, proactive events) run on APScheduler
+  (CVE dreaming, fitness, proactive events) run on APScheduler
   alongside the request loop. A separate `OpenClaw` process is reached via
   HTTP bridge for privileged skill execution.
 
@@ -45,7 +44,14 @@
   runtime context (attachments + extracted snippets) and
   `memory_coordinator.build_referent_grounding_block` prioritizes this state
   for deictic follow-ups like "edit previous result" / "add to that".
-- **Legacy modules:** Legacy compliance endpoints return `410 Gone` to enforce the Lean architecture.
+- **Legacy modules:** Legacy compliance, habits, and reminder endpoints return `410 Gone` to enforce the Lean architecture.
+
+## V7.1.0 Reset Notes ("Sovereign Unbound")
+
+- **The Final Purge:** The legacy Habits and Reminders system, the Live2D "Hijiki" mascot, and all voice (TTS) infrastructure were completely purged from the codebase.
+- **Sovereign Rebranding:** The "Butler" persona has been evolved into the "Sovereign" persona, reflecting a more autonomous and sophisticated architecture.
+- **Frontend Simplification:** Removed L2D canvas, tips/trivia bubble, and voice artifacts from the dashboard. `app.js` and `index.html` were sanitized for maximum performance.
+- **Asset Removal:** Deleted redundant `.db` files, Live2D models, and legacy JS libraries.
 
 ## Core Logic Flow (Function-Level Flowchart)
 
@@ -82,9 +88,6 @@ flowchart TD
     end
 
     subgraph SSoT[Services / SSoT]
-        S1[services.core_service reminders+habits]
-        S2[reminder_service]
-        S3[habit_service]
         S5[intelligence_engine + intelligence_db]
     end
 
@@ -101,7 +104,6 @@ flowchart TD
 
     subgraph FE[Frontend]
         F1[app.js dashboard handlers]
-        F2[live2d_manager.js avatar logic]
     end
 
     U1 --> R1
@@ -120,21 +122,14 @@ flowchart TD
     B3 --> T1
     T1 --> T2
     T1 --> T3
-    T1 --> S1
     T1 --> S5
-    S1 --> S2
-    S1 --> S3
     B3 --> O3
     R4 --> O2
     O2 --> F1
-    F1 --> F2
 ```
 
 Side-branches not drawn on the trunk but reachable from the same
 `tool_node` / scheduler layer:
-- **Habits** — `/api/habits*` routes → `services/core_service` → `habit_service`.
-- **Reminders** — APScheduler jobs in `main.py` → `reminder_service` →
-  Telegram + dashboard WS.
 - **Intelligence briefings** — `/api/intelligence/*` and the daily scheduler
   → `intelligence_engine` → `serper_tool` + `intelligence_db`.
 - **Dreaming / CVE + fiscal sentinels** — `dreaming_worker.run_dreaming_cycle`
@@ -174,8 +169,8 @@ artefacts are excluded — see **Exclusions** at the bottom of this section.
 │   ├── telegram_notifier.py
 │   ├── proactive_events.py
 │   ├── proactive_greeting.py
-│   ├── reminder_service.py
-│   ├── habit_service.py
+│   ├── reminder_service.py      # [PURGED in V7.1]
+│   ├── habit_service.py         # [PURGED in V7.1]
 │   ├── fitness_service.py
 │   ├── intelligence_engine.py
 │   ├── persona_history_admin.py
@@ -186,12 +181,12 @@ artefacts are excluded — see **Exclusions** at the bottom of this section.
 │   ├── auth_db.py               # schema only; *.db files excluded
 │   ├── chat_history.py
 │   ├── compliance_db.py
-│   ├── daily_habits_db.py
+│   ├── daily_habits_db.py       # [PURGED in V7.1]
 │   ├── intelligence_db.py
-│   ├── reminder_db.py
+│   ├── reminder_db.py           # [PURGED in V7.1]
 │   ├── services/
 │   │   ├── __init__.py
-│   │   ├── core_service.py      # reminders + habits canonical layer
+│   │   ├── core_service.py      # sync revision management (purged logic)
 │   │   ├── schemas.py           # Pydantic contracts
 │   │   └── async_adapter.py
 │   ├── tools/
@@ -203,20 +198,15 @@ artefacts are excluded — see **Exclusions** at the bottom of this section.
 │   │   └── service.py           # sync wrapper
 ├── web_interface/
 │   ├── templates/
-│   │   ├── index.html           # dashboard + Live2D dock + avatar
+│   │   ├── index.html           # dashboard + avatar
 │   │   ├── login.html
-│   │   ├── daily_habits.html
-│   │   ├── reminder.html
 │   │   ├── intelligence.html
 │   │   └── compliance.html
 │   └── static/
 │       ├── js/
-│       │   ├── app.js           # WS client, UI modes
-│       │   └── live2d_manager.js # Hijiki loader
+│       │   └── app.js           # WS client, UI modes
 │       ├── css/                 # dashboard styles
 │       └── vendor/
-│           └── live2d/
-│               └── README.md    # offline SDK drop-in instructions
 ├── openclaw_skills/
 │   ├── harvest_gemini_share/
 │   │   ├── harvest_gemini_share.py
@@ -286,19 +276,18 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
 - [`main.py`](main.py) — *public*: `app` (FastAPI), `verify_password`,
   `create_access_token`, `validate_token`, `save_upload_file`,
   `api_success`, `api_error`, and 65 `@app.*` route handlers spanning
-  `/api/login`, `/api/chat`, `/api/chat/stream`, `/api/voice/speech`,
-  `/ws/dashboard`, `/api/habits*`, `/api/reminders*`, `/api/compliance*`,
+  `/api/login`, `/api/chat`, `/api/chat/stream`,
+  `/ws/dashboard`, `/api/compliance*`,
   `/api/intelligence*`, `/api/finances/*`, `/api/persona*`, `/api/observability/*`,
   `/api/system-status`, `/api/health`. Also wires two APScheduler
-  `BackgroundScheduler` instances (`_hardware_sentinel_scheduler`,
-  `_reminder_scheduler`) and the Uvicorn boot thread.
+  `BackgroundScheduler` instances (`_hardware_sentinel_scheduler`) and the Uvicorn boot thread.
 
 ### Reasoning Core
 - [`kuro_backend/langgraph_core.py`](kuro_backend/langgraph_core.py) —
   *public*: `KuroState`, `build_kuro_graph`, `process_chat_with_graph`,
   `process_chat_with_graph_stream`, `process_pdf_with_thinking`,
   `supervisor_node`, `memory_retrieval_node`, `memory_extraction_node`,
-  `response_node`, `tool_node`, `compliance_node`, `habit_node`,
+  `response_node`, `tool_node`, `compliance_node`,
   `route_after_supervisor`, `get_system_instruction`,
   `get_post_response_queue_depth`, `save_graph_visualization`. Owns the
   Gemini tool-calling loop and destructive-action approval gate.
@@ -309,7 +298,7 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
   `SamplingProfile`, `LayerWeights`, `ContextBudget`, `get_sampling_profile`,
   `get_context_budget`, `build_factual_response_config`,
   `normalize_persona_key`, `build_system_instruction`. English "Elegant &
-  Sophisticated" prompts for butler / consultant / advisor / chill /
+  Sophisticated" prompts for consultant / advisor / chill /
   tactical / chancellor (Sovereign Accountant + financial SSoT addendum).
 
 ### Memory & SSoT
@@ -320,7 +309,7 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
   `apply_path_tokens_to_runtime`, `render_summary_for_prompt`,
   `build_compressed_short_term_text`, `prefetch_mem0`, `take_prefetched_mem0`,
   `safe_mem0_retrieve`, `execute_memory_write_task`,
-  `execute_mem0_extract_task`, `habit_create/update/delete`,
+  `execute_mem0_extract_task`,
   `record_mutation`, `apply_openclaw_execution_result`.
 - [`kuro_backend/memory_manager.py`](kuro_backend/memory_manager.py) —
   *public*: `load_master_profile`, `save_master_profile`,
@@ -382,10 +371,7 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
   `toggle_habit_log_for_date`, `reset_all_habits`, `save_ai_evaluation`,
   `get_upcoming_reminders`, `get_reminder_history`, `get_reminder_stats`,
   `get_reminders_needing_*_notification`, `get_pending_reminders`.
-- [`kuro_backend/habit_service.py`](kuro_backend/habit_service.py) —
-  *public*: `fetch_sqlite_habit_snapshot`,
-  `snapshot_has_no_positive_activity`, `log_snapshot_debug`,
-  `format_habit_block_for_llm`, `build_monthly_eval_user_prompt`.
+- [`kuro_backend/habit_service.py`](kuro_backend/habit_service.py) — [PURGED].
 - [`kuro_backend/fitness_service.py`](kuro_backend/fitness_service.py) —
   *public*: `check_fitness_anomalies`, `run_fitness_sentinel`.
 - [`kuro_backend/intelligence_engine.py`](kuro_backend/intelligence_engine.py)
@@ -412,10 +398,9 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
   `parse_log_content`, `index_system_path`, `analyze_system_health`,
   `get_system_status`, `check_proxmox_infrastructure`, `process_video`,
   `parse_datetime`,
-  `lookup_chroma_context`, `add_reminder_tool`, `get_reminders_tool`,
+  `lookup_chroma_context`,
   `set_monthly_budget_tool`, `get_budget_tool`, `add_recurring_expense_tool`,
   `list_recurring_expenses_tool`, `get_daily_api_cost_tool`,
-  `mark_habit_done_tool`, `get_habits_status_tool`, `get_habit_history_tool`,
   `summarize_pdf`, `read_docx_content`, `read_xlsx_content`,
   `read_pptx_content`, `summarize_document`, `extract_gemini_share_url`,
   `task_suggests_gemini_harvest`, `resolve_harvest_gemini_routing`,
@@ -495,12 +480,9 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
 
 ### Frontend
 - [`web_interface/templates/index.html`](web_interface/templates/index.html)
-  — dashboard shell: avatar (`/profile/kuro_avatar.png`), Live2D dock
-  (`<canvas id="live2d-canvas">`), WebSocket status ticker, chat pane,
-  favicon links, `V7.0` sidebar badge, Chancellor persona option, market chips bar.
-- [`web_interface/templates/daily_habits.html`](web_interface/templates/daily_habits.html),
-  [`reminder.html`](web_interface/templates/reminder.html),
-  [`intelligence.html`](web_interface/templates/intelligence.html),
+  — dashboard shell: avatar (`/profile/kuro_avatar.png`), WebSocket status ticker, chat pane,
+  favicon links, `V7.1` sidebar badge, Chancellor persona option, market chips bar.
+- [`web_interface/templates/intelligence.html`](web_interface/templates/intelligence.html),
   [`market.html`](web_interface/templates/market.html),
   [`compliance.html`](web_interface/templates/compliance.html),
   [`login.html`](web_interface/templates/login.html) — secondary pages,
@@ -508,20 +490,9 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
 - [`web_interface/static/js/app.js`](web_interface/static/js/app.js) —
   key symbols: `authFetch`, `setupEventListeners`, `kuroApplyUIMode`,
   `kuroEnsureTicker`, `kuroRenderStatusTicker`, `kuroRenderSentinelTicker`,
-  `kuroSetAvatarSpeaking`, `kuroPlayTTS` (creates `AudioContext` +
-  `AnalyserNode` and drives lip-sync),   `kuroConnectDashboardWS`, `kuroStartMarketHudPoll`, `kuroMarketHudChipLine`,
-  `kuroHandleGreeting`, `kuroRestoreUIMode`, `kuroMaybeSpeakHUD`,
-  `sendMessage`, `handleFiles`, plus Web Audio helpers
-  `_kuroEnsureAudioGraph`, `_kuroAttachAudioToAnalyser`,
-  `_kuroStartLipSyncLoop`, `_kuroStopLipSyncLoop`.
-- [`web_interface/static/js/live2d_manager.js`](web_interface/static/js/live2d_manager.js)
-  — *public*: `initLive2D()`, `setLipSyncValue(v)`, `playTalkMotion()`,
-  `returnToIdle()` (attached to `window.kuroLive2D`). Loads
-  `live2dcubismcore.min.js` + PIXI + `pixi-live2d-display` from local
-  vendor first, CDN fallback second; model = Hijiki at
-  `/profile/live2d/hijiki/runtime/hijiki.model3.json`.
-- [`web_interface/static/vendor/live2d/README.md`](web_interface/static/vendor/live2d/README.md)
-  — instructions for the offline SDK drop (binaries excluded by license).
+  `kuroSetAvatarSpeaking`, `kuroConnectDashboardWS`, `kuroStartMarketHudPoll`, `kuroMarketHudChipLine`,
+  `kuroHandleGreeting`, `kuroRestoreUIMode`, `sendMessage`, `handleFiles`.
+- [`web_interface/static/js/live2d_manager.js`](web_interface/static/js/live2d_manager.js) — [PURGED].
 
 ### Ops / CLI / Tests
 - [`openclaw_skills/`](openclaw_skills/) — out-of-process skills consumed
@@ -621,10 +592,8 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
 | Static Gemini list pricing (USD) | `pricing.py` (→ `observability.track_token_usage` → `finance_db.add_api_usage`) | Approximate per-1K token map for ledgered `api_usage_daily`; unknown models log + record `0.0` cost. |
 | Mem0 | `perpetual_memory.py` (via `memory_coordinator.safe_mem0_retrieve` + `execute_mem0_extract_task`) | Long-term semantic memory store. |
 | ChromaDB | `perpetual_memory.py`, `tools/base_tools.lookup_chroma_context`, maintenance scripts | On-disk collections `kuro_chromadb/`. |
-| Telegram Bot API | `telegram_notifier.py` (→ `proactive_events.publish`, reminder scheduler jobs in `main.py`, `intelligence_engine.format_telegram_message` pipeline) | Uses `TELEGRAM_TOKEN` / `TELEGRAM_CHAT_ID`. |
+| Telegram Bot API | `telegram_notifier.py` (→ `proactive_events.publish`, intelligence_engine.format_telegram_message pipeline) | Uses `TELEGRAM_TOKEN` / `TELEGRAM_CHAT_ID`. |
 | Serper.dev | `serper_tool.py` (→ `tool_node` in `langgraph_core.py`, `intelligence_engine.execute_research`, `dreaming_worker._google_via_serper`) | Requires `SERPER_API_KEY` env. |
-
-| Live2D Cubism Core + `pixi-live2d-display` | `web_interface/static/js/live2d_manager.js` (loads `/static/vendor/live2d/*` then CDN fallback) | Hijiki model served from `/profile/live2d/hijiki/runtime/`. |
 | Proxmox VE API | `tools/base_tools._get_proxmox_headers`, `check_proxmox_infrastructure`, `dreaming_worker._discover_proxmox_targets_locally`, `/api/proxmox-status` route | Uses `PVE_*` env keys. |
 | NVD (CVE feed) | `dreaming_worker._cve_scan_via_nvd_direct` | Direct HTTPS; no auth required but API key supported. |
 | OpenClaw skill bridge | `execution/openclaw_bridge.py` + `execution/service.py` | HTTP + circuit breaker to local OpenClaw process; skills enumerated in `openclaw_skills/`. |
@@ -717,9 +686,5 @@ semantics, and the presence of both indexes via `PRAGMA index_list`.
 - **Telegram, Proxmox, and OpenClaw** calls assume the matching sidecar
   services are reachable; failure is absorbed by circuit-breakers but
   downgraded reasoning quality will not be visible in this map.
-- **Live2D binaries**: `live2dcubismcore.min.js` and `pixi-live2d-display`
-  are not vendored (license). Offline deployments must populate
-  `web_interface/static/vendor/live2d/` per the `README.md` there; when
-  missing, `live2d_manager.js` silently falls back to CDN.
 - **Any `sys.path` or import-time monkey-patch** is flagged
   here rather than traced — assume hidden side-effects at import.

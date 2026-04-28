@@ -1,3 +1,26 @@
+# Kuro AI V7.1.0 "Sovereign Unbound" - Changelog
+
+**Release Date:** 2026-04-28
+**Version:** 7.1.0
+**Codename:** "Sovereign Unbound — The Final Purge"
+
+---
+
+## V7.1.0 - Sovereign Unbound: The Final Purge (2026-04-28)
+
+### Summary
+The final stage of the V7 "Leviathan" transition. This release completes the decommissioning of all legacy Project Kuro components, specifically purging the Live2D "Hijiki" mascot, the associated UI tips/trivia bubble, and the entire voice/TTS infrastructure. The backend has been further sanitized by removing the Habits and Reminders services, resulting in a significantly leaner and more performant "Sovereign" codebase.
+
+### Highlights
+- **Live2D Decommissioning:** Completely removed the Hijiki model, PIXI.js integration, and `live2d_manager.js`. The dashboard is now mascot-free.
+- **UI Sanitization:** Purged the Kuro Tips & Trivia bubble and the associated 10-minute timer logic.
+- **Voice Infrastructure Purge:** Removed all TTS/voice services (Piper, gTTS) and associated dependencies (`piper-tts`, `onnxruntime`) from `requirements.txt`.
+- **Backend Streamlining:** Deleted `habit_service.py`, `reminder_service.py`, and their respective SQLite databases. Legacy endpoints now return `410 Gone`.
+- **Sovereign Rebranding:** Updated all internal documentation and system maps to reflect the "Sovereign" persona evolution from the legacy "Butler" model.
+- **System Map & Tutorial:** Refreshed `SYSTEM_MAP.md` and the Tutorial page to reflect the new lean architecture.
+
+---
+
 # Kuro AI V7.0 "Leviathan" - Changelog
 
 **Release Date:** 2026-04-22

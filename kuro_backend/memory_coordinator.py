@@ -1,22 +1,18 @@
 """
 Kuro AI V6.0 Sovereign — Unified Memory Coordinator — single orchestration surface for memory-related reads
-and post-response writes across short-term, Chroma, Mem0, and SSOT revision (habits/reminders).
+and post-response writes across short-term, Chroma, Mem0, and SSOT revision (finances/market).
 
-AUDIT — mutation entry points (update when adding routes or tools):
-- Habits CRUD: main.py /api/habits -> core_service.add_habit_svc / update_habit_svc / delete_habit_svc (bump inside each svc)
-- Habits: reminder_service -> core_service *_svc
-- Raw core_service.add_habit / update_habit / delete_habit bypass bump — do not use from product code
 - Long-term + Chroma summary: post-response worker -> execute_memory_write_task
 - Mem0 extract: post-response worker + fast stream -> execute_mem0_extract_task (deduped)
 - OpenClaw: advanced_execution_tool -> apply_openclaw_execution_result (revision when touched_* flags)
-- Optional batch entry: record_mutation(domain=habits|long_term|mem0, ...)
+- Optional batch entry: record_mutation(domain=long_term|mem0, ...)
 - Deictic read path: build_referent_grounding_block, format_same_turn_attachment_index; apply_path_tokens_to_runtime (integrity + last_accessed_file)
 - Vision bundle: build_gemini_contents_parts(text, image_paths) for LangGraph response_node
 
 --- Header Doc ---
 Purpose: Central memory-read orchestration + post-response write fan-out across all memory tiers.
 Caller: langgraph_core response_node, main.py chat routes, dreaming_worker, services/core_service.
-Dependencies: memory_manager, perpetual_memory, finance_db, reminder_service, habit_service, intelligence_engine, observability, Mem0 (optional).
+Dependencies: memory_manager, perpetual_memory, finance_db, intelligence_engine, observability, Mem0 (optional).
 Main Functions: build_context_for_llm(), post_response_memory_writes(), record_mutation(), build_gemini_contents_parts(), build_referent_grounding_block().
 Side Effects: Reads + writes across sqlite + Mem0, Mem0 HTTP calls, SSoT revision bumps via core_service.bump_data_revision.
 """
@@ -446,16 +442,6 @@ _PERSONA_SUMMARIZER_PROMPTS: Dict[str, str] = {
         "- entities: framework / regulator / vendor. "
         "- open_questions: gap compliance yang belum diatasi."
     ),
-    "butler": (
-        "Anda adalah operational summarizer. "
-        "Ringkas percakapan sebagai JSON WAJIB mengikuti schema. "
-        "Ekstrak: "
-        "- topic: urusan operasional yang dibahas. "
-        "- decisions: instruksi Master yang disepakati. "
-        "- entities: habit/reminder/integrasi yang disebut. "
-        "- compliance_refs: kebijakan operasional internal. "
-        "Kosongkan field lain."
-    ),
     "chill": (
         "Anda adalah casual conversation summarizer. "
         "Ringkas percakapan sebagai JSON WAJIB mengikuti schema. "
@@ -609,7 +595,6 @@ def _persona_ledger_kinds(persona_scope: str) -> List[tuple[str, str]]:
         "advisor":    [("novelty_points", "novelty_point"), ("open_questions", "open_question")],
         "tactical":   [("technical_specs", "technical_spec"), ("decisions", "decision")],
         "consultant": [("compliance_refs", "compliance_ref"), ("decisions", "decision")],
-        "butler":     [("compliance_refs", "compliance_ref"), ("decisions", "decision")],
         "chill":      [],
     }
     return per_persona.get(persona_scope, []) + base
@@ -672,8 +657,6 @@ def render_summary_for_prompt(
     elif persona_key == "consultant":
         priority_order = ["compliance_refs", "decisions", "entities",
                           "open_questions"]
-    elif persona_key == "butler":
-        priority_order = ["decisions", "compliance_refs", "entities"]
     elif persona_key == "chill":
         priority_order = ["tone_markers", "entities"]
     else:
@@ -1106,31 +1089,6 @@ def execute_mem0_extract_task(user_input: str, final_response: str) -> None:
         logger.debug("[MEMORY_COORD] mem0_extract nothing to store")
 
 
-def habit_create(title: str, scheduled_time: str, category: str = "General", source: str = "web_api") -> int:
-    """Strong-sync habit create; delegates to core_service.add_habit_svc (includes bump)."""
-    from kuro_backend.services import core_service
-
-    _trace_coordinator_span("habit_create", {"source": source, "title": title[:80]})
-    hid = core_service.add_habit_svc(title, scheduled_time, category)
-    rev = core_service.get_data_revision()
-    logger.info("[MEMORY_COORD] habit_create id=%s revision=%s source=%s", hid, rev, source)
-    return hid
-
-
-def habit_update(habit_id: int, source: str = "web_api", **kwargs: Any) -> None:
-    from kuro_backend.services import core_service
-
-    _trace_coordinator_span("habit_update", {"source": source, "habit_id": habit_id})
-    core_service.update_habit_svc(habit_id, **kwargs)
-    logger.info("[MEMORY_COORD] habit_update id=%s revision=%s", habit_id, core_service.get_data_revision())
-
-
-def habit_delete(habit_id: int, source: str = "web_api") -> None:
-    from kuro_backend.services import core_service
-
-    _trace_coordinator_span("habit_delete", {"source": source, "habit_id": habit_id})
-    core_service.delete_habit_svc(habit_id)
-    logger.info("[MEMORY_COORD] habit_delete id=%s revision=%s", habit_id, core_service.get_data_revision())
 
 
 def record_mutation(
@@ -1153,48 +1111,6 @@ def record_mutation(
     if idempotency_key:
         logger.debug("[MEMORY_COORD] record_mutation idempotency_key present")
 
-    if domain == "habits":
-        op = str(payload.get("op") or "create").lower()
-        if op == "create":
-            hid = habit_create(
-                str(payload["title"]),
-                str(payload["scheduled_time"]),
-                category=str(payload.get("category") or "General"),
-                source=source,
-            )
-            result_h = {
-                "ok": True,
-                "revision": _cs.get_data_revision(),
-                "canonical_record_id": str(hid),
-            }
-            _maybe_emit_proactive_from_mutation(domain, source, payload, result_h)
-            return result_h
-        if op == "update":
-            habit_id = int(payload["habit_id"])
-            fields = {
-                k: v
-                for k, v in payload.items()
-                if k not in ("op", "habit_id") and v is not None
-            }
-            habit_update(habit_id, source=source, **fields)
-            result_h = {
-                "ok": True,
-                "revision": _cs.get_data_revision(),
-                "canonical_record_id": str(habit_id),
-            }
-            _maybe_emit_proactive_from_mutation(domain, source, payload, result_h)
-            return result_h
-        if op == "delete":
-            habit_id = int(payload["habit_id"])
-            habit_delete(habit_id, source=source)
-            result_h = {
-                "ok": True,
-                "revision": _cs.get_data_revision(),
-                "canonical_record_id": str(habit_id),
-            }
-            _maybe_emit_proactive_from_mutation(domain, source, payload, result_h)
-            return result_h
-        return {"ok": False, "error": f"unknown habits op: {op}", "revision": _cs.get_data_revision()}
 
     if domain == "long_term":
         from kuro_backend import memory_manager
@@ -1296,9 +1212,7 @@ def apply_openclaw_execution_result(
     from kuro_backend.services import core_service
 
     should_bump = bool(
-        raw.get("touched_habits")
-        or raw.get("touched_reminders")
-        or raw.get("ssot_bump_required")
+        raw.get("ssot_bump_required")
         or raw.get("data_mutation")
     )
     if success and skill_name == "harvest_gemini_share":
@@ -1315,8 +1229,6 @@ def apply_openclaw_execution_result(
                 {
                     "skill": skill_name,
                     "revision_after": core_service.get_data_revision(),
-                    "touched_habits": bool(raw.get("touched_habits")),
-                    "touched_reminders": bool(raw.get("touched_reminders")),
                 },
             )
         except Exception as exc:

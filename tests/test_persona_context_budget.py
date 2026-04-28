@@ -58,7 +58,7 @@ from kuro_backend import token_budget
 # P1 — per-persona budgets
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("persona", ["advisor", "tactical", "consultant", "butler", "chill"])
+@pytest.mark.parametrize("persona", ["advisor", "tactical", "consultant", "chill"])
 def test_context_budget_weights_sum_to_one(persona: str) -> None:
     budget = personas.get_context_budget(persona)
     total = (
@@ -69,7 +69,7 @@ def test_context_budget_weights_sum_to_one(persona: str) -> None:
     assert abs(total - 1.0) < 1e-3, f"{persona} weights must sum to 1.0, got {total}"
 
 
-@pytest.mark.parametrize("persona", ["advisor", "tactical", "consultant", "butler", "chill"])
+@pytest.mark.parametrize("persona", ["advisor", "tactical", "consultant", "chill"])
 def test_context_budget_layer3_floor(persona: str) -> None:
     budget = personas.get_context_budget(persona)
     # Every persona must preserve at least 15% of its budget for SSoT.
@@ -131,21 +131,21 @@ def test_apply_persona_budget_respects_layer_quotas() -> None:
 
 
 def test_enforce_global_ceiling_protects_layer3_floor() -> None:
-    budget = personas.get_context_budget("butler")  # L3-heavy persona
+    budget = personas.get_context_budget("advisor")  # L3-heavy persona
     l3_text = "FACT " * 5000  # large Layer 3 block
     l1_text = "turn " * 5000
     l2_text = "rag "  * 5000
     parts = [
         ("summary", l1_text),
         ("memory_injection", l2_text),
-        ("habit", l3_text),
+        ("fact", l3_text),
         ("compliance", l3_text),
     ]
     trimmed = token_budget.enforce_global_ceiling(parts, budget=budget)
     # Collect final L3 tokens post-trim
     l3_tokens_after = sum(
         token_budget.approx_tokens(t) for name, t in trimmed
-        if name in ("habit", "compliance", "ssot_factual")
+        if name in ("fact", "compliance", "ssot_factual")
     )
     # SSoT floor must be respected even under aggressive overshoot
     # (sum of per-section floors is >= layer3_floor_tokens across 3 sections;

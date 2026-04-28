@@ -46,12 +46,11 @@ from kuro_backend import memory_coordinator
 from kuro_backend import chat_history
 from kuro_backend import tools
 from kuro_backend import compliance_db
-from kuro_backend import reminder_service
+
 from kuro_backend import dashboard_broadcast
 from kuro_backend.services import core_service as core_data
 from kuro_backend.services.async_adapter import run_db
 from kuro_backend.services.schemas import (
-    AiEvaluationRecord,
     ApiUsageDailyRecord,
     MarketHudChip,
     MonthlyBudgetRecord,
@@ -68,7 +67,7 @@ from kuro_backend import version as kuro_version
 from kuro_backend import proactive_greeting
 
 # --- Logging Setup with TimedRotatingFileHandler ---
-LOG_FILE = "kuro_butler.log"
+LOG_FILE = "kuro_sovereign.log"
 LOG_BACKUP_COUNT = 7  # Keep 7 days of logs
 
 # Create rotating file handler that rotates at midnight
@@ -79,7 +78,7 @@ file_handler = logging.handlers.TimedRotatingFileHandler(
     backupCount=LOG_BACKUP_COUNT,
     encoding='utf-8'
 )
-file_handler.suffix = "%Y-%m-%d"  # Log files will be named kuro_butler.log.YYYY-MM-DD
+file_handler.suffix = "%Y-%m-%d"  # Log files will be named kuro_sovereign.log.YYYY-MM-DD
 file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
 
 # Console handler
@@ -1337,22 +1336,6 @@ async def compliance_analyze(document: str = Form(""), standard: str = Form("iso
 async def audit_trail(limit: int = 50):
     return JSONResponse(status_code=410, content={"status": "disabled", "message": "Compliance module purged in KURO V7.0"})
 
-# --- Reminder Routes ---
-@app.get("/reminders")
-async def reminder_dashboard():
-    return RedirectResponse(url="/tutorial")
-
-@app.get("/api/reminders/upcoming")
-async def get_upcoming_reminders():
-    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Reminders moved to OpenClaw Skills in KURO V7.0"})
-
-@app.get("/api/reminders/history")
-async def get_reminder_history():
-    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Reminders moved to OpenClaw Skills in KURO V7.0"})
-
-@app.get("/api/reminders/stats")
-async def get_reminder_stats():
-    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Reminders moved to OpenClaw Skills in KURO V7.0"})
 
 @app.get("/api/dashboard/data-revision")
 async def dashboard_data_revision():
@@ -1365,7 +1348,7 @@ async def dashboard_data_revision():
 async def dashboard_sync_websocket(websocket: WebSocket):
     """Push REFRESH_NOW when data_revision bumps (same cookie auth as dashboards).
 
-    V6.0 Sovereign: also delivers the once-per-day butler greeting via
+    V6.0 Sovereign: also delivers the once-per-day personalized greeting via
     ``proactive_greeting.maybe_send`` right after the handshake so the
     master hears Kuro the moment the dashboard loads.
     """
@@ -1389,67 +1372,6 @@ async def dashboard_sync_websocket(websocket: WebSocket):
     finally:
         await dashboard_broadcast.disconnect(websocket)
 
-@app.get("/api/reminders/notifications")
-async def get_pending_notifications():
-    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Reminders moved to OpenClaw Skills in KURO V7.0"})
-
-# --- Daily Habits Routes ---
-@app.get("/habits")
-async def habits_dashboard():
-    return RedirectResponse(url="/tutorial")
-
-@app.get("/api/habits")
-async def get_habits():
-    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Habits moved to OpenClaw Skills in KURO V7.0"})
-
-
-@app.post("/api/habits")
-async def create_habit(
-    title: str = Form(...),
-    scheduled_time: str = Form(...),
-    category: str = Form("General"),
-):
-    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Habits moved to OpenClaw Skills in KURO V7.0"})
-
-
-@app.put("/api/habits/{habit_id}")
-async def update_habit(
-    habit_id: int,
-    title: Optional[str] = Form(None),
-    scheduled_time: Optional[str] = Form(None),
-    category: Optional[str] = Form(None),
-    target_per_month: Optional[int] = Form(None),
-    target_per_week: Optional[int] = Form(None),
-):
-    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Habits moved to OpenClaw Skills in KURO V7.0"})
-
-
-@app.delete("/api/habits/{habit_id}")
-async def delete_habit(habit_id: int):
-    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Habits moved to OpenClaw Skills in KURO V7.0"})
-
-@app.get("/api/habits/stats")
-async def get_habits_stats():
-    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Habits moved to OpenClaw Skills in KURO V7.0"})
-
-@app.get("/api/habits/report")
-async def get_end_of_day_report():
-    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Habits moved to OpenClaw Skills in KURO V7.0"})
-
-# --- V2.0: Monthly/Weekly Analytics Endpoints ---
-
-@app.get("/api/habits/monthly")
-async def get_monthly_habits(year: int = None, month: int = None):
-    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Habits moved to OpenClaw Skills in KURO V7.0"})
-
-@app.get("/api/habits/weekly")
-async def get_weekly_habits(year: int = None, week: int = None):
-    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Habits moved to OpenClaw Skills in KURO V7.0"})
-
-
-@app.get("/api/habits/evaluation-cached")
-async def get_habits_evaluation_cached(period_type: str, year: int, period: int):
-    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Habits moved to OpenClaw Skills in KURO V7.0"})
 
 
 # --- Finances SSoT (The Chancellor) ---
@@ -1835,53 +1757,15 @@ def hardware_sentinel_check():
         except Exception:
             pass
 
-# --- Background Scheduler for Reminders & Habits ---
+# --- Background Scheduler ---
 _reminder_scheduler = None
 
 def start_reminder_scheduler():
-    """Start the background scheduler for reminder notifications."""
+    """Start the background scheduler for automated intelligence cycles."""
     global _reminder_scheduler
     from apscheduler.schedulers.background import BackgroundScheduler
     
     _reminder_scheduler = BackgroundScheduler(daemon=True)
-    
-    # Check for pending reminders every 30 seconds
-    _reminder_scheduler.add_job(
-        check_reminder_notifications,
-        'interval',
-        seconds=30,
-        id='reminder_checker',
-        replace_existing=True
-    )
-    
-    # Recovery: Load pending reminders on startup
-    _reminder_scheduler.add_job(
-        recover_pending_reminders,
-        'date',
-        run_date=datetime.now() + timedelta(seconds=5),
-        id='reminder_recovery',
-        replace_existing=True
-    )
-    
-    # End-of-day habit report at 8 PM (20:00)
-    _reminder_scheduler.add_job(
-        send_end_of_day_report,
-        'cron',
-        hour=20,
-        minute=0,
-        id='habit_eod_report',
-        replace_existing=True
-    )
-    
-    # Midnight habit reset at 00:00
-    _reminder_scheduler.add_job(
-        reset_daily_habits,
-        'cron',
-        hour=0,
-        minute=0,
-        id='habit_midnight_reset',
-        replace_existing=True
-    )
     
     # Daily intelligence briefing at 08:00 AM
     _reminder_scheduler.add_job(
@@ -1894,11 +1778,6 @@ def start_reminder_scheduler():
     )
 
     # Autonomous memory dreaming cycle (Kuro AI V6.0 Sovereign).
-    # Reflects on the last 24h of short-term summaries + research ledger
-    # while Master is offline, enriches low-confidence findings via
-    # OpenClaw google_search (Serper fallback), and sends proactive
-    # Telegram alerts for inconsistencies. Gated by KURO_DREAMING_ENABLED
-    # so it can be switched off without a redeploy.
     if os.getenv("KURO_DREAMING_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on"):
         try:
             from kuro_backend import dreaming_worker
@@ -1920,10 +1799,7 @@ def start_reminder_scheduler():
                 f"Autonomous dreaming cycle scheduled at {dreaming_cron_hour:02d}:00 daily."
             )
 
-    # Fitness anomaly sentinel (Kuro AI V6.0 Sovereign). Reads the
-    # wearable drop at ~/.kuro/fitness_latest.json every 30 minutes and
-    # publishes anomalies through the proactive_events bus. Gated by
-    # KURO_FITNESS_ENABLED (default: off).
+    # Fitness anomaly sentinel (Kuro AI V6.0 Sovereign).
     if os.getenv("KURO_FITNESS_ENABLED", "false").strip().lower() in ("1", "true", "yes", "on"):
         try:
             from kuro_backend import fitness_service
@@ -1945,61 +1821,8 @@ def start_reminder_scheduler():
             )
 
     _reminder_scheduler.start()
-    logger.info("Reminder, Habits & Intelligence scheduler started.")
+    logger.info("Intelligence scheduler started.")
 
-def check_reminder_notifications():
-    """Check and send notifications for due reminders."""
-    try:
-        # 10-minute warnings
-        ten_min_reminders = reminder_service.get_reminders_needing_10m_notification()
-        for r in ten_min_reminders:
-            reminder_service.mark_notified_10m(r['id'])
-            msg = f"⏰ A gentle reminder, Master — the event '{r['event_name']}' begins in 10 minutes."
-            logger.info(f"Reminder notification (10m): {r['event_name']}")
-            # Send to Telegram if source is telegram or always
-            send_telegram_reminder_notification(msg)
-        
-        # Event-time notifications
-        event_reminders = reminder_service.get_reminders_needing_event_notification()
-        for r in event_reminders:
-            reminder_service.mark_notified_event(r['id'])
-            msg = f"🔔 Waktunya event '{r['event_name']}' dimulai, Master!"
-            logger.info(f"Reminder notification (event): {r['event_name']}")
-            send_telegram_reminder_notification(msg)
-    except Exception as e:
-        logger.error(f"Error in reminder scheduler: {e}")
-
-def recover_pending_reminders():
-    """Recovery protocol: Load and report pending reminders on startup."""
-    try:
-        pending = reminder_service.get_pending_reminders()
-        if pending:
-            logger.info(f"Recovery: Found {len(pending)} pending reminders on startup.")
-            for r in pending:
-                logger.info(f"  - {r['event_name']} at {r['event_time']}")
-    except Exception as e:
-        logger.error(f"Error in reminder recovery: {e}")
-
-def send_telegram_reminder_notification(message: str):
-    """Send a reminder notification to Telegram.
-
-    Delegates to :mod:`kuro_backend.telegram_notifier` so the HTTP client,
-    retry policy, and kill switches stay centralized.
-    """
-    try:
-        from kuro_backend import telegram_notifier
-        telegram_notifier.send_message(message)
-    except Exception as e:
-        logger.error(f"Failed to send Telegram reminder: {e}")
-
-def send_end_of_day_report():
-    """Send end-of-day habit report at 8 PM."""
-    try:
-        report = core_data.get_end_of_day_report()
-        send_telegram_reminder_notification(f"📊 Laporan Harian:\n\n{report}")
-        logger.info("End-of-day habit report sent.")
-    except Exception as e:
-        logger.error(f"Failed to send end-of-day report: {e}")
 
 def send_daily_intelligence_briefing():
     """Send daily intelligence briefing to Telegram at 08:00 AM."""
@@ -2013,7 +1836,8 @@ def send_daily_intelligence_briefing():
         telegram_message = format_telegram_message(briefing)
         
         # Send to Telegram
-        send_telegram_reminder_notification(telegram_message)
+        from kuro_backend import telegram_notifier
+        telegram_notifier.send_message(telegram_message)
         
         logger.info("[INTELLIGENCE] Daily briefing sent to Telegram")
     except Exception as e:
@@ -2087,7 +1911,7 @@ def get_log_storage_usage() -> Dict:
         
         # Count rotated log files
         for f in os.listdir(log_dir):
-            if f.startswith('kuro_butler.log.'):
+            if f.startswith('kuro_sovereign.log.'):
                 fp = os.path.join(log_dir, f)
                 if os.path.isfile(fp):
                     total_size += os.path.getsize(fp)
@@ -2102,22 +1926,18 @@ def get_log_storage_usage() -> Dict:
         return {"error": str(e)}
 
 def reset_daily_habits():
-    """Midnight reset: Reset all habit is_done to False + cleanup old artifacts."""
+    """Midnight reset: Cleanup old artifacts."""
     try:
         # Log rotation audit message
         today = datetime.now().strftime('%Y-%m-%d')
         logger.info(f"--- END OF LOG FOR {today} - ROTATING NOW ---")
-        
-        # Reset habits (single write gateway)
-        reminder_service.reset_all_habits()
-        logger.info("Daily habits reset for new day.")
         
         # Run artifact cleanup
         cleanup_result = cleanup_old_artifacts(days=14)
         logger.info(f"Midnight artifact cleanup: {cleanup_result}")
         
     except Exception as e:
-        logger.error(f"Failed to reset daily habits: {e}")
+        logger.error(f"Failed to run midnight cleanup: {e}")
 
 # --- Telegram Bot Logic ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):

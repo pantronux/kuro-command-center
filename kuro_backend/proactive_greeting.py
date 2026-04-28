@@ -1,6 +1,6 @@
 """Kuro AI V6.0 "Sovereign" — Proactive dashboard greeting.
 
-When the master opens the dashboard, Kuro should whisper a butler-flavoured
+When the master opens the dashboard, Kuro should whisper a welcoming
 welcome at most once per calendar day. This module encapsulates the cooldown
 check, the per-client UI_COMMAND send, and the SQLite persistence so the
 ``/ws/dashboard`` handler stays a one-liner.
@@ -16,7 +16,7 @@ The function never raises; a broken greeting must never take down the
 WebSocket handshake.
 
 --- Header Doc ---
-Purpose: One-per-day butler greeting push to the dashboard UI on connect.
+Purpose: One-per-day personalized greeting push to the dashboard UI on connect.
 Caller: main.py /ws/dashboard handler.
 Dependencies: dashboard_broadcast, auth_db, sqlite for cooldown state.
 Main Functions: maybe_send_greeting(), _greeting_due_today(), _record_sent().

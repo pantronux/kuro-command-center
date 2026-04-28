@@ -12,8 +12,7 @@ callers keep ownership of error handling, types, and return shape.
 
 Usage:
     from kuro_backend.services import async_adapter
-    habits = await async_adapter.run_db(core_service.list_habits_validated)
-    await async_adapter.run_db(core_service.add_habit_svc, name="read", target=30)
+    revision = await async_adapter.run_db(core_service.get_data_revision)
 
 --- Header Doc ---
 Purpose: Typed bridge to run synchronous SSoT writers off the FastAPI event loop.

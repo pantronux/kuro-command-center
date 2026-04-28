@@ -6,7 +6,7 @@ Re-exports all functions from the original tools.py module.
 Purpose: Public tool surface for Gemini tool-calling (re-export from base_tools).
 Caller: core.py, langgraph_core.py, main.py (when assembling generation_config tools).
 Dependencies: kuro_backend.tools.base_tools.
-Main Functions: reminder/habit/finance/market/system tools + filesystem path constants.
+Main Functions: finance/market/system tools + filesystem path constants.
 Side Effects: None at import (base_tools itself is import-safe).
 """
 # Re-export everything from the original tools.py (now base_tools.py)
@@ -21,10 +21,6 @@ from kuro_backend.tools.base_tools import (
     index_system_path,
     analyze_system_health,
     process_video,
-    parse_datetime,
-    lookup_chroma_context,
-    add_reminder_tool,
-    get_reminders_tool,
     set_monthly_budget_tool,
     get_budget_tool,
     add_recurring_expense_tool,
@@ -33,11 +29,7 @@ from kuro_backend.tools.base_tools import (
     get_ticker_price_tool,
     get_market_news_tool,
     prediction_market_scan_tool,
-    mark_habit_done_tool,
-    get_habits_status_tool,
-    get_habit_history_tool,
     advanced_execution_tool,
-    EMPTY_HABIT_FACTUAL_MESSAGE,
     summarize_pdf,
     summarize_document,
     smart_read,

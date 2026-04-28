@@ -1,7 +1,7 @@
 """
 Kuro AI V6.0 "Sovereign" - Config [2026-04-17]
 ================================================================================
-Centralized configuration for Kuro AI Butler System.
+Centralized configuration for Kuro AI System.
 
 --- Header Doc ---
 Purpose: Single source of truth for environment-driven runtime configuration.
@@ -63,20 +63,6 @@ class Settings:
     KURO_FITNESS_DATA_PATH: str = os.getenv("KURO_FITNESS_DATA_PATH", "~/.kuro/fitness_latest.json")
     KURO_FITNESS_INTERVAL_MIN: int = int(os.getenv("KURO_FITNESS_INTERVAL_MIN", "30"))
 
-    # Voice synthesis (V6.1 Sovereign defaults — Sebastian via Piper).
-    # Shipped voice: `en_GB-alan-medium` (British male, calm register), kept
-    # as default because it is fully offline and survives Internet blackouts.
-    # gTTS remains available as a manual override.
-    KURO_TTS_ENGINE: str = os.getenv("KURO_TTS_ENGINE", "piper").strip().lower()
-    KURO_PIPER_VOICE_PATH: str = os.getenv("KURO_PIPER_VOICE_PATH", "~/.kuro/piper/en_GB-alan-medium.onnx")
-    KURO_TTS_CACHE_DIR: str = os.getenv("KURO_TTS_CACHE_DIR", "media/tts")
-    # Piper length scale — >1 slows speech (elegant butler cadence).
-    KURO_PIPER_LENGTH_SCALE: float = float(os.getenv("KURO_PIPER_LENGTH_SCALE", "1.1"))
-    # ffmpeg pitch-shift multiplier applied to Piper's WAV output. <1.0
-    # deepens the voice; 0.93 ≈ 7% drop which lands in the 5–10% band
-    # requested for "Sebastian depth" without sounding artificial.
-    KURO_TTS_PITCH_SHIFT: float = float(os.getenv("KURO_TTS_PITCH_SHIFT", "0.93"))
-    KURO_TTS_FFMPEG_ENABLED: bool = os.getenv("KURO_TTS_FFMPEG_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on")
 
     # Proactive daily greeting (V6.0 Sovereign).
     KURO_PROACTIVE_GREETING_ENABLED: bool = os.getenv("KURO_PROACTIVE_GREETING_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on")

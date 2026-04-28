@@ -49,18 +49,12 @@ def _get_system_instruction_with_time(persona_override: Optional[str] = None) ->
         persona_override or memory_manager.get_active_persona()
     )
 
-    empty_habit_placeholder = (
-        f"Gunakan '{tools.EMPTY_HABIT_FACTUAL_MESSAGE}' HANYA jika Master "
-        "menanyakan riwayat pribadi (personal history / completion habit) "
-        "yang tidak ditemukan di DB lokal."
-    )
     return build_system_instruction(
         active_persona,
         current_time=current_time,
         current_date=current_date,
         kuro_version_label="V5.5 Official - Contextual RAG",
         variant="core",
-        empty_habit_placeholder=empty_habit_placeholder,
     )
 
 # --- Reusable Generation Config (SDK v3 Protocol) ---
@@ -79,8 +73,6 @@ def _get_generation_config(persona_override: Optional[str] = None) -> types.Gene
             tools.check_proxmox_infrastructure,
             tools.list_my_files,
             tools.list_project_files,
-            tools.add_reminder_tool,
-            tools.get_reminders_tool,
             tools.set_monthly_budget_tool,
             tools.get_budget_tool,
             tools.add_recurring_expense_tool,
@@ -89,9 +81,6 @@ def _get_generation_config(persona_override: Optional[str] = None) -> types.Gene
             tools.get_ticker_price_tool,
             tools.get_market_news_tool,
             tools.prediction_market_scan_tool,
-            tools.mark_habit_done_tool,
-            tools.get_habits_status_tool,
-            tools.get_habit_history_tool,
             tools.advanced_execution_tool,
             tools.smart_read,
             tools.summarize_pdf,

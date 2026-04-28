@@ -25,19 +25,3 @@ arize-phoenix
 opentelemetry-sdk
 opentelemetry-exporter-otlp
 opentelemetry-instrumentation-langchain
-# Text-to-Speech (Kuro V6.1 Sovereign).
-# piper-tts is the default engine for the Sebastian butler voice.
-# Shipped voice: en_GB-alan-medium (British male, calm register) with
-# KURO_PIPER_LENGTH_SCALE=1.1 for elegance; see CHANGELOG.
-# onnxruntime is Piper's runtime. ffmpeg must be available on PATH for the
-# pitch-shift post-processor — no Python pkg.
-# Voice model download (run once):
-#   mkdir -p ~/.kuro/piper && \
-#   curl -L -o ~/.kuro/piper/en_GB-alan-medium.onnx \
-#     https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_GB/alan/medium/en_GB-alan-medium.onnx && \
-#   curl -L -o ~/.kuro/piper/en_GB-alan-medium.onnx.json \
-#     https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_GB/alan/medium/en_GB-alan-medium.onnx.json
-piper-tts>=1.2.0
-onnxruntime>=1.17.0
-# Online fallback engine — still useful when piper model is missing.
-gTTS>=2.5.0

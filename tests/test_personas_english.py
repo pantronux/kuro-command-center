@@ -42,9 +42,9 @@ def test_persona_text_has_no_bahasa_remnants(key):
         )
 
 
-def test_consultant_persona_is_butler_english():
+def test_consultant_persona_is_sovereign_english():
     text = personas.PERSONA_INSTRUCTIONS["consultant"]
-    assert "AI Butler" in text
+    assert "AI Sovereign" in text
     assert "Pantronux" in text
     assert "CORE KNOWLEDGE BASE" in text  # structural header preserved
 
