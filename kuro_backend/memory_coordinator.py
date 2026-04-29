@@ -862,7 +862,7 @@ def build_context_for_llm(
 
     fan_out = _parallel_gather_sync(parallel_tasks)
     all_recent_messages = fan_out.get("short_term") or []
-    # V7.0: Raw Episodic Buffer (Last 10 turns MUST be passed in raw, unsummarized form)
+    # V7.2.1: Raw Episodic Buffer (Last 10 turns MUST be passed in raw, unsummarized form)
     recent_messages = all_recent_messages[-10:]
     referent_grounding_block = fan_out.get("referent") if include_referent_grounding else None
     mem0_context_block = fan_out.get("mem0_fmt") if mem0_retrieved_memories else None
@@ -873,7 +873,7 @@ def build_context_for_llm(
             len(mem0_context_block),
         )
 
-    # KURO V7.0: raw short-term window only (no summary compression) and Mem0 as
+    # KURO V7.2.1: raw short-term window only (no summary compression) and Mem0 as
     # sole long-term semantic layer. Keep memory_injection focused on raw turns.
     # Label explicitly as RAW EPISODIC BUFFER
     short_term_block = _format_entries_for_prompt(recent_messages, max_chars_per_entry=10000)
@@ -882,7 +882,7 @@ def build_context_for_llm(
     if short_term_block:
         memory_injection = f"[RAW EPISODIC BUFFER - LAST 10 TURNS]\n{short_term_block}"
 
-    # V7.0 Active Buffer (Session Files)
+    # V7.2.1 Active Buffer (Session Files)
     session_files = fan_out.get("session_files") or []
     if session_files:
         session_files_block = "[ACTIVE BUFFER - SESSION FILES]\n"

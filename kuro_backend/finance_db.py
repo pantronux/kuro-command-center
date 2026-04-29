@@ -2,7 +2,7 @@
 Kuro finances SSoT — SQLite ledger for budgets, recurring expenses, and
 daily API usage rollups (The Chancellor domain).
 
-V7.0 Leviathan audit:
+V7.2.1 Natural Agency audit:
 - init_db() is guarded by an in-memory `_SCHEMA_READY` flag + `threading.Lock`
   so hot-path CRUD helpers never re-issue 6x CREATE TABLE IF NOT EXISTS each
   call (measured as ~40-50 fewer DDL parse/verifications per Chancellor turn).
@@ -50,7 +50,7 @@ logger.propagate = False
 _BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 _DEFAULT_DB = os.path.join(_BASE_DIR, "kuro_finances.db")
 
-# V7.0 Leviathan audit:
+# V7.2.1 Natural Agency audit:
 # hot-path helpers call init_db() defensively. Running 6x CREATE TABLE IF NOT
 # EXISTS + an INSERT OR IGNORE on every CRUD is wasted DDL parse/verify work.
 # We short-circuit via an in-memory flag keyed by the resolved DB path so

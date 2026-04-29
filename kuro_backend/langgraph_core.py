@@ -470,7 +470,7 @@ def get_system_instruction(persona_override: Optional[str] = None) -> str:
 
 def reflection_node(state: KuroState) -> Dict[str, Any]:
     """
-    Pre-Processing Reflection Node (V7.0 Task Continuity) with LLM-Based Intent Router.
+    Pre-Processing Reflection Node (V7.2.1 Task Continuity) with LLM-Based Intent Router.
     Determines if the Master's intent is "Editing", "Adding", or "Revising".
     """
     user_input = state.get("user_input", "").lower()
@@ -666,7 +666,7 @@ def memory_retrieval_node(state: KuroState) -> Dict[str, Any]:
 
 def memory_extraction_node(state: KuroState) -> Dict[str, Any]:
     """
-    V7.0 Memory Extraction Node: Consolidates Mem0 usage as a Declarative Fact Store.
+    V7.2.1 Memory Extraction Node: Consolidates Mem0 usage as a Declarative Fact Store.
     Only triggers memory extraction when a task is successfully completed and NOT during an edit cycle.
     """
     user_input = state.get("user_input", "")
@@ -680,7 +680,7 @@ def memory_extraction_node(state: KuroState) -> Dict[str, Any]:
         logger.warning("[MEM0_EXTRACTION] Skipped: No final_response found in state.")
         return {}
 
-    # V7.0 Guard Clause: Skip extraction during edit/revision loops
+    # V7.2.1 Guard Clause: Skip extraction during edit/revision loops
     if intent == "edit":
         logger.info("[MEM0_EXTRACTION] Skipped: Currently in 'edit' intent cycle.")
         return {}
@@ -2113,7 +2113,7 @@ async def process_chat_with_graph_stream(
                 emitted += 1
             _persist_short_term_and_enqueue_writes(message, response_text, persona_mode)
 
-            # V7.0 Mem0 Check inside streaming fast-path
+            # V7.2.1 Mem0 Check inside streaming fast-path
             if intent != "edit":
                 task_success = False
                 success_keywords = ["thanks", "terima kasih", "selesai", "fixed", "done", "berhasil", "sip", "ok", "confirmed"]

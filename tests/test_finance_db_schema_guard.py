@@ -1,4 +1,4 @@
-"""Schema-guard + index presence tests for V7.0 Leviathan finance_db.
+"""Schema-guard + index presence tests for V7.2.1 Natural Agency finance_db.
 
 --- Header Doc ---
 Purpose: Verify init_db() is short-circuited after the first successful bootstrap

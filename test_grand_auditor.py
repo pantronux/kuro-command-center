@@ -5,7 +5,7 @@ import sys
 from kuro_backend.langgraph_core import build_kuro_graph
 
 async def main():
-    print("Initializing LangGraph for Project Kuro V7.0...")
+    print("Initializing LangGraph for Project Kuro V7.2.1...")
     graph = build_kuro_graph()
     
     # Configure the session and persona

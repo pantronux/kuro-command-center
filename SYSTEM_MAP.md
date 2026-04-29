@@ -1,4 +1,4 @@
-# Kuro AI V7.1 "Leviathan" — SYSTEM_MAP
+# Kuro AI V7.2.1 "Sovereign Leviathan" — SYSTEM_MAP
 
 > Authoritative navigation map for the repository. Traced function-by-function
 > from the true entrypoint (`main.py`) outward. Only source code under version
@@ -49,7 +49,9 @@ Kuro AI is your **Intelligent Personal Sovereign**—a sophisticated digital com
   alongside the request loop. A separate `OpenClaw` process is reached via
   HTTP bridge for privileged skill execution.
 
-## V7.0 Reset Notes ("Lean Leviathan")
+## Evolution & Core Milestones
+
+### V7.0 Reset Notes ("Lean Leviathan")
 
 - **The "Lean" Philosophy Purge:** NeMo Guardrails, Compliance Scorers, the `voice_service` (TTS), and redundant legacy modules were fully excised from the repository to achieve maximum efficiency and limit bloatware.
 - **QA Architect Persona Integration:** Strict adherence to Business Requirements Documents (BRD) is enforced by the QA Architect, integrated directly into the `memory_manager` and frontend.
@@ -67,14 +69,14 @@ Kuro AI is your **Intelligent Personal Sovereign**—a sophisticated digital com
   for deictic follow-ups like "edit previous result" / "add to that".
 - **Legacy modules:** Legacy compliance, habits, and reminder endpoints return `410 Gone` to enforce the Lean architecture.
 
-## V7.1.0 Reset Notes ("Sovereign Unbound")
+### V7.1.0 Reset Notes ("Sovereign Unbound")
 
 - **The Final Purge:** The legacy Habits and Reminders system, the Live2D "Hijiki" mascot, and all voice (TTS) infrastructure were completely purged from the codebase.
 - **Sovereign Rebranding:** The "Butler" persona has been evolved into the "Sovereign" persona, reflecting a more autonomous and sophisticated architecture.
 - **Frontend Simplification:** Removed L2D canvas, tips/trivia bubble, and voice artifacts from the dashboard. `app.js` and `index.html` were sanitized for maximum performance.
 - **Asset Removal:** Deleted redundant `.db` files, Live2D models, and legacy JS libraries.
 
-## V7.2.0 Architecture Notes ("Natural Agency — Tomasello 2025")
+### V7.2.0 Architecture Notes ("Natural Agency")
 
 - **Three-Tier Control System:** Kuro transitions from a stimulus-driven processor to a Natural Agency model based on Tomasello (2025).
 - **Auto-RAG (V7.2.1):** Implements a self-correction loop in the retrieval layer. `retrieval_grader_node` evaluates context relevance (relevant/ambiguous/irrelevant); `query_transform_node` rewrites queries or triggers Serper web-search failover at max retries (bounded loop).
@@ -320,22 +322,24 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
 
 ### Reasoning Core
 - [`kuro_backend/langgraph_core.py`](kuro_backend/langgraph_core.py) —
-  *public*: `KuroState`, `build_kuro_graph`, `process_chat_with_graph`,
-  `process_chat_with_graph_stream`, `process_pdf_with_thinking`,
-  `supervisor_node`, `memory_retrieval_node`, `memory_extraction_node`,
-  `response_node`, `tool_node`, `compliance_node`,
-  `route_after_supervisor`, `get_system_instruction`,
-  `get_post_response_queue_depth`, `save_graph_visualization`. Owns the
-  Gemini tool-calling loop and destructive-action approval gate.
-- [`kuro_backend/core.py`](kuro_backend/core.py) — *public*: `process_chat`,
-  `get_last_topic`. Non-graph fallback path used when LangGraph is
-  bypassed (e.g. some CLI/smoke tools).
+  *public*: `KuroState`, `build_kuro_graph`, `process_chat_with_graph_stream`,
+  `supervisor_node`, `memory_retrieval_node`, `retrieval_grader_node` (Auto-RAG),
+  `query_transform_node` (Auto-RAG), `attention_filter_node` (T1),
+  `executive_monitor_node` (T1), `metacognitive_review_node` (T2),
+  `response_node`, `tool_node`, `memory_extraction_node`.
+  Orchestrates the Tomasello-inspired 3-tier control system and self-correcting retrieval loop.
 - [`kuro_backend/personas.py`](kuro_backend/personas.py) — *public*:
-  `SamplingProfile`, `LayerWeights`, `ContextBudget`, `get_sampling_profile`,
-  `get_context_budget`, `build_factual_response_config`,
-  `normalize_persona_key`, `build_system_instruction`. English "Elegant &
-  Sophisticated" prompts for consultant / advisor / chill /
-  tactical / chancellor (Sovereign Accountant + financial SSoT addendum).
+  `build_system_instruction`, `get_persona_instruction`. English prompts
+  for consultant / advisor / chill / tactical / chancellor.
+  Updated with Shared Agency (T3) coordination partner protocols.
+
+### Agency (T1-T3)
+- [`kuro_backend/agency/joint_goal_store.py`](kuro_backend/agency/joint_goal_store.py) —
+  *public*: `add_commitment`, `get_active_commitments`, `format_for_prompt`.
+  SQLite-backed persistent store for T3 Shared Agency dissertation goals.
+- [`kuro_backend/agency/cognitive_effort.py`](kuro_backend/agency/cognitive_effort.py) —
+  *public*: `get_effort_level`, `get_cot_injection`.
+  T2 allocator that scales Chain-of-Thought reasoning depth (low/medium/high) based on input intent.
 
 ### Memory & SSoT
 - [`kuro_backend/memory_coordinator.py`](kuro_backend/memory_coordinator.py)
@@ -517,7 +521,7 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
 ### Frontend
 - [`web_interface/templates/index.html`](web_interface/templates/index.html)
   — dashboard shell: avatar (`/profile/kuro_avatar.png`), WebSocket status ticker, chat pane,
-  favicon links, `V7.1` sidebar badge, Chancellor persona option, market chips bar.
+  favicon links, `V7.2.1` sidebar badge, Chancellor persona option, market chips bar.
 - [`web_interface/templates/intelligence.html`](web_interface/templates/intelligence.html),
   [`market.html`](web_interface/templates/market.html),
   [`compliance.html`](web_interface/templates/compliance.html),
@@ -639,7 +643,7 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
 
 | Arize Phoenix + OpenTelemetry | `observability.py` | Phoenix UI served from `phoenix_data/`; OTel exports traces for every LangGraph node via `trace_node`. |
 
-## Documentation discipline (V7.0 Leviathan)
+## Documentation discipline (V7.2.2)
 
 The V7.0 pass landed a repo-wide documentation standard so every file can
 answer the same five questions at a glance. Keep it intact when adding new

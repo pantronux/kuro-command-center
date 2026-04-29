@@ -1221,15 +1221,15 @@ async def memory_stats():
 
 @app.post("/api/compliance/ingest")
 async def compliance_ingest(clear: bool = Form(False)):
-    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Compliance module purged in KURO V7.0"})
+    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Compliance module purged in KURO V7.2.1"})
 
 @app.get("/api/compliance/stats")
 async def compliance_stats():
-    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Compliance module purged in KURO V7.0"})
+    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Compliance module purged in KURO V7.2.1"})
 
 @app.get("/api/compliance/search")
 async def compliance_search(query: str):
-    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Compliance module purged in KURO V7.0"})
+    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Compliance module purged in KURO V7.2.1"})
 
 # --- Intelligence Hub Routes ---
 @app.get("/api/intelligence/history")
@@ -1318,23 +1318,23 @@ async def compliance_dashboard():
 
 @app.get("/api/compliance/progress/{standard}")
 async def compliance_progress(standard: str):
-    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Compliance module purged in KURO V7.0"})
+    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Compliance module purged in KURO V7.2.1"})
 
 @app.get("/api/compliance/evidence")
 async def compliance_evidence(standard: str = None):
-    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Compliance module purged in KURO V7.0"})
+    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Compliance module purged in KURO V7.2.1"})
 
 @app.get("/api/compliance/search")
 async def compliance_search(query: str, standard: str = None):
-    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Compliance module purged in KURO V7.0"})
+    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Compliance module purged in KURO V7.2.1"})
 
 @app.post("/api/compliance/analyze")
 async def compliance_analyze(document: str = Form(""), standard: str = Form("iso27001")):
-    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Compliance module purged in KURO V7.0"})
+    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Compliance module purged in KURO V7.2.1"})
 
 @app.get("/api/compliance/audit-trail")
 async def audit_trail(limit: int = 50):
-    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Compliance module purged in KURO V7.0"})
+    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Compliance module purged in KURO V7.2.1"})
 
 
 @app.get("/api/dashboard/data-revision")
