@@ -177,8 +177,8 @@ def format_for_prompt() -> str:
     if not goals:
         return ""
     lines = [
-        "[JOINT_COMMITMENTS — Komitmen Bersama dengan Master Pantronux]",
-        "Referensikan komitmen ini secara proaktif saat relevan:",
+        "[JOINT_COMMITMENTS — Joint Commitment with Master Pantronux]",
+        "Proactively reference this commitment when relevant.:",
     ]
     for g in goals:
         ref = f" ({g['chapter_ref']})" if g.get("chapter_ref") else ""

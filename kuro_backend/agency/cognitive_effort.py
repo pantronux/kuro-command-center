@@ -106,12 +106,12 @@ _EFFORT_COT_INJECTIONS: dict[EffortLevel, str] = {
     ),
     "high": (
         "\n\n[COGNITIVE EFFORT: HIGH — DISSERTATION NOVELTY MODE]\n"
-        "Lakukan reasoning mendalam:\n"
-        "1. Identifikasi asumsi tersembunyi dalam pertanyaan ini.\n"
-        "2. Cari potensi celah atau counter-evidence.\n"
-        "3. Pertimbangkan implikasi terhadap novelty kontribusi disertasi.\n"
-        "4. Jika ada komitmen bersama yang relevan, referensikan secara eksplisit.\n"
-        "5. Baru berikan jawaban yang terstruktur dan verified."
+        "Perform deep reasoning:\n"
+"1. Identify hidden assumptions in this question.\n"
+"2. Look for potential gaps or counter-evidence.\n"
+"3. Consider the implications for the novelty contribution of the dissertation.\n"
+"4. If there are relevant joint commitments, reference them explicitly.\n"
+"5. Only then provide a structured and verified answer."
     ),
 }
 

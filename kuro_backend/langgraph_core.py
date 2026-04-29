@@ -1189,9 +1189,8 @@ def metacognitive_review_node(state: KuroState) -> Dict[str, Any]:
     evidence_note = ""
     if evidence_weak:
         evidence_note = (
-            f"\n\n> ⚠️ **Catatan Evidensi:** Retrieval memory menunjukkan kualitas "
-            f"`{retrieval_grade}` setelah {retry_count} percobaan — respons mungkin "
-            f"kurang didukung oleh bukti dari memori jangka panjang."
+            f"\n\n> ⚠️ **Evidence Note:** Retrieval memory shows `{retrieval_grade}` quality "
+            f"after {retry_count} attempts — response may be less supported by long-term memory evidence."
         )
 
     # ── 3. Contradiction Trigger ─────────────────────────────────────────────
@@ -1201,13 +1200,13 @@ def metacognitive_review_node(state: KuroState) -> Dict[str, Any]:
         rec = alignment_result.get("recommendation", "Realign with dissertation objective.")
         reflective_msg = (
             f"⚠️ **[Metacognitive Alignment Check — T2 Rational Agent]**\n\n"
-            f"Master Pantronux, sebelum melanjutkan — saya mendeteksi potensi konflik "
-            f"antara instruksi saat ini dan komitmen disertasi yang telah kita sepakati bersama.\n\n"
-            f"**Konflik terdeteksi:**\n{conflict_txt}\n\n"
-            f"**Rekomendasi:** {rec}"
+            f"Master Pantronux, before continuing — I have detected a potential conflict "
+            f"between the current instructions and our mutually agreed-upon dissertation commitments.\n\n"
+            f"**Conflict detected:**\n{conflict_txt}\n\n"
+            f"**Recommendation:** {rec}"
             f"{evidence_note}\n\n"
-            f"Apakah Master ingin melanjutkan dengan mempertimbangkan realignment ini? "
-            f"Atau ada konteks baru yang perlu saya pahami sebelum melanjutkan?"
+            f"Would you like to proceed with this realignment in mind? "
+            f"Or is there any new context I need to understand before continuing?"
         )
         logger.info(
             "[METACOGNITIVE] Conflict detected score=%.2f retrieval=%s → reflective path",
