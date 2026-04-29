@@ -1247,3 +1247,108 @@ def apply_openclaw_execution_result(
         result=result,
     )
     return result
+
+
+# ---------------------------------------------------------------------------
+# T2 Metacognitive Tier — Belief Revision (Tomasello 2025)
+# ---------------------------------------------------------------------------
+
+def evaluate_alignment(user_input: str, persona_mode: str) -> Dict[str, Any]:
+    """
+    T2 Belief Revision: compare the current user input against prior BRD-backed
+    commitments stored in the research_ledger (kind='decision' and 'novelty_point').
+
+    Only meaningful when the research_ledger contains prior commitments — new
+    sessions will return score=1.0 (no prior beliefs to conflict with).
+
+    Args:
+        user_input:   Raw user message.
+        persona_mode: Active persona key (e.g. "advisor", "consultant", "auditor").
+
+    Returns:
+        {
+            "score":          float,  # 0.0 (full conflict) … 1.0 (full alignment)
+            "conflicts":      list,   # ledger items that contradict input
+            "supports":       list,   # ledger items that support input
+            "recommendation": str,    # suggested realignment action
+        }
+    """
+    from kuro_backend import memory_manager
+
+    _NULL_RESULT: Dict[str, Any] = {
+        "score": 1.0,
+        "conflicts": [],
+        "supports": [],
+        "recommendation": "",
+    }
+
+    # Fetch prior commitments — decisions and novelty points are the
+    # primary BRD-anchored belief stores for the advisor/consultant/auditor path.
+    try:
+        prior_decisions = memory_manager.query_research_ledger(
+            persona_scope=persona_mode, kind="decision", limit=8
+        )
+        prior_novelty = memory_manager.query_research_ledger(
+            persona_scope=persona_mode, kind="novelty_point", limit=5
+        )
+    except Exception as exc:
+        logger.warning("[EVALUATE_ALIGNMENT] ledger read failed: %s", exc)
+        return _NULL_RESULT
+
+    all_priors = prior_decisions + prior_novelty
+    if not all_priors:
+        # No prior beliefs → no possible conflict.
+        return _NULL_RESULT
+
+    prior_text = "\n".join(
+        f"- [{r.get('kind', '?')}] {r.get('content', '')}" for r in all_priors
+    )
+
+    try:
+        from google.genai import types as genai_types
+        from kuro_backend.config import CLASSIFIER_MODEL
+
+        client = _get_summary_genai_client()
+        prompt = (
+            "You are a dissertation coherence auditor.\n\n"
+            f"Prior BRD Commitments (from research ledger, persona={persona_mode}):\n"
+            f"{prior_text}\n\n"
+            f"Current User Input:\n{user_input}\n\n"
+            "Evaluate alignment between the current input and the prior commitments.\n"
+            "Return JSON with exactly these keys:\n"
+            "{\n"
+            '  "score": <float 0.0-1.0>,\n'
+            '  "conflicts": ["<ledger item that contradicts input>", ...],\n'
+            '  "supports": ["<ledger item that supports input>", ...],\n'
+            '  "recommendation": "<one-sentence suggested realignment action>"\n'
+            "}\n"
+            "score=1.0 → fully aligned; score=0.0 → directly contradictory."
+        )
+
+        resp = client.models.generate_content(
+            model=CLASSIFIER_MODEL,
+            contents=prompt,
+            config=genai_types.GenerateContentConfig(
+                temperature=0.0,
+                max_output_tokens=350,
+                response_mime_type="application/json",
+            ),
+        )
+
+        import json as _json
+        raw_text = getattr(resp, "text", "") or ""
+        result = _json.loads(raw_text) if raw_text.strip() else {}
+
+        score = float(result.get("score", 1.0))
+        score = max(0.0, min(1.0, score))
+
+        return {
+            "score": score,
+            "conflicts": result.get("conflicts", []),
+            "supports": result.get("supports", []),
+            "recommendation": result.get("recommendation", ""),
+        }
+
+    except Exception as exc:
+        logger.warning("[EVALUATE_ALIGNMENT] LLM call failed: %s", exc)
+        return _NULL_RESULT

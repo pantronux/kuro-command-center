@@ -389,8 +389,9 @@ class KuroState(TypedDict):
     """
     Kuro Agent State - persists across graph nodes.
     V5.5: Guardrail-related fields removed for performance.
-    
-    Fields:
+    V7.2: Natural Agency (Tomasello 2025) tier fields added.
+
+    Core Fields:
     - messages: Conversation history (list of dicts with role/content)
     - next_step: Next node to route to (supervisor decision)
     - user_input: Original user message
@@ -399,6 +400,21 @@ class KuroState(TypedDict):
     - mem0_retrieved_memories: Memories retrieved from Mem0 for context
     - tool_execution_result: Result from tool execution (ToolNode output)
     - requires_approval: Flag for HITL interrupt (file operations need approval)
+
+    T1 Executive / Intentional Agent:
+    - inhibited: True if prepotent response was withheld
+    - inhibition_reason: Why it was withheld
+    - simulated_outcomes: List of {"label", "strategy", "novelty_score"/"adversarial_score"}
+    - selected_outcome: The chosen simulation dict
+    - cognitive_effort: "low" | "medium" | "high" — controls CoT depth
+
+    T2 Metacognitive / Rational Agent:
+    - alignment_score: 0.0–1.0 alignment with BRD commitments
+    - metacognitive_flag: True triggers reflective_response_node instead of normal response
+
+    T3 Shared Agency / Social Agent:
+    - joint_goal_block: Formatted active commitments injected into system prompt
+    - _intent_category: Attention filter tag (dissertation/research/off_track/administrative)
     """
     messages: Annotated[List[Dict], lambda x, y: x + y]
     next_step: str
@@ -412,6 +428,20 @@ class KuroState(TypedDict):
     _approval_scope: str
     _trace_id: str
     _intent: str
+    # --- Natural Agency fields (V7.2) ---
+    _intent_category: str
+    inhibited: bool
+    inhibition_reason: str
+    simulated_outcomes: List[Dict]
+    selected_outcome: Optional[Dict]
+    cognitive_effort: str
+    alignment_score: float
+    metacognitive_flag: bool
+    joint_goal_block: str
+    # --- Auto-RAG fields (V7.2.1 Self-Correction Loop) ---
+    retrieval_grade: str          # "relevant" | "ambiguous" | "irrelevant"
+    retrieval_retry_count: int    # bounded 0–2; failover to Serper at max
+    rewritten_query: str          # LLM-transformed query after grading fail
 
 
 # ============================================
@@ -597,14 +627,16 @@ def memory_retrieval_node(state: KuroState) -> Dict[str, Any]:
 
     user_input = state.get("user_input", "")
     session_id = state.get("_session_id", "")
+    # Auto-RAG: use rewritten query on retry passes
+    effective_query = state.get("rewritten_query") or user_input
 
     with observability.trace_node("memory_retrieval_node") as span:
         try:
             # P1.2 — consume supervisor's prefetch if present; otherwise fall
-            # back to a live retrieval. Either path degrades gracefully.
+            # back to a live retrieval using effective_query (may be rewritten).
             raw_memories = memory_coordinator.take_prefetched_mem0(session_id)
             if raw_memories is None:
-                raw_memories = memory_coordinator.safe_mem0_retrieve(user_input, limit=5)
+                raw_memories = memory_coordinator.safe_mem0_retrieve(effective_query, limit=5)
 
             if not isinstance(raw_memories, list):
                 logger.warning("[MEM0] Unexpected output format: %s", type(raw_memories))
@@ -705,6 +737,531 @@ Status:"""
 
 
 # ============================================
+# AUTO-RAG: SELF-CORRECTION LOOP (V7.2.1)
+# References: Self-RAG (Asai et al. 2023), CRAG (Yan et al. 2024),
+#             Adaptive-RAG (Jeong et al. 2024)
+# ============================================
+
+_RAG_MAX_RETRIES: int = 2  # hard ceiling — prevents token-burn loops
+
+
+def retrieval_grader_node(state: KuroState) -> Dict[str, Any]:
+    """
+    Auto-RAG Step 1 — Retrieval Quality Grader.
+
+    Evaluates whether Mem0-retrieved memories are relevant to the current
+    user_input using CLASSIFIER_MODEL. Fast path: if Mem0 returned nothing,
+    grade immediately as 'irrelevant' without an LLM call.
+
+    Grades:
+      "relevant"   → context is useful; proceed to attention_filter_node.
+      "ambiguous"  → context is partially useful; attempt query rewrite.
+      "irrelevant" → context is useless; trigger query_transform_node.
+
+    --- Header Doc ---
+    Purpose: CRAG-style retrieval quality gating (Yan et al. 2024).
+    Caller: memory_retrieval_node (via graph edge).
+    Dependencies: CLASSIFIER_MODEL, genai_types.
+    Main Functions: retrieval_grader_node(state) -> Dict
+    Side Effects: None (read-only evaluation).
+    """
+    user_input = state.get("user_input", "")
+    memories: List[Dict] = state.get("mem0_retrieved_memories") or []
+    retry_count: int = state.get("retrieval_retry_count", 0)
+
+    # ── Fast path: nothing retrieved ─────────────────────────────────────────
+    if not memories:
+        logger.info("[RAG_GRADER] No memories retrieved — grade=irrelevant")
+        return {"retrieval_grade": "irrelevant"}
+
+    # Summarise retrieved context for the grader prompt (cap at 1200 chars)
+    context_preview = "\n".join(
+        f"- {m.get('memory', m.get('content', str(m)))}" for m in memories[:6]
+    )[:1200]
+
+    try:
+        from kuro_backend.config import CLASSIFIER_MODEL
+        client = _get_genai_client()
+
+        prompt = (
+            "You are a strict retrieval quality judge.\n\n"
+            f"User Query:\n{user_input}\n\n"
+            f"Retrieved Context:\n{context_preview}\n\n"
+            "Grade whether the retrieved context is useful for answering the query.\n"
+            "Reply with ONLY one of these words: relevant | ambiguous | irrelevant\n"
+            "- relevant:   context directly addresses the query.\n"
+            "- ambiguous:  context is partially related or vague.\n"
+            "- irrelevant: context does not address the query at all.\n\n"
+            "Grade:"
+        )
+        resp = client.models.generate_content(
+            model=CLASSIFIER_MODEL,
+            contents=prompt,
+            config=genai_types.GenerateContentConfig(
+                temperature=0.0,
+                max_output_tokens=5,
+            ),
+        )
+        raw = (resp.text or "").strip().lower().split()[0] if resp.text else ""
+        grade = raw if raw in ("relevant", "ambiguous", "irrelevant") else "ambiguous"
+    except Exception as exc:
+        logger.warning("[RAG_GRADER] Grading failed (%s) — defaulting to relevant", exc)
+        grade = "relevant"
+
+    logger.info(
+        "[RAG_GRADER] retry=%d grade=%s memories=%d",
+        retry_count, grade, len(memories),
+    )
+    return {"retrieval_grade": grade}
+
+
+def query_transform_node(state: KuroState) -> Dict[str, Any]:
+    """
+    Auto-RAG Step 2 — Query Rewriter & Serper Failover.
+
+    Called when retrieval_grade is NOT 'relevant'.
+
+    Behaviour:
+      - If retry_count < _RAG_MAX_RETRIES: rewrite user_input into a more
+        precise search query and bump retrieval_retry_count. The graph loops
+        back to memory_retrieval_node with the rewritten_query in state.
+      - If retry_count == _RAG_MAX_RETRIES: invoke Serper web search as a
+        last-resort retrieval, inject results into mem0_retrieved_memories,
+        and force retrieval_grade="relevant" to unblock the pipeline.
+
+    Token-burn protection: bounded by _RAG_MAX_RETRIES=2 (max 2 extra
+    CLASSIFIER_MODEL calls + 1 Serper HTTP call per turn).
+
+    --- Header Doc ---
+    Purpose: Self-RAG query optimiser and web-search failover.
+    Caller: retrieval_grader_node (via conditional edge).
+    Dependencies: CLASSIFIER_MODEL, serper_tool.serper_search.
+    Main Functions: query_transform_node(state) -> Dict
+    Side Effects: May call Serper API (network I/O).
+    """
+    user_input = state.get("user_input", "")
+    rewritten = state.get("rewritten_query") or user_input
+    retry_count: int = state.get("retrieval_retry_count", 0)
+    grade = state.get("retrieval_grade", "irrelevant")
+
+    # ── Serper failover at max retries ────────────────────────────────────────
+    if retry_count >= _RAG_MAX_RETRIES:
+        logger.info(
+            "[RAG_TRANSFORM] Max retries reached (%d) — Serper failover for: %s",
+            retry_count, rewritten[:80],
+        )
+        serper_memories: List[Dict] = []
+        try:
+            from kuro_backend.serper_tool import serper_search
+            results = serper_search(rewritten, search_type="search", num_results=5)
+            organic = results.get("organic", []) or []
+            for r in organic[:5]:
+                snippet = r.get("snippet", "")
+                title = r.get("title", "")
+                if snippet:
+                    serper_memories.append({
+                        "memory": f"[Web] {title}: {snippet}",
+                        "source": "serper",
+                    })
+        except Exception as exc:
+            logger.warning("[RAG_TRANSFORM] Serper failover failed: %s", exc)
+
+        # Inject web results and unblock pipeline
+        return {
+            "mem0_retrieved_memories": serper_memories,
+            "retrieval_grade": "relevant",    # unblock — best-effort web results
+            "retrieval_retry_count": retry_count + 1,
+            "rewritten_query": rewritten,
+        }
+
+    # ── LLM query rewrite ─────────────────────────────────────────────────────
+    new_query = rewritten
+    try:
+        from kuro_backend.config import CLASSIFIER_MODEL
+        client = _get_genai_client()
+
+        prompt = (
+            "You are an expert search query optimizer.\n\n"
+            f"Original user question: {user_input}\n"
+            f"Previous retrieval grade: {grade} (retrieval was not useful)\n\n"
+            "Rewrite the question as a precise, specific search query that will "
+            "retrieve better results from a personal AI memory system.\n"
+            "Focus on key entities, topics, and temporal anchors.\n"
+            "Return ONLY the rewritten query, no explanation."
+        )
+        resp = client.models.generate_content(
+            model=CLASSIFIER_MODEL,
+            contents=prompt,
+            config=genai_types.GenerateContentConfig(
+                temperature=0.2,
+                max_output_tokens=80,
+            ),
+        )
+        new_query = (resp.text or "").strip() or user_input
+    except Exception as exc:
+        logger.warning("[RAG_TRANSFORM] Query rewrite failed: %s", exc)
+
+    logger.info(
+        "[RAG_TRANSFORM] retry=%d → rewritten query: %s",
+        retry_count + 1, new_query[:80],
+    )
+    return {
+        "rewritten_query": new_query,
+        "retrieval_retry_count": retry_count + 1,
+        # Reset grade so next retrieval gets re-evaluated
+        "retrieval_grade": "ambiguous",
+    }
+
+
+# ── Auto-RAG Routing ──────────────────────────────────────────────────────────
+
+def route_after_grader(state: KuroState) -> str:
+    """
+    Auto-RAG conditional edge after retrieval_grader_node.
+
+    relevant   → attention_filter_node  (proceed with Natural Agency pipeline)
+    ambiguous  → query_transform_node   (rewrite query, loop back)
+    irrelevant → query_transform_node   (rewrite query, loop back)
+
+    Loop is bounded by retrieval_retry_count via query_transform_node's
+    Serper failover at _RAG_MAX_RETRIES.
+    """
+    grade = state.get("retrieval_grade", "ambiguous")
+    if grade == "relevant":
+        return "attention_filter_node"
+    return "query_transform_node"
+
+
+# ============================================
+# NATURAL AGENCY TIER (Tomasello 2025) — V7.2
+# Gated to: advisor, consultant, auditor personas only
+# ============================================
+
+_AGENCY_PERSONAS = {"advisor", "consultant", "auditor"}
+
+# ── T1a: Attention / Relevance Filter ────────────────────────────────────────
+
+def attention_filter_node(state: KuroState) -> Dict[str, Any]:
+    """
+    T1 Attention Gate: classifies input into intent categories.
+    Fast heuristic + optional LLM classifier.
+
+    Categories:
+      dissertation  → core PhD novelty / methodology work
+      research      → reading papers, referencing, analysis
+      technical     → code, debugging, devops
+      administrative→ file ops, scheduling, finance
+      off_track     → diverges from dissertation goals (triggers inhibition)
+      general       → everything else
+    """
+    persona_mode = state.get("persona_mode", "consultant")
+
+    # Only run for agency personas — fast bypass for others.
+    if persona_mode not in _AGENCY_PERSONAS:
+        return {"_intent_category": "general"}
+
+    user_input = (state.get("user_input") or "").lower()
+
+    import re as _re
+    _DISS = _re.compile(
+        r"\b(novel|kontribusi|disertasi|dissertation|bab\s*\d|chapter\s*\d|"
+        r"hipotesis|hypothesis|metodologi|methodology|forensic|phd|tesis|thesis|"
+        r"eu ai act|uu pdp|nist|iso\s*\d+|research gap|evidence)\b", _re.I
+    )
+    _RESEARCH = _re.compile(
+        r"\b(paper|artikel|article|jurnal|journal|referensi|reference|"
+        r"analisis|analysis|ringkas|summarize|review|literatur|literature)\b", _re.I
+    )
+    _TECH = _re.compile(
+        r"\b(kode|code|debug|error|bug|fix|refactor|deploy|server|"
+        r"script|function|import|install|dependency)\b", _re.I
+    )
+    _ADMIN = _re.compile(
+        r"\b(file|excel|export|budget|finance|jadwal|schedule|reminder)\b", _re.I
+    )
+    _OFF = _re.compile(
+        r"\b(cerita|joke|lelucon|hiburan|entertainment|rehat|istirahat|"
+        r"random|gaming|nonton|film|musik|music)\b", _re.I
+    )
+
+    if _DISS.search(user_input):
+        category = "dissertation"
+    elif _RESEARCH.search(user_input):
+        category = "research"
+    elif _TECH.search(user_input):
+        category = "technical"
+    elif _ADMIN.search(user_input):
+        category = "administrative"
+    elif _OFF.search(user_input):
+        category = "off_track"
+    else:
+        category = "general"
+
+    logger.info("[ATTENTION_FILTER] persona=%s category=%s", persona_mode, category)
+    return {"_intent_category": category}
+
+
+# ── T1b: Executive Monitor (Inhibit + Simulate) ───────────────────────────────
+
+def executive_monitor_node(state: KuroState) -> Dict[str, Any]:
+    """
+    T1 Executive / Intentional Agent — Tomasello (2025).
+
+    1. Inhibitory filter: withhold response for off-track/bloatware inputs
+       when active persona is advisor/consultant/auditor.
+    2. Imaginative simulation:
+       - advisor/consultant → Draft A (Conservative) vs Draft B (Novel)
+       - auditor           → Draft A (Pass/Safe)    vs Draft B (Adversarial/Fail)
+    3. Cognitive effort: compute via kuro_backend.agency.cognitive_effort.
+    """
+    persona_mode = state.get("persona_mode", "consultant")
+
+    if persona_mode not in _AGENCY_PERSONAS:
+        return {
+            "inhibited": False, "inhibition_reason": "",
+            "simulated_outcomes": [], "selected_outcome": None,
+            "cognitive_effort": "low",
+        }
+
+    user_input = state.get("user_input", "")
+    intent_cat = state.get("_intent_category", "general")
+
+    # ── 1. Inhibitory filter ─────────────────────────────────────────────────
+    BLOATWARE_SIGNALS = [
+        "tambahkan fitur", "buat animasi", "install plugin",
+        "change theme", "add emoji", "redesign ui", "ganti warna",
+    ]
+    IMPULSIVE_SIGNALS = [
+        "cerita", "joke", "lelucon", "hiburan", "random fact",
+        "nonton", "gaming", "musik",
+    ]
+    lowered = user_input.lower()
+    is_bloatware = any(s in lowered for s in BLOATWARE_SIGNALS)
+    is_impulsive = intent_cat == "off_track" and any(
+        s in lowered for s in IMPULSIVE_SIGNALS
+    )
+
+    if is_bloatware or is_impulsive:
+        reason = (
+            "Bloatware-type request detected — not backed by BRD." if is_bloatware
+            else "Off-track impulsive input — diverges from dissertation goals."
+        )
+        logger.info("[EXECUTIVE] Inhibiting. persona=%s reason=%s", persona_mode, reason)
+        return {
+            "inhibited": True,
+            "inhibition_reason": reason,
+            "simulated_outcomes": [],
+            "selected_outcome": None,
+            "cognitive_effort": "low",
+        }
+
+    # ── 2. Imaginative simulation ────────────────────────────────────────────
+    simulated_outcomes: List[Dict] = []
+    selected_outcome: Optional[Dict] = None
+
+    sim_eligible = intent_cat in ("dissertation", "research") or persona_mode == "auditor"
+
+    if sim_eligible:
+        try:
+            from kuro_backend.config import CLASSIFIER_MODEL
+
+            client = _get_genai_client()
+
+            if persona_mode == "auditor":
+                sim_prompt = (
+                    f'You are a QA Architect auditor.\n'
+                    f'Scenario: "{user_input}"\n\n'
+                    f'Generate two audit simulation drafts.\n'
+                    f'Draft A (Pass/Safe): The code/approach meets requirements — '
+                    f'describe why it is safe and what tests pass.\n'
+                    f'Draft B (Adversarial/Fail): The most dangerous failure scenario — '
+                    f'edge cases, adversarial inputs, or missing controls that would cause failure.\n\n'
+                    f'Return JSON: {{"draft_a": {{"strategy": "...", "adversarial_score": 0}}, '
+                    f'"draft_b": {{"strategy": "...", "adversarial_score": 10}}}}\n'
+                    f'adversarial_score: 0=safe, 10=critical failure found.'
+                )
+                score_key = "adversarial_score"
+                # auditor always selects Draft B (the adversarial scenario) to surface risks
+                pick_highest = True
+            else:
+                sim_prompt = (
+                    f'You are a dissertation research planner.\n'
+                    f'Question: "{user_input}"\n\n'
+                    f'Generate two alternative response strategies.\n'
+                    f'Draft A (Conservative): Safe, grounded answer aligned with existing literature.\n'
+                    f'Draft B (Novel): Creative, potentially groundbreaking angle advancing novelty.\n\n'
+                    f'Return JSON: {{"draft_a": {{"strategy": "...", "novelty_score": 3}}, '
+                    f'"draft_b": {{"strategy": "...", "novelty_score": 8}}}}\n'
+                    f'novelty_score: 0=very conventional, 10=highly novel.'
+                )
+                score_key = "novelty_score"
+                pick_highest = True  # advisor/consultant pick highest novelty
+
+            resp = client.models.generate_content(
+                model=CLASSIFIER_MODEL,
+                contents=sim_prompt,
+                config=genai_types.GenerateContentConfig(
+                    temperature=0.3,
+                    max_output_tokens=350,
+                    response_mime_type="application/json",
+                ),
+            )
+            sim_data = json.loads(resp.text or "{}")
+            draft_a = {"label": "Draft A", **sim_data.get("draft_a", {})}
+            draft_b = {"label": "Draft B", **sim_data.get("draft_b", {})}
+            simulated_outcomes = [draft_a, draft_b]
+            selected_outcome = max(
+                simulated_outcomes,
+                key=lambda d: int(d.get(score_key, 0)),
+            ) if pick_highest else draft_a
+            logger.info(
+                "[EXECUTIVE] Simulation done. Selected=%s score=%s",
+                selected_outcome.get("label"),
+                selected_outcome.get(score_key),
+            )
+        except Exception as exc:
+            logger.warning("[EXECUTIVE] Simulation failed: %s", exc)
+
+    # ── 3. Cognitive effort ──────────────────────────────────────────────────
+    from kuro_backend.agency.cognitive_effort import compute as _compute_effort
+    effort = _compute_effort(intent_cat, user_input)
+
+    return {
+        "inhibited": False,
+        "inhibition_reason": "",
+        "simulated_outcomes": simulated_outcomes,
+        "selected_outcome": selected_outcome,
+        "cognitive_effort": effort,
+    }
+
+
+# ── T2: Metacognitive Review (Belief Revision) ────────────────────────────────
+
+def metacognitive_review_node(state: KuroState) -> Dict[str, Any]:
+    """
+    T2 Rational / Metacognitive Agent — Tomasello (2025).
+
+    1. Belief Revision: compare current input against prior BRD commitments
+       (research_ledger) via memory_coordinator.evaluate_alignment().
+    2. Evidence Quality: incorporate retrieval_grade from Auto-RAG — if beliefs
+       conflict AND retrieval was poor-quality, the reflective message flags the
+       double uncertainty (belief conflict + weak evidence backing).
+    3. Contradiction Trigger: if conflict score < threshold, set
+       metacognitive_flag=True and produce a reflective realignment message.
+    4. Joint Goal Injection: on aligned path, inject joint_goal_block for
+       response_node to embed in system prompt (T3 Shared Agency).
+    """
+    persona_mode = state.get("persona_mode", "consultant")
+
+    if persona_mode not in _AGENCY_PERSONAS:
+        return {
+            "alignment_score": 1.0,
+            "metacognitive_flag": False,
+            "joint_goal_block": "",
+        }
+
+    # If the Executive already inhibited — skip metacognitive check.
+    if state.get("inhibited"):
+        return {
+            "alignment_score": 1.0,
+            "metacognitive_flag": False,
+            "joint_goal_block": "",
+        }
+
+    user_input = state.get("user_input", "")
+
+    # ── 1. Belief Revision ───────────────────────────────────────────────────
+    alignment_result: Dict[str, Any] = {
+        "score": 1.0, "conflicts": [], "supports": [], "recommendation": "",
+    }
+    try:
+        alignment_result = memory_coordinator.evaluate_alignment(user_input, persona_mode)
+    except Exception as exc:
+        logger.warning("[METACOGNITIVE] evaluate_alignment error: %s", exc)
+
+    score = float(alignment_result.get("score", 1.0))
+    threshold = float(os.getenv("KURO_ALIGNMENT_THRESHOLD", "0.35"))
+
+    # ── 2. Evidence Quality (Auto-RAG integration) ───────────────────────────
+    retrieval_grade = state.get("retrieval_grade", "relevant")
+    retry_count = state.get("retrieval_retry_count", 0)
+    evidence_weak = retrieval_grade in ("irrelevant", "ambiguous")
+    evidence_note = ""
+    if evidence_weak:
+        evidence_note = (
+            f"\n\n> ⚠️ **Catatan Evidensi:** Retrieval memory menunjukkan kualitas "
+            f"`{retrieval_grade}` setelah {retry_count} percobaan — respons mungkin "
+            f"kurang didukung oleh bukti dari memori jangka panjang."
+        )
+
+    # ── 3. Contradiction Trigger ─────────────────────────────────────────────
+    if score < threshold:
+        conflicts = alignment_result.get("conflicts", [])
+        conflict_txt = "; ".join(str(c) for c in conflicts[:3]) or "Input diverges from prior BRD goals."
+        rec = alignment_result.get("recommendation", "Realign with dissertation objective.")
+        reflective_msg = (
+            f"⚠️ **[Metacognitive Alignment Check — T2 Rational Agent]**\n\n"
+            f"Master Pantronux, sebelum melanjutkan — saya mendeteksi potensi konflik "
+            f"antara instruksi saat ini dan komitmen disertasi yang telah kita sepakati bersama.\n\n"
+            f"**Konflik terdeteksi:**\n{conflict_txt}\n\n"
+            f"**Rekomendasi:** {rec}"
+            f"{evidence_note}\n\n"
+            f"Apakah Master ingin melanjutkan dengan mempertimbangkan realignment ini? "
+            f"Atau ada konteks baru yang perlu saya pahami sebelum melanjutkan?"
+        )
+        logger.info(
+            "[METACOGNITIVE] Conflict detected score=%.2f retrieval=%s → reflective path",
+            score, retrieval_grade,
+        )
+        return {
+            "alignment_score": score,
+            "metacognitive_flag": True,
+            "final_response": reflective_msg,
+            "joint_goal_block": "",
+        }
+
+    # ── 4. Joint Goal Injection (T3) ─────────────────────────────────────────
+    joint_goal_block = ""
+    try:
+        from kuro_backend.agency.joint_goal_store import format_for_prompt
+        joint_goal_block = format_for_prompt()
+    except Exception as exc:
+        logger.debug("[METACOGNITIVE] joint_goal_block skipped: %s", exc)
+
+    return {
+        "alignment_score": score,
+        "metacognitive_flag": False,
+        "joint_goal_block": joint_goal_block,
+    }
+
+
+
+# ── T2 Reflective Response (Metacognitive message passthrough) ────────────────
+
+def reflective_response_node(state: KuroState) -> Dict[str, Any]:
+    """
+    Only reached when metacognitive_flag=True OR inhibited=True.
+    The reflective message is already assembled in state['final_response']
+    by metacognitive_review_node or the Executive inhibition path.
+    This node simply ensures memory persistence is skipped for inhibited turns.
+    """
+    # Build inhibition message if Executive withheld response
+    if state.get("inhibited"):
+        reason = state.get("inhibition_reason", "Prepotent response withheld.")
+        msg = (
+            f"⚡ **[Executive Monitor — T1 Intentional Agent]**\n\n"
+            f"Master Pantronux, respons ini ditahan oleh Executive Monitor.\n\n"
+            f"**Alasan:** {reason}\n\n"
+            f"Mohon arahkan kembali ke tujuan disertasi kita. "
+            f"Jika ini memang diperlukan, gunakan persona yang sesuai (chill/tactical)."
+        )
+        return {"final_response": msg}
+
+    # Metacognitive reflective message already in final_response — pass through.
+    return {}
+
+
+# ============================================
 # NODE: RESPONSE GENERATOR (Final Answer - No Guardrails)
 # ============================================
 
@@ -771,6 +1328,22 @@ def response_node(state: KuroState) -> Dict[str, Any]:
 
             system_prompt += continuity_block
 
+        # ── T2/T3 Natural Agency injections ──────────────────────────────────
+        # 1. Joint Goal Block (T3 Shared Agency) — active commitments
+        joint_goal_block = state.get("joint_goal_block") or ""
+        if joint_goal_block:
+            system_prompt += f"\n\n{joint_goal_block}"
+
+        # 2. Cognitive Effort CoT (T2 Metacognitive) — reasoning depth scaler
+        effort = state.get("cognitive_effort") or "low"
+        try:
+            from kuro_backend.agency.cognitive_effort import get_cot_injection
+            cot_inj = get_cot_injection(effort)
+            if cot_inj:
+                system_prompt += cot_inj
+        except Exception as _cot_exc:
+            logger.debug("[RESPONSE_NODE] cognitive_effort CoT skipped: %s", _cot_exc)
+
         # Assemble per-section context blocks so we can apply the token budget
         # uniformly. Each block is independently trimmed to its quota before
         # concatenation, with a final global ceiling enforcement pass.
@@ -792,6 +1365,17 @@ def response_node(state: KuroState) -> Dict[str, Any]:
         market_block = (ctx or {}).get("market_block") or ""
         if market_block:
             sections["market"] = "\n\n" + market_block
+
+        # ── T1 Simulation hint (Executive selected_outcome) ───────────────────
+        selected_outcome = state.get("selected_outcome")
+        if selected_outcome and selected_outcome.get("strategy"):
+            label = selected_outcome.get("label", "Simulation")
+            strategy = selected_outcome["strategy"]
+            sections["simulation_hint"] = (
+                f"\n\n[EXECUTIVE SIMULATION — {label}]\n"
+                f"Recommended approach: {strategy}\n"
+                f"Incorporate this strategic direction into your response."
+            )
 
         tool_status = (tool_result or {}).get("status")
         if tool_status == "success":
@@ -1185,10 +1769,35 @@ def _execute_tool(tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
 def route_after_supervisor(state: KuroState) -> str:
     """Determine next node based on supervisor decision."""
     next_step = state.get("next_step", "response_node")
-    # Map END constant to string for routing
     if next_step == END:
         return "__end__"
     return next_step
+
+
+def route_after_executive(state: KuroState) -> str:
+    """
+    T1 Exit Gate: if inhibited, go directly to reflective_response_node
+    (skipping metacognitive check — no point reviewing an inhibited input).
+    Otherwise continue to metacognitive_review_node.
+    """
+    if state.get("inhibited"):
+        return "reflective_response_node"
+    return "metacognitive_review_node"
+
+
+def route_after_metacognitive(state: KuroState) -> str:
+    """
+    T2 Exit Gate:
+    - metacognitive_flag → reflective_response_node (realignment message)
+    - next_step==tool_node → tool_node
+    - default → response_node
+    """
+    if state.get("metacognitive_flag"):
+        return "reflective_response_node"
+    next_step = state.get("next_step", "response_node")
+    if next_step == "tool_node":
+        return "tool_node"
+    return "response_node"
 
 
 # ============================================
@@ -1198,61 +1807,105 @@ def route_after_supervisor(state: KuroState) -> str:
 def build_kuro_graph() -> StateGraph:
     """
     Build the Kuro LangGraph state machine.
-    
-    Graph Structure:
-    START -> supervisor_node -> memory_retrieval -> [tool_node | response_node] -> response_node -> memory_extraction -> END
+
+    V7.2.1 Auto-RAG + Natural Agency Graph Structure:
+    START
+      → reflection_node             (edit/new intent)
+      → supervisor_node             (tool vs response routing)
+      → memory_retrieval_node       (Mem0 prefetch; uses rewritten_query on retry)
+      → retrieval_grader_node       (CRAG: relevant | ambiguous | irrelevant)
+          ├── [relevant]   → attention_filter_node
+          └── [non-relevant] → query_transform_node
+                                 ├── [retry<max] → memory_retrieval_node (LOOP)
+                                 └── [retry==max] → Serper failover → attention_filter_node
+      → attention_filter_node       (T1a: intent category)
+      → executive_monitor_node      (T1b: inhibit + A/B simulate)
+          ├── [inhibited]  → reflective_response_node
+          └── [ok]         → metacognitive_review_node
+                               ├── [conflict] → reflective_response_node
+                               └── [aligned]  → tool_node | response_node
+      → memory_extraction_node → END
+
+    Loop safety: query_transform_node self-terminates at _RAG_MAX_RETRIES=2
+    by injecting Serper results and forcing retrieval_grade='relevant'.
     """
-    
-    # Initialize checkpointer for persistence
     checkpointer = MemorySaver()
-    
-    # Create state graph
     graph_builder = StateGraph(KuroState)
-    
-    # Add nodes
+
+    # ── Core nodes ────────────────────────────────────────────────────────────
     graph_builder.add_node("reflection_node", reflection_node)
     graph_builder.add_node("supervisor_node", supervisor_node)
     graph_builder.add_node("memory_retrieval_node", memory_retrieval_node)
     graph_builder.add_node("tool_node", tool_node)
     graph_builder.add_node("response_node", response_node)
     graph_builder.add_node("memory_extraction_node", memory_extraction_node)
-    
-    # Set entry point using START constant (LangGraph v0.2+ compatible)
+
+    # ── Auto-RAG nodes (V7.2.1) ───────────────────────────────────────────────
+    graph_builder.add_node("retrieval_grader_node", retrieval_grader_node)
+    graph_builder.add_node("query_transform_node", query_transform_node)
+
+    # ── Natural Agency nodes (V7.2) ───────────────────────────────────────────
+    graph_builder.add_node("attention_filter_node", attention_filter_node)
+    graph_builder.add_node("executive_monitor_node", executive_monitor_node)
+    graph_builder.add_node("metacognitive_review_node", metacognitive_review_node)
+    graph_builder.add_node("reflective_response_node", reflective_response_node)
+
+    # ── Edges: entry → retrieval ──────────────────────────────────────────────
     graph_builder.add_edge(START, "reflection_node")
     graph_builder.add_edge("reflection_node", "supervisor_node")
-    
-    # After supervisor, run memory retrieval in parallel
     graph_builder.add_edge("supervisor_node", "memory_retrieval_node")
-    
-    # Add conditional edges from memory retrieval
+
+    # ── Auto-RAG loop: retrieval → grade → [loop|continue] ───────────────────
+    graph_builder.add_edge("memory_retrieval_node", "retrieval_grader_node")
     graph_builder.add_conditional_edges(
-        "memory_retrieval_node",
-        route_after_supervisor,
+        "retrieval_grader_node",
+        route_after_grader,
         {
+            "attention_filter_node": "attention_filter_node",
+            "query_transform_node": "query_transform_node",
+        },
+    )
+    # query_transform loops back to retrieval (uses rewritten_query)
+    # The loop terminates via Serper failover inside query_transform_node
+    # which forces retrieval_grade='relevant' → next grader pass exits to attention_filter
+    graph_builder.add_edge("query_transform_node", "memory_retrieval_node")
+
+    # ── Natural Agency pipeline ───────────────────────────────────────────────
+    graph_builder.add_edge("attention_filter_node", "executive_monitor_node")
+
+    graph_builder.add_conditional_edges(
+        "executive_monitor_node",
+        route_after_executive,
+        {
+            "reflective_response_node": "reflective_response_node",
+            "metacognitive_review_node": "metacognitive_review_node",
+        },
+    )
+    graph_builder.add_conditional_edges(
+        "metacognitive_review_node",
+        route_after_metacognitive,
+        {
+            "reflective_response_node": "reflective_response_node",
             "tool_node": "tool_node",
             "response_node": "response_node",
-            "__end__": END,
-        }
+        },
     )
-    
-    # Add edges from worker nodes to response
+
+    # ── Tail edges ────────────────────────────────────────────────────────────
+    graph_builder.add_edge("reflective_response_node", "memory_extraction_node")
     graph_builder.add_edge("tool_node", "response_node")
-    
-    # V5.5: Direct edge from response_node to memory_extraction_node (no re-ask loop)
     graph_builder.add_edge("response_node", "memory_extraction_node")
-    
-    # After memory extraction, go to END
     graph_builder.add_edge("memory_extraction_node", END)
-    
-    # Compile with checkpointer
+
     graph = graph_builder.compile(checkpointer=checkpointer)
-    
-    logger.info("[LANGGRAPH] Kuro graph compiled successfully with tool_node")
+    logger.info("[LANGGRAPH] V7.2.1 Auto-RAG + Natural Agency graph compiled successfully.")
     return graph
 
 
 # Global graph instance
 kuro_graph = build_kuro_graph()
+
+
 
 
 def _iter_sse_text_chunks(text: str, soft_limit: int = 56) -> Iterator[str]:
@@ -1504,6 +2157,20 @@ async def process_chat_with_graph_stream(
             "_session_id": session_id,
             "_approval_scope": approval_scope,
             "_trace_id": trace_id,
+            # Natural Agency defaults (V7.2)
+            "_intent_category": "general",
+            "inhibited": False,
+            "inhibition_reason": "",
+            "simulated_outcomes": [],
+            "selected_outcome": None,
+            "cognitive_effort": "low",
+            "alignment_score": 1.0,
+            "metacognitive_flag": False,
+            "joint_goal_block": "",
+            # Auto-RAG defaults (V7.2.1)
+            "retrieval_grade": "relevant",
+            "retrieval_retry_count": 0,
+            "rewritten_query": "",
         }
         
         thread_id = f"kuro_stream_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{session_id[:8]}"
@@ -1724,9 +2391,23 @@ def process_chat_with_graph(
             "mem0_retrieved_memories": [],
             "tool_execution_result": {},
             "requires_approval": False,
-            "_session_id": session_id,  # Internal field for observability
+            "_session_id": session_id,
             "_approval_scope": approval_scope,
             "_trace_id": trace_id,
+            # Natural Agency defaults (V7.2)
+            "_intent_category": "general",
+            "inhibited": False,
+            "inhibition_reason": "",
+            "simulated_outcomes": [],
+            "selected_outcome": None,
+            "cognitive_effort": "low",
+            "alignment_score": 1.0,
+            "metacognitive_flag": False,
+            "joint_goal_block": "",
+            # Auto-RAG defaults (V7.2.1)
+            "retrieval_grade": "relevant",
+            "retrieval_retry_count": 0,
+            "rewritten_query": "",
         }
 
         # Create unique thread ID for persistence

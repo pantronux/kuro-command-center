@@ -1,3 +1,149 @@
+# Kuro AI V7.2.1 "Natural Agency — Auto-RAG" - Changelog
+
+**Release Date:** 2026-04-29
+**Version:** 7.2.1
+**Codename:** "Natural Agency — Auto-RAG Loop"
+
+---
+
+## V7.2.1 - Natural Agency: Auto-RAG Self-Correction Loop (2026-04-29)
+
+### Summary
+Implementation of an **Automated RAG (Self-RAG)** pattern to harden the perceptual
+feedback loop of the retrieval layer. Kuro now actively grades its own memory
+retrievals and attempts query-transformation loops if context is found to be
+irrelevant or ambiguous, with a last-resort failover to web search.
+
+### Highlights
+
+- **New Auto-RAG Loop Topology:**
+  `memory_retrieval_node → retrieval_grader_node ↺ query_transform_node → attention_filter_node`
+
+- **Retrieval Grader (CRAG pattern):**
+  - `retrieval_grader_node`: Uses `CLASSIFIER_MODEL` to evaluate the relevance of
+    retrieved Mem0 context against `user_input`.
+  - Grades: `relevant` (proceed), `ambiguous` (loop to transform), `irrelevant`
+    (loop to transform).
+  - Fast-path bypass if zero results are found.
+
+- **Query Transformer & Failover:**
+  - `query_transform_node`: Rewrites the original query into a more optimized
+    search string for the next retrieval pass.
+  - **Bounded Loop:** Maximum of 2 retries (`_RAG_MAX_RETRIES`) to prevent
+    infinite token-burn.
+  - **Serper Failover:** If retries are exhausted, the node triggers a `serper_search`
+    (web search) to inject external grounding, then unblocks the pipeline by forcing
+    `relevant` status.
+
+- **Metacognitive Evidence Signal:**
+  - `metacognitive_review_node` now incorporates `retrieval_grade`.
+  - If a belief conflict is detected AND retrieval was low-quality, the reflective
+    message explicitly warns the Master about the lack of solid evidential grounding.
+
+- **State Updates:**
+  - Added `retrieval_grade`, `retrieval_retry_count`, and `rewritten_query` to `KuroState`.
+
+---
+
+# Kuro AI V7.2.0 "Natural Agency" - Changelog
+
+## V7.2.0 - Natural Agency: Three-Tier Control System (2026-04-29)
+
+### Summary
+Architectural transition from a stimulus-driven processor to a **Natural Agency** model
+based on Michael Tomasello's (2025) *"Natural Agency: From Intentional to Rational to
+Social Agents"* framework. Kuro now operates across three hierarchical control tiers:
+**T1 Executive** (inhibition + imaginative simulation), **T2 Metacognitive** (belief
+revision + cognitive effort allocation), and **T3 Shared Agency** (joint commitments +
+coordination partner protocol). All agency behaviour is gated to the `advisor`,
+`consultant`, and `auditor` personas. Non-agency personas (`chill`, `tactical`,
+`chancellor`) experience zero latency overhead via O(1) self-bypass.
+
+### Highlights
+
+- **New LangGraph Topology:** `reflection → supervisor → memory_retrieval →
+  attention_filter → executive_monitor → metacognitive_review →
+  [reflective_response | tool | response] → memory_extraction → END`
+
+- **T1 — Executive / Intentional Agent:**
+  - `attention_filter_node`: Classifies input intent into `dissertation`, `research`,
+    `technical`, `administrative`, `off_track`, or `general` using pure-regex patterns
+    (no LLM call).
+  - `executive_monitor_node`: (a) **Inhibitory filter** — blocks bloatware-type or
+    off-track impulsive requests when an agency persona is active, routing them to
+    `reflective_response_node` instead of the LLM. (b) **Imaginative simulation** —
+    generates two strategic drafts via `CLASSIFIER_MODEL`:
+    - `advisor` / `consultant`: Draft A (Conservative) vs Draft B (Novel) — picks
+      highest `novelty_score`.
+    - `auditor`: Draft A (Pass/Safe) vs Draft B (Adversarial/Fail) — always selects
+      Draft B to proactively surface risks.
+  - Selected simulation strategy is injected into `response_node` as
+    `[EXECUTIVE SIMULATION]` context block.
+
+- **T2 — Metacognitive / Rational Agent:**
+  - `cognitive_effort.py` (`kuro_backend/agency/`): Pure-regex effort allocator maps
+    intent category to `low / medium / high`. High effort injects a 5-step
+    dissertation-novelty CoT into the system prompt. Zero LLM calls.
+  - `metacognitive_review_node`: Calls `memory_coordinator.evaluate_alignment()` to
+    compare current input against `research_ledger` BRD commitments (`decision` +
+    `novelty_point` kinds). If `alignment_score < KURO_ALIGNMENT_THRESHOLD` (default
+    `0.35`), routes to `reflective_response_node` with a bilingual realignment message
+    instead of answering directly.
+  - `evaluate_alignment()` added to `memory_coordinator.py`: single-call
+    `CLASSIFIER_MODEL` audit returning `{score, conflicts, supports, recommendation}`.
+
+- **T3 — Shared Agency / Social Agent:**
+  - `joint_goal_store.py` (`kuro_backend/agency/`): SQLite-backed store using WAL mode
+    in `kuro_short_term.db`. Stores `joint_goals(id, description, chapter_ref, status,
+    created_at, closed_at)`. Survives process restarts — PhD commitments span weeks.
+    Exposes `add_commitment()`, `get_active_commitments()`, `close_commitment()`,
+    `search_commitments()`, `format_for_prompt()`.
+  - Active commitments are injected as `[JOINT_COMMITMENTS]` block into the system
+    prompt of every agency-persona turn.
+  - `advisor`, `consultant`, and `auditor` personas updated with **Coordination Partner**
+    framing: proactive commitment referencing and standing authority to issue
+    constructive call-outs when input diverges from dissertation goals.
+  - `auditor` persona extended with **Adversarial Simulation Protocol**: leads response
+    with `[ADVERSARIAL FINDING]` when Draft B simulation is injected.
+
+- **`KuroState` Extended (V7.2 fields):**
+  `_intent_category`, `inhibited`, `inhibition_reason`, `simulated_outcomes`,
+  `selected_outcome`, `cognitive_effort`, `alignment_score`, `metacognitive_flag`,
+  `joint_goal_block`.
+
+- **New env var:** `KURO_ALIGNMENT_THRESHOLD` (float, default `0.35`) — alignment
+  conflict floor below which metacognitive realignment fires.
+
+### New Files
+
+| File | Purpose |
+|---|---|
+| `kuro_backend/agency/__init__.py` | Package root for Natural Agency sub-system |
+| `kuro_backend/agency/joint_goal_store.py` | SQLite joint commitment CRUD (T3) |
+| `kuro_backend/agency/cognitive_effort.py` | Regex-based effort allocator (T2) |
+
+### Modified Files
+
+| File | Change |
+|---|---|
+| `kuro_backend/langgraph_core.py` | +4 nodes, +2 routing fns, new topology, extended `KuroState`, agency field defaults |
+| `kuro_backend/memory_coordinator.py` | +`evaluate_alignment()` (T2 Belief Revision) |
+| `kuro_backend/personas.py` | `advisor` + `auditor` Shared Agency Protocol framing |
+| `SYSTEM_MAP.md` | V7.2 architecture notes, updated graph topology, `agency/` in module tree |
+| `CHANGELOG.md` | This entry |
+
+### Performance Notes
+
+- All agency nodes self-bypass in **O(1)** for non-agency personas — zero added latency
+  for `chill`, `tactical`, `chancellor`.
+- Simulation + alignment calls use `CLASSIFIER_MODEL` (Gemini Flash) — lightweight,
+  consistent with `reflection_node` pattern.
+- `cognitive_effort` is pure-regex — no LLM call.
+- `evaluate_alignment` is skipped when `research_ledger` has no prior commitments
+  (returns `score=1.0` immediately).
+
+---
+
 # Kuro AI V7.1.0 "Sovereign Unbound" - Changelog
 
 **Release Date:** 2026-04-28

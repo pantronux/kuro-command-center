@@ -53,6 +53,17 @@
 - **Frontend Simplification:** Removed L2D canvas, tips/trivia bubble, and voice artifacts from the dashboard. `app.js` and `index.html` were sanitized for maximum performance.
 - **Asset Removal:** Deleted redundant `.db` files, Live2D models, and legacy JS libraries.
 
+## V7.2.0 Architecture Notes ("Natural Agency — Tomasello 2025")
+
+- **Three-Tier Control System:** Kuro transitions from a stimulus-driven processor to a Natural Agency model based on Tomasello (2025).
+- **Auto-RAG (V7.2.1):** Implements a self-correction loop in the retrieval layer. `retrieval_grader_node` evaluates context relevance (relevant/ambiguous/irrelevant); `query_transform_node` rewrites queries or triggers Serper web-search failover at max retries (bounded loop).
+- **T1 Executive / Intentional Agent:** `attention_filter_node` classifies input intent; `executive_monitor_node` applies inhibitory filter (blocks bloatware/off-track inputs) and runs dual-draft imaginative simulation (advisor/consultant: Conservative vs Novel; auditor: Pass vs Adversarial-Fail).
+- **T2 Metacognitive / Rational Agent:** `metacognitive_review_node` performs belief revision via `memory_coordinator.evaluate_alignment()`, comparing current input against BRD-backed `research_ledger` commitments. Incorporates `retrieval_grade` as an evidence-quality signal for realignment call-outs.
+- **T3 Shared Agency / Social Agent:** `joint_goal_store` (SQLite-backed, survives restarts) stores joint dissertation commitments. Active commitments are injected as `[JOINT_COMMITMENTS]` block into every agency-persona response. Advisor/consultant/auditor personas updated with Coordination Partner framing and proactive call-out authority.
+- **Cognitive Effort Allocator:** `agency/cognitive_effort.py` maps intent category to `low/medium/high` effort level, injecting scaled CoT depth into the system prompt.
+- **Gating:** All agency nodes self-bypass in O(1) for non-agency personas (chill, tactical, chancellor).
+- **New env vars:** `KURO_ALIGNMENT_THRESHOLD` (float, default `0.35`) — alignment conflict floor.
+
 ## Core Logic Flow (Function-Level Flowchart)
 
 ```mermaid
@@ -76,7 +87,7 @@ flowchart TD
     subgraph Brain[Reasoning core]
         B1[langgraph_core.process_chat_with_graph_stream]
         B2[langgraph_core.build_kuro_graph]
-        B3[supervisor_node -> memory_retrieval_node -> response_node -> tool_node]
+        B3["reflection → supervisor → memory_retrieval\n→ retrieval_grader ↺ query_transform\n→ attention_filter → executive_monitor\n→ metacognitive_review → reflective_response | tool | response\n→ memory_extraction"]
         B4[personas.build_system_instruction]
     end
 
@@ -156,7 +167,7 @@ artefacts are excluded — see **Exclusions** at the bottom of this section.
 │   ├── personas.py              # butler/consultant/advisor/chill/tactical/chancellor
 │   ├── core.py                  # non-graph Gemini fallback
 │   ├── langgraph_core.py        # graph nodes, streaming, tool dispatch
-│   ├── memory_coordinator.py    # orchestrates 3-layer memory
+│   ├── memory_coordinator.py    # orchestrates 3-layer memory + evaluate_alignment
 │   ├── memory_manager.py        # SQLite short-term + research ledger
 │   ├── perpetual_memory.py      # Mem0 + Chroma wrapper
 │   ├── ssot_shortcuts.py        # deterministic SSoT answers
@@ -184,6 +195,10 @@ artefacts are excluded — see **Exclusions** at the bottom of this section.
 │   ├── daily_habits_db.py       # [PURGED in V7.1]
 │   ├── intelligence_db.py
 │   ├── reminder_db.py           # [PURGED in V7.1]
+│   ├── agency/                  # V7.2 Natural Agency sub-package
+│   │   ├── __init__.py
+│   │   ├── joint_goal_store.py  # SQLite joint commitments (T3 Shared Agency)
+│   │   └── cognitive_effort.py  # effort allocator low/medium/high (T2)
 │   ├── services/
 │   │   ├── __init__.py
 │   │   ├── core_service.py      # sync revision management (purged logic)
