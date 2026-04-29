@@ -102,7 +102,7 @@ _EFFORT_COT_INJECTIONS: dict[EffortLevel, str] = {
     "low": "",
     "medium": (
         "\n\n[COGNITIVE EFFORT: MEDIUM]\n"
-        "Pertimbangkan minimal dua sudut pandang sebelum menjawab."
+        "Consider at least two perspectives before answering."
     ),
     "high": (
         "\n\n[COGNITIVE EFFORT: HIGH — DISSERTATION NOVELTY MODE]\n"

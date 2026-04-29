@@ -1,10 +1,17 @@
-# Kuro AI V7.2.1 "Natural Agency — Auto-RAG" - Changelog
+# Kuro AI V7.2.2 "Natural Agency — Sovereign Partner" - Changelog
 
 **Release Date:** 2026-04-29
-**Version:** 7.2.1
-**Codename:** "Natural Agency — Auto-RAG Loop"
+**Version:** 7.2.2
+**Codename:** "Natural Agency — Sovereign Partner"
 
 ---
+
+## V7.2.2 - Global Language Standardization & Documentation Polish (2026-04-29)
+
+- **Full English Translation Pass**: All remaining Indonesian prompts, personas, and system instructions in `personas.py`, `cognitive_effort.py`, and `langgraph_core.py` have been migrated to English for architectural consistency.
+- **Executive Summary Implementation**: Added a high-level, user-friendly "Executive Summary" and "Simplified Flow" to `SYSTEM_MAP.md` (Tutorial Page) to assist non-technical users.
+- **Syntax Hardening**: Fixed critical `SyntaxError` (unterminated string) in `personas.py` and validated all backend modules with `compileall`.
+- **UI Consistency**: Updated versioning to V7.2.2 across the stack.
 
 ## V7.2.1 - Natural Agency: Auto-RAG Self-Correction Loop (2026-04-29)
 

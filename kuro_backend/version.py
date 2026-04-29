@@ -16,8 +16,8 @@ from __future__ import annotations
 
 from typing import Dict
 
-VERSION: str = "7.1.0"
-CODENAME: str = "Sovereign Unbound"
+VERSION: str = "7.2.2"
+CODENAME: str = "Natural Agency — Sovereign Partner"
 VERSION_LABEL: str = f"V{VERSION.split('.')[0]}.{VERSION.split('.')[1]}"
 VERSION_BANNER: str = f"Kuro {VERSION_LABEL} — {CODENAME}"
 

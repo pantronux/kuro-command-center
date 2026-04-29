@@ -178,7 +178,7 @@ def format_for_prompt() -> str:
         return ""
     lines = [
         "[JOINT_COMMITMENTS — Joint Commitment with Master Pantronux]",
-        "Proactively reference this commitment when relevant.:",
+        "Proactively reference this commitment when relevant:",
     ]
     for g in goals:
         ref = f" ({g['chapter_ref']})" if g.get("chapter_ref") else ""
