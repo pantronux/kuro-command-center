@@ -45,7 +45,7 @@ const CONFIG = {
 // Authentication Helper Functions (Cookie-Based)
 // ============================================
 function getUsername() {
-    return localStorage.getItem('kuro_username') || sessionStorage.getItem('kuro_username') || 'Pantronux';
+    return window.KURO_USER_CONTEXT?.displayName || localStorage.getItem('kuro_username') || sessionStorage.getItem('kuro_username') || 'Pantronux';
 }
 
 function logout() {
@@ -1144,7 +1144,8 @@ async function loadChatHistory() {
         } else {
             console.log('[CHAT_HISTORY] No history found, showing welcome message');
             // Show welcome message if no history
-            addMessageToChat('ai', 'Welcome, Master Pantronux. I am Kuro, your devoted AI Butler. How may I be of service today?');
+            const masterName = window.KURO_USER_CONTEXT?.masterName || 'Master Pantronux';
+            addMessageToChat('ai', `Welcome, ${masterName}. I am Kuro, your devoted AI Butler. How may I be of service today?`);
             hasMoreMessages = false;
         }
     } catch (error) {
@@ -1155,7 +1156,8 @@ async function loadChatHistory() {
             </div>
         `;
         elements.scrollLoader = document.getElementById('scrollLoader');
-        addMessageToChat('ai', 'Welcome, Master Pantronux. I am Kuro, your devoted AI Butler. How may I be of service today?');
+        const masterName = window.KURO_USER_CONTEXT?.masterName || 'Master Pantronux';
+        addMessageToChat('ai', `Welcome, ${masterName}. I am Kuro, your devoted AI Butler. How may I be of service today?`);
         hasMoreMessages = false;
     }
 }
@@ -1643,9 +1645,25 @@ async function applyPersona() {
 }
 
 async function loadPersona() {
+    const restricted = window.KURO_USER_CONTEXT?.restrictedPersona;
     const urlPersona = getPersonaFromUrl();
     const savedPersona = localStorage.getItem('kuro-persona');
-    selectedPersona = normalizePersona(urlPersona || savedPersona || 'consultant');
+    
+    if (restricted) {
+        selectedPersona = restricted;
+        // Disable other options in UI
+        document.querySelectorAll('.persona-option').forEach(option => {
+            if (option.dataset.persona !== restricted) {
+                option.disabled = true;
+                option.classList.add('opacity-50', 'cursor-not-allowed');
+                option.style.pointerEvents = 'none';
+                option.title = "This persona is restricted for your account.";
+            }
+        });
+    } else {
+        selectedPersona = normalizePersona(urlPersona || savedPersona || 'consultant');
+    }
+    
     localStorage.setItem('kuro-persona', selectedPersona);
     setPersonaInUrl(selectedPersona, false);
     
@@ -1667,6 +1685,16 @@ function updateUserInfo() {
     const username = getUsername();
     if (elements.userInfo && username) {
         elements.userInfo.textContent = username;
+    }
+    
+    // Update sidebar if exists (for dynamic branding)
+    const sidebarDisplayName = document.getElementById('sidebarDisplayName');
+    const sidebarRole = document.getElementById('sidebarRole');
+    if (sidebarDisplayName && window.KURO_USER_CONTEXT?.displayName) {
+        sidebarDisplayName.textContent = window.KURO_USER_CONTEXT.displayName;
+    }
+    if (sidebarRole && window.KURO_USER_CONTEXT?.role) {
+        sidebarRole.textContent = window.KURO_USER_CONTEXT.role;
     }
     
     if (elements.logoutBtn) {

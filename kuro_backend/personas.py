@@ -465,6 +465,7 @@ def build_system_instruction(
     current_date: str,
     kuro_version_label: str,
     variant: str = "core",
+    master_name: str = "Pantronux",
 ) -> str:
     """
     Build full system prompt for a persona.
@@ -477,6 +478,11 @@ def build_system_instruction(
     """
     persona_key = normalize_persona_key(persona)
     persona_text = PERSONA_INSTRUCTIONS[persona_key]
+    
+    # Dynamic Master Name Injection
+    # Replace "Master Pantronux" or just "Pantronux" with the current master_name
+    persona_text = persona_text.replace("Master Pantronux", master_name)
+    persona_text = persona_text.replace("Pantronux", master_name)
 
     header = (
         f"\n\n[CURRENT_TIME: {current_time}] "

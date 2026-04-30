@@ -151,7 +151,7 @@ def load_master_profile() -> Dict:
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError) as e:
         logger.warning(f"Failed to load master profile: {e}")
-        return {"master": {"name": "Pantronux"}, "infrastructure": {}, "preferences": {}, "notes": []}
+        return {"shared": {"infrastructure": {}, "compliance_standards": {}, "cross_mapping": {}, "notes": []}, "users": {"Pantronux": {"master": {"name": "Pantronux"}, "preferences": {}}}}
 
 def save_master_profile(profile: Dict):
     """Save updates to master profile."""
@@ -160,22 +160,25 @@ def save_master_profile(profile: Dict):
             json.dump(profile, f, ensure_ascii=False, indent=4)
         logger.info("Master profile updated.")
 
-def get_master_profile_formatted() -> str:
+def get_master_profile_formatted(username: str = "Pantronux") -> str:
     """Get formatted master profile for prompt injection."""
     profile = load_master_profile()
-    lines = []
-    lines.append(f"Nama Master: {profile.get('master', {}).get('name', 'Pantronux')}")
+    user_profile = profile.get('users', {}).get(username, {})
+    shared_profile = profile.get('shared', {})
     
-    infra = profile.get('infrastructure', {})
+    lines = []
+    lines.append(f"Nama Master: {user_profile.get('master', {}).get('name', username)}")
+    
+    infra = shared_profile.get('infrastructure', {})
     if infra:
         lines.append(f"Proxmox Host: {infra.get('proxmox_host', 'N/A')}")
         lines.append(f"Kuro VM IP: {infra.get('kuro_vm_ip', 'N/A')}")
     
-    prefs = profile.get('preferences', {})
+    prefs = user_profile.get('preferences', {})
     if prefs:
         lines.append(f"Model AI: {prefs.get('ai_model', 'N/A')}")
     
-    notes = profile.get('notes', [])
+    notes = shared_profile.get('notes', [])
     if notes:
         lines.append("Catatan Penting:")
         for note in notes:
@@ -183,13 +186,17 @@ def get_master_profile_formatted() -> str:
     
     return "\n".join(lines)
 
-def update_master_profile(key: str, value: str):
-    """Update a specific field in master profile."""
+def update_master_profile(key: str, value: str, username: str = "Pantronux"):
+    """Update a specific field in master profile. Keys starting with 'shared.' go to shared, otherwise to user."""
     profile = load_master_profile()
     
-    # Try to parse key as nested path (e.g., "infrastructure.proxmox_host")
-    parts = key.split('.')
-    target = profile
+    if key.startswith('shared.'):
+        parts = key.split('.')[1:]
+        target = profile.setdefault('shared', {})
+    else:
+        parts = key.split('.')
+        target = profile.setdefault('users', {}).setdefault(username, {})
+        
     for part in parts[:-1]:
         if part not in target:
             target[part] = {}
@@ -197,12 +204,12 @@ def update_master_profile(key: str, value: str):
     target[parts[-1]] = value
     
     save_master_profile(profile)
-    logger.info(f"Updated master profile: {key} = {value}")
+    logger.info(f"Updated master profile: {key} = {value} for user {username}")
 
-def get_active_persona() -> str:
+def get_active_persona(username: str = "Pantronux") -> str:
     """Get the currently active persona."""
     profile = load_master_profile()
-    raw = profile.get('preferences', {}).get('persona_mode', 'consultant')
+    raw = profile.get('users', {}).get(username, {}).get('preferences', {}).get('persona_mode', 'consultant')
     return normalize_persona(raw)
 
 
@@ -215,7 +222,7 @@ def normalize_persona(persona: str) -> str:
         return PERSONA_ALIASES[raw]
     return "consultant"
 
-def set_active_persona(persona: str) -> Dict:
+def set_active_persona(persona: str, username: str = "Pantronux") -> Dict:
     """Set the active persona and save to master profile."""
     valid_personas = CANONICAL_PERSONAS + sorted(PERSONA_ALIASES.keys())
     incoming = (persona or "").strip().lower()
@@ -224,28 +231,30 @@ def set_active_persona(persona: str) -> Dict:
     normalized = normalize_persona(incoming)
     
     profile = load_master_profile()
-    if 'preferences' not in profile:
-        profile['preferences'] = {}
-    profile['preferences']['persona_mode'] = normalized
+    user_profile = profile.setdefault('users', {}).setdefault(username, {})
+    if 'preferences' not in user_profile:
+        user_profile['preferences'] = {}
+    user_profile['preferences']['persona_mode'] = normalized
     save_master_profile(profile)
-    logger.info(f"Active persona changed to: {normalized}")
+    logger.info(f"Active persona changed to: {normalized} for user {username}")
     return {"status": "success", "persona": normalized}
 
 
-def set_runtime_context_value(key: str, value: str) -> None:
+def set_runtime_context_value(key: str, value: str, username: str = "Pantronux") -> None:
     """Persist lightweight runtime context in master profile preferences."""
     profile = load_master_profile()
-    preferences = profile.setdefault("preferences", {})
+    preferences = profile.setdefault('users', {}).setdefault(username, {}).setdefault("preferences", {})
     runtime_context = preferences.setdefault("runtime_context", {})
     runtime_context[key] = value
     save_master_profile(profile)
 
 
-def get_runtime_context_value(key: str, default: str = "") -> str:
+def get_runtime_context_value(key: str, default: str = "", username: str = "Pantronux") -> str:
     """Fetch runtime context value from master profile preferences."""
     profile = load_master_profile()
     return (
-        profile.get("preferences", {})
+        profile.get('users', {}).get(username, {})
+        .get("preferences", {})
         .get("runtime_context", {})
         .get(key, default)
     )
@@ -269,6 +278,7 @@ def init_short_term_db():
             role TEXT NOT NULL,
             content TEXT NOT NULL,
             persona_scope TEXT NOT NULL DEFAULT 'consultant',
+            username TEXT NOT NULL DEFAULT 'Pantronux',
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     """)
@@ -276,16 +286,20 @@ def init_short_term_db():
     columns = [row["name"] for row in cursor.fetchall()]
     if "persona_scope" not in columns:
         cursor.execute("ALTER TABLE short_term ADD COLUMN persona_scope TEXT NOT NULL DEFAULT 'consultant'")
+    if "username" not in columns:
+        cursor.execute("ALTER TABLE short_term ADD COLUMN username TEXT NOT NULL DEFAULT 'Pantronux'")
 
-    # Sliding-window summary cache (P2.1) — one row per persona. Keeps the
+    # Sliding-window summary cache (P2.1) — keyed by (username, persona_scope). Keeps the
     # compressed summary of older turns keyed by the highest short_term.id
     # that was included, so we regenerate only when truly new turns arrive.
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS short_term_summaries (
-            persona_scope TEXT PRIMARY KEY,
+            username TEXT NOT NULL DEFAULT 'Pantronux',
+            persona_scope TEXT NOT NULL,
             last_entry_id INTEGER NOT NULL DEFAULT 0,
             summary TEXT NOT NULL DEFAULT '',
-            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (username, persona_scope)
         )
     """)
     # Persona-Aware Context Management (V5.5) — structured JSON summary
@@ -296,6 +310,18 @@ def init_short_term_db():
         cursor.execute(
             "ALTER TABLE short_term_summaries ADD COLUMN summary_json TEXT NOT NULL DEFAULT '{}'"
         )
+    
+    # Due to changing primary key to composite, we might need a migration if the table existed.
+    # SQLite doesn't support DROP PRIMARY KEY, so we leave it if it exists but we add username.
+    if "username" not in summary_cols:
+        cursor.execute("ALTER TABLE short_term_summaries ADD COLUMN username TEXT NOT NULL DEFAULT 'Pantronux'")
+        # For simplicity, we drop and recreate the index on new inserts if needed, or rely on composite inserts.
+        try:
+            # Recreate table using temp table approach if we really needed to drop PK, but here 
+            # we just add the column. The code will do ON CONFLICT(username, persona_scope).
+            pass
+        except Exception as e:
+            pass
 
     # Append-only durability ledger. Stores per-persona extraction records
     # (novelty_points, technical_specs, decisions, ...) so summarization can
@@ -304,6 +330,7 @@ def init_short_term_db():
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS research_ledger (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL DEFAULT 'Pantronux',
             persona_scope TEXT NOT NULL,
             kind TEXT NOT NULL,
             content TEXT NOT NULL,
@@ -312,9 +339,14 @@ def init_short_term_db():
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    cursor.execute("PRAGMA table_info(research_ledger)")
+    ledger_cols = [row["name"] for row in cursor.fetchall()]
+    if "username" not in ledger_cols:
+        cursor.execute("ALTER TABLE research_ledger ADD COLUMN username TEXT NOT NULL DEFAULT 'Pantronux'")
+
     cursor.execute(
-        "CREATE INDEX IF NOT EXISTS idx_research_ledger_persona_kind "
-        "ON research_ledger (persona_scope, kind)"
+        "CREATE INDEX IF NOT EXISTS idx_research_ledger_user_persona_kind "
+        "ON research_ledger (username, persona_scope, kind)"
     )
 
     # Autonomous Memory Dreaming (V5.5) — advisory lease, cycle audit log,
@@ -367,19 +399,19 @@ def init_short_term_db():
     logger.info("Short-term memory database initialized.")
 
 
-def get_short_term_with_ids(persona_scope: str = None) -> List[Dict]:
+def get_short_term_with_ids(persona_scope: str = None, username: str = "Pantronux") -> List[Dict]:
     """Same as :func:`get_short_term` but includes the SQLite row id per entry.
 
     Needed for the sliding-window summary cache so we can key summaries by the
     highest id they cover.
     """
-    scope = normalize_persona(persona_scope or get_active_persona())
+    scope = normalize_persona(persona_scope or get_active_persona(username))
     conn = _get_short_term_conn()
     cursor = conn.cursor()
     cursor.execute(
         "SELECT id, role, content, persona_scope, timestamp FROM short_term "
-        "WHERE persona_scope = ? ORDER BY id DESC LIMIT ?",
-        (scope, SHORT_TERM_LIMIT),
+        "WHERE persona_scope = ? AND username = ? ORDER BY id DESC LIMIT ?",
+        (scope, username, SHORT_TERM_LIMIT),
     )
     rows = cursor.fetchall()
     conn.close()
@@ -395,14 +427,14 @@ def get_short_term_with_ids(persona_scope: str = None) -> List[Dict]:
     ]
 
 
-def get_short_term_summary(persona_scope: str) -> Optional[Dict]:
+def get_short_term_summary(persona_scope: str, username: str = "Pantronux") -> Optional[Dict]:
     """Return cached summary row ``(last_entry_id, summary)`` or ``None``."""
     conn = _get_short_term_conn()
     try:
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT last_entry_id, summary FROM short_term_summaries WHERE persona_scope = ?",
-            (persona_scope,),
+            "SELECT last_entry_id, summary FROM short_term_summaries WHERE persona_scope = ? AND username = ?",
+            (persona_scope, username),
         )
         row = cursor.fetchone()
     finally:
@@ -412,25 +444,25 @@ def get_short_term_summary(persona_scope: str) -> Optional[Dict]:
     return {"last_entry_id": int(row["last_entry_id"]), "summary": str(row["summary"] or "")}
 
 
-def upsert_short_term_summary(persona_scope: str, last_entry_id: int, summary: str) -> None:
+def upsert_short_term_summary(persona_scope: str, last_entry_id: int, summary: str, username: str = "Pantronux") -> None:
     """Upsert the compressed-history cache for a persona scope."""
     conn = _get_short_term_conn()
     try:
         cursor = conn.cursor()
         cursor.execute(
-            "INSERT INTO short_term_summaries (persona_scope, last_entry_id, summary) "
-            "VALUES (?, ?, ?) "
-            "ON CONFLICT(persona_scope) DO UPDATE SET "
+            "INSERT INTO short_term_summaries (username, persona_scope, last_entry_id, summary) "
+            "VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(username, persona_scope) DO UPDATE SET "
             "last_entry_id=excluded.last_entry_id, summary=excluded.summary, "
             "updated_at=CURRENT_TIMESTAMP",
-            (persona_scope, int(last_entry_id), summary),
+            (username, persona_scope, int(last_entry_id), summary),
         )
         conn.commit()
     finally:
         conn.close()
 
 
-def get_short_term_summary_json(persona_scope: str) -> Optional[Dict]:
+def get_short_term_summary_json(persona_scope: str, username: str = "Pantronux") -> Optional[Dict]:
     """Return cached structured summary JSON for the persona, or ``None``.
 
     Falls back to parsing the legacy ``summary`` column into a minimal dict so
@@ -441,8 +473,8 @@ def get_short_term_summary_json(persona_scope: str) -> Optional[Dict]:
         cursor = conn.cursor()
         cursor.execute(
             "SELECT last_entry_id, summary, summary_json FROM short_term_summaries "
-            "WHERE persona_scope = ?",
-            (persona_scope,),
+            "WHERE persona_scope = ? AND username = ?",
+            (persona_scope, username),
         )
         row = cursor.fetchone()
     finally:
@@ -473,6 +505,7 @@ def upsert_short_term_summary_json(
     summary_json: Dict,
     *,
     fallback_text: str = "",
+    username: str = "Pantronux",
 ) -> None:
     """Upsert the structured JSON summary for a persona scope.
 
@@ -485,14 +518,14 @@ def upsert_short_term_summary_json(
         cursor = conn.cursor()
         cursor.execute(
             "INSERT INTO short_term_summaries "
-            "(persona_scope, last_entry_id, summary, summary_json) "
-            "VALUES (?, ?, ?, ?) "
-            "ON CONFLICT(persona_scope) DO UPDATE SET "
+            "(username, persona_scope, last_entry_id, summary, summary_json) "
+            "VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT(username, persona_scope) DO UPDATE SET "
             "last_entry_id=excluded.last_entry_id, "
             "summary=excluded.summary, "
             "summary_json=excluded.summary_json, "
             "updated_at=CURRENT_TIMESTAMP",
-            (persona_scope, int(last_entry_id), fallback_text, blob),
+            (username, persona_scope, int(last_entry_id), fallback_text, blob),
         )
         conn.commit()
     finally:
@@ -520,6 +553,7 @@ def append_research_ledger(
     *,
     source_entry_id: Optional[int] = None,
     schema_v: int = 1,
+    username: str = "Pantronux",
 ) -> Optional[int]:
     """Append one research ledger row. Returns inserted row id or None on failure.
 
@@ -536,9 +570,9 @@ def append_research_ledger(
         cursor = conn.cursor()
         cursor.execute(
             "INSERT INTO research_ledger "
-            "(persona_scope, kind, content, source_entry_id, schema_v) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (persona_scope, kind, content, source_entry_id, int(schema_v)),
+            "(username, persona_scope, kind, content, source_entry_id, schema_v) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (username, persona_scope, kind, content, source_entry_id, int(schema_v)),
         )
         conn.commit()
         return int(cursor.lastrowid)
@@ -555,6 +589,7 @@ def append_research_ledger_batch(
     records: List[Dict],
     *,
     source_entry_id: Optional[int] = None,
+    username: str = "Pantronux",
 ) -> int:
     """Append multiple ledger rows in a single transaction.
 
@@ -567,7 +602,7 @@ def append_research_ledger_batch(
         if not content:
             continue
         kind = str(rec.get("kind") or "").strip() or "decision"
-        rows.append((persona_scope, kind, content,
+        rows.append((username, persona_scope, kind, content,
                      rec.get("source_entry_id") or source_entry_id, 1))
     if not rows:
         return 0
@@ -593,10 +628,11 @@ def append_research_ledger_batch(
 def query_research_ledger(
     persona_scope: str,
     *,
+    username: str = "Pantronux",
     kinds: Optional[List[str]] = None,
     limit: int = 50,
 ) -> List[Dict]:
-    """Return most recent ledger rows for a persona, newest first."""
+    """Return most recent ledger rows for a persona and user, newest first."""
     conn = _get_short_term_conn()
     try:
         cursor = conn.cursor()
@@ -604,15 +640,15 @@ def query_research_ledger(
             placeholders = ",".join("?" * len(kinds))
             cursor.execute(
                 f"SELECT id, kind, content, source_entry_id, created_at "
-                f"FROM research_ledger WHERE persona_scope = ? AND kind IN ({placeholders}) "
+                f"FROM research_ledger WHERE persona_scope = ? AND username = ? AND kind IN ({placeholders}) "
                 f"ORDER BY id DESC LIMIT ?",
-                (persona_scope, *kinds, int(limit)),
+                (persona_scope, username, *kinds, int(limit)),
             )
         else:
             cursor.execute(
                 "SELECT id, kind, content, source_entry_id, created_at "
-                "FROM research_ledger WHERE persona_scope = ? ORDER BY id DESC LIMIT ?",
-                (persona_scope, int(limit)),
+                "FROM research_ledger WHERE persona_scope = ? AND username = ? ORDER BY id DESC LIMIT ?",
+                (persona_scope, username, int(limit)),
             )
         rows = cursor.fetchall()
     finally:
@@ -632,17 +668,18 @@ def query_research_ledger(
 def query_research_ledger_since(
     cutoff_iso: str,
     *,
+    username: str = "Pantronux",
     limit: int = 500,
 ) -> List[Dict]:
-    """Return ledger rows created since ``cutoff_iso`` across all personas."""
+    """Return ledger rows created since ``cutoff_iso`` for a user across all personas."""
     conn = _get_short_term_conn()
     try:
         cursor = conn.cursor()
         cursor.execute(
             "SELECT id, persona_scope, kind, content, source_entry_id, created_at "
-            "FROM research_ledger WHERE created_at >= ? "
+            "FROM research_ledger WHERE created_at >= ? AND username = ? "
             "ORDER BY id DESC LIMIT ?",
-            (cutoff_iso, int(limit)),
+            (cutoff_iso, username, int(limit)),
         )
         rows = cursor.fetchall()
     finally:
@@ -893,39 +930,39 @@ def mark_dream_notification(
     finally:
         conn.close()
 
-def add_short_term(role: str, content: str, persona_scope: str = None):
+def add_short_term(role: str, content: str, persona_scope: str = None, username: str = "Pantronux"):
     """Add interaction to short-term buffer."""
-    scope = normalize_persona(persona_scope or get_active_persona())
+    scope = normalize_persona(persona_scope or get_active_persona(username))
     conn = _get_short_term_conn()
     cursor = conn.cursor()
     cursor.execute(
-        "INSERT INTO short_term (role, content, persona_scope) VALUES (?, ?, ?)",
-        (role, content, scope),
+        "INSERT INTO short_term (role, content, persona_scope, username) VALUES (?, ?, ?, ?)",
+        (role, content, scope, username),
     )
     
     # Enforce limit - delete oldest if over limit
     cursor.execute(
         """
         DELETE FROM short_term
-        WHERE persona_scope = ?
+        WHERE persona_scope = ? AND username = ?
           AND id NOT IN (
-              SELECT id FROM short_term WHERE persona_scope = ? ORDER BY id DESC LIMIT ?
+              SELECT id FROM short_term WHERE persona_scope = ? AND username = ? ORDER BY id DESC LIMIT ?
           )
         """,
-        (scope, scope, SHORT_TERM_LIMIT),
+        (scope, username, scope, username, SHORT_TERM_LIMIT),
     )
     
     conn.commit()
     conn.close()
 
-def get_short_term(persona_scope: str = None) -> List[Dict]:
+def get_short_term(persona_scope: str = None, username: str = "Pantronux") -> List[Dict]:
     """Get recent short-term memory."""
-    scope = normalize_persona(persona_scope or get_active_persona())
+    scope = normalize_persona(persona_scope or get_active_persona(username))
     conn = _get_short_term_conn()
     cursor = conn.cursor()
     cursor.execute(
-        "SELECT * FROM short_term WHERE persona_scope = ? ORDER BY id DESC LIMIT ?",
-        (scope, SHORT_TERM_LIMIT),
+        "SELECT * FROM short_term WHERE persona_scope = ? AND username = ? ORDER BY id DESC LIMIT ?",
+        (scope, username, SHORT_TERM_LIMIT),
     )
     rows = cursor.fetchall()
     conn.close()

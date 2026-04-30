@@ -19,11 +19,11 @@ import psutil
 import uvicorn
 from typing import Any, Dict, Optional
 from datetime import date, datetime, timedelta
-from fastapi import FastAPI, UploadFile, File, Form, Request, Depends, HTTPException, status
+from fastapi import FastAPI, UploadFile, File, Form, Request, Depends, HTTPException, status, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, RedirectResponse
-from starlette.websockets import WebSocket, WebSocketDisconnect
+from fastapi.templating import Jinja2Templates
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, RedirectResponse, StreamingResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel, Field
 from jose import JWTError, jwt
@@ -131,6 +131,29 @@ ACCESS_TOKEN_EXPIRE_HOURS = int(os.getenv("JWT_EXPIRATION_HOURS", "12"))
 # Admin credentials from .env
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "Pantronux")
 ADMIN_PASSWORD_HASH = os.getenv("ADMIN_PASSWORD_HASH", "")
+
+# Secondary User: Kagetoki (V7.2.2 Restricted Access)
+KAGETOKI_USERNAME = os.getenv("KAGETOKI_USERNAME", "kagetoki")
+KAGETOKI_PASSWORD_HASH = os.getenv("KAGETOKI_PASSWORD_HASH", "")
+KAGETOKI_MASTER_NAME = os.getenv("KAGETOKI_MASTER_NAME", "Kagetoki-sama")
+
+# User Registry - maps username to credentials and session-specific behaviors
+USER_REGISTRY = {
+    ADMIN_USERNAME: {
+        "password_hash": ADMIN_PASSWORD_HASH,
+        "master_name": "Master Pantronux",
+        "display_name": "Pantronux",
+        "role": "Administrator",
+        "restricted_persona": None
+    },
+    KAGETOKI_USERNAME: {
+        "password_hash": KAGETOKI_PASSWORD_HASH,
+        "master_name": KAGETOKI_MASTER_NAME,
+        "display_name": "Kagetoki",
+        "role": "Quality Assurance",
+        "restricted_persona": "auditor"
+    }
+}
 
 # Cookie name for JWT token
 COOKIE_NAME = "kuro_access_token"
@@ -246,8 +269,9 @@ async def login_endpoint(
             }
         )
     
-    # Validate username
-    if username != ADMIN_USERNAME:
+    # Validate user existence
+    user_info = USER_REGISTRY.get(username)
+    if not user_info:
         failed_count = auth_db.record_failed_attempt(username, client_ip, user_agent)
         if failed_count >= auth_db.MAX_FAILED_ATTEMPTS:
             auth_db.lock_account(username)
@@ -257,7 +281,7 @@ async def login_endpoint(
         )
     
     # Verify password
-    if not verify_password(password, ADMIN_PASSWORD_HASH):
+    if not verify_password(password, user_info["password_hash"]):
         failed_count = auth_db.record_failed_attempt(username, client_ip, user_agent)
         logger.warning(f"Failed login attempt {failed_count} for user: {username} from {client_ip}")
         
@@ -364,6 +388,7 @@ app.add_middleware(
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 WEB_DIR = os.path.join(BASE_DIR, "web_interface")
 app.mount("/static", StaticFiles(directory=os.path.join(WEB_DIR, "static")), name="static")
+templates = Jinja2Templates(directory=os.path.join(WEB_DIR, "templates"))
 
 
 
@@ -530,21 +555,57 @@ async def auth_middleware(request: Request, call_next):
 async def index(request: Request):
     """Serve the main web dashboard. Redirect to /login if not authenticated."""
     token = get_token_from_cookie(request)
-    if not validate_token(token):
+    user = validate_token(token)
+    if not user:
         return RedirectResponse(url="/login", status_code=302)
-    return FileResponse(os.path.join(WEB_DIR, "templates", "index.html"))
+    
+    username = user.get("username")
+    user_info = USER_REGISTRY.get(username, {})
+    
+    return templates.TemplateResponse(
+        request=request,
+        name="index.html",
+        context={
+            "username": username,
+            "display_name": user_info.get("display_name", username),
+            "role": user_info.get("role", "User"),
+            "restricted_persona": user_info.get("restricted_persona") or "",
+            "master_name": user_info.get("master_name", f"Master {username}")
+        }
+    )
 
 
 @app.get("/chat", response_class=HTMLResponse)
 async def chat_page(request: Request):
     """Serve chat dashboard route that supports URL persona state."""
     token = get_token_from_cookie(request)
-    if not validate_token(token):
+    user = validate_token(token)
+    if not user:
         return RedirectResponse(url="/login", status_code=302)
-    return FileResponse(os.path.join(WEB_DIR, "templates", "index.html"))
+        
+    username = user.get("username")
+    user_info = USER_REGISTRY.get(username, {})
+    
+    return templates.TemplateResponse(
+        request=request,
+        name="index.html",
+        context={
+            "username": username,
+            "display_name": user_info.get("display_name", username),
+            "role": user_info.get("role", "User"),
+            "restricted_persona": user_info.get("restricted_persona") or "",
+            "master_name": user_info.get("master_name", f"Master {username}")
+        }
+    )
 
 @app.get("/api/history")
-async def get_chat_history(limit: int = 20, offset: int = 0, platform: str = None, persona: str = None):
+async def get_chat_history(
+    request: Request,
+    limit: int = 20,
+    offset: int = 0,
+    platform: str = None,
+    persona: str = None
+):
     """Get chat history from database with pagination for infinite scroll.
     
     Args:
@@ -553,14 +614,26 @@ async def get_chat_history(limit: int = 20, offset: int = 0, platform: str = Non
         platform: Filter by platform ('web', 'telegram', or None for all)
         persona: Filter by persona mode (defaults to active persona)
     """
-    resolved_persona = memory_manager.normalize_persona(persona or memory_manager.get_active_persona())
+    token = get_token_from_cookie(request)
+    user = validate_token(token)
+    username = user.get("username") if user else ADMIN_USERNAME
+    user_info = USER_REGISTRY.get(username, {})
+    
+    # Persona restriction enforcement
+    restricted_persona = user_info.get("restricted_persona")
+    if restricted_persona:
+        resolved_persona = restricted_persona
+    else:
+        resolved_persona = memory_manager.normalize_persona(persona or memory_manager.get_active_persona())
+
     history = chat_history.get_history(
         limit=limit,
         offset=offset,
         platform=platform,
         persona=resolved_persona,
+        username=username,
     )
-    total = chat_history.get_total_count(platform=platform, persona=resolved_persona)
+    total = chat_history.get_total_count(platform=platform, persona=resolved_persona, username=username)
     return api_success(
         data={
             "history": history,
@@ -575,10 +648,14 @@ async def get_chat_history(limit: int = 20, offset: int = 0, platform: str = Non
     )
 
 @app.delete("/api/history")
-async def clear_chat_history():
-    """Clear all chat history."""
-    chat_history.clear_history()
-    return api_success(data={"message": "Chat history cleared"}, message="Chat history cleared")
+async def clear_chat_history(request: Request):
+    """Clear all chat history for the current user."""
+    token = get_token_from_cookie(request)
+    user = validate_token(token)
+    username = user.get("username") if user else ADMIN_USERNAME
+    
+    chat_history.clear_history(username=username)
+    return api_success(data={"message": f"Chat history cleared for {username}"}, message=f"Chat history cleared for {username}")
 
 
 def _collect_research_status_snapshot(max_chars: int = 600) -> Dict[str, Any]:
@@ -643,10 +720,24 @@ async def chat_endpoint(
 ):
     """Handle chat requests from the web interface with vision and file reading support. (Non-streaming fallback)"""
     try:
+        # Resolve user context
+        token = get_token_from_cookie(request)
+        user = validate_token(token)
+        username = user.get("username") if user else ADMIN_USERNAME
+        user_info = USER_REGISTRY.get(username, {})
+        master_name = user_info.get("master_name", "Master Pantronux")
+        
         trace_id = f"chat_{uuid.uuid4().hex}"
-        resolved_persona = memory_manager.normalize_persona(
-            persona or request.query_params.get("persona") or memory_manager.get_active_persona()
-        )
+        
+        # Persona restriction
+        restricted_persona = user_info.get("restricted_persona")
+        if restricted_persona:
+            resolved_persona = restricted_persona
+        else:
+            resolved_persona = memory_manager.normalize_persona(
+                persona or request.query_params.get("persona") or memory_manager.get_active_persona()
+            )
+            
         request_id = f"web_{uuid.uuid4().hex}"
         session_scope = _resolve_chat_session_id(request)
 
@@ -767,6 +858,7 @@ async def chat_endpoint(
             [f["stored_filename"] for f in file_attachments],
             persona=resolved_persona,
             request_id=request_id,
+            username=username,
         )
         
         # Process with AI core using LangGraph (with vision if images uploaded)
@@ -777,10 +869,12 @@ async def chat_endpoint(
             approval_scope=f"web:{session_scope}:{resolved_persona}",
             trace_id=trace_id,
             session_id=session_scope,
+            master_name=master_name,
+            username=username,
         )
         
         # Save AI response to chat history
-        chat_history.add_message("web", "assistant", response, persona=resolved_persona, request_id=request_id)
+        chat_history.add_message("web", "assistant", response, persona=resolved_persona, request_id=request_id, username=username)
         
         return api_success(
             data={"response": response},
@@ -790,7 +884,7 @@ async def chat_endpoint(
         
     except Exception as e:
         logger.exception(f"Error in chat endpoint: {e}")
-        return api_error(f"My apologies, Master — an error occurred: {e}")
+        return api_error(f"My apologies, {master_name} — an error occurred: {e}")
 
 
 @app.post("/api/chat/stream")
@@ -812,10 +906,23 @@ async def chat_stream_endpoint(
         stream_metrics: Dict[str, Any] = {}
         try:
             yield f"event: meta\ndata: {json.dumps({'trace_id': trace_id, 'phase': 'started'}, ensure_ascii=False)}\n\n"
+            # Resolve user context
+            token = get_token_from_cookie(request)
+            user = validate_token(token)
+            username = user.get("username") if user else ADMIN_USERNAME
+            user_info = USER_REGISTRY.get(username, {})
+            master_name = user_info.get("master_name", "Master Pantronux")
+            
             session_scope = _resolve_chat_session_id(request)
-            resolved_persona = memory_manager.normalize_persona(
-                persona or request.query_params.get("persona") or memory_manager.get_active_persona()
-            )
+            
+            # Persona restriction
+            restricted_persona = user_info.get("restricted_persona")
+            if restricted_persona:
+                resolved_persona = restricted_persona
+            else:
+                resolved_persona = memory_manager.normalize_persona(
+                    persona or request.query_params.get("persona") or memory_manager.get_active_persona()
+                )
 
             # UI mode router gate — broadcast the UI command and short-
             # circuit the SSE stream when the user's message is purely a
@@ -829,10 +936,12 @@ async def chat_stream_endpoint(
                     chat_history.add_message(
                         "web", "user", user_message, [],
                         persona=resolved_persona, request_id=request_id,
+                        username=username,
                     )
                     chat_history.add_message(
                         "web", "assistant", ack,
                         persona=resolved_persona, request_id=request_id,
+                        username=username,
                     )
                     yield (
                         "event: meta\n"
@@ -939,6 +1048,7 @@ async def chat_stream_endpoint(
                 [f["stored_filename"] for f in file_attachments],
                 persona=resolved_persona,
                 request_id=request_id,
+                username=username,
             )
             
             # V6.0: Stream response - no guardrail overhead, direct LLM response
@@ -952,6 +1062,8 @@ async def chat_stream_endpoint(
                 approval_scope=f"web:{session_scope}:{resolved_persona}",
                 trace_id=trace_id,
                 session_id=session_scope,
+                master_name=master_name,
+                username=username,
             ):
                 full_response.append(chunk)
                 if first_chunk_ms is None:
@@ -968,6 +1080,7 @@ async def chat_stream_endpoint(
                 response_text,
                 persona=resolved_persona,
                 request_id=request_id,
+                username=username,
             )
             total_ms = round((time.perf_counter() - request_started) * 1000, 2)
             observability.record_latency_metric("chat_stream_total_ms", total_ms)
@@ -997,7 +1110,7 @@ async def chat_stream_endpoint(
             
         except Exception as e:
             logger.exception(f"Error in streaming endpoint: {e}")
-            yield f"event: error\ndata: {json.dumps(api_error(str(e), trace_id=trace_id), ensure_ascii=False)}\n\n"
+            yield f"event: error\ndata: {json.dumps(api_error(f'Maaf, {master_name} — ' + str(e), trace_id=trace_id), ensure_ascii=False)}\n\n"
     
     return StreamingResponse(
         event_generator(),
@@ -1976,6 +2089,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             persona_override=telegram_persona,
             approval_scope=f"telegram:{settings.TELEGRAM_CHAT_ID}:{telegram_persona}",
             trace_id=telegram_trace_id,
+            master_name="Pantronux",
+            username="Pantronux",
         )
         chat_history.add_message(
             "telegram",
@@ -2046,6 +2161,10 @@ def run_bot_with_recovery():
     for attempt in range(max_retries):
         try:
             logger.info(f"Starting Telegram bot polling... (Attempt {attempt + 1}/{max_retries})")
+
+            # Create a new event loop for each attempt, as python-telegram-bot closes the loop on exit
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
 
             application = ApplicationBuilder().token(settings.TELEGRAM_TOKEN).build()
 

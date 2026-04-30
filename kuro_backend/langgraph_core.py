@@ -258,12 +258,14 @@ def _execute_post_response_task(task: Dict[str, Any]) -> None:
     if kind == "memory_write":
         user_input = task.get("user_input", "")
         final_response = task.get("final_response", "")
-        persona_scope = task.get("persona_scope") or memory_manager.get_active_persona()
+        username = task.get("username", "Pantronux")
+        persona_scope = task.get("persona_scope") or memory_manager.get_active_persona(username)
         memory_coordinator.execute_memory_write_task(user_input, final_response, persona_scope)
     elif kind == "mem0_extract":
         user_input = task.get("user_input", "")
         final_response = task.get("final_response", "")
-        memory_coordinator.execute_mem0_extract_task(user_input, final_response)
+        username = task.get("username", "Pantronux")
+        memory_coordinator.execute_mem0_extract_task(user_input, final_response, username)
     else:
         logger.warning("[POST_RESPONSE_WORKER] Unknown task kind=%s", kind)
 
@@ -323,9 +325,9 @@ def get_post_response_queue_depth() -> int:
     return _post_response_queue.qsize()
 
 
-def _persist_short_term_and_enqueue_writes(user_input: str, response_text: str, persona_mode: str) -> None:
-    memory_manager.add_short_term("user", user_input, persona_scope=persona_mode)
-    memory_manager.add_short_term("assistant", response_text, persona_scope=persona_mode)
+def _persist_short_term_and_enqueue_writes(user_input: str, response_text: str, persona_mode: str, username: str = "Pantronux") -> None:
+    memory_manager.add_short_term("user", user_input, persona_scope=persona_mode, username=username)
+    memory_manager.add_short_term("assistant", response_text, persona_scope=persona_mode, username=username)
 
 
 async def _stream_direct_llm_chunks(
@@ -442,6 +444,8 @@ class KuroState(TypedDict):
     retrieval_grade: str          # "relevant" | "ambiguous" | "irrelevant"
     retrieval_retry_count: int    # bounded 0–2; failover to Serper at max
     rewritten_query: str          # LLM-transformed query after grading fail
+    master_name: str              # User-specific name (e.g. Pantronux, Kagetoki-sama)
+    username: str                 # System username for memory isolation
 
 
 # ============================================
@@ -449,7 +453,7 @@ class KuroState(TypedDict):
 # ============================================
 
 
-def get_system_instruction(persona_override: Optional[str] = None) -> str:
+def get_system_instruction(persona_override: Optional[str] = None, master_name: str = "Pantronux") -> str:
     """Get system instruction with current time and active persona (graph variant)."""
     current_time = settings.get_current_time_formatted()
     current_date = settings.get_current_time().strftime("%Y-%m-%d")
@@ -462,6 +466,7 @@ def get_system_instruction(persona_override: Optional[str] = None) -> str:
         current_date=current_date,
         kuro_version_label="V5.5 LangGraph",
         variant="graph",
+        master_name=master_name,
     )
 
 # ============================================
@@ -635,8 +640,9 @@ def memory_retrieval_node(state: KuroState) -> Dict[str, Any]:
             # P1.2 — consume supervisor's prefetch if present; otherwise fall
             # back to a live retrieval using effective_query (may be rewritten).
             raw_memories = memory_coordinator.take_prefetched_mem0(session_id)
+            username = state.get("username", "Pantronux")
             if raw_memories is None:
-                raw_memories = memory_coordinator.safe_mem0_retrieve(effective_query, limit=5)
+                raw_memories = memory_coordinator.safe_mem0_retrieve(effective_query, limit=5, username=username)
 
             if not isinstance(raw_memories, list):
                 logger.warning("[MEM0] Unexpected output format: %s", type(raw_memories))
@@ -723,11 +729,13 @@ Status:"""
 
     if task_success:
         with observability.trace_node("memory_extraction_node"):
+            username = state.get("username", "Pantronux")
             _enqueue_post_response_task(
                 {
                     "kind": "mem0_extract",
                     "user_input": user_input,
                     "final_response": final_response,
+                    "username": username,
                 }
             )
             logger.info("[MEM0_EXTRACTION] Triggering Mem0 extraction (Task Completed successfully).")
@@ -1284,11 +1292,13 @@ def response_node(state: KuroState) -> Dict[str, Any]:
     
     with observability.trace_node("response_node", trace_attrs) as span:
         memory_coordinator.apply_path_tokens_to_runtime(user_input, persona_mode)
+        username = state.get("username", "Pantronux")
         ctx = memory_coordinator.build_context_for_llm(
             user_input,
             persona_mode,
             mem0_retrieved_memories=mem0_memories or None,
             session_id=session_id,
+            username=username,
         )
         memory_injection = ctx["memory_injection"]
         mem0_context_block = ctx.get("mem0_context_block")
@@ -1296,7 +1306,8 @@ def response_node(state: KuroState) -> Dict[str, Any]:
         context_budget = ctx.get("budget")
 
         # Build system prompt
-        system_prompt = get_system_instruction(persona_override=persona_mode)
+        master_name = state.get("master_name", "Pantronux")
+        system_prompt = get_system_instruction(persona_override=persona_mode, master_name=master_name)
         
         intent = state.get("_intent", "new")
         if intent == "edit":
@@ -1505,7 +1516,8 @@ def response_node(state: KuroState) -> Dict[str, Any]:
         # Single consolidated persist path (short-term + enqueue memory_write + mem0_extract).
         # memory_extraction_node still runs as a dedupe/guardian, but mem0 fingerprint dedupe
         # in memory_coordinator prevents double-store.
-        _persist_short_term_and_enqueue_writes(user_input, response_text, persona_mode)
+        username = state.get("username", "Pantronux")
+        _persist_short_term_and_enqueue_writes(user_input, response_text, persona_mode, username)
 
         logger.info("[RESPONSE] Generated response (%s chars)", len(response_text))
         
@@ -1985,6 +1997,8 @@ async def process_chat_with_graph_stream(
     approval_scope: str = "default",
     trace_id: str = "",
     session_id: Optional[str] = None,
+    master_name: str = "Pantronux",
+    username: str = "Pantronux",
 ) -> AsyncGenerator[str, None]:
     """
     V5.5 STREAMING: Graph runs in asyncio.to_thread (sync stream) so the event loop can serve SSE.
@@ -2026,7 +2040,7 @@ async def process_chat_with_graph_stream(
                     stream_metrics["stream_mode"] = "semantic_cache"
                 yield cached_response
                 try:
-                    _persist_short_term_and_enqueue_writes(message, cached_response, persona_mode)
+                    _persist_short_term_and_enqueue_writes(message, cached_response, persona_mode, username)
                 except Exception as exc:
                     logger.warning("[SEMANTIC_CACHE] persist failed: %s", exc)
                 return
@@ -2047,6 +2061,7 @@ async def process_chat_with_graph_stream(
                 persona_mode,
                 mem0_retrieved_memories=None,
                 session_id=session_id,
+                username=username,
             )
             if stream_metrics is not None:
                 stream_metrics["memory_query_ms"] = round((time.perf_counter() - memory_started) * 1000, 2)
@@ -2065,7 +2080,7 @@ async def process_chat_with_graph_stream(
             if ref_block:
                 prefix = f"{message}\n\n{ref_block}"
             full_message = f"{prefix}{memory_injection}"
-            system_prompt = get_system_instruction(persona_override=persona_mode)
+            system_prompt = get_system_instruction(persona_override=persona_mode, master_name=master_name)
 
             # Re-evaluate reflection node logic for fastpath
             intent = reflection_node({"user_input": message}).get("_intent", "new")
@@ -2111,7 +2126,7 @@ async def process_chat_with_graph_stream(
                 response_text = "Maaf, Pantronux. Respons model kosong setelah streaming."
                 yield response_text
                 emitted += 1
-            _persist_short_term_and_enqueue_writes(message, response_text, persona_mode)
+            _persist_short_term_and_enqueue_writes(message, response_text, persona_mode, username)
 
             # V7.2.1 Mem0 Check inside streaming fast-path
             if intent != "edit":
@@ -2125,6 +2140,7 @@ async def process_chat_with_graph_stream(
                         "kind": "mem0_extract",
                         "user_input": message,
                         "final_response": response_text,
+                        "username": username,
                     })
 
             # P3.1 — cache the fastpath response for near-duplicate queries.
@@ -2153,6 +2169,7 @@ async def process_chat_with_graph_stream(
             "mem0_retrieved_memories": [],
             "tool_execution_result": {},
             "requires_approval": False,
+            "master_name": master_name,
             "_session_id": session_id,
             "_approval_scope": approval_scope,
             "_trace_id": trace_id,
@@ -2197,7 +2214,7 @@ async def process_chat_with_graph_stream(
             response_text = ""
         if not str(response_text).strip():
             response_text = (
-                "Maaf, Pantronux. Respons model kosong setelah pemeriksaan. Silakan ulangi pertanyaan."
+                f"Maaf, {master_name}. Respons model kosong setelah pemeriksaan. Silakan ulangi pertanyaan."
             )
             logger.warning("[LANGGRAPH_STREAM] empty model text after postprocess; sent fallback bubble")
         if response_text:
@@ -2230,7 +2247,7 @@ async def process_chat_with_graph_stream(
         
     except Exception as e:
         logger.exception(f"[LANGGRAPH_STREAM] Streaming failed: {e}")
-        error_msg = "Maaf, Pantronux. Terjadi kesalahan saat memproses permintaan Anda."
+        error_msg = f"Maaf, {master_name}. Terjadi kesalahan saat memproses permintaan Anda."
         yield error_msg
         full_response = [error_msg]
 
@@ -2340,6 +2357,8 @@ def process_chat_with_graph(
     approval_scope: str = "sync_default",
     trace_id: str = "",
     session_id: Optional[str] = None,
+    master_name: str = "Pantronux",
+    username: str = "Pantronux",
 ) -> str:
     """
     Process chat message using LangGraph state machine.
@@ -2374,7 +2393,7 @@ def process_chat_with_graph(
             cached_response = semantic_cache.lookup(message, persona_mode)
             if cached_response is not None:
                 try:
-                    _persist_short_term_and_enqueue_writes(message, cached_response, persona_mode)
+                    _persist_short_term_and_enqueue_writes(message, cached_response, persona_mode, username)
                 except Exception as exc:
                     logger.warning("[SEMANTIC_CACHE] persist failed: %s", exc)
                 return cached_response
@@ -2391,6 +2410,8 @@ def process_chat_with_graph(
             "tool_execution_result": {},
             "requires_approval": False,
             "_session_id": session_id,
+            "master_name": master_name,
+            "username": username,
             "_approval_scope": approval_scope,
             "_trace_id": trace_id,
             # Natural Agency defaults (V7.2)

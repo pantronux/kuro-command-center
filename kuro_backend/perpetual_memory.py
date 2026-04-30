@@ -162,7 +162,6 @@ class PerpetualMemory:
     """
     
     def __init__(self):
-        self.user_id = MASTER_USER_ID
         self._client: Optional[Memory] = None
         self._cooldown_until_ts: float = 0.0
         self._consecutive_failures: int = 0
@@ -250,7 +249,7 @@ class PerpetualMemory:
                 return False
         return True
     
-    def extract_personal_info(self, message: str, response: str = "") -> List[Dict]:
+    def extract_personal_info(self, message: str, response: str = "", user_id: str = MASTER_USER_ID) -> List[Dict]:
         """
         Extract personal information from conversation for storage.
         
@@ -263,15 +262,15 @@ class PerpetualMemory:
         text_to_analyze = f"{message} {response}"
         
         # Check for habit completions
-        habit_memories = self._extract_habit_completions(message)
+        habit_memories = self._extract_habit_completions(message, user_id)
         memories_to_store.extend(habit_memories)
         
         # Check for personal preferences
-        preference_memories = self._extract_preferences(message)
+        preference_memories = self._extract_preferences(message, user_id)
         memories_to_store.extend(preference_memories)
         
         # Check for personal facts
-        fact_memories = self._extract_personal_facts(message)
+        fact_memories = self._extract_personal_facts(message, user_id)
         memories_to_store.extend(fact_memories)
         
         # Filter by privacy
@@ -284,7 +283,7 @@ class PerpetualMemory:
         
         return safe_memories
     
-    def _extract_habit_completions(self, message: str) -> List[Dict]:
+    def _extract_habit_completions(self, message: str, user_id: str) -> List[Dict]:
         """Extract habit completion information."""
         memories = []
         msg_lower = message.lower()
@@ -299,7 +298,7 @@ class PerpetualMemory:
                     is_completion = any(ci in msg_lower for ci in completion_indicators)
                     
                     if is_completion:
-                        memory_text = f"Pantronux completed {habit} on {today} ({today_date})"
+                        memory_text = f"{user_id} completed {habit} on {today} ({today_date})"
                         memories.append({
                             "text": memory_text,
                             "metadata": {
@@ -314,7 +313,7 @@ class PerpetualMemory:
         
         return memories
     
-    def _extract_preferences(self, message: str) -> List[Dict]:
+    def _extract_preferences(self, message: str, user_id: str) -> List[Dict]:
         """Extract personal preferences from message."""
         memories = []
         msg_lower = message.lower()
@@ -326,7 +325,7 @@ class PerpetualMemory:
                 for sentence in sentences:
                     if indicator in sentence.lower() and len(sentence.strip()) > 15:
                         memories.append({
-                            "text": f"Pantronux preference: {sentence.strip()}",
+                            "text": f"{user_id} preference: {sentence.strip()}",
                             "metadata": {
                                 "type": "preference",
                                 "timestamp": datetime.now().isoformat(),
@@ -338,8 +337,8 @@ class PerpetualMemory:
         
         return memories
     
-    def _extract_personal_facts(self, message: str) -> List[Dict]:
-        """Extract personal facts about Pantronux."""
+    def _extract_personal_facts(self, message: str, user_id: str) -> List[Dict]:
+        """Extract personal facts about the user."""
         memories = []
         msg_lower = message.lower()
         
@@ -358,7 +357,7 @@ class PerpetualMemory:
                         # Skip if it's a question
                         if '?' not in sentence and 'apakah' not in sentence.lower():
                             memories.append({
-                                "text": f"Pantronux fact: {sentence.strip()}",
+                                "text": f"{user_id} fact: {sentence.strip()}",
                                 "metadata": {
                                     "type": "personal_fact",
                                     "timestamp": datetime.now().isoformat(),
@@ -370,7 +369,7 @@ class PerpetualMemory:
         
         return memories
     
-    def store_memories(self, memories: List[Any]):
+    def store_memories(self, memories: List[Any], user_id: str = MASTER_USER_ID):
         """Store extracted memories in Mem0 with fast fallback on embedding errors."""
         if not self.client or not memories:
             return
@@ -400,7 +399,7 @@ class PerpetualMemory:
 
                 self.client.add(
                     messages=[payload],
-                    user_id=self.user_id,
+                    user_id=user_id,
                     metadata=metadata
                 )
                 logger.info("[MEM0] Memory successfully stored.")
@@ -415,7 +414,7 @@ class PerpetualMemory:
                 logger.error(f"[MEM0] Failed to store memory: {e}")
                 self._enter_cooldown("store_generic_error")
     
-    def retrieve_memories(self, query: str, limit: int = 5) -> List[Dict]:
+    def retrieve_memories(self, query: str, limit: int = 5, user_id: str = MASTER_USER_ID) -> List[Dict]:
         """
         Retrieve relevant memories based on query.
         V5.5: Fast bypass on embedding errors - no timeout waiting.
@@ -428,7 +427,7 @@ class PerpetualMemory:
         try:
             results = self.client.search(
                 query=query,
-                user_id=self.user_id,
+                user_id=user_id,
                 limit=limit
             )
 
@@ -474,7 +473,7 @@ class PerpetualMemory:
                 self._enter_cooldown("retrieve_generic_error")
             return []
     
-    def get_habit_history(self, habit: str, days: int = 30) -> List[Dict]:
+    def get_habit_history(self, habit: str, days: int = 30, user_id: str = MASTER_USER_ID) -> List[Dict]:
         """Get habit completion history for the past N days."""
         if not self.client:
             logger.warning(
@@ -487,7 +486,7 @@ class PerpetualMemory:
         try:
             results = self.client.search(
                 query=f"{habit} completion history",
-                user_id=self.user_id,
+                user_id=user_id,
                 limit=50
             )
 
@@ -532,13 +531,13 @@ class PerpetualMemory:
             logger.error(f"[MEM0] Failed to get habit history: {e}")
             return []
     
-    def generate_habit_insight(self, habit: str) -> str:
+    def generate_habit_insight(self, habit: str, user_id: str = MASTER_USER_ID) -> str:
         """
         Generate insight about habit patterns for smarter scolding.
         
         Example: "Bulan lalu Master bilang suka gym Senin, tapi datanya bolong-bolong."
         """
-        history = self.get_habit_history(habit, days=30)
+        history = self.get_habit_history(habit, days=30, user_id=user_id)
         
         if not history:
             return (
@@ -551,7 +550,7 @@ class PerpetualMemory:
         days_list = [h.get("day", "") for h in history]
         most_common_day = max(set(days_list), key=days_list.count) if days_list else "tidak diketahui"
         
-        insight = f"Pantronux telah menyelesaikan '{habit}' sebanyak {total_completions} kali dalam 30 hari terakhir. "
+        insight = f"{user_id} telah menyelesaikan '{habit}' sebanyak {total_completions} kali dalam 30 hari terakhir. "
         insight += f"Hari yang paling konsisten: {most_common_day}. "
         
         if total_completions < 15:
@@ -593,13 +592,13 @@ class PerpetualMemory:
         except Exception as e:
             logger.error(f"[MEM0] Failed to delete memory: {e}")
     
-    def get_all_memories(self, limit: int = 50) -> List[Dict]:
-        """Get all memories for Pantronux (for debugging/admin)."""
+    def get_all_memories(self, limit: int = 50, user_id: str = MASTER_USER_ID) -> List[Dict]:
+        """Get all memories for the user (for debugging/admin)."""
         if not self.client:
             return []
         
         try:
-            results = self.client.get_all(user_id=self.user_id, limit=limit)
+            results = self.client.get_all(user_id=user_id, limit=limit)
             return results
         except Exception as e:
             logger.error(f"[MEM0] Failed to get all memories: {e}")

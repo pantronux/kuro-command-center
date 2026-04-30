@@ -818,6 +818,7 @@ def build_context_for_llm(
     chat_platform: Optional[str] = None,
     context_budget: Any = None,
     session_id: Optional[str] = None,
+    username: str = "Pantronux",
 ) -> Dict[str, Any]:
     """
     Single read path: raw short-term + optional Mem0 block (same inputs as response_node / stream).
@@ -846,7 +847,7 @@ def build_context_for_llm(
     # Parallelize independent I/O. Short-term retrieval and referent grounding
     # are independent from Mem0 context formatting.
     parallel_tasks: Dict[str, Any] = {
-        "short_term": lambda: memory_manager.get_short_term(persona_scope=persona_mode),
+        "short_term": lambda: memory_manager.get_short_term(persona_scope=persona_mode, username=username),
         "session_files": lambda: memory_manager.get_session_files(session_id) if session_id else [],
     }
     if include_referent_grounding:
@@ -923,6 +924,7 @@ async def build_context_for_llm_async(
     chat_platform: Optional[str] = None,
     context_budget: Any = None,
     session_id: Optional[str] = None,
+    username: str = "Pantronux",
 ) -> Dict[str, Any]:
     """Async variant of :func:`build_context_for_llm`.
 
@@ -941,6 +943,7 @@ async def build_context_for_llm_async(
         chat_platform=chat_platform,
         context_budget=context_budget,
         session_id=session_id,
+        username=username,
     )
 
 
@@ -959,7 +962,7 @@ _MEM0_PREFETCH_TTL_S = 30.0
 _MEM0_PREFETCH_TIMESTAMPS: Dict[str, float] = {}
 
 
-def prefetch_mem0(session_id: str, user_input: str, *, limit: int = 5) -> None:
+def prefetch_mem0(session_id: str, user_input: str, *, limit: int = 5, username: str = "Pantronux") -> None:
     """Kick off a Mem0 retrieval in the background, keyed by session.
 
     Safe to call multiple times — existing in-flight futures are preserved.
@@ -986,6 +989,7 @@ def prefetch_mem0(session_id: str, user_input: str, *, limit: int = 5) -> None:
                 perpetual_memory.perpetual_memory.retrieve_memories,
                 user_input,
                 limit,
+                username,
             )
         except RuntimeError:
             return
@@ -1020,6 +1024,7 @@ def safe_mem0_retrieve(
     *,
     limit: int = 5,
     timeout_s: float = _MEM0_DEFAULT_TIMEOUT_SEC,
+    username: str = "Pantronux",
 ) -> List[Dict[str, Any]]:
     """
     Hard-timeout Mem0 retrieval. Returns `[]` on timeout or any exception so
@@ -1034,6 +1039,7 @@ def safe_mem0_retrieve(
             perpetual_memory.perpetual_memory.retrieve_memories,
             user_input,
             limit,
+            username,
         )
         result = future.result(timeout=timeout_s)
     except concurrent.futures.TimeoutError:
@@ -1065,7 +1071,7 @@ def execute_memory_write_task(
     pass
 
 
-def execute_mem0_extract_task(user_input: str, final_response: str) -> None:
+def execute_mem0_extract_task(user_input: str, final_response: str, username: str = "Pantronux") -> None:
     """Mem0 extract+store with dedupe (graph + fast path may enqueue similar payloads)."""
     from kuro_backend import perpetual_memory
 
@@ -1081,10 +1087,11 @@ def execute_mem0_extract_task(user_input: str, final_response: str) -> None:
     memories_to_store = perpetual_memory.perpetual_memory.extract_personal_info(
         user_input,
         final_response,
+        username,
     )
     if memories_to_store and isinstance(memories_to_store, list):
-        perpetual_memory.perpetual_memory.store_memories(memories_to_store)
-        logger.info("[MEMORY_COORD] mem0_extract stored n=%s", len(memories_to_store))
+        perpetual_memory.perpetual_memory.store_memories(memories_to_store, username)
+        logger.info("[MEMORY_COORD] mem0_extract stored n=%s for user %s", len(memories_to_store), username)
     else:
         logger.debug("[MEMORY_COORD] mem0_extract nothing to store")
 
@@ -1130,9 +1137,11 @@ def record_mutation(
         return result_lt
 
     if domain == "mem0":
+        username = payload.get("username", "Pantronux")
         execute_mem0_extract_task(
             str(payload.get("user_input", "")),
             str(payload.get("final_response", "")),
+            username
         )
         result_mem0 = {
             "ok": True,

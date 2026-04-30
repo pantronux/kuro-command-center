@@ -63,6 +63,11 @@ def init_db():
                 "ALTER TABLE chat_history ADD COLUMN request_id TEXT"
             )
             logger.info("chat_history migration: added request_id column")
+        if "username" not in columns:
+            cursor.execute(
+                "ALTER TABLE chat_history ADD COLUMN username TEXT NOT NULL DEFAULT 'Pantronux'"
+            )
+            logger.info("chat_history migration: added username column with Pantronux default")
         cursor.execute(
             "UPDATE chat_history SET persona = 'consultant' WHERE persona IS NULL OR TRIM(persona) = ''"
         )
@@ -128,6 +133,7 @@ def add_message(
     attachments: List[str] = None,
     persona: Optional[str] = None,
     request_id: Optional[str] = None,
+    username: str = "Pantronux",
 ):
     """Add a message to the chat history."""
     conn = None
@@ -136,8 +142,8 @@ def add_message(
         cursor = conn.cursor()
         normalized_persona = memory_manager.normalize_persona(persona)
         cursor.execute(
-            "INSERT OR IGNORE INTO chat_history (platform, role, content, attachments, persona, request_id) VALUES (?, ?, ?, ?, ?, ?)",
-            (platform, role, content, json.dumps(attachments or []), normalized_persona, request_id)
+            "INSERT OR IGNORE INTO chat_history (platform, role, content, attachments, persona, request_id, username) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (platform, role, content, json.dumps(attachments or []), normalized_persona, request_id, username)
         )
         conn.commit()
     except Exception as e:
@@ -151,8 +157,9 @@ def get_history(
     offset: int = 0,
     platform: str = None,
     persona: Optional[str] = None,
+    username: str = "Pantronux",
 ) -> List[Dict]:
-    """Get recent chat history with pagination and optional platform/persona filters."""
+    """Get recent chat history with pagination and optional platform/persona/username filters."""
     conn = None
     try:
         conn = _get_connection()
@@ -160,13 +167,13 @@ def get_history(
         normalized_persona = memory_manager.normalize_persona(persona)
         if platform:
             cursor.execute(
-                "SELECT * FROM chat_history WHERE platform = ? AND persona = ? ORDER BY timestamp DESC LIMIT ? OFFSET ?",
-                (platform, normalized_persona, limit, offset)
+                "SELECT * FROM chat_history WHERE platform = ? AND persona = ? AND username = ? ORDER BY timestamp DESC LIMIT ? OFFSET ?",
+                (platform, normalized_persona, username, limit, offset)
             )
         else:
             cursor.execute(
-                "SELECT * FROM chat_history WHERE persona = ? ORDER BY timestamp DESC LIMIT ? OFFSET ?",
-                (normalized_persona, limit, offset)
+                "SELECT * FROM chat_history WHERE persona = ? AND username = ? ORDER BY timestamp DESC LIMIT ? OFFSET ?",
+                (normalized_persona, username, limit, offset)
             )
         rows = cursor.fetchall()
         
@@ -207,7 +214,7 @@ def get_history(
         if conn:
             conn.close()
 
-def get_total_count(platform: str = None, persona: Optional[str] = None) -> int:
+def get_total_count(platform: str = None, persona: Optional[str] = None, username: str = "Pantronux") -> int:
     """Get total count of messages for pagination."""
     conn = None
     try:
@@ -216,11 +223,11 @@ def get_total_count(platform: str = None, persona: Optional[str] = None) -> int:
         normalized_persona = memory_manager.normalize_persona(persona)
         if platform:
             cursor.execute(
-                "SELECT COUNT(*) FROM chat_history WHERE platform = ? AND persona = ?",
-                (platform, normalized_persona),
+                "SELECT COUNT(*) FROM chat_history WHERE platform = ? AND persona = ? AND username = ?",
+                (platform, normalized_persona, username),
             )
         else:
-            cursor.execute("SELECT COUNT(*) FROM chat_history WHERE persona = ?", (normalized_persona,))
+            cursor.execute("SELECT COUNT(*) FROM chat_history WHERE persona = ? AND username = ?", (normalized_persona, username))
         return cursor.fetchone()[0]
     except Exception as e:
         logger.error(f"Failed to get chat history count: {e}")
@@ -229,16 +236,16 @@ def get_total_count(platform: str = None, persona: Optional[str] = None) -> int:
         if conn:
             conn.close()
 
-def clear_history(platform: str = None):
-    """Clear chat history, optionally for a specific platform."""
+def clear_history(platform: str = None, username: str = "Pantronux"):
+    """Clear chat history for a specific user and optionally a specific platform."""
     conn = None
     try:
         conn = _get_connection()
         cursor = conn.cursor()
         if platform:
-            cursor.execute("DELETE FROM chat_history WHERE platform = ?", (platform,))
+            cursor.execute("DELETE FROM chat_history WHERE platform = ? AND username = ?", (platform, username))
         else:
-            cursor.execute("DELETE FROM chat_history")
+            cursor.execute("DELETE FROM chat_history WHERE username = ?", (username,))
         conn.commit()
         logger.info(f"Chat history cleared (platform: {platform or 'all'})")
     except Exception as e:
