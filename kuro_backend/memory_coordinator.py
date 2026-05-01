@@ -897,8 +897,8 @@ def build_context_for_llm(
         try:
             from kuro_backend import finance_db
 
-            finance_block = finance_db.format_ledger_snapshot()
-            market_block = finance_db.format_market_snapshot_for_prompt()
+            finance_block = finance_db.format_ledger_snapshot(username=username)
+            market_block = finance_db.format_market_snapshot_for_prompt(username=username)
         except Exception as exc:
             logger.debug("[MEMORY_COORD] finance/market snapshot skipped: %s", exc)
             finance_block = ""
@@ -1262,7 +1262,7 @@ def apply_openclaw_execution_result(
 # T2 Metacognitive Tier — Belief Revision (Tomasello 2025)
 # ---------------------------------------------------------------------------
 
-def evaluate_alignment(user_input: str, persona_mode: str) -> Dict[str, Any]:
+def evaluate_alignment(user_input: str, persona_mode: str, username: str = "Pantronux") -> Dict[str, Any]:
     """
     T2 Belief Revision: compare the current user input against prior BRD-backed
     commitments stored in the research_ledger (kind='decision' and 'novelty_point').
@@ -1273,6 +1273,7 @@ def evaluate_alignment(user_input: str, persona_mode: str) -> Dict[str, Any]:
     Args:
         user_input:   Raw user message.
         persona_mode: Active persona key (e.g. "advisor", "consultant", "auditor").
+        username:     User requesting alignment check.
 
     Returns:
         {
@@ -1295,13 +1296,13 @@ def evaluate_alignment(user_input: str, persona_mode: str) -> Dict[str, Any]:
     # primary BRD-anchored belief stores for the advisor/consultant/auditor path.
     try:
         prior_decisions = memory_manager.query_research_ledger(
-            persona_scope=persona_mode, kind="decision", limit=8
+            persona_scope=persona_mode, username=username, kinds=["decision"], limit=8
         )
         prior_novelty = memory_manager.query_research_ledger(
-            persona_scope=persona_mode, kind="novelty_point", limit=5
+            persona_scope=persona_mode, username=username, kinds=["novelty_point"], limit=5
         )
     except Exception as exc:
-        logger.warning("[EVALUATE_ALIGNMENT] ledger read failed: %s", exc)
+        logger.warning("[EVALUATE_ALIGNMENT] ledger read failed for %s: %s", username, exc)
         return _NULL_RESULT
 
     all_priors = prior_decisions + prior_novelty

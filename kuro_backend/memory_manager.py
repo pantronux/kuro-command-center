@@ -697,8 +697,8 @@ def query_research_ledger_since(
     ]
 
 
-def query_short_term_summaries_recent(limit: int = 50) -> List[Dict]:
-    """Return the most recently updated short_term_summaries rows.
+def query_short_term_summaries_recent(username: str = "Pantronux", limit: int = 50) -> List[Dict]:
+    """Return the most recently updated short_term_summaries rows for a specific user.
 
     We can't filter by a ``created_at`` column (there isn't one), but
     ``updated_at`` reflects when the summarizer last wrote. Caller filters
@@ -709,8 +709,9 @@ def query_short_term_summaries_recent(limit: int = 50) -> List[Dict]:
         cursor = conn.cursor()
         cursor.execute(
             "SELECT persona_scope, last_entry_id, summary, summary_json, updated_at "
-            "FROM short_term_summaries ORDER BY updated_at DESC LIMIT ?",
-            (int(limit),),
+            "FROM short_term_summaries WHERE username = ? "
+            "ORDER BY updated_at DESC LIMIT ?",
+            (username, int(limit)),
         )
         rows = cursor.fetchall()
     finally:

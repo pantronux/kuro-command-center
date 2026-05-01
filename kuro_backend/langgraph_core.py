@@ -444,7 +444,7 @@ class KuroState(TypedDict):
     retrieval_grade: str          # "relevant" | "ambiguous" | "irrelevant"
     retrieval_retry_count: int    # bounded 0–2; failover to Serper at max
     rewritten_query: str          # LLM-transformed query after grading fail
-    master_name: str              # User-specific name (e.g. Pantronux, Kagetoki-sama)
+    master_name: str              # User-specific name (e.g. Pantronux, Master Faikhira)
     username: str                 # System username for memory isolation
 
 
@@ -1182,10 +1182,11 @@ def metacognitive_review_node(state: KuroState) -> Dict[str, Any]:
     alignment_result: Dict[str, Any] = {
         "score": 1.0, "conflicts": [], "supports": [], "recommendation": "",
     }
+    username = state.get("username", "Pantronux")
     try:
-        alignment_result = memory_coordinator.evaluate_alignment(user_input, persona_mode)
+        alignment_result = memory_coordinator.evaluate_alignment(user_input, persona_mode, username=username)
     except Exception as exc:
-        logger.warning("[METACOGNITIVE] evaluate_alignment error: %s", exc)
+        logger.warning("[METACOGNITIVE] evaluate_alignment error for %s: %s", username, exc)
 
     score = float(alignment_result.get("score", 1.0))
     threshold = float(os.getenv("KURO_ALIGNMENT_THRESHOLD", "0.35"))
@@ -1231,7 +1232,7 @@ def metacognitive_review_node(state: KuroState) -> Dict[str, Any]:
     joint_goal_block = ""
     try:
         from kuro_backend.agency.joint_goal_store import format_for_prompt
-        joint_goal_block = format_for_prompt()
+        joint_goal_block = format_for_prompt(username=username)
     except Exception as exc:
         logger.debug("[METACOGNITIVE] joint_goal_block skipped: %s", exc)
 
@@ -1485,7 +1486,8 @@ def response_node(state: KuroState) -> Dict[str, Any]:
                 completion_tokens = response.usage_metadata.candidates_token_count or 0
                 total_tokens = response.usage_metadata.total_token_count or (prompt_tokens + completion_tokens)
                 
-                observability.track_token_usage(session_id, prompt_tokens, completion_tokens, total_tokens)
+                username = state.get("username", "Pantronux")
+                observability.track_token_usage(session_id, prompt_tokens, completion_tokens, total_tokens, username=username)
                 
                 if span:
                     span.set_attribute("response_node.prompt_tokens", prompt_tokens)

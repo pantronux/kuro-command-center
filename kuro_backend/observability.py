@@ -263,7 +263,7 @@ def trace_node(node_name: str, attributes: Dict[str, str] = None):
 # TOKEN USAGE MONITORING
 # ============================================
 
-def track_token_usage(session_id: str, prompt_tokens: int, completion_tokens: int, total_tokens: int):
+def track_token_usage(session_id: str, prompt_tokens: int, completion_tokens: int, total_tokens: int, username: str = "Pantronux"):
     """
     Track token usage per session and alert if threshold exceeded.
     """
@@ -299,6 +299,7 @@ def track_token_usage(session_id: str, prompt_tokens: int, completion_tokens: in
                 prompt_tokens,
                 completion_tokens,
                 cost,
+                username,
             )
         except Exception as exc:
             logger.debug("[OBS] api_usage rollup skipped: %s", exc)

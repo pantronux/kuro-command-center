@@ -62,7 +62,7 @@ def execute_research(queries: Dict[str, List[str]]) -> Dict[str, Any]:
     return results
 
 
-def synthesize_intelligence(research_results: Dict[str, Any]) -> Dict[str, Any]:
+def synthesize_intelligence(research_results: Dict[str, Any], username: str = "Pantronux", display_name: str = "Pantronux") -> Dict[str, Any]:
     """
     Use Gemini to synthesize research results into intelligence briefing.
     Returns structured briefing with sections.
@@ -75,13 +75,13 @@ def synthesize_intelligence(research_results: Dict[str, Any]) -> Dict[str, Any]:
     # Prepare research data for synthesis
     research_summary = json.dumps(research_results, ensure_ascii=False, indent=2)[:8000]
     
-    prompt = f"""Kamu adalah Kuro, AI Sovereign dan Analis Intelijen Pantronux. Tugasmu adalah menganalisis hasil riset dan menyusun Laporan Intelijen Harian yang formal dan profesional.
+    prompt = f"""Kamu adalah Kuro, AI Sovereign dan Analis Intelijen {display_name}. Tugasmu adalah menganalisis hasil riset dan menyusun Laporan Intelijen Harian yang formal dan profesional.
 
 DATA RISET MENTAH:
 {research_summary}
 
 INSTRUKSI LAPORAN:
-Gunakan Bahasa Indonesia Formal (Baku). Panggil user dengan nama "Pantronux".
+Gunakan Bahasa Indonesia Formal (Baku). Panggil user dengan nama "{display_name}".
 
 Struktur laporan WAJIB:
 
@@ -158,11 +158,11 @@ LAPORAN:"""
         return briefing
         
     except Exception as e:
-        logger.error(f"[INTELLIGENCE] Synthesis failed: {e}")
+        logger.error(f"[INTELLIGENCE] Synthesis failed for {username}: {e}")
         # Return fallback briefing
         return {
             "date": datetime.now().strftime("%Y-%m-%d"),
-            "status_pagi": f"Selamat pagi, Pantronux. Sistem Kuro beroperasi normal.",
+            "status_pagi": f"Selamat pagi, {display_name}. Sistem Kuro beroperasi normal.",
             "intelijen_sektoral": "Tidak ada intelijen signifikan hari ini.",
             "wawasan_teknologi": "Tidak ada perkembangan teknologi signifikan.",
             "wawasan_finansial": "Tidak ada update finansial signifikan.",
@@ -174,7 +174,7 @@ LAPORAN:"""
         }
 
 
-def format_telegram_message(briefing: Dict[str, Any]) -> str:
+def format_telegram_message(briefing: Dict[str, Any], display_name: str = "Pantronux") -> str:
     """Format briefing for Telegram message with markdown."""
     date = briefing.get("date", datetime.now().strftime("%Y-%m-%d"))
     
@@ -214,9 +214,9 @@ _Dikirim otomatis oleh Kuro AI Sovereign_"""
     return message
 
 
-def run_daily_research() -> Dict[str, Any]:
+def run_daily_research(username: str = "Pantronux") -> Dict[str, Any]:
     """
-    Main function: Execute full research pipeline.
+    Main function: Execute full research pipeline for a specific user.
     1. Generate queries
     2. Execute research
     3. Synthesize intelligence
@@ -224,8 +224,16 @@ def run_daily_research() -> Dict[str, Any]:
     5. Save to log file
     6. Return briefing for Telegram delivery
     """
-    logger.info("[INTELLIGENCE] Starting daily research pipeline...")
+    logger.info(f"[INTELLIGENCE] Starting daily research pipeline for {username}...")
     
+    from kuro_backend import memory_manager
+    display_name = "Pantronux"
+    try:
+        profile = memory_manager.load_master_profile(username)
+        display_name = profile.get("master_name", username)
+    except:
+        pass
+
     # Step 1: Generate queries
     queries = generate_daily_queries()
     logger.info(f"[INTELLIGENCE] Generated queries for {len(queries)} pillars")
@@ -236,7 +244,7 @@ def run_daily_research() -> Dict[str, Any]:
     logger.info(f"[INTELLIGENCE] Collected {total_results} research results")
     
     # Step 3: Synthesize intelligence
-    briefing = synthesize_intelligence(research_results)
+    briefing = synthesize_intelligence(research_results, username=username, display_name=display_name)
     
     # Step 4: Save to database
     today = datetime.now().strftime("%Y-%m-%d")
@@ -244,11 +252,12 @@ def run_daily_research() -> Dict[str, Any]:
         date=today,
         summary_text=briefing.get("full_report", ""),
         raw_json_data=research_results,
-        experimental_signals=briefing.get("rekomendasi_eksperimental", [])
+        experimental_signals=briefing.get("rekomendasi_eksperimental", []),
+        username=username
     )
     
     # Step 5: Save to log file
-    log_file = os.path.join(BRIEFINGS_LOG_DIR, f"briefing_{today}.json")
+    log_file = os.path.join(BRIEFINGS_LOG_DIR, f"briefing_{username}_{today}.json")
     with open(log_file, 'w', encoding='utf-8') as f:
         json.dump({
             "briefing": briefing,

@@ -211,8 +211,8 @@ def _coerce_findings(raw: Any) -> tuple[List[Finding], str]:
 # Collector
 # ---------------------------------------------------------------------------
 
-def collect_last_24h(lookback_hours: int = 24) -> Dict[str, Any]:
-    """Read last-N-hours reflection input from SQLite.
+def collect_last_24h(lookback_hours: int = 24, username: str = "Pantronux") -> Dict[str, Any]:
+    """Read last-N-hours reflection input from SQLite for a specific user.
 
     Returns a small dict with ``summaries``, ``ledger``, and ``personas_active``
     keys. Uses fresh short-lived connections so writers are never blocked.
@@ -223,7 +223,7 @@ def collect_last_24h(lookback_hours: int = 24) -> Dict[str, Any]:
         timespec="seconds"
     )
 
-    raw_summaries = memory_manager.query_short_term_summaries_recent(limit=50)
+    raw_summaries = memory_manager.query_short_term_summaries_recent(username=username, limit=50)
     summaries: List[Dict[str, Any]] = []
     personas_active: set[str] = set()
     for row in raw_summaries:
@@ -248,7 +248,7 @@ def collect_last_24h(lookback_hours: int = 24) -> Dict[str, Any]:
             "entities": list(summary_json.get("entities") or []),
         })
 
-    raw_ledger = memory_manager.query_research_ledger_since(cutoff, limit=500)
+    raw_ledger = memory_manager.query_research_ledger_since(cutoff, username=username, limit=500)
     ledger: List[Dict[str, Any]] = []
     for row in raw_ledger:
         personas_active.add(row.get("persona_scope", "consultant"))
@@ -578,7 +578,7 @@ def _cve_scan_via_nvd_direct(
     return out
 
 
-def _persist_cve_alert(cve: Dict[str, Any], *, cycle_id: int) -> bool:
+def _persist_cve_alert(cve: Dict[str, Any], *, cycle_id: int, username: str = "Pantronux") -> bool:
     """Write a CVE finding to Chroma Layer 2 with a ``cve-alert`` tag."""
     try:
         from kuro_backend import memory_manager
@@ -597,6 +597,7 @@ def _persist_cve_alert(cve: Dict[str, Any], *, cycle_id: int) -> bool:
         from kuro_backend import perpetual_memory
         perpetual_memory.get_memory_client().store_memories([
             {"memory": content, "metadata": {
+                "user_id": username,
                 "source": "cve_sentinel",
                 "tag": "cve-alert",
                 "cve_id": cve_id,
@@ -614,7 +615,7 @@ def _persist_cve_alert(cve: Dict[str, Any], *, cycle_id: int) -> bool:
         return False
 
 
-def _publish_cve_event(cve: Dict[str, Any]) -> bool:
+def _publish_cve_event(cve: Dict[str, Any], username: str = "Pantronux") -> bool:
     """Emit a ProactiveEvent so the bus handles dedup + Telegram."""
     try:
         from kuro_backend import proactive_events
@@ -633,8 +634,9 @@ def _publish_cve_event(cve: Dict[str, Any]) -> bool:
             severity=bus_severity,
             title=title,
             body=body,
-            fingerprint_seed=f"cve:{cve_id}:{target_id}",
+            fingerprint_seed=f"cve:{cve_id}:{target_id}:{username}",
             context={
+                "username": username,
                 "cve_id": cve_id,
                 "cvss": cve.get("cvss"),
                 "target_id": target_id,
@@ -648,12 +650,8 @@ def _publish_cve_event(cve: Dict[str, Any]) -> bool:
         return False
 
 
-def _run_cve_sentinel(*, cycle_id: int, dry_run: bool) -> Dict[str, int]:
-    """Scan Proxmox + VMs for CVEs, persist + alert. Returns counts dict.
-
-    Kill-switched by ``KURO_CVE_SENTINEL_ENABLED``; CVSS floor via
-    ``KURO_CVE_MIN_CVSS``; alert cap via ``KURO_CVE_MAX_ALERTS_PER_CYCLE``.
-    """
+def _run_cve_sentinel(*, cycle_id: int, dry_run: bool, username: str = "Pantronux") -> Dict[str, int]:
+    """Scan Proxmox + VMs for CVEs, persist + alert. Returns counts dict."""
     counts = {"cves": 0, "persisted": 0, "notified": 0}
     if not _env_bool(_ENV_CVE_ENABLED, True):
         logger.info("[CVE] sentinel disabled via %s", _ENV_CVE_ENABLED)
@@ -703,9 +701,9 @@ def _run_cve_sentinel(*, cycle_id: int, dry_run: bool) -> Dict[str, int]:
                 logger.info("[CVE] dry_run cve=%s target=%s",
                             cve.get("id"), cve.get("target_id"))
                 continue
-            if _persist_cve_alert(cve, cycle_id=cycle_id):
+            if _persist_cve_alert(cve, cycle_id=cycle_id, username=username):
                 counts["persisted"] += 1
-            if _publish_cve_event(cve):
+            if _publish_cve_event(cve, username=username):
                 counts["notified"] += 1
         return counts
     finally:
@@ -768,6 +766,7 @@ def _persist_dream_insight(
     *,
     source_label: str,
     cycle_id: int,
+    username: str = "Pantronux",
 ) -> bool:
     """Write the dream-insight into Chroma Layer 2 with a #dream-insight tag."""
     if not summary_text:
@@ -784,6 +783,7 @@ def _persist_dream_insight(
         from kuro_backend import perpetual_memory
         perpetual_memory.get_memory_client().store_memories([
             {"memory": content, "metadata": {
+                "user_id": username,
                 "source": "dream_insight",
                 "tag": "dream-insight",
                 "persona_scope": finding.persona_scope,
@@ -799,7 +799,7 @@ def _persist_dream_insight(
         return False
 
 
-def _enrich_finding(finding: Finding, *, cycle_id: int, dry_run: bool) -> bool:
+def _enrich_finding(finding: Finding, *, cycle_id: int, dry_run: bool, username: str = "Pantronux") -> bool:
     """Run search + summarize + persist. Returns True when Chroma was written."""
     if not _env_bool(_ENV_SEARCH, True):
         logger.info("[DREAMING] enrichment disabled via env")
@@ -824,7 +824,7 @@ def _enrich_finding(finding: Finding, *, cycle_id: int, dry_run: bool) -> bool:
         )
         return False
     return _persist_dream_insight(
-        finding, summary, source_label=source_label, cycle_id=cycle_id,
+        finding, summary, source_label=source_label, cycle_id=cycle_id, username=username,
     )
 
 
@@ -832,8 +832,8 @@ def _enrich_finding(finding: Finding, *, cycle_id: int, dry_run: bool) -> bool:
 # SSoT bump gating
 # ---------------------------------------------------------------------------
 
-def _maybe_bump_ssot(finding: Finding, *, cycle_id: int, dry_run: bool) -> bool:
-    """Bump data revision only when the finding clears all gates."""
+def _maybe_bump_ssot(finding: Finding, *, cycle_id: int, dry_run: bool, username: str = "Pantronux") -> bool:
+    """Bump data revision only when the finding clears all gates for a specific user."""
     if not finding.ssot_bump_recommended:
         return False
     if finding.kind not in ("inconsistency", "deep_research"):
@@ -842,8 +842,8 @@ def _maybe_bump_ssot(finding: Finding, *, cycle_id: int, dry_run: bool) -> bool:
         return False
     if dry_run:
         logger.info(
-            "[DREAMING] dry_run ssot_bump finding=%s persona=%s",
-            finding.id, finding.persona_scope,
+            "[DREAMING] dry_run ssot_bump finding=%s persona=%s user=%s",
+            finding.id, finding.persona_scope, username,
         )
         return False
     try:
@@ -879,20 +879,29 @@ def _short_desc(finding: Finding, *, max_chars: int = 220) -> str:
     return desc
 
 
-def _maybe_notify(finding: Finding, *, dry_run: bool) -> bool:
-    """Send Telegram alert only for inconsistency findings; dedup by fingerprint."""
+def _maybe_notify(finding: Finding, *, dry_run: bool, username: str = "Pantronux") -> bool:
+    """Send Telegram alert only for inconsistency findings; dedup by fingerprint per user."""
     if finding.kind != "inconsistency":
         return False
     from kuro_backend import memory_manager
     from kuro_backend import telegram_notifier
 
-    fingerprint = _finding_fingerprint(finding)
+    # Add username to seed for multi-user isolation in notifications
+    seed = f"{username}|{finding.persona_scope}|{finding.kind}|{finding.description[:240]}"
+    fingerprint = hashlib.sha1(seed.encode("utf-8")).hexdigest()
+
     if memory_manager.dream_notification_seen(fingerprint):
-        logger.info("[DREAMING] notify skipped (dedup) finding=%s", finding.id)
+        logger.info("[DREAMING] notify skipped (dedup) finding=%s user=%s", finding.id, username)
         return False
+    
+    # Prefix message with username if not master
+    desc = _short_desc(finding)
+    if username != "Pantronux":
+        desc = f"[{username}] {desc}"
+
     sent = telegram_notifier.send_dream_inconsistency(
         finding.persona_scope,
-        _short_desc(finding),
+        desc,
         finding_id=finding.id,
         dry_run=dry_run,
     )
@@ -956,8 +965,8 @@ def _persist_fiscal_roll_up_insight(
         logger.warning("[FISCAL] mem0 insight failed: %s", exc)
 
 
-def _run_fiscal_sentinel(*, cycle_id: int, dry_run: bool) -> Dict[str, int]:
-    """Nightly audit: yesterday's API cost vs USD threshold; Telegram if over."""
+def _run_fiscal_sentinel(*, cycle_id: int, dry_run: bool, username: str = "Pantronux") -> Dict[str, int]:
+    """Nightly audit: yesterday's API cost vs USD threshold; Telegram if over for a specific user."""
     counts: Dict[str, int] = {"checked": 0, "notified": 0, "cost_cents": 0}
     if not _env_bool("KURO_FISCAL_SENTINEL_ENABLED", True):
         logger.info("[FISCAL] sentinel disabled via KURO_FISCAL_SENTINEL_ENABLED")
@@ -967,11 +976,16 @@ def _run_fiscal_sentinel(*, cycle_id: int, dry_run: bool) -> Dict[str, int]:
         from kuro_backend import finance_db, proactive_events
 
         yesterday = (datetime.now().date() - timedelta(days=1)).isoformat()
-        cost = float(finance_db.get_daily_api_cost_usd(yesterday))
+        cost = float(finance_db.get_daily_api_cost_usd(yesterday, username=username))
         counts["checked"] = 1
         counts["cost_cents"] = int(round(cost * 100))
 
-        threshold = float(os.getenv("KURO_FISCAL_DAILY_USD_THRESHOLD", "1.00"))
+        # Check user-specific budget if available, else fallback to global env
+        budget = finance_db.get_budget(datetime.now().strftime("%Y-%m"), username=username)
+        if budget:
+            threshold = float(budget.get("amount_usd", 50.0)) * 0.1 # 10% of monthly as daily warning
+        else:
+            threshold = float(os.getenv("KURO_FISCAL_DAILY_USD_THRESHOLD", "1.00"))
 
         alerted = cost >= threshold
         if not dry_run:
@@ -987,6 +1001,7 @@ def _run_fiscal_sentinel(*, cycle_id: int, dry_run: bool) -> Dict[str, int]:
             return counts
 
         body = (
+            f"User: {username}\n"
             f"Date (UTC calendar day): {yesterday}\n"
             f"Estimated API spend: USD {cost:.4f}\n"
             f"Threshold: USD {threshold:.2f}\n"
@@ -995,16 +1010,16 @@ def _run_fiscal_sentinel(*, cycle_id: int, dry_run: bool) -> Dict[str, int]:
         event = proactive_events.make_event(
             kind="fiscal_alert",
             severity="warning",
-            title=f"API spend exceeded USD {threshold:.2f}",
+            title=f"API spend exceeded USD {threshold:.2f} for {username}",
             body=body,
-            fingerprint_seed=f"fiscal:{yesterday}",
-            context={"date": yesterday, "cost_usd": cost, "threshold": threshold},
+            fingerprint_seed=f"fiscal:{yesterday}:{username}",
+            context={"date": yesterday, "cost_usd": cost, "threshold": threshold, "username": username},
         )
         if proactive_events.publish(event, dry_run=dry_run):
             counts["notified"] = 1
         return counts
     except Exception as exc:
-        logger.warning("[FISCAL] sentinel failed: %s", exc)
+        logger.warning("[FISCAL] sentinel failed for %s: %s", username, exc)
         return counts
 
 
@@ -1029,12 +1044,13 @@ def _market_openclaw_price(symbol: str) -> Optional[float]:
         return None
 
 
-def _persist_market_insight(note: str, *, cycle_id: int) -> None:
+def _persist_market_insight(note: str, *, cycle_id: int, username: str = "Pantronux") -> None:
     try:
         from kuro_backend import perpetual_memory
 
         perpetual_memory.get_memory_client().store_memories([
             {"memory": f"[DREAM-INSIGHT][MARKET] {note}", "metadata": {
+                "user_id": username,
                 "source": "dream_insight",
                 "tag": "market-sentinel",
                 "persona_scope": "chancellor",
@@ -1045,7 +1061,7 @@ def _persist_market_insight(note: str, *, cycle_id: int) -> None:
         logger.warning("[MARKET] mem0 insight failed: %s", exc)
 
 
-def _run_prediction_scan_nightly(*, dry_run: bool) -> int:
+def _run_prediction_scan_nightly(*, dry_run: bool, username: str = "Pantronux") -> int:
     if not _env_bool("KURO_PREDICTION_SCAN_ENABLED", True):
         return 0
     try:
@@ -1065,7 +1081,7 @@ def _run_prediction_scan_nightly(*, dry_run: bool) -> int:
         markets = raw.get("markets") or []
         if not isinstance(markets, list) or dry_run:
             return len(markets) if isinstance(markets, list) else 0
-        rows = finance_db.list_prediction_watch()
+        rows = finance_db.list_prediction_watch(username=username)
         existing = {
             str(x["slug"]): float(x.get("last_probability") or 0.0) for x in rows
         }
@@ -1089,6 +1105,7 @@ def _run_prediction_scan_nightly(*, dry_run: bool) -> int:
                 str(m.get("title") or slug)[:240],
                 prob,
                 trend=trend,
+                username=username,
             )
             existing[slug] = prob
             n += 1
@@ -1098,8 +1115,8 @@ def _run_prediction_scan_nightly(*, dry_run: bool) -> int:
         return 0
 
 
-def _run_market_sentinel(*, cycle_id: int, dry_run: bool) -> Dict[str, int]:
-    """Refresh watched symbols + optional prediction scan; alert on large moves."""
+def _run_market_sentinel(*, cycle_id: int, dry_run: bool, username: str = "Pantronux") -> Dict[str, int]:
+    """Refresh watched symbols + optional prediction scan; alert on large moves for a specific user."""
     counts: Dict[str, int] = {"checked": 0, "notified": 0, "alerts": 0, "prediction_rows": 0}
     if not _env_bool("KURO_MARKET_SENTINEL_ENABLED", True):
         logger.info("[MARKET] sentinel disabled via KURO_MARKET_SENTINEL_ENABLED")
@@ -1108,10 +1125,10 @@ def _run_market_sentinel(*, cycle_id: int, dry_run: bool) -> Dict[str, int]:
     try:
         from kuro_backend import finance_db, proactive_events
     except Exception as exc:
-        logger.warning("[MARKET] imports failed: %s", exc)
+        logger.warning("[MARKET] imports failed for %s: %s", username, exc)
         return counts
 
-    watched = finance_db.list_watched_symbols(active_only=True)
+    watched = finance_db.list_watched_symbols(active_only=True, username=username)
     alerts: List[str] = []
     for row in watched:
         sym = str(row.get("symbol") or "").strip().upper()
@@ -1122,13 +1139,14 @@ def _run_market_sentinel(*, cycle_id: int, dry_run: bool) -> Dict[str, int]:
         if price is None:
             continue
         counts["checked"] += 1
-        meta = finance_db.apply_watched_price(sym, price)
+        meta = finance_db.apply_watched_price(sym, price, username=username)
         pct = float(meta.get("last_pct_change") or 0.0)
         if was_warm and abs(pct) >= move_pct:
             counts["alerts"] += 1
             alerts.append(f"{sym} {pct:+.2f}%")
             day_key = datetime.now().date().isoformat()
             body = (
+                f"User: {username}\n"
                 f"Symbol: {sym}\nMove since last observation: {pct:+.2f}%\n"
                 f"Last price (USD): {price:.4f}\n"
                 "Source: OpenClaw market_analysis (readonly)."
@@ -1136,15 +1154,15 @@ def _run_market_sentinel(*, cycle_id: int, dry_run: bool) -> Dict[str, int]:
             event = proactive_events.make_event(
                 kind="market_alert",
                 severity="warning",
-                title=f"Watched symbol {sym} moved {pct:+.2f}%",
+                title=f"Watched symbol {sym} moved {pct:+.2f}% for {username}",
                 body=body,
-                fingerprint_seed=f"market:{sym}:{day_key}",
-                context={"symbol": sym, "pct": pct, "price": price},
+                fingerprint_seed=f"market:{sym}:{day_key}:{username}",
+                context={"symbol": sym, "pct": pct, "price": price, "username": username},
             )
             if proactive_events.publish(event, dry_run=dry_run):
                 counts["notified"] += 1
 
-    pred_n = _run_prediction_scan_nightly(dry_run=dry_run)
+    pred_n = _run_prediction_scan_nightly(dry_run=dry_run, username=username)
     counts["prediction_rows"] = pred_n
     note = "; ".join(alerts[:6]) if alerts else ""
     brief = note or (f"Prediction watch rows refreshed: {pred_n}." if pred_n else "")
@@ -1152,9 +1170,10 @@ def _run_market_sentinel(*, cycle_id: int, dry_run: bool) -> Dict[str, int]:
         finance_db.set_market_brief_and_note(
             brief or "Market sentinel: no large moves; prediction scan complete.",
             sentinel_note=note or f"predictions_updated={pred_n}",
+            username=username,
         )
         if note:
-            _persist_market_insight(note, cycle_id=cycle_id)
+            _persist_market_insight(note, cycle_id=cycle_id, username=username)
     if alerts and not dry_run:
         try:
             from kuro_backend import dashboard_broadcast
@@ -1181,13 +1200,10 @@ def run_dreaming_cycle(
     """
     started = time.perf_counter()
     audit: Dict[str, Any] = {
-        "status": "unknown",
-        "findings": 0,
-        "enriched": 0,
-        "notified": 0,
-        "ssot_bumps": 0,
-        "cycle_id": None,
-        "duration_ms": 0.0,
+        "status": "starting",
+        "users_processed": [],
+        "total_findings": 0,
+        "total_notified": 0,
     }
 
     if not _env_bool(_ENV_ENABLED, True):
@@ -1216,108 +1232,85 @@ def run_dreaming_cycle(
 
     cycle_id = memory_manager.insert_dreaming_cycle(status="running")
     audit["cycle_id"] = cycle_id
-    findings_count = 0
-    enriched_count = 0
-    notified_count = 0
-    ssot_bumps = 0
-    error_text: Optional[str] = None
-    final_status = "ok"
+
+    # Get all users to process
+    from main import USER_REGISTRY
+    all_usernames = list(USER_REGISTRY.keys())
+    if not all_usernames:
+        all_usernames = ["Pantronux"]
 
     try:
         if not force and not _idle_gate_passes(_env_int(_ENV_IDLE_MIN, 20)):
             logger.info("[DREAMING] skipped — idle gate not cleared")
             audit["status"] = "skipped"
-            audit["reason"] = "not_idle"
-            final_status = "skipped"
             return audit
 
-        # CVE sentinel is independent of the chat corpus — run it first so
-        # a quiet conversation day still gets a nightly security check.
-        try:
-            cve_counts = _run_cve_sentinel(cycle_id=cycle_id, dry_run=dry_run)
-        except Exception as cve_exc:
-            logger.warning("[DREAMING] cve sentinel failed: %s", cve_exc)
-            cve_counts = {"cves": 0, "persisted": 0, "notified": 0}
-        audit["cve_findings"] = cve_counts.get("cves", 0)
-        audit["cve_persisted"] = cve_counts.get("persisted", 0)
-        audit["cve_notified"] = cve_counts.get("notified", 0)
-        notified_count += cve_counts.get("notified", 0)
+        for username in all_usernames:
+            logger.info("[DREAMING] Starting cycle for user: %s", username)
+            user_audit = {"username": username, "findings": 0, "notified": 0}
+            
+            # CVE sentinel (security is priority, runs for each user to ensure visibility)
+            try:
+                cve_counts = _run_cve_sentinel(cycle_id=cycle_id, dry_run=dry_run, username=username)
+                user_audit["cve"] = cve_counts
+                user_audit["notified"] += cve_counts.get("notified", 0)
+            except Exception as e:
+                logger.warning("[DREAMING] CVE sentinel failed for %s: %s", username, e)
 
-        try:
-            fiscal_counts = _run_fiscal_sentinel(cycle_id=cycle_id, dry_run=dry_run)
-        except Exception as fiscal_exc:
-            logger.warning("[DREAMING] fiscal sentinel failed: %s", fiscal_exc)
-            fiscal_counts = {"checked": 0, "notified": 0, "cost_cents": 0}
-        audit["fiscal_cost_cents"] = fiscal_counts.get("cost_cents", 0)
-        audit["fiscal_notified"] = fiscal_counts.get("notified", 0)
-        notified_count += fiscal_counts.get("notified", 0)
+            # Fiscal sentinel
+            try:
+                fiscal_counts = _run_fiscal_sentinel(cycle_id=cycle_id, dry_run=dry_run, username=username)
+                user_audit["fiscal"] = fiscal_counts
+                user_audit["notified"] += fiscal_counts.get("notified", 0)
+            except Exception as e:
+                logger.warning("[DREAMING] Fiscal sentinel failed for %s: %s", username, e)
 
-        try:
-            market_counts = _run_market_sentinel(cycle_id=cycle_id, dry_run=dry_run)
-        except Exception as m_exc:
-            logger.warning("[DREAMING] market sentinel failed: %s", m_exc)
-            market_counts = {"checked": 0, "notified": 0, "alerts": 0, "prediction_rows": 0}
-        audit["market_checked"] = market_counts.get("checked", 0)
-        audit["market_alerts"] = market_counts.get("alerts", 0)
-        audit["market_notified"] = market_counts.get("notified", 0)
-        audit["market_prediction_rows"] = market_counts.get("prediction_rows", 0)
-        notified_count += market_counts.get("notified", 0)
+            # Market sentinel
+            try:
+                market_counts = _run_market_sentinel(cycle_id=cycle_id, dry_run=dry_run, username=username)
+                user_audit["market"] = market_counts
+                user_audit["notified"] += market_counts.get("notified", 0)
+            except Exception as e:
+                logger.warning("[DREAMING] Market sentinel failed for %s: %s", username, e)
 
-        hours = lookback_hours if lookback_hours is not None else _env_int(_ENV_LOOKBACK, 24)
-        corpus = collect_last_24h(hours)
-        if not corpus.get("summaries") and not corpus.get("ledger"):
-            logger.info("[DREAMING] empty corpus (last %dh) — reflection skipped", hours)
-            audit["status"] = "ok"
-            audit["notified"] = notified_count
-            return audit
+            # Memory Reflection
+            hours = lookback_hours if lookback_hours is not None else _env_int(_ENV_LOOKBACK, 24)
+            corpus = collect_last_24h(hours, username=username)
+            if corpus.get("summaries") or corpus.get("ledger"):
+                findings, overall_risk = _run_reflection(corpus)
+                max_findings = _env_int(_ENV_MAX_FINDINGS, 8)
+                findings = findings[:max_findings]
+                
+                confidence_threshold = _env_float(_ENV_CONF, 0.7)
+                for finding in findings:
+                    if finding.confidence < confidence_threshold:
+                        _enrich_finding(finding, cycle_id=cycle_id, dry_run=dry_run, username=username)
+                    _maybe_bump_ssot(finding, cycle_id=cycle_id, dry_run=dry_run, username=username)
+                    if _maybe_notify(finding, dry_run=dry_run, username=username):
+                        user_audit["notified"] += 1
+                user_audit["findings"] = len(findings)
+                user_audit["overall_risk"] = overall_risk
+            
+            audit["users_processed"].append(user_audit)
+            audit["total_findings"] += user_audit.get("findings", 0)
+            audit["total_notified"] += user_audit.get("notified", 0)
 
-        findings, overall_risk = _run_reflection(corpus)
-        audit["overall_risk"] = overall_risk
-        max_findings = _env_int(_ENV_MAX_FINDINGS, 8)
-        findings = findings[:max_findings]
-        findings_count = len(findings)
-        audit["findings"] = findings_count
-
-        confidence_threshold = _env_float(_ENV_CONF, 0.7)
-        for finding in findings:
-            logger.info(
-                "[DREAMING] finding id=%s kind=%s persona=%s conf=%.2f",
-                finding.id, finding.kind, finding.persona_scope, finding.confidence,
-            )
-            if finding.confidence < confidence_threshold:
-                if _enrich_finding(finding, cycle_id=cycle_id, dry_run=dry_run):
-                    enriched_count += 1
-            if _maybe_bump_ssot(finding, cycle_id=cycle_id, dry_run=dry_run):
-                ssot_bumps += 1
-            if _maybe_notify(finding, dry_run=dry_run):
-                notified_count += 1
-
-        audit["enriched"] = enriched_count
-        audit["notified"] = notified_count
-        audit["ssot_bumps"] = ssot_bumps
         audit["status"] = "ok"
     except Exception as exc:
         logger.exception("[DREAMING] cycle failed: %s", exc)
-        error_text = str(exc)
-        final_status = "error"
         audit["status"] = "error"
-        audit["error"] = error_text
+        audit["error"] = str(exc)
     finally:
         try:
             memory_manager.update_dreaming_cycle(
                 cycle_id,
-                status=audit.get("status") or final_status,
-                findings_count=findings_count,
-                enriched_count=enriched_count,
-                notified_count=notified_count,
-                error=error_text,
+                status=audit.get("status", "ok"),
+                findings_count=audit["total_findings"],
+                notified_count=audit["total_notified"],
             )
-        except Exception as exc:
-            logger.warning("[DREAMING] cycle audit update failed: %s", exc)
-        try:
-            memory_manager.release_dreaming_lease(_LEASE_NAME, lease_holder)
-        except Exception as exc:
-            logger.warning("[DREAMING] lease release failed: %s", exc)
+        except Exception:
+            pass
+        memory_manager.release_dreaming_lease(_LEASE_NAME, lease_holder)
         audit["duration_ms"] = round((time.perf_counter() - started) * 1000, 2)
 
     return audit

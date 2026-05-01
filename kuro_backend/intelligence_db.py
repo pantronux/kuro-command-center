@@ -38,16 +38,28 @@ def init_db():
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS intelligence_briefings (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                date TEXT NOT NULL UNIQUE,
+                username TEXT NOT NULL DEFAULT 'Pantronux',
+                date TEXT NOT NULL,
                 summary_text TEXT NOT NULL,
                 raw_json_data TEXT DEFAULT '{}',
                 experimental_signals TEXT DEFAULT '[]',
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(username, date)
             )
         """)
         cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_date ON intelligence_briefings(date DESC)
+            CREATE INDEX IF NOT EXISTS idx_briefing_user_date ON intelligence_briefings(username, date DESC)
         """)
+        # Migration: check for username column
+        cursor.execute("PRAGMA table_info(intelligence_briefings)")
+        cols = [row["name"] for row in cursor.fetchall()]
+        if "username" not in cols:
+            # We need to drop the old UNIQUE constraint on date if it exists.
+            # SQLite doesn't support ALTER TABLE DROP CONSTRAINT. 
+            # But we can just add the column and use it.
+            cursor.execute("ALTER TABLE intelligence_briefings ADD COLUMN username TEXT NOT NULL DEFAULT 'Pantronux'")
+            logger.info("[INTELLIGENCE] Added username column to briefings table.")
+        
         conn.commit()
         logger.info(f"Intelligence briefings database initialized at {DB_PATH}")
     except Exception as e:
@@ -56,20 +68,20 @@ def init_db():
         if conn:
             conn.close()
 
-def save_briefing(date: str, summary_text: str, raw_json_data: Dict, experimental_signals: List[str]) -> bool:
-    """Save a daily intelligence briefing."""
+def save_briefing(date: str, summary_text: str, raw_json_data: Dict, experimental_signals: List[str], username: str = "Pantronux") -> bool:
+    """Save a daily intelligence briefing for a specific user."""
     conn = None
     try:
         conn = _get_connection()
         cursor = conn.cursor()
         cursor.execute(
             """INSERT OR REPLACE INTO intelligence_briefings 
-               (date, summary_text, raw_json_data, experimental_signals) 
-               VALUES (?, ?, ?, ?)""",
-            (date, summary_text, json.dumps(raw_json_data, ensure_ascii=False), json.dumps(experimental_signals))
+               (username, date, summary_text, raw_json_data, experimental_signals) 
+               VALUES (?, ?, ?, ?, ?)""",
+            (username, date, summary_text, json.dumps(raw_json_data, ensure_ascii=False), json.dumps(experimental_signals))
         )
         conn.commit()
-        logger.info(f"[INTELLIGENCE] Briefing saved for {date}")
+        logger.info(f"[INTELLIGENCE] Briefing saved for {username} on {date}")
         return True
     except Exception as e:
         logger.error(f"Failed to save briefing: {e}")
@@ -78,15 +90,15 @@ def save_briefing(date: str, summary_text: str, raw_json_data: Dict, experimenta
         if conn:
             conn.close()
 
-def get_briefings(limit: int = 20, offset: int = 0) -> List[Dict]:
-    """Get recent briefings with pagination."""
+def get_briefings(limit: int = 20, offset: int = 0, username: str = "Pantronux") -> List[Dict]:
+    """Get recent briefings for a specific user with pagination."""
     conn = None
     try:
         conn = _get_connection()
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT * FROM intelligence_briefings ORDER BY date DESC LIMIT ? OFFSET ?",
-            (limit, offset)
+            "SELECT * FROM intelligence_briefings WHERE username = ? ORDER BY date DESC LIMIT ? OFFSET ?",
+            (username, limit, offset)
         )
         rows = cursor.fetchall()
         
@@ -109,13 +121,13 @@ def get_briefings(limit: int = 20, offset: int = 0) -> List[Dict]:
         if conn:
             conn.close()
 
-def get_briefing_by_date(date: str) -> Optional[Dict]:
-    """Get a specific briefing by date."""
+def get_briefing_by_date(date: str, username: str = "Pantronux") -> Optional[Dict]:
+    """Get a specific briefing by date for a specific user."""
     conn = None
     try:
         conn = _get_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM intelligence_briefings WHERE date = ?", (date,))
+        cursor.execute("SELECT * FROM intelligence_briefings WHERE date = ? AND username = ?", (date, username))
         row = cursor.fetchone()
         
         if row:
@@ -135,15 +147,15 @@ def get_briefing_by_date(date: str) -> Optional[Dict]:
         if conn:
             conn.close()
 
-def search_briefings(query: str, limit: int = 20) -> List[Dict]:
-    """Search briefings by keyword in summary text."""
+def search_briefings(query: str, username: str = "Pantronux", limit: int = 20) -> List[Dict]:
+    """Search briefings by keyword for a specific user."""
     conn = None
     try:
         conn = _get_connection()
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT * FROM intelligence_briefings WHERE summary_text LIKE ? ORDER BY date DESC LIMIT ?",
-            (f"%{query}%", limit)
+            "SELECT * FROM intelligence_briefings WHERE username = ? AND summary_text LIKE ? ORDER BY date DESC LIMIT ?",
+            (username, f"%{query}%", limit)
         )
         rows = cursor.fetchall()
         
@@ -166,13 +178,13 @@ def search_briefings(query: str, limit: int = 20) -> List[Dict]:
         if conn:
             conn.close()
 
-def get_total_count() -> int:
-    """Get total count of briefings."""
+def get_total_count(username: str = "Pantronux") -> int:
+    """Get total count of briefings for a specific user."""
     conn = None
     try:
         conn = _get_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM intelligence_briefings")
+        cursor.execute("SELECT COUNT(*) FROM intelligence_briefings WHERE username = ?", (username,))
         return cursor.fetchone()[0]
     except Exception as e:
         logger.error(f"Failed to get briefing count: {e}")

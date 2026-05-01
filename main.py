@@ -132,10 +132,10 @@ ACCESS_TOKEN_EXPIRE_HOURS = int(os.getenv("JWT_EXPIRATION_HOURS", "12"))
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "Pantronux")
 ADMIN_PASSWORD_HASH = os.getenv("ADMIN_PASSWORD_HASH", "")
 
-# Secondary User: Kagetoki (V7.2.2 Restricted Access)
-KAGETOKI_USERNAME = os.getenv("KAGETOKI_USERNAME", "kagetoki")
-KAGETOKI_PASSWORD_HASH = os.getenv("KAGETOKI_PASSWORD_HASH", "")
-KAGETOKI_MASTER_NAME = os.getenv("KAGETOKI_MASTER_NAME", "Kagetoki-sama")
+# Secondary User: Faikhira (V7.2.2 Restricted Access)
+FAIKHIRA_USERNAME = os.getenv("FAIKHIRA_USERNAME", "Faikhira")
+FAIKHIRA_PASSWORD_HASH = os.getenv("FAIKHIRA_PASSWORD_HASH", "")
+FAIKHIRA_MASTER_NAME = os.getenv("FAIKHIRA_MASTER_NAME", "Master Faikhira")
 
 # User Registry - maps username to credentials and session-specific behaviors
 USER_REGISTRY = {
@@ -146,10 +146,10 @@ USER_REGISTRY = {
         "role": "Administrator",
         "restricted_persona": None
     },
-    KAGETOKI_USERNAME: {
-        "password_hash": KAGETOKI_PASSWORD_HASH,
-        "master_name": KAGETOKI_MASTER_NAME,
-        "display_name": "Kagetoki",
+    FAIKHIRA_USERNAME: {
+        "password_hash": FAIKHIRA_PASSWORD_HASH,
+        "master_name": FAIKHIRA_MASTER_NAME,
+        "display_name": "Faikhira",
         "role": "Quality Assurance",
         "restricted_persona": "auditor"
     }
@@ -1490,10 +1490,11 @@ async def dashboard_sync_websocket(websocket: WebSocket):
 
 # --- Finances SSoT (The Chancellor) ---
 @app.get("/api/finances/budget")
-async def finances_get_budget(month: Optional[str] = None):
-    """Return monthly_budget for YYYY-MM (default: current month)."""
+    token = get_token_from_cookie(request)
+    user = validate_token(token)
+    username = user.get("username") if user else "Pantronux"
     m = (month or "").strip() or date.today().strftime("%Y-%m")
-    row = await run_db(finance_db.get_budget, m)
+    row = await run_db(finance_db.get_budget, m, username)
     if not row:
         return {"status": "success", "month": m, "budget": None}
     rec = MonthlyBudgetRecord.model_validate(dict(row))
@@ -1506,9 +1507,11 @@ async def finances_set_budget(
     amount_usd: float = Form(...),
     notes: str = Form(""),
 ):
-    """Upsert monthly_budget."""
     try:
-        await run_db(finance_db.add_budget, month, amount_usd, notes or "")
+        token = get_token_from_cookie(request)
+        user = validate_token(token)
+        username = user.get("username") if user else "Pantronux"
+        await run_db(finance_db.add_budget, month, amount_usd, notes or "", username)
         await run_db(core_data.bump_data_revision)
         return {"status": "success", "month": month.strip()}
     except Exception as e:
@@ -1520,8 +1523,11 @@ async def finances_set_budget(
 
 
 @app.get("/api/finances/expenses")
-async def finances_list_expenses():
-    rows = await run_db(finance_db.list_recurring_expenses, True)
+async def finances_list_expenses(request: Request):
+    token = get_token_from_cookie(request)
+    user = validate_token(token)
+    username = user.get("username") if user else "Pantronux"
+    rows = await run_db(finance_db.list_recurring_expenses, True, username)
     out = [RecurringExpenseRecord.model_validate(dict(r)).model_dump(mode="json") for r in rows]
     return {"status": "success", "expenses": out}
 
@@ -1535,6 +1541,9 @@ async def finances_add_expense(
     category: str = Form(""),
 ):
     try:
+        token = get_token_from_cookie(request)
+        user = validate_token(token)
+        username = user.get("username") if user else "Pantronux"
         await run_db(
             finance_db.upsert_recurring_expense,
             label,
@@ -1543,6 +1552,7 @@ async def finances_add_expense(
             next_due,
             category,
             True,
+            username,
         )
         await run_db(core_data.bump_data_revision)
         return {"status": "success", "label": label.strip()}
@@ -1555,9 +1565,12 @@ async def finances_add_expense(
 
 
 @app.delete("/api/finances/expenses/{expense_id}")
-async def finances_delete_expense(expense_id: int):
+async def finances_delete_expense(expense_id: int, request: Request):
     try:
-        ok = await run_db(finance_db.delete_recurring_expense, expense_id)
+        token = get_token_from_cookie(request)
+        user = validate_token(token)
+        username = user.get("username") if user else "Pantronux"
+        ok = await run_db(finance_db.delete_recurring_expense, expense_id, username)
         if ok:
             await run_db(core_data.bump_data_revision)
         return {"status": "success", "deleted": bool(ok)}
@@ -1570,16 +1583,22 @@ async def finances_delete_expense(expense_id: int):
 
 
 @app.get("/api/finances/api-usage")
-async def finances_api_usage(days: int = 7):
-    rows = await run_db(finance_db.get_last_n_days_spend, max(1, min(int(days), 90)))
+async def finances_api_usage(request: Request, days: int = 7):
+    token = get_token_from_cookie(request)
+    user = validate_token(token)
+    username = user.get("username") if user else "Pantronux"
+    rows = await run_db(finance_db.get_last_n_days_spend, max(1, min(int(days), 90)), username)
     out = [ApiUsageDailyRecord.model_validate(dict(r)).model_dump(mode="json") for r in rows]
     return {"status": "success", "usage": out}
 
 
 # --- Market Sentinel (Chancellor + OpenClaw cache) ---
 @app.get("/api/market/watch")
-async def market_list_watch():
-    rows = await run_db(finance_db.list_watched_symbols, True)
+async def market_list_watch(request: Request):
+    token = get_token_from_cookie(request)
+    user = validate_token(token)
+    username = user.get("username") if user else "Pantronux"
+    rows = await run_db(finance_db.list_watched_symbols, True, username)
     out = [WatchedSymbolRecord.model_validate(dict(r)).model_dump(mode="json") for r in rows]
     return {"status": "success", "symbols": out}
 
@@ -1587,13 +1606,16 @@ async def market_list_watch():
 @app.post("/api/market/watch")
 async def market_add_watch(symbol: str = Form(...), label: str = Form("")):
     try:
+        token = get_token_from_cookie(request)
+        user = validate_token(token)
+        username = user.get("username") if user else "Pantronux"
         sym = (symbol or "").strip().upper()
         if not sym:
             return JSONResponse(
                 status_code=400,
                 content={"status": "error", "message": "symbol required"},
             )
-        await run_db(finance_db.upsert_watched_symbol, sym, label or "")
+        await run_db(finance_db.upsert_watched_symbol, sym, label or "", username)
         await run_db(core_data.bump_data_revision)
         return {"status": "success", "symbol": sym}
     except Exception as e:
@@ -1605,10 +1627,13 @@ async def market_add_watch(symbol: str = Form(...), label: str = Form("")):
 
 
 @app.delete("/api/market/watch/{symbol}")
-async def market_delete_watch(symbol: str):
+async def market_delete_watch(symbol: str, request: Request):
     try:
+        token = get_token_from_cookie(request)
+        user = validate_token(token)
+        username = user.get("username") if user else "Pantronux"
         sym = (symbol or "").strip().upper()
-        ok = await run_db(finance_db.delete_watched_symbol, sym)
+        ok = await run_db(finance_db.delete_watched_symbol, sym, username)
         if ok:
             await run_db(core_data.bump_data_revision)
         return {"status": "success", "deleted": bool(ok)}
@@ -1621,15 +1646,21 @@ async def market_delete_watch(symbol: str):
 
 
 @app.get("/api/market/hud")
-async def market_hud():
-    raw = await run_db(finance_db.get_market_hud_items)
+async def market_hud(request: Request):
+    token = get_token_from_cookie(request)
+    user = validate_token(token)
+    username = user.get("username") if user else "Pantronux"
+    raw = await run_db(finance_db.get_market_hud_items, username)
     items = [MarketHudChip.model_validate(x).model_dump(mode="json") for x in raw]
     return {"status": "success", "items": items}
 
 
 @app.get("/api/market/brief")
-async def market_brief():
-    parts = await run_db(finance_db.get_market_brief_parts)
+async def market_brief(request: Request):
+    token = get_token_from_cookie(request)
+    user = validate_token(token)
+    username = user.get("username") if user else "Pantronux"
+    parts = await run_db(finance_db.get_market_brief_parts, username)
     brief = (parts.get("brief_text") or "").strip()
     if not brief:
         brief = (
@@ -1939,23 +1970,43 @@ def start_reminder_scheduler():
 
 
 def send_daily_intelligence_briefing():
-    """Send daily intelligence briefing to Telegram at 08:00 AM."""
+    """Send daily intelligence briefing to Telegram at 08:00 AM for all users."""
     try:
         from kuro_backend.intelligence_engine import run_daily_research, format_telegram_message
+        from kuro_backend import telegram_notifier, memory_manager
         
-        logger.info("[INTELLIGENCE] Running daily research for 08:00 AM briefing...")
-        briefing = run_daily_research()
-        
-        # Format for Telegram
-        telegram_message = format_telegram_message(briefing)
-        
-        # Send to Telegram
-        from kuro_backend import telegram_notifier
-        telegram_notifier.send_message(telegram_message)
-        
-        logger.info("[INTELLIGENCE] Daily briefing sent to Telegram")
+        # Get all users to process
+        from main import USER_REGISTRY
+        all_usernames = list(USER_REGISTRY.keys())
+        if not all_usernames:
+            all_usernames = ["Pantronux"]
+
+        for username in all_usernames:
+            try:
+                logger.info(f"[INTELLIGENCE] Running daily research for {username} (08:00 AM briefing)...")
+                briefing = run_daily_research(username=username)
+                
+                # Get display name for message
+                display_name = username
+                try:
+                    profile = memory_manager.load_master_profile(username)
+                    display_name = profile.get("master_name", username)
+                except:
+                    pass
+
+                # Format for Telegram
+                telegram_message = format_telegram_message(briefing, display_name=display_name)
+                
+                # Send to Telegram (Note: telegram_notifier might need user-specific chat_id in future, 
+                # but for now it sends to the configured admin bot)
+                telegram_notifier.send_message(telegram_message)
+                
+                logger.info(f"[INTELLIGENCE] Daily briefing sent to Telegram for {username}")
+            except Exception as user_exc:
+                logger.error(f"[INTELLIGENCE] Failed to send briefing for {username}: {user_exc}")
+                
     except Exception as e:
-        logger.error(f"[INTELLIGENCE] Failed to send daily briefing: {e}")
+        logger.error(f"[INTELLIGENCE] Global failure in daily briefing: {e}")
 
 def cleanup_old_artifacts(days: int = 14):
     """Clean up uploaded files and cache older than specified days.

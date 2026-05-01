@@ -112,24 +112,29 @@ def _init_db_locked() -> None:
             """
             CREATE TABLE IF NOT EXISTS monthly_budget (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                month TEXT NOT NULL UNIQUE,
+                username TEXT NOT NULL DEFAULT 'Pantronux',
+                month TEXT NOT NULL,
                 amount_usd REAL NOT NULL,
                 notes TEXT DEFAULT '',
                 created_at TEXT DEFAULT (datetime('now')),
-                updated_at TEXT DEFAULT (datetime('now'))
+                updated_at TEXT DEFAULT (datetime('now')),
+                UNIQUE(username, month)
             )
             """
         )
         c.execute(
             """
             CREATE TABLE IF NOT EXISTS financial_goals (
-                goal_id TEXT PRIMARY KEY NOT NULL,
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL DEFAULT 'Pantronux',
+                goal_id TEXT NOT NULL,
                 name TEXT NOT NULL,
                 target_amount REAL NOT NULL,
                 current_amount REAL NOT NULL DEFAULT 0.0,
                 deadline TEXT,
                 created_at TEXT DEFAULT (datetime('now')),
-                updated_at TEXT DEFAULT (datetime('now'))
+                updated_at TEXT DEFAULT (datetime('now')),
+                UNIQUE(username, goal_id)
             )
             """
         )
@@ -137,34 +142,41 @@ def _init_db_locked() -> None:
             """
             CREATE TABLE IF NOT EXISTS recurring_expenses (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                label TEXT NOT NULL UNIQUE,
+                username TEXT NOT NULL DEFAULT 'Pantronux',
+                label TEXT NOT NULL,
                 amount_usd REAL NOT NULL,
                 cadence TEXT NOT NULL DEFAULT 'monthly',
                 next_due TEXT DEFAULT '',
                 category TEXT DEFAULT '',
                 active INTEGER NOT NULL DEFAULT 1,
                 created_at TEXT DEFAULT (datetime('now')),
-                updated_at TEXT DEFAULT (datetime('now'))
+                updated_at TEXT DEFAULT (datetime('now')),
+                UNIQUE(username, label)
             )
             """
         )
         c.execute(
             """
             CREATE TABLE IF NOT EXISTS api_usage_daily (
-                date TEXT PRIMARY KEY NOT NULL,
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL DEFAULT 'Pantronux',
+                date TEXT NOT NULL,
                 model_name TEXT NOT NULL DEFAULT '',
                 prompt_tokens INTEGER NOT NULL DEFAULT 0,
                 completion_tokens INTEGER NOT NULL DEFAULT 0,
                 total_tokens INTEGER NOT NULL DEFAULT 0,
                 cost_usd REAL NOT NULL DEFAULT 0.0,
-                updated_at TEXT DEFAULT (datetime('now'))
+                updated_at TEXT DEFAULT (datetime('now')),
+                UNIQUE(username, date)
             )
             """
         )
         c.execute(
             """
             CREATE TABLE IF NOT EXISTS watched_symbols (
-                symbol TEXT PRIMARY KEY NOT NULL,
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL DEFAULT 'Pantronux',
+                symbol TEXT NOT NULL,
                 label TEXT NOT NULL DEFAULT '',
                 baseline_price REAL,
                 baseline_at TEXT,
@@ -173,42 +185,61 @@ def _init_db_locked() -> None:
                 last_refreshed TEXT,
                 active INTEGER NOT NULL DEFAULT 1,
                 created_at TEXT DEFAULT (datetime('now')),
-                updated_at TEXT DEFAULT (datetime('now'))
+                updated_at TEXT DEFAULT (datetime('now')),
+                UNIQUE(username, symbol)
             )
             """
         )
         c.execute(
             """
             CREATE TABLE IF NOT EXISTS prediction_watch (
-                slug TEXT PRIMARY KEY NOT NULL,
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL DEFAULT 'Pantronux',
+                slug TEXT NOT NULL,
                 label TEXT NOT NULL,
                 last_probability REAL NOT NULL DEFAULT 0.0,
                 trend TEXT NOT NULL DEFAULT 'flat',
-                updated_at TEXT DEFAULT (datetime('now'))
+                updated_at TEXT DEFAULT (datetime('now')),
+                UNIQUE(username, slug)
             )
             """
         )
         c.execute(
             """
             CREATE TABLE IF NOT EXISTS market_hud_snapshot (
-                id INTEGER PRIMARY KEY NOT NULL DEFAULT 1 CHECK (id = 1),
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL DEFAULT 'Pantronux',
                 brief_text TEXT NOT NULL DEFAULT '',
                 last_sentinel_note TEXT NOT NULL DEFAULT '',
-                updated_at TEXT DEFAULT (datetime('now'))
+                updated_at TEXT DEFAULT (datetime('now')),
+                UNIQUE(username)
             )
             """
         )
         c.execute(
-            "INSERT OR IGNORE INTO market_hud_snapshot (id, brief_text) VALUES (1, '')"
+            "INSERT OR IGNORE INTO market_hud_snapshot (username, brief_text) VALUES ('Pantronux', '')"
         )
         c.execute(
-            "CREATE INDEX IF NOT EXISTS idx_recurring_active "
-            "ON recurring_expenses(active, label)"
+            "CREATE INDEX IF NOT EXISTS idx_recurring_active_user "
+            "ON recurring_expenses(active, username, label)"
         )
         c.execute(
-            "CREATE INDEX IF NOT EXISTS idx_watched_active "
-            "ON watched_symbols(active, symbol)"
+            "CREATE INDEX IF NOT EXISTS idx_watched_active_user "
+            "ON watched_symbols(active, username, symbol)"
         )
+        
+        # Migration: Add username column to all tables if missing
+        tables = [
+            "monthly_budget", "financial_goals", "recurring_expenses",
+            "api_usage_daily", "watched_symbols", "prediction_watch",
+            "market_hud_snapshot"
+        ]
+        for tbl in tables:
+            c.execute(f"PRAGMA table_info({tbl})")
+            cols = [row["name"] for row in c.fetchall()]
+            if "username" not in cols:
+                c.execute(f"ALTER TABLE {tbl} ADD COLUMN username TEXT NOT NULL DEFAULT 'Pantronux'")
+                logger.info("[FINANCE] Added username column to %s", tbl)
         conn.commit()
         logger.info("[FINANCE] DB initialized at %s", _db_path())
     except Exception as exc:
@@ -219,51 +250,51 @@ def _init_db_locked() -> None:
             conn.close()
 
 
-def add_budget(month: str, amount_usd: float, notes: str = "") -> int:
-    """Insert or replace monthly budget for YYYY-MM."""
+def add_budget(month: str, amount_usd: float, notes: str = "", username: str = "Pantronux") -> int:
+    """Insert or replace monthly budget for YYYY-MM for a specific user."""
     init_db()
     conn = _conn()
     try:
         c = conn.cursor()
         c.execute(
             """
-            INSERT INTO monthly_budget (month, amount_usd, notes, updated_at)
-            VALUES (?, ?, ?, datetime('now'))
-            ON CONFLICT(month) DO UPDATE SET
+            INSERT INTO monthly_budget (month, amount_usd, notes, username, updated_at)
+            VALUES (?, ?, ?, ?, datetime('now'))
+            ON CONFLICT(username, month) DO UPDATE SET
                 amount_usd = excluded.amount_usd,
                 notes = excluded.notes,
                 updated_at = datetime('now')
             """,
-            (month.strip(), float(amount_usd), notes or ""),
+            (month.strip(), float(amount_usd), notes or "", username),
         )
         conn.commit()
-        c.execute("SELECT id FROM monthly_budget WHERE month = ?", (month.strip(),))
+        c.execute("SELECT id FROM monthly_budget WHERE month = ? AND username = ?", (month.strip(), username))
         row = c.fetchone()
         return int(row["id"]) if row else 0
     finally:
         conn.close()
 
 
-def get_budget(month: str) -> Optional[Dict[str, Any]]:
+def get_budget(month: str, username: str = "Pantronux") -> Optional[Dict[str, Any]]:
     init_db()
     conn = _conn()
     try:
         c = conn.cursor()
-        c.execute("SELECT * FROM monthly_budget WHERE month = ?", (month.strip(),))
+        c.execute("SELECT * FROM monthly_budget WHERE month = ? AND username = ?", (month.strip(), username))
         row = c.fetchone()
         return dict(row) if row else None
     finally:
         conn.close()
 
 
-def list_budgets(limit: int = 24) -> List[Dict[str, Any]]:
+def list_budgets(limit: int = 24, username: str = "Pantronux") -> List[Dict[str, Any]]:
     init_db()
     conn = _conn()
     try:
         c = conn.cursor()
         c.execute(
-            "SELECT * FROM monthly_budget ORDER BY month DESC LIMIT ?",
-            (max(1, int(limit)),),
+            "SELECT * FROM monthly_budget WHERE username = ? ORDER BY month DESC LIMIT ?",
+            (username, max(1, int(limit))),
         )
         return [dict(r) for r in c.fetchall()]
     finally:
@@ -277,6 +308,7 @@ def upsert_recurring_expense(
     next_due: str = "",
     category: str = "",
     active: bool = True,
+    username: str = "Pantronux",
 ) -> int:
     init_db()
     conn = _conn()
@@ -285,9 +317,9 @@ def upsert_recurring_expense(
         c.execute(
             """
             INSERT INTO recurring_expenses
-                (label, amount_usd, cadence, next_due, category, active, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
-            ON CONFLICT(label) DO UPDATE SET
+                (label, amount_usd, cadence, next_due, category, active, username, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+            ON CONFLICT(username, label) DO UPDATE SET
                 amount_usd = excluded.amount_usd,
                 cadence = excluded.cadence,
                 next_due = excluded.next_due,
@@ -302,39 +334,41 @@ def upsert_recurring_expense(
                 (next_due or "").strip(),
                 (category or "").strip(),
                 1 if active else 0,
+                username,
             ),
         )
         conn.commit()
-        c.execute("SELECT id FROM recurring_expenses WHERE label = ?", (label.strip(),))
+        c.execute("SELECT id FROM recurring_expenses WHERE label = ? AND username = ?", (label.strip(), username))
         row = c.fetchone()
         return int(row["id"]) if row else 0
     finally:
         conn.close()
 
 
-def delete_recurring_expense(expense_id: int) -> bool:
+def delete_recurring_expense(expense_id: int, username: str = "Pantronux") -> bool:
     init_db()
     conn = _conn()
     try:
         c = conn.cursor()
-        c.execute("DELETE FROM recurring_expenses WHERE id = ?", (int(expense_id),))
+        c.execute("DELETE FROM recurring_expenses WHERE id = ? AND username = ?", (int(expense_id), username))
         conn.commit()
         return c.rowcount > 0
     finally:
         conn.close()
 
 
-def list_recurring_expenses(active_only: bool = True) -> List[Dict[str, Any]]:
+def list_recurring_expenses(active_only: bool = True, username: str = "Pantronux") -> List[Dict[str, Any]]:
     init_db()
     conn = _conn()
     try:
         c = conn.cursor()
         if active_only:
             c.execute(
-                "SELECT * FROM recurring_expenses WHERE active = 1 ORDER BY label ASC"
+                "SELECT * FROM recurring_expenses WHERE active = 1 AND username = ? ORDER BY label ASC",
+                (username,)
             )
         else:
-            c.execute("SELECT * FROM recurring_expenses ORDER BY label ASC")
+            c.execute("SELECT * FROM recurring_expenses WHERE username = ? ORDER BY label ASC", (username,))
         return [dict(r) for r in c.fetchall()]
     finally:
         conn.close()
@@ -346,8 +380,9 @@ def add_api_usage(
     prompt_tokens: int,
     completion_tokens: int,
     cost_usd: float,
+    username: str = "Pantronux",
 ) -> None:
-    """Accumulate token counts and estimated cost for a calendar day."""
+    """Accumulate token counts and estimated cost for a calendar day for a specific user."""
     init_db()
     conn = _conn()
     try:
@@ -356,13 +391,13 @@ def add_api_usage(
             """
             INSERT INTO api_usage_daily
                 (date, model_name, prompt_tokens, completion_tokens,
-                 total_tokens, cost_usd, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
-            ON CONFLICT(date) DO UPDATE SET
-                prompt_tokens = prompt_tokens + excluded.prompt_tokens,
-                completion_tokens = completion_tokens + excluded.completion_tokens,
-                total_tokens = total_tokens + excluded.total_tokens,
-                cost_usd = cost_usd + excluded.cost_usd,
+                 total_tokens, cost_usd, username, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+            ON CONFLICT(username, date) DO UPDATE SET
+                prompt_tokens = api_usage_daily.prompt_tokens + excluded.prompt_tokens,
+                completion_tokens = api_usage_daily.completion_tokens + excluded.completion_tokens,
+                total_tokens = api_usage_daily.total_tokens + excluded.total_tokens,
+                cost_usd = api_usage_daily.cost_usd + excluded.cost_usd,
                 model_name = excluded.model_name,
                 updated_at = datetime('now')
             """,
@@ -373,6 +408,7 @@ def add_api_usage(
                 int(completion_tokens),
                 int(prompt_tokens) + int(completion_tokens),
                 float(cost_usd),
+                username,
             ),
         )
         conn.commit()
@@ -380,14 +416,14 @@ def add_api_usage(
         conn.close()
 
 
-def get_daily_api_cost_usd(date_str: str) -> float:
+def get_daily_api_cost_usd(date_str: str, username: str = "Pantronux") -> float:
     init_db()
     conn = _conn()
     try:
         c = conn.cursor()
         c.execute(
-            "SELECT cost_usd FROM api_usage_daily WHERE date = ?",
-            (date_str.strip(),),
+            "SELECT cost_usd FROM api_usage_daily WHERE date = ? AND username = ?",
+            (date_str.strip(), username),
         )
         row = c.fetchone()
         return float(row["cost_usd"]) if row else 0.0
@@ -395,8 +431,8 @@ def get_daily_api_cost_usd(date_str: str) -> float:
         conn.close()
 
 
-def upsert_watched_symbol(symbol: str, label: str = "") -> None:
-    """Add or reactivate a watched ticker (US symbols via OpenClaw/Stooq .us)."""
+def upsert_watched_symbol(symbol: str, label: str = "", username: str = "Pantronux") -> None:
+    """Add or reactivate a watched ticker for a specific user."""
     init_db()
     sym = (symbol or "").strip().upper()
     if not sym:
@@ -406,70 +442,71 @@ def upsert_watched_symbol(symbol: str, label: str = "") -> None:
         c = conn.cursor()
         c.execute(
             """
-            INSERT INTO watched_symbols (symbol, label, active, updated_at)
-            VALUES (?, ?, 1, datetime('now'))
-            ON CONFLICT(symbol) DO UPDATE SET
+            INSERT INTO watched_symbols (symbol, label, username, active, updated_at)
+            VALUES (?, ?, ?, 1, datetime('now'))
+            ON CONFLICT(username, symbol) DO UPDATE SET
                 label = COALESCE(NULLIF(excluded.label, ''), watched_symbols.label),
                 active = 1,
                 updated_at = datetime('now')
             """,
-            (sym, (label or "").strip()),
+            (sym, (label or "").strip(), username),
         )
         conn.commit()
     finally:
         conn.close()
 
 
-def delete_watched_symbol(symbol: str) -> bool:
+def delete_watched_symbol(symbol: str, username: str = "Pantronux") -> bool:
     init_db()
     sym = (symbol or "").strip().upper()
     conn = _conn()
     try:
         c = conn.cursor()
-        c.execute("DELETE FROM watched_symbols WHERE symbol = ?", (sym,))
+        c.execute("DELETE FROM watched_symbols WHERE symbol = ? AND username = ?", (sym, username))
         conn.commit()
         return c.rowcount > 0
     finally:
         conn.close()
 
 
-def get_watched_symbol(symbol: str) -> Optional[Dict[str, Any]]:
+def get_watched_symbol(symbol: str, username: str = "Pantronux") -> Optional[Dict[str, Any]]:
     init_db()
     sym = (symbol or "").strip().upper()
     conn = _conn()
     try:
         c = conn.cursor()
-        c.execute("SELECT * FROM watched_symbols WHERE symbol = ?", (sym,))
+        c.execute("SELECT * FROM watched_symbols WHERE symbol = ? AND username = ?", (sym, username))
         row = c.fetchone()
         return dict(row) if row else None
     finally:
         conn.close()
 
 
-def list_watched_symbols(active_only: bool = True) -> List[Dict[str, Any]]:
+def list_watched_symbols(active_only: bool = True, username: str = "Pantronux") -> List[Dict[str, Any]]:
     init_db()
     conn = _conn()
     try:
         c = conn.cursor()
         if active_only:
             c.execute(
-                "SELECT * FROM watched_symbols WHERE active = 1 ORDER BY symbol ASC"
+                "SELECT * FROM watched_symbols WHERE active = 1 AND username = ? ORDER BY symbol ASC",
+                (username,)
             )
         else:
-            c.execute("SELECT * FROM watched_symbols ORDER BY symbol ASC")
+            c.execute("SELECT * FROM watched_symbols WHERE username = ? ORDER BY symbol ASC", (username,))
         return [dict(r) for r in c.fetchall()]
     finally:
         conn.close()
 
 
-def apply_watched_price(symbol: str, new_price: float) -> Dict[str, Any]:
-    """Update last close for a watched symbol; set baseline on first tick. Returns pct vs prior last."""
+def apply_watched_price(symbol: str, new_price: float, username: str = "Pantronux") -> Dict[str, Any]:
+    """Update last close for a watched symbol for a specific user."""
     init_db()
     sym = (symbol or "").strip().upper()
     conn = _conn()
     try:
         c = conn.cursor()
-        c.execute("SELECT * FROM watched_symbols WHERE symbol = ?", (sym,))
+        c.execute("SELECT * FROM watched_symbols WHERE symbol = ? AND username = ?", (sym, username))
         row = c.fetchone()
         if not row:
             return {}
@@ -485,9 +522,9 @@ def apply_watched_price(symbol: str, new_price: float) -> Dict[str, Any]:
                     last_pct_change = 0,
                     last_refreshed = datetime('now'),
                     updated_at = datetime('now')
-                WHERE symbol = ?
+                WHERE symbol = ? AND username = ?
                 """,
-                (float(new_price), float(new_price), sym),
+                (float(new_price), float(new_price), sym, username),
             )
         else:
             old = d.get("last_price")
@@ -502,9 +539,9 @@ def apply_watched_price(symbol: str, new_price: float) -> Dict[str, Any]:
                     last_pct_change = ?,
                     last_refreshed = datetime('now'),
                     updated_at = datetime('now')
-                WHERE symbol = ?
+                WHERE symbol = ? AND username = ?
                 """,
-                (float(new_price), float(pct), sym),
+                (float(new_price), float(pct), sym, username),
             )
         conn.commit()
         return {"symbol": sym, "last_price": float(new_price), "last_pct_change": float(pct)}
@@ -518,8 +555,9 @@ def upsert_financial_goal(
     target_amount: float,
     current_amount: float = 0.0,
     deadline: Optional[str] = None,
+    username: str = "Pantronux",
 ) -> None:
-    """Insert or replace a financial goal (e.g. 'Emergency Fund')."""
+    """Insert or replace a financial goal for a specific user."""
     init_db()
     gid = (goal_id or "").strip()
     if not gid:
@@ -530,9 +568,9 @@ def upsert_financial_goal(
         c.execute(
             """
             INSERT INTO financial_goals
-                (goal_id, name, target_amount, current_amount, deadline, updated_at)
-            VALUES (?, ?, ?, ?, ?, datetime('now'))
-            ON CONFLICT(goal_id) DO UPDATE SET
+                (goal_id, name, target_amount, current_amount, deadline, username, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+            ON CONFLICT(username, goal_id) DO UPDATE SET
                 name = excluded.name,
                 target_amount = excluded.target_amount,
                 current_amount = excluded.current_amount,
@@ -545,6 +583,7 @@ def upsert_financial_goal(
                 float(target_amount),
                 float(current_amount),
                 (deadline or "").strip() or None,
+                username,
             ),
         )
         conn.commit()
@@ -552,37 +591,37 @@ def upsert_financial_goal(
         conn.close()
 
 
-def get_financial_goal(goal_id: str) -> Optional[Dict[str, Any]]:
+def get_financial_goal(goal_id: str, username: str = "Pantronux") -> Optional[Dict[str, Any]]:
     init_db()
     gid = (goal_id or "").strip()
     conn = _conn()
     try:
         c = conn.cursor()
-        c.execute("SELECT * FROM financial_goals WHERE goal_id = ?", (gid,))
+        c.execute("SELECT * FROM financial_goals WHERE goal_id = ? AND username = ?", (gid, username))
         row = c.fetchone()
         return dict(row) if row else None
     finally:
         conn.close()
 
 
-def list_financial_goals() -> List[Dict[str, Any]]:
+def list_financial_goals(username: str = "Pantronux") -> List[Dict[str, Any]]:
     init_db()
     conn = _conn()
     try:
         c = conn.cursor()
-        c.execute("SELECT * FROM financial_goals ORDER BY created_at DESC")
+        c.execute("SELECT * FROM financial_goals WHERE username = ? ORDER BY created_at DESC", (username,))
         return [dict(r) for r in c.fetchall()]
     finally:
         conn.close()
 
 
-def delete_financial_goal(goal_id: str) -> bool:
+def delete_financial_goal(goal_id: str, username: str = "Pantronux") -> bool:
     init_db()
     gid = (goal_id or "").strip()
     conn = _conn()
     try:
         c = conn.cursor()
-        c.execute("DELETE FROM financial_goals WHERE goal_id = ?", (gid,))
+        c.execute("DELETE FROM financial_goals WHERE goal_id = ? AND username = ?", (gid, username))
         conn.commit()
         return c.rowcount > 0
     finally:
@@ -594,6 +633,7 @@ def upsert_prediction_watch(
     label: str,
     probability: float,
     trend: str = "flat",
+    username: str = "Pantronux",
 ) -> None:
     init_db()
     sl = (slug or "").strip()
@@ -604,72 +644,74 @@ def upsert_prediction_watch(
         c = conn.cursor()
         c.execute(
             """
-            INSERT INTO prediction_watch (slug, label, last_probability, trend, updated_at)
-            VALUES (?, ?, ?, ?, datetime('now'))
-            ON CONFLICT(slug) DO UPDATE SET
+            INSERT INTO prediction_watch (slug, label, last_probability, trend, username, updated_at)
+            VALUES (?, ?, ?, ?, ?, datetime('now'))
+            ON CONFLICT(username, slug) DO UPDATE SET
                 label = excluded.label,
                 last_probability = excluded.last_probability,
                 trend = excluded.trend,
                 updated_at = datetime('now')
             """,
-            (sl, (label or sl).strip(), float(probability), (trend or "flat").strip().lower()[:16]),
+            (sl, (label or sl).strip(), float(probability), (trend or "flat").strip().lower()[:16], username),
         )
         conn.commit()
     finally:
         conn.close()
 
 
-def list_prediction_watch() -> List[Dict[str, Any]]:
+def list_prediction_watch(username: str = "Pantronux") -> List[Dict[str, Any]]:
     init_db()
     conn = _conn()
     try:
         c = conn.cursor()
-        c.execute("SELECT * FROM prediction_watch ORDER BY slug ASC")
+        c.execute("SELECT * FROM prediction_watch WHERE username = ? ORDER BY slug ASC", (username,))
         return [dict(r) for r in c.fetchall()]
     finally:
         conn.close()
 
 
-def delete_prediction_watch(slug: str) -> bool:
+def delete_prediction_watch(slug: str, username: str = "Pantronux") -> bool:
     init_db()
     sl = (slug or "").strip()
     conn = _conn()
     try:
         c = conn.cursor()
-        c.execute("DELETE FROM prediction_watch WHERE slug = ?", (sl,))
+        c.execute("DELETE FROM prediction_watch WHERE slug = ? AND username = ?", (sl, username))
         conn.commit()
         return c.rowcount > 0
     finally:
         conn.close()
 
 
-def set_market_brief_and_note(brief_text: str, sentinel_note: str = "") -> None:
+def set_market_brief_and_note(brief_text: str, sentinel_note: str = "", username: str = "Pantronux") -> None:
     init_db()
     conn = _conn()
     try:
         c = conn.cursor()
         c.execute(
             """
-            UPDATE market_hud_snapshot SET
-                brief_text = ?,
-                last_sentinel_note = ?,
+            INSERT INTO market_hud_snapshot (username, brief_text, last_sentinel_note, updated_at)
+            VALUES (?, ?, ?, datetime('now'))
+            ON CONFLICT(username) DO UPDATE SET
+                brief_text = excluded.brief_text,
+                last_sentinel_note = excluded.last_sentinel_note,
                 updated_at = datetime('now')
-            WHERE id = 1
             """,
-            (brief_text or "", sentinel_note or ""),
+            (username, brief_text or "", sentinel_note or ""),
         )
         conn.commit()
     finally:
         conn.close()
 
 
-def get_market_brief_parts() -> Dict[str, str]:
+def get_market_brief_parts(username: str = "Pantronux") -> Dict[str, str]:
     init_db()
     conn = _conn()
     try:
         c = conn.cursor()
         c.execute(
-            "SELECT brief_text, last_sentinel_note FROM market_hud_snapshot WHERE id = 1"
+            "SELECT brief_text, last_sentinel_note FROM market_hud_snapshot WHERE username = ?",
+            (username,)
         )
         row = c.fetchone()
         if not row:
@@ -702,10 +744,10 @@ def _equity_sentiment(pct: Optional[float]) -> str:
     return "FLAT"
 
 
-def get_market_hud_items() -> List[Dict[str, Any]]:
-    """Compose HUD chips for /api/market/hud (watched symbols + prediction rows)."""
+def get_market_hud_items(username: str = "Pantronux") -> List[Dict[str, Any]]:
+    """Compose HUD chips for /api/market/hud for a specific user."""
     items: List[Dict[str, Any]] = []
-    for p in list_prediction_watch():
+    for p in list_prediction_watch(username=username):
         prob = float(p.get("last_probability") or 0.0)
         items.append(
             {
@@ -717,7 +759,7 @@ def get_market_hud_items() -> List[Dict[str, Any]]:
                 "kind": "prediction",
             }
         )
-    for w in list_watched_symbols(active_only=True):
+    for w in list_watched_symbols(active_only=True, username=username):
         sym = w["symbol"]
         pct = w.get("last_pct_change")
         pf = float(pct) if pct is not None else None
@@ -735,11 +777,11 @@ def get_market_hud_items() -> List[Dict[str, Any]]:
     return items
 
 
-def format_market_snapshot_for_prompt() -> str:
-    """Cached market / watchlist block for Chancellor (SQLite only)."""
+def format_market_snapshot_for_prompt(username: str = "Pantronux") -> str:
+    """Cached market / watchlist block for Chancellor for a specific user."""
     try:
         lines = ["[MARKET CACHE — temporary facts from ledger; verify via tools if live quote needed]"]
-        ws = list_watched_symbols(active_only=True)
+        ws = list_watched_symbols(active_only=True, username=username)
         if ws:
             lines.append("- Watched symbols:")
             for w in ws[:24]:
@@ -751,7 +793,7 @@ def format_market_snapshot_for_prompt() -> str:
                 )
         else:
             lines.append("- Watched symbols: none")
-        pw = list_prediction_watch()
+        pw = list_prediction_watch(username=username)
         if pw:
             lines.append("- Prediction watch (cached):")
             for p in pw[:16]:
@@ -759,16 +801,16 @@ def format_market_snapshot_for_prompt() -> str:
                     f"  • {p['slug']}: {p.get('label', '')} "
                     f"p={float(p.get('last_probability') or 0):.3f} trend={p.get('trend', '')}"
                 )
-        parts = get_market_brief_parts()
+        parts = get_market_brief_parts(username=username)
         if parts.get("last_sentinel_note"):
             lines.append(f"- Last sentinel note: {parts['last_sentinel_note']}")
         return "\n".join(lines)
     except Exception as exc:
-        logger.warning("[FINANCE] market snapshot failed: %s", exc)
+        logger.warning("[FINANCE] market snapshot failed for %s: %s", username, exc)
         return "[MARKET CACHE — unavailable]"
 
 
-def get_last_n_days_spend(n: int = 7) -> List[Dict[str, Any]]:
+def get_last_n_days_spend(n: int = 7, username: str = "Pantronux") -> List[Dict[str, Any]]:
     init_db()
     conn = _conn()
     try:
@@ -778,24 +820,25 @@ def get_last_n_days_spend(n: int = 7) -> List[Dict[str, Any]]:
             SELECT date, model_name, prompt_tokens, completion_tokens,
                    total_tokens, cost_usd, updated_at
             FROM api_usage_daily
+            WHERE username = ?
             ORDER BY date DESC
             LIMIT ?
             """,
-            (max(1, int(n)),),
+            (username, max(1, int(n))),
         )
         return [dict(r) for r in c.fetchall()]
     finally:
         conn.close()
 
 
-def format_ledger_snapshot() -> str:
-    """Compact block for Chancellor prompt injection."""
+def format_ledger_snapshot(username: str = "Pantronux") -> str:
+    """Compact block for Chancellor prompt injection for a specific user."""
     try:
         today = date.today()
         month_key = today.strftime("%Y-%m")
-        bud = get_budget(month_key)
-        exps = list_recurring_expenses(active_only=True)
-        usage = get_last_n_days_spend(7)
+        bud = get_budget(month_key, username=username)
+        exps = list_recurring_expenses(active_only=True, username=username)
+        usage = get_last_n_days_spend(7, username=username)
         lines = ["[FINANCES SSoT — ledger snapshot]"]
         if bud:
             lines.append(
