@@ -262,6 +262,15 @@ def get_runtime_context_value(key: str, default: str = "", username: str = "Pant
 # ============================================
 # TIER 1: Short-Term Buffer (SQLite)
 # ============================================
+
+_SHORT_TERM_SCHEMA_READY_FOR = None
+_SHORT_TERM_LOCK = __import__("threading").Lock()
+
+def _reset_short_term_schema_ready_for_tests():
+    global _SHORT_TERM_SCHEMA_READY_FOR
+    with _SHORT_TERM_LOCK:
+        _SHORT_TERM_SCHEMA_READY_FOR = None
+
 def _get_short_term_conn():
     """Get SQLite connection for short-term memory."""
     conn = sqlite3.connect(SHORT_TERM_DB)
@@ -270,6 +279,22 @@ def _get_short_term_conn():
 
 def init_short_term_db():
     """Initialize short-term memory database."""
+    global _SHORT_TERM_SCHEMA_READY_FOR
+    current_path = SHORT_TERM_DB
+    if current_path is None:
+        _init_short_term_db_locked()
+        return
+
+    if _SHORT_TERM_SCHEMA_READY_FOR == current_path:
+        return
+    with _SHORT_TERM_LOCK:
+        if _SHORT_TERM_SCHEMA_READY_FOR == current_path:
+            return
+        _init_short_term_db_locked()
+        _SHORT_TERM_SCHEMA_READY_FOR = current_path
+
+def _init_short_term_db_locked():
+    """Perform the actual database initialization schema work."""
     conn = _get_short_term_conn()
     cursor = conn.cursor()
     cursor.execute("""

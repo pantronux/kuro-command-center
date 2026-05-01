@@ -59,6 +59,35 @@ def _notify_websocket_refresh(revision: int) -> None:
     except Exception as e:
         logger.debug("[SYNC] websocket schedule skipped: %s", e)
 
+_SCHEMA_READY_FOR: Optional[str] = None
+
+def _reset_schema_ready_for_tests() -> None:
+    global _SCHEMA_READY_FOR
+    with _write_lock:
+        _SCHEMA_READY_FOR = None
+
+def _ensure_schema(cur: sqlite3.Cursor) -> None:
+    global _SCHEMA_READY_FOR
+    current_path = SHORT_TERM_DB_PATH
+    if current_path is None:
+        cur.execute(
+            "CREATE TABLE IF NOT EXISTS app_sync_metadata ("
+            "key TEXT PRIMARY KEY, "
+            "value INTEGER, "
+            "updated_at DATETIME DEFAULT (datetime('now')))"
+        )
+        return
+
+    if _SCHEMA_READY_FOR == current_path:
+        return
+    cur.execute(
+        "CREATE TABLE IF NOT EXISTS app_sync_metadata ("
+        "key TEXT PRIMARY KEY, "
+        "value INTEGER, "
+        "updated_at DATETIME DEFAULT (datetime('now')))"
+    )
+    _SCHEMA_READY_FOR = current_path
+
 def bump_data_revision() -> None:
     """Increment persisted revision (short_term DB) so all workers share one counter; then push WS."""
     new_val: int
@@ -67,12 +96,7 @@ def bump_data_revision() -> None:
         try:
             cur = conn.cursor()
             cur.execute("BEGIN IMMEDIATE")
-            cur.execute(
-                "CREATE TABLE IF NOT EXISTS app_sync_metadata ("
-                "key TEXT PRIMARY KEY, "
-                "value INTEGER, "
-                "updated_at DATETIME DEFAULT (datetime('now')))"
-            )
+            _ensure_schema(cur)
             cur.execute(
                 "INSERT OR IGNORE INTO app_sync_metadata (key, value) VALUES (?, 0)",
                 (SYNC_METADATA_KEY_REVISION,),
@@ -98,12 +122,7 @@ def get_data_revision() -> int:
     conn = _conn_short_term()
     try:
         cur = conn.cursor()
-        cur.execute(
-            "CREATE TABLE IF NOT EXISTS app_sync_metadata ("
-            "key TEXT PRIMARY KEY, "
-            "value INTEGER, "
-            "updated_at DATETIME DEFAULT (datetime('now')))"
-        )
+        _ensure_schema(cur)
         cur.execute(
             "SELECT value FROM app_sync_metadata WHERE key = ?",
             (SYNC_METADATA_KEY_REVISION,),
