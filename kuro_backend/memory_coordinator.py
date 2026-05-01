@@ -469,7 +469,7 @@ def _coerce_summary_dict(raw: Any) -> Dict[str, Any]:
             parsed = _json.loads(raw) if raw.strip() else {}
         except _json.JSONDecodeError:
             parsed = {}
-    out: Dict[str, Any] = {k: v for k, v in _EMPTY_SUMMARY_JSON.items()}
+    out: Dict[str, Any] = _EMPTY_SUMMARY_JSON.copy()
     for key, default in _EMPTY_SUMMARY_JSON.items():
         val = parsed.get(key, default)
         if isinstance(default, list):
