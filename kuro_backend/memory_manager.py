@@ -1024,6 +1024,7 @@ def query_memory(
     recent_messages: List[Dict] = None,
     persona_scope: str = None,
     include_compliance: bool = False,
+    username: str = "Pantronux",
 ) -> Dict[str, str]:
     """
     Pre-process memory before AI response.
@@ -1032,8 +1033,8 @@ def query_memory(
     Long-term semantic context is handled by Mem0 in memory_coordinator.
     """
     # Tier 1: Short-term
-    scope = normalize_persona(persona_scope or get_active_persona())
-    short_term_entries = get_short_term(persona_scope=scope)
+    scope = normalize_persona(persona_scope or get_active_persona(username))
+    short_term_entries = get_short_term(persona_scope=scope, username=username)
     short_term_text = ""
     if short_term_entries:
         summaries = []
@@ -1043,7 +1044,7 @@ def query_memory(
         short_term_text = "\n".join(summaries)
 
     # Tier 3: Master profile
-    profile_text = get_master_profile_formatted()
+    profile_text = get_master_profile_formatted(username)
 
     return {
         "short_term": short_term_text,

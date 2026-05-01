@@ -1490,6 +1490,7 @@ async def dashboard_sync_websocket(websocket: WebSocket):
 
 # --- Finances SSoT (The Chancellor) ---
 @app.get("/api/finances/budget")
+async def finances_get_budget(request: Request, month: Optional[str] = None):
     token = get_token_from_cookie(request)
     user = validate_token(token)
     username = user.get("username") if user else "Pantronux"
@@ -1503,6 +1504,7 @@ async def dashboard_sync_websocket(websocket: WebSocket):
 
 @app.post("/api/finances/budget")
 async def finances_set_budget(
+    request: Request,
     month: str = Form(...),
     amount_usd: float = Form(...),
     notes: str = Form(""),
@@ -1534,6 +1536,7 @@ async def finances_list_expenses(request: Request):
 
 @app.post("/api/finances/expenses")
 async def finances_add_expense(
+    request: Request,
     label: str = Form(...),
     amount_usd: float = Form(...),
     cadence: str = Form("monthly"),
@@ -1604,7 +1607,7 @@ async def market_list_watch(request: Request):
 
 
 @app.post("/api/market/watch")
-async def market_add_watch(symbol: str = Form(...), label: str = Form("")):
+async def market_add_watch(request: Request, symbol: str = Form(...), label: str = Form("")):
     try:
         token = get_token_from_cookie(request)
         user = validate_token(token)

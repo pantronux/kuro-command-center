@@ -35,8 +35,8 @@ from kuro_backend import dashboard_broadcast
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_TEXT: str = (
-    "Welcome back, Master Pantronux. All systems are operating normally."
+_DEFAULT_TEXT_TEMPLATE: str = (
+    "Welcome back, {master_name}. All systems are operating normally."
 )
 
 
@@ -57,11 +57,11 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
-def _greeting_text() -> str:
+def _greeting_text(master_name: str = "Pantronux") -> str:
     raw = os.getenv("KURO_PROACTIVE_GREETING_TEXT")
     if raw and raw.strip():
-        return raw.strip()
-    return _DEFAULT_TEXT
+        return raw.strip().format(master_name=master_name)
+    return _DEFAULT_TEXT_TEMPLATE.format(master_name=master_name)
 
 
 def _greeting_lang() -> str:
@@ -93,7 +93,14 @@ async def maybe_send(ws: WebSocket, username: Optional[str]) -> bool:
         logger.warning("[GREETING] cooldown check failed: %s", exc)
         # Fail-open: one extra greeting is better than a silent boot.
 
-    text = _greeting_text()
+    # Resolve master_name from registry
+    try:
+        from main import USER_REGISTRY
+        master_name = USER_REGISTRY.get(user, {}).get("master_name", user)
+    except Exception:
+        master_name = user
+
+    text = _greeting_text(master_name)
     lang = _greeting_lang()
     payload = {"text": text, "lang": lang}
     try:

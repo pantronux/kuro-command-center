@@ -556,7 +556,8 @@ def supervisor_node(state: KuroState) -> Dict[str, Any]:
         # P1.2 — kick off Mem0 retrieve in parallel with the supervisor's
         # routing logic; memory_retrieval_node will await the future.
         try:
-            memory_coordinator.prefetch_mem0(session_id, state.get("user_input", ""), limit=5)
+            username = state.get("username", "Pantronux")
+            memory_coordinator.prefetch_mem0(session_id, state.get("user_input", ""), limit=5, username=username)
         except Exception as exc:
             logger.debug("[SUPERVISOR] mem0 prefetch skipped: %s", exc)
 
@@ -1279,8 +1280,9 @@ def response_node(state: KuroState) -> Dict[str, Any]:
     V5.5: Guardrails validation removed. Direct LLM response is returned.
     """
     user_input = state.get("user_input", "")
+    username = state.get("username", "Pantronux")
     persona_mode = memory_manager.normalize_persona(
-        state.get("persona_mode", memory_manager.get_active_persona())
+        state.get("persona_mode", memory_manager.get_active_persona(username))
     )
     image_paths = state.get("image_paths")
     mem0_memories = state.get("mem0_retrieved_memories", [])
@@ -2445,7 +2447,7 @@ def process_chat_with_graph(
         
         if not response:
             logger.warning("[LANGGRAPH] Empty response from graph")
-            return "Maaf, Pantronux. Respons tidak tersedia untuk saat ini. Mohon ulangi instruksi."
+            return f"Maaf, {master_name}. Respons tidak tersedia untuk saat ini. Mohon ulangi instruksi."
         # P3.1 — store response for future semantic reuse.
         try:
             from kuro_backend import semantic_cache
@@ -2461,7 +2463,7 @@ def process_chat_with_graph(
         
     except Exception as e:
         logger.exception(f"[LANGGRAPH] Graph invocation failed: {e}")
-        return "Maaf, Pantronux. Kuro mengalami kendala sistem. Silakan coba lagi."
+        return f"Maaf, {master_name}. Kuro mengalami kendala sistem. Silakan coba lagi."
 
 
 # ============================================

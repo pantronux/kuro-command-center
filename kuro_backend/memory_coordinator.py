@@ -201,6 +201,7 @@ def build_referent_grounding_block(
     *,
     chat_platform: Optional[str] = None,
     history_limit: int = 16,
+    username: str = "Pantronux",
 ) -> Optional[str]:
     from kuro_backend import chat_history
     from kuro_backend import memory_manager
@@ -211,6 +212,7 @@ def build_referent_grounding_block(
         offset=0,
         platform=chat_platform,
         persona=persona_mode,
+        username=username,
     )
     has_att = _history_has_user_attachments(history)
 
@@ -222,7 +224,7 @@ def build_referent_grounding_block(
         "Aturan: untuk 'ini/itu/gambar tadi', rujuk entri user terbaru yang punya lampiran; "
         "jika masih ambigu, tanyakan jangan menebak.",
     ]
-    raw_session_state = memory_manager.get_runtime_context_value("current_session_state", "")
+    raw_session_state = memory_manager.get_runtime_context_value("current_session_state", "", username=username)
     if raw_session_state:
         try:
             session_state = json.loads(raw_session_state)
@@ -855,6 +857,7 @@ def build_context_for_llm(
             user_input,
             persona_mode,
             chat_platform=chat_platform,
+            username=username,
         )
     if mem0_retrieved_memories:
         parallel_tasks["mem0_fmt"] = lambda: perpetual_memory.perpetual_memory.format_memories_for_context(

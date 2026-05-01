@@ -43,6 +43,22 @@ irrelevant or ambiguous, with a last-resort failover to web search.
 - **State Updates:**
   - Added `retrieval_grade`, `retrieval_retry_count`, and `rewritten_query` to `KuroState`.
 
+- **Multi-User Memory Isolation & Identity Hardening:**
+  - **Context Bleed Prevention:** Updated `memory_coordinator.py` and `chat_history.py` to strictly enforce `username` isolation. This prevents User A (e.g., Faikhira) from accidentally seeing the session state or history of User B (Pantronux).
+  - **Dynamic Identity Injection:** Refactored `personas.py` to use `{master_name}` placeholders. Kuro now dynamically adapts its self-identity to the logged-in user, greeting them correctly and scoping its purpose (e.g., as "Master Faikhira's Senior Auditor").
+  - **Personalized Proactive Greetings:** Updated `proactive_greeting.py` to resolve the Master's name from the user registry for a more personalized "Welcome back" experience.
+
+### Modified Files (V7.2.1)
+
+| File | Change |
+|---|---|
+| `kuro_backend/memory_coordinator.py` | User-aware grounding and context retrieval |
+| `kuro_backend/langgraph_core.py` | Username propagation + dynamic error messaging |
+| `kuro_backend/personas.py` | `{master_name}` placeholder implementation |
+| `kuro_backend/proactive_greeting.py` | Personalized dashboard greetings |
+| `kuro_backend/memory_manager.py` | Strict `username` parameter in `query_memory` |
+| `main.py` | User registry updates and session hardening |
+
 ---
 
 # Kuro AI V7.2.0 "Natural Agency" - Changelog
