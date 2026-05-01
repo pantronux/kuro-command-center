@@ -1258,7 +1258,8 @@ async def system_analysis():
 @app.post("/api/index-path")
 async def index_path(path: str = Form("/home/kuro/projects/")):
     """Index a system path recursively."""
-    # Security: only allow whitelisted paths
+    # Security: only allow whitelisted paths, prevent path traversal
+    path = os.path.abspath(path)
     is_whitelisted = any(path.startswith(wp) for wp in tools.WHITELIST_PATHS)
     if not is_whitelisted:
         return {"status": "error", "message": "Path not in whitelist"}
