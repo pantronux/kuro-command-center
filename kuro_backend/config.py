@@ -1,5 +1,5 @@
 """
-Kuro AI V7.5.0 "Identity" - Config [2026-05-01]
+Kuro AI V7.5.1 "Identity" - Config [2026-05-01]
 ================================================================================
 Centralized configuration for Kuro AI System.
 

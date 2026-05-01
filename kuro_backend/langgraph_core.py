@@ -33,7 +33,7 @@ from google.genai import types as genai_types
 
 # LangGraph imports
 from langgraph.checkpoint.memory import MemorySaver
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import END, START, StateGraph, add_messages
 
 # Kuro imports
 from kuro_backend import (
@@ -419,7 +419,7 @@ class KuroState(TypedDict):
     - joint_goal_block: Formatted active commitments injected into system prompt
     - _intent_category: Attention filter tag (dissertation/research/off_track/administrative)
     """
-    messages: Annotated[List[Dict], lambda x, y: x + y]
+    messages: Annotated[List[Dict], add_messages]
     next_step: str
     user_input: str
     final_response: str
@@ -2204,9 +2204,11 @@ async def process_chat_with_graph_stream(
             "rewritten_query": "",
             "username": username,
             "custom_persona": custom_persona,
+            "_intent": "new",
         }
         
-        thread_id = f"kuro_stream_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{session_id[:8]}"
+        # V7.3 Identity: Use stable thread_id for persistence (user + session)
+        thread_id = f"{username}_{session_id}"
         config = {"configurable": {"thread_id": thread_id}}
         
         logger.debug("[LANGGRAPH_STREAM] graph invoke (thread offload) preview=%.50s", message)
@@ -2451,10 +2453,12 @@ def process_chat_with_graph(
             "retrieval_grade": "relevant",
             "retrieval_retry_count": 0,
             "rewritten_query": "",
+            "_intent": "new",
         }
 
         # Create unique thread ID for persistence
-        thread_id = f"kuro_session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        # V7.3 Identity: Use stable thread_id for persistence (user + session)
+        thread_id = f"{username}_{session_id}"
         config = {"configurable": {"thread_id": thread_id}}
 
         # Invoke graph

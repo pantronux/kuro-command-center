@@ -1,4 +1,4 @@
-# Kuro AI V7.5.0 "Identity" — SYSTEM_MAP
+# Kuro AI V7.5.1 "Identity" — SYSTEM_MAP
 
 > Authoritative navigation map for the repository. Traced function-by-function
 > from the true entrypoint (`main.py`) outward. Only source code under version
@@ -42,8 +42,9 @@ Kuro AI is your **Intelligent Personal Sovereign**—a sophisticated digital com
     OpenClaw skill bridge.
 - **Architecture pattern**: Monolithic FastAPI process (`main.py`) owning
   auth, routing, schedulers and WebSocket fan-out. Reasoning is delegated to
-  a LangGraph state machine (`kuro_backend/langgraph_core.py`) whose nodes
-  call into a layered memory stack (`memory_coordinator` → `memory_manager`
+  a LangGraph state machine (`kuro_backend/langgraph_core.py`) with 
+  **thread-based persistence** for multi-user isolation. Nodes call into a 
+  layered memory stack (`memory_coordinator` → `memory_manager`
   + `perpetual_memory`) and feature services. Background sentinels
   (CVE dreaming, fitness, proactive events) run on APScheduler
   alongside the request loop. A separate `OpenClaw` process is reached via

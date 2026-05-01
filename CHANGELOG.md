@@ -6,14 +6,17 @@
 
 ---
 
-## V7.5.0 - Identity & Technical Depth (2026-05-01)
-
-### Summary
-Major iteration focusing on the synergy between the new Identity System and technical reasoning depth. This release decouples rigid persona role-play from technical expertise, allowing the user's global personality settings to drive the interaction while the system provides the technical backbone. Integrated mandatory real-time grounding to bypass knowledge cut-offs.
+## V7.5.1 - State Compression & Reducer Hardening (2026-05-01)
 
 ### Highlights
+- **LangGraph State Management 2026 (Best Practices):**
+  - Switched to the official `add_messages` reducer for `KuroState["messages"]`, ensuring robust history merging and deduplication.
+  - Implemented **State Compression** by explicitly resetting one-turn fields (`_intent`, `mem0_retrieved_memories`, etc.) in `initial_state`, preventing state bloat in the checkpointer.
+  - Reinforced **Memory Separation** architecture: `MemorySaver` for short-term graph state and `Mem0` (External) for long-term knowledge.
 
-- **Persona Technical Refactor (Depth over Template):**
+---
+
+## V7.5.0 - Identity & Technical Depth (2026-05-01)
   - Shifted all system personas (Consultant, Advisor, Tactical, etc.) from prescriptive role-play to deep technical domain expertise.
   - Removed restrictive "Tone" and "Mindset" mandates that caused templated responses.
   - Enhanced system prompt logic to prioritize the User's Global Custom Persona for stylistic control.
@@ -30,6 +33,11 @@ Major iteration focusing on the synergy between the new Identity System and tech
   - Fixed database schema synchronization issue (missing `restricted_persona` column) and applied automated recovery.
   - Implemented user-aware persona switching to prevent cross-account mode collisions.
   - Enforced strict backend-side persona overrides for restricted roles (e.g., QA isolation).
+
+- **LangGraph Multi-User State Isolation:**
+  - Implemented stable `thread_id` mapping (User + Session) for LangGraph persistence.
+  - Ensured isolated conversation contexts and state resumption across interactions within a session.
+  - Aligned checkpointer configuration with state-of-the-art multi-user management practices.
 
 - **Full Registry Decommissioning:**
   - Completed the removal of all legacy `USER_REGISTRY` references from background workers (`dreaming_worker.py`) and proactive services.
