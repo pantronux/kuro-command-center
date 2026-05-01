@@ -1234,8 +1234,8 @@ def run_dreaming_cycle(
     audit["cycle_id"] = cycle_id
 
     # Get all users to process
-    from main import USER_REGISTRY
-    all_usernames = list(USER_REGISTRY.keys())
+    from kuro_backend import auth_db
+    all_usernames = auth_db.get_all_users()
     if not all_usernames:
         all_usernames = ["Pantronux"]
 

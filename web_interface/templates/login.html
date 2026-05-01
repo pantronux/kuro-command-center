@@ -1,11 +1,10 @@
 <!DOCTYPE html>
 <!--
   Header Doc ---
-  Purpose: Authentication screen (brute-force-hardened via auth_db).
-  Caller: main.py GET "/login" (redirects here when unauthenticated).
-  Dependencies: POST /auth/login, Tailwind.
-  Main Sections: password form + status banner.
-  Side Effects: Submits credentials to /auth/login; server sets session cookie.
+  Purpose: Revamped Authentication screen with split-layout and particles.js.
+  Caller: main.py GET "/login".
+  Dependencies: POST /auth/login, Tailwind, particles.js, Font Awesome 6.
+  Main Sections: Left Branding Panel (Particles), Right Login Panel.
 -->
 <html lang="en" class="scroll-smooth">
 <head>
@@ -16,499 +15,471 @@
     <link rel="apple-touch-icon" href="/profile/kuro_avatar.png">
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/particles.js/2.0.0/particles.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        /* ===== FALLBACK STYLES (in case Tailwind CDN fails) ===== */
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
-        
-        /* Layout */
-        .min-h-screen { min-height: 100vh; }
-        .flex { display: flex; }
-        .items-center { align-items: center; }
-        .justify-center { justify-content: center; }
-        .p-4 { padding: 1rem; }
-        .p-8 { padding: 2rem; }
-        .mb-2 { margin-bottom: 0.5rem; }
-        .mb-4 { margin-bottom: 1rem; }
-        .mb-6 { margin-bottom: 1.5rem; }
-        .mb-8 { margin-bottom: 2rem; }
-        .mt-6 { margin-top: 1.5rem; }
-        .mt-1 { margin-top: 0.25rem; }
-        .mr-1 { margin-right: 0.25rem; }
-        .space-y-5 > * + * { margin-top: 1.25rem; }
-        .gap-2 { gap: 0.5rem; }
-        .gap-3 { gap: 0.75rem; }
-        .gap-4 { gap: 1rem; }
-        .w-full { width: 100%; }
-        .max-w-md { max-width: 28rem; }
-        .relative { position: relative; }
-        .absolute { position: absolute; }
-        .right-3 { right: 0.75rem; }
-        .top-1\/2 { top: 50%; }
-        .-translate-y-1\/2 { transform: translateY(-50%); }
-        .hidden { display: none; }
-        .block { display: block; }
-        .inline { display: inline; }
-        .text-center { text-align: center; }
-        .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .flex-shrink-0 { flex-shrink: 0; }
-        
-        /* Typography */
-        .text-3xl { font-size: 1.875rem; }
-        .text-sm { font-size: 0.875rem; }
-        .text-xs { font-size: 0.75rem; }
-        .font-bold { font-weight: 700; }
-        .font-medium { font-weight: 500; }
-        .text-white { color: #ffffff; }
-        .text-white\/70 { color: rgba(255,255,255,0.7); }
-        .text-white\/50 { color: rgba(255,255,255,0.5); }
-        .text-gray-700 { color: #374151; }
-        .text-gray-600 { color: #4b5563; }
-        .text-gray-500 { color: #6b7280; }
-        .text-gray-400 { color: #9ca3af; }
-        .text-gray-900 { color: #111827; }
-        .text-emerald-700 { color: #047857; }
-        .text-emerald-600 { color: #059669; }
-        .text-emerald-300 { color: #6ee7b7; }
-        .text-red-700 { color: #b91c1c; }
-        .text-red-600 { color: #dc2626; }
-        .text-red-500 { color: #ef4444; }
-        .text-red-400 { color: #f87171; }
-        .text-red-300 { color: #fca5a5; }
-        
-        /* Backgrounds */
-        .bg-animated {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            background-size: 400% 400%;
-            animation: gradient 15s ease infinite;
+        body { 
+            font-family: 'Plus Jakarta Sans', sans-serif; 
+            background-color: #0f172a;
+            overflow: hidden;
+            min-height: 100vh;
         }
-        @keyframes gradient {
-            0% { background-position: 0% 50%; }
-            50% { background-position: 100% 50%; }
-            100% { background-position: 0% 50%; }
-        }
-        .bg-white\/80 { background: rgba(255,255,255,0.8); }
-        .bg-gray-50 { background: #f9fafb; }
-        .bg-emerald-50 { background: #ecfdf5; }
-        .bg-red-50 { background: #fef2f2; }
-        .bg-emerald-500\/10 { background: rgba(16,185,129,0.1); }
-        .bg-red-500\/10 { background: rgba(239,68,68,0.1); }
-        .bg-white\/10 { background: rgba(255,255,255,0.1); }
-        .bg-gray-200 { background: #e5e7eb; }
-        .hover\:bg-gray-200:hover { background: #e5e7eb; }
         
-        /* Borders */
-        .border { border: 1px solid; }
-        .border-gray-200\/50 { border-color: rgba(229,231,235,0.5); }
-        .border-gray-300 { border-color: #d1d5db; }
-        .border-gray-200 { border-color: #e5e7eb; }
-        .border-emerald-200 { border-color: #a7f3d0; }
-        .border-red-200 { border-color: #fecaca; }
-        .border-white\/20 { border-color: rgba(255,255,255,0.2); }
-        .border-white\/10 { border-color: rgba(255,255,255,0.1); }
-        .rounded-xl { border-radius: 0.75rem; }
-        .rounded-3xl { border-radius: 1.5rem; }
-        .rounded-2xl { border-radius: 1rem; }
-        .rounded-lg { border-radius: 0.5rem; }
-        
-        /* Shadows */
-        .shadow-2xl { box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25); }
-        .shadow-lg { box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); }
-        
-        /* Backdrop */
-        .backdrop-blur-xl { backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); }
-        
-        /* Inputs */
-        input[type="text"], input[type="password"] {
+        .main-container {
+            display: flex;
+            min-height: 100vh;
             width: 100%;
-            padding: 0.75rem 1rem;
-            border-radius: 0.75rem;
-            border: 1px solid #d1d5db;
-            background: #f9fafb;
-            color: #111827;
+            position: relative;
+            z-index: 2;
+        }
+
+        #particles-js {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+            pointer-events: none;
+        }
+
+        /* Branding Side */
+        .branding-side {
+            flex: 1;
+            background: rgba(15, 23, 42, 0.7);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            padding: 3rem;
+            backdrop-filter: blur(5px);
+        }
+
+        .branding-content {
+            text-align: left;
+            max-width: 600px;
+        }
+
+        .kuro-logo-icon {
+            font-size: 80px;
+            color: #10b981;
+            margin-bottom: 2rem;
+            filter: drop-shadow(0 0 20px rgba(16, 185, 129, 0.4));
+        }
+
+        .welcome-text h1 {
+            font-size: 3.5rem;
+            font-weight: 800;
+            line-height: 1.2;
+            margin-bottom: 1.5rem;
+        }
+
+        .welcome-text .highlight {
+            background: linear-gradient(to right, #10b981, #34d399);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .bullet-points {
+            list-style: none;
+            margin-top: 2rem;
+        }
+
+        .bullet-points li {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 0.75rem;
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+
+        .bullet-points li::before {
+            content: '◆';
+            color: #10b981;
+            font-size: 0.8rem;
+        }
+
+        /* Login Side */
+        .login-side {
+            width: 500px;
+            background: white;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            padding: 4rem;
+            box-shadow: -10px 0 50px rgba(0,0,0,0.2);
+            position: relative;
+        }
+
+        .mobile-header {
+            display: none;
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        .login-header {
+            margin-bottom: 2.5rem;
+        }
+
+        .login-header h2 {
+            font-size: 1.75rem;
+            font-weight: 800;
+            color: #0f172a;
+            margin-bottom: 0.5rem;
+        }
+
+        .form-group {
+            margin-bottom: 1.75rem;
+        }
+
+        .form-group label {
+            display: block;
             font-size: 0.875rem;
+            font-weight: 600;
+            color: #475569;
+            margin-bottom: 0.75rem;
+            margin-left: 0.25rem;
+        }
+
+        .input-wrapper {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+
+        .input-wrapper i {
+            position: absolute;
+            left: 1.25rem;
+            color: #64748b;
+            font-size: 1.1rem;
+            pointer-events: none;
+            z-index: 5;
+        }
+
+        .input-wrapper input {
+            width: 100%;
+            padding: 1rem 1.25rem 1rem 3.5rem;
+            border: 1.5px solid #e2e8f0;
+            border-radius: 16px;
             outline: none;
             transition: all 0.2s;
+            font-size: 1rem;
+            color: #0f172a;
+            background: #f8fafc;
         }
-        input[type="text"]:focus, input[type="password"]:focus {
+
+        .input-wrapper input:focus {
             border-color: #10b981;
-            box-shadow: 0 0 0 2px rgba(16,185,129,0.2);
+            background: white;
+            box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.1);
         }
-        input[type="text"]::placeholder, input[type="password"]::placeholder {
-            color: #9ca3af;
+
+        .btn-login {
+            width: 100%;
+            background: #10b981;
+            color: white;
+            padding: 1.125rem;
+            border-radius: 16px;
+            font-weight: 700;
+            font-size: 1.1rem;
+            margin-top: 1.5rem;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.75rem;
+            border: none;
+            cursor: pointer;
         }
-        
-        /* Buttons */
-        button { cursor: pointer; border: none; outline: none; }
-        .bg-gradient-to-r {
-            background: linear-gradient(to right, #10b981, #14b8a6);
+
+        .btn-login:hover {
+            background: #059669;
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(16, 185, 129, 0.25);
         }
-        .hover\:from-emerald-600:hover {
-            background: linear-gradient(to right, #059669, #0d9488);
+
+        .btn-login:active {
+            transform: translateY(0);
         }
-        .text-white { color: white; }
-        .py-3 { padding-top: 0.75rem; padding-bottom: 0.75rem; }
-        .px-4 { padding-left: 1rem; padding-right: 1rem; }
-        .px-3 { padding-left: 0.75rem; padding-right: 0.75rem; }
-        .py-2 { padding-top: 0.5rem; padding-bottom: 0.5rem; }
-        .py-1 { padding-top: 0.25rem; padding-bottom: 0.25rem; }
-        .w-4 { width: 1rem; }
-        .w-5 { width: 1.25rem; }
-        .w-10 { width: 2.5rem; }
-        .w-20 { width: 5rem; }
-        .h-4 { height: 1rem; }
-        .h-5 { height: 1.25rem; }
-        .h-10 { height: 2.5rem; }
-        .h-20 { height: 5rem; }
-        
-        /* Animations */
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(20px); }
-            to { opacity: 1; transform: translateY(0); }
+
+        .btn-login:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
         }
-        .animate-fade-in { animation: fadeIn 0.6s ease-out; }
+
+        .powered-by {
+            margin-top: 4rem;
+            text-align: center;
+            padding-top: 2.5rem;
+            border-top: 1px solid #f1f5f9;
+        }
+
+        .powered-by span {
+            font-size: 0.75rem;
+            color: #94a3b8;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            font-weight: 600;
+        }
+
+        .logo-footer {
+            margin-top: 1rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+        }
+
+        /* Error/Success Banners */
+        .message-banner {
+            padding: 1.25rem;
+            border-radius: 16px;
+            margin-bottom: 2rem;
+            display: none;
+            font-size: 0.95rem;
+        }
+
+        .error-banner {
+            background: #fff1f2;
+            border: 1px solid #ffe4e6;
+            color: #9f1239;
+        }
+
+        .success-banner {
+            background: #f0fdf4;
+            border: 1px solid #dcfce7;
+            color: #166534;
+        }
+
+        .shake { animation: shake 0.5s ease-in-out; }
         @keyframes shake {
             0%, 100% { transform: translateX(0); }
             10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); }
             20%, 40%, 60%, 80% { transform: translateX(5px); }
         }
-        .shake { animation: shake 0.5s ease-in-out; }
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-        .animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+
         .spinner {
             border: 3px solid rgba(255,255,255,0.3);
             border-radius: 50%;
             border-top: 3px solid white;
-            width: 20px; height: 20px;
+            width: 22px; height: 22px;
             animation: spin 1s linear infinite;
         }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        
-        /* Particles */
-        .particle {
-            position: absolute;
-            border-radius: 50%;
-            background: rgba(255,255,255,0.1);
-            animation: float 20s infinite;
+
+        /* Responsive */
+        @media (max-width: 1024px) {
+            .branding-side { display: none; }
+            .login-side { 
+                width: 100%; 
+                padding: 2.5rem; 
+                background: rgba(255, 255, 255, 0.95);
+                backdrop-filter: blur(10px);
+            }
+            .mobile-header { display: block; }
+            body { 
+                overflow: auto; 
+                background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            }
+            .main-container {
+                align-items: center;
+                justify-content: center;
+                padding: 1.5rem;
+            }
+            .login-side {
+                max-width: 450px;
+                border-radius: 32px;
+                box-shadow: 0 20px 50px rgba(0,0,0,0.3);
+                justify-content: flex-start;
+                padding-top: 4rem;
+                padding-bottom: 4rem;
+            }
         }
-        @keyframes float {
-            0%, 100% { transform: translateY(0) translateX(0); opacity: 0; }
-            10% { opacity: 1; }
-            90% { opacity: 1; }
-            100% { transform: translateY(-100vh) translateX(100px); opacity: 0; }
-        }
-        .fixed { position: fixed; }
-        .inset-0 { top: 0; right: 0; bottom: 0; left: 0; }
-        .overflow-hidden { overflow: hidden; }
-        .pointer-events-none { pointer-events: none; }
-        .z-10 { z-index: 10; }
     </style>
 </head>
-<body class="bg-animated min-h-screen flex items-center justify-center p-4 font-[Inter]">
-    <!-- Floating particles -->
-    <div class="fixed inset-0 overflow-hidden pointer-events-none">
-        <div class="particle" style="width: 10px; height: 10px; left: 10%; animation-delay: 0s;"></div>
-        <div class="particle" style="width: 15px; height: 15px; left: 30%; animation-delay: 2s;"></div>
-        <div class="particle" style="width: 8px; height: 8px; left: 50%; animation-delay: 4s;"></div>
-        <div class="particle" style="width: 12px; height: 12px; left: 70%; animation-delay: 6s;"></div>
-        <div class="particle" style="width: 10px; height: 10px; left: 90%; animation-delay: 8s;"></div>
-    </div>
+<body>
+    <div id="particles-js"></div>
 
-    <!-- Login Card -->
-    <div class="relative z-10 w-full max-w-md animate-fade-in">
-        <!-- Logo/Brand -->
-        <div class="text-center mb-8">
-            <div class="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-glass-light backdrop-blur-xl shadow-2xl border border-glass-border mb-4">
-                <i data-lucide="shield-check" class="w-10 h-10 text-white"></i>
+    <div class="main-container">
+        <!-- Left Section (Desktop) -->
+        <div class="branding-side">
+            <div class="branding-content">
+                <i class="fa-solid fa-shield-cat kuro-logo-icon"></i>
+                <div class="welcome-text">
+                    <p class="text-emerald-400 font-semibold mb-2">Sovereign Artificial Intelligence</p>
+                    <h1>Welcome to <br><span class="highlight">Kuro AI</span></h1>
+                    <ul class="bullet-points">
+                        <li>One Data</li>
+                        <li>One App</li>
+                        <li>One Network</li>
+                        <li>One Platform</li>
+                        <li>One Screen</li>
+                    </ul>
+                </div>
             </div>
-            <h1 class="text-3xl font-bold text-white mb-2">Kuro AI</h1>
-            <p class="text-white/70 text-sm">Secure Butler Dashboard - Authentication Required</p>
         </div>
 
-        <!-- Login Form Card -->
-        <div class="bg-white/80 dark:bg-gray-800/80 backdrop-blur-xl rounded-3xl shadow-2xl border border-gray-200/50 dark:border-gray-700/50 p-8">
-            <!-- Security Badge -->
-            <div class="flex items-center justify-center gap-2 mb-6 px-4 py-2 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800">
-                <i data-lucide="lock" class="w-4 h-4 text-emerald-600 dark:text-emerald-400"></i>
-                <span class="text-xs text-emerald-700 dark:text-emerald-300 font-medium">ISO 27001 Compliant Authentication</span>
+        <!-- Right Section -->
+        <div class="login-side">
+            <div class="mobile-header">
+                <i class="fa-solid fa-shield-cat text-emerald-500 text-6xl mb-4"></i>
+                <h1 class="text-3xl font-extrabold text-slate-900">Kuro AI</h1>
+                <p class="text-slate-500 text-sm mt-1">Sovereign Intelligence System</p>
             </div>
 
-            <!-- Error Message -->
-            <div id="errorMessage" class="hidden mb-4 p-4 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
+            <div class="login-header">
+                <h2>Login to Dashboard</h2>
+                <p class="text-slate-500 text-sm">Please enter your credentials to continue</p>
+            </div>
+
+            <!-- Banners -->
+            <div id="errorMessage" class="message-banner error-banner">
                 <div class="flex items-start gap-3">
-                    <i data-lucide="alert-triangle" class="w-5 h-5 text-red-500 dark:text-red-400 mt-0.5 flex-shrink-0"></i>
+                    <i data-lucide="alert-circle" class="w-5 h-5 flex-shrink-0"></i>
                     <div>
-                        <p id="errorText" class="text-sm text-red-700 dark:text-red-300"></p>
-                        <p id="lockoutTimer" class="text-xs text-red-600 dark:text-red-400 mt-1 hidden animate-pulse"></p>
+                        <p id="errorText"></p>
+                        <p id="lockoutTimer" class="text-xs mt-1 opacity-80"></p>
                     </div>
                 </div>
             </div>
 
-            <!-- Success Message -->
-            <div id="successMessage" class="hidden mb-4 p-4 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800">
-                <div class="flex items-start gap-3">
-                    <i data-lucide="check-circle" class="w-5 h-5 text-emerald-600 dark:text-emerald-400 mt-0.5 flex-shrink-0"></i>
-                    <p class="text-sm text-emerald-700 dark:text-emerald-300">Login successful! Redirecting...</p>
+            <div id="successMessage" class="message-banner success-banner">
+                <div class="flex items-center gap-3">
+                    <i data-lucide="check-circle" class="w-5 h-5 flex-shrink-0"></i>
+                    <p>Login successful! Redirecting...</p>
                 </div>
             </div>
 
-            <form id="loginForm" class="space-y-5">
-                <!-- Username Field -->
-                <div>
-                    <label for="username" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                        <i data-lucide="user" class="w-4 h-4 inline mr-1 text-gray-500 dark:text-gray-400"></i>Username
-                    </label>
-                    <div class="relative">
-                        <input
-                            type="text"
-                            id="username"
-                            name="username"
-                            autocomplete="username"
-                            class="w-full px-4 py-3 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-xl text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all"
-                            placeholder="Enter your username"
-                            required
-                        >
+            <form id="loginForm">
+                <div class="form-group">
+                    <label for="username">Username</label>
+                    <div class="input-wrapper">
+                        <i class="fa-solid fa-user"></i>
+                        <input type="text" id="username" name="username" placeholder="Enter your username" required>
                     </div>
                 </div>
 
-                <!-- Password Field -->
-                <div>
-                    <label for="password" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                        <i data-lucide="key" class="w-4 h-4 inline mr-1 text-gray-500 dark:text-gray-400"></i>Password
-                    </label>
-                    <div class="relative">
-                        <input
-                            type="password"
-                            id="password"
-                            name="password"
-                            autocomplete="current-password"
-                            class="w-full px-4 py-3 pr-12 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-xl text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all"
-                            placeholder="Enter your password"
-                            required
-                        >
-                        <!-- Show/Hide Password Button -->
-                        <button
-                            type="button"
-                            id="togglePassword"
-                            class="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
-                            aria-label="Toggle password visibility"
-                        >
-                            <i data-lucide="eye" id="eyeIcon" class="w-5 h-5 text-gray-500 dark:text-gray-400"></i>
-                        </button>
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <div class="input-wrapper">
+                        <i class="fa-solid fa-lock"></i>
+                        <input type="password" id="password" name="password" placeholder="Enter your password" required>
                     </div>
                 </div>
 
-                <!-- Remember Me & Forgot Password -->
-                <div class="flex items-center justify-between">
-                    <label class="flex items-center gap-2 cursor-pointer">
-                        <input
-                            type="checkbox"
-                            id="rememberMe"
-                            name="rememberMe"
-                            class="w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-0"
-                        >
-                        <span class="text-sm text-gray-600 dark:text-gray-400">Remember Me</span>
+                <div class="flex items-center mb-8">
+                    <label class="flex items-center gap-3 cursor-pointer text-sm text-slate-600 font-medium">
+                        <input type="checkbox" id="rememberMe" class="w-5 h-5 rounded-lg border-slate-300 text-emerald-500 focus:ring-emerald-500 transition-all">
+                        Remember Me
                     </label>
                 </div>
 
-                <!-- Login Button -->
-                <button
-                    type="submit"
-                    id="loginBtn"
-                    class="w-full py-3 px-4 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white font-medium rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                    <span id="btnText">
-                        <i data-lucide="log-in" class="w-5 h-5 inline mr-1"></i>Sign In
-                    </span>
+                <button type="submit" id="loginBtn" class="btn-login">
+                    <span id="btnText">Sign In to Account</span>
                     <div id="btnSpinner" class="spinner hidden"></div>
                 </button>
             </form>
 
-            <!-- Security Info -->
-            <div class="mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
-                <div class="flex items-center justify-center gap-4 text-xs text-gray-500 dark:text-gray-400">
-                    <span class="flex items-center gap-1">
-                        <i data-lucide="shield" class="w-3 h-3"></i>
-                        Brute Force Protection
-                    </span>
-                    <span class="flex items-center gap-1">
-                        <i data-lucide="clock" class="w-3 h-3"></i>
-                        12h Session
-                    </span>
-                    <span class="flex items-center gap-1">
-                        <i data-lucide="lock" class="w-3 h-3"></i>
-                        JWT Auth
-                    </span>
+            <div class="powered-by">
+                <span>Powered By:</span>
+                <div class="logo-footer">
+                    <i class="fa-solid fa-shield-cat text-slate-300 text-2xl"></i>
+                    <span class="font-bold text-slate-300">Kuro AI</span>
                 </div>
             </div>
         </div>
-
-        <!-- Footer -->
-        <p class="text-center text-white/50 text-xs mt-6">
-            &copy; 2026 Kuro AI System. All rights reserved.
-        </p>
     </div>
 
     <script>
-        // Initialize Lucide icons
+        // Initialize Lucide
         lucide.createIcons();
 
-        // DOM Elements
+        // Particles.js Config
+        particlesJS("particles-js", {
+            "particles": {
+                "number": { "value": 80, "density": { "enable": true, "value_area": 800 } },
+                "color": { "value": "#10b981" },
+                "shape": { "type": "circle" },
+                "opacity": { "value": 0.6, "random": false },
+                "size": { "value": 3, "random": true },
+                "line_linked": { "enable": true, "distance": 150, "color": "#10b981", "opacity": 0.4, "width": 1 },
+                "move": { "enable": true, "speed": 1.5, "direction": "none", "random": false, "straight": false, "out_mode": "out", "bounce": false }
+            },
+            "interactivity": {
+                "detect_on": "canvas",
+                "events": { "onhover": { "enable": true, "mode": "grab" }, "onclick": { "enable": true, "mode": "push" }, "resize": true },
+                "modes": { "grab": { "distance": 140, "line_linked": { "opacity": 0.8 } } }
+            },
+            "retina_detect": true
+        });
+
+        // Form Logic
         const loginForm = document.getElementById('loginForm');
         const usernameInput = document.getElementById('username');
         const passwordInput = document.getElementById('password');
-        const togglePassword = document.getElementById('togglePassword');
-        const eyeIcon = document.getElementById('eyeIcon');
         const rememberMe = document.getElementById('rememberMe');
         const loginBtn = document.getElementById('loginBtn');
         const btnText = document.getElementById('btnText');
         const btnSpinner = document.getElementById('btnSpinner');
         const errorMessage = document.getElementById('errorMessage');
         const errorText = document.getElementById('errorText');
-        const lockoutTimer = document.getElementById('lockoutTimer');
         const successMessage = document.getElementById('successMessage');
 
-        // Show/Hide Password Toggle
-        let passwordVisible = false;
-        togglePassword.addEventListener('click', () => {
-            passwordVisible = !passwordVisible;
-            passwordInput.type = passwordVisible ? 'text' : 'password';
-            eyeIcon.setAttribute('data-lucide', passwordVisible ? 'eye-off' : 'eye');
-            lucide.createIcons();
-        });
-
-        // Show error message
-        function showError(message, isLockout = false, remainingSeconds = 0) {
-            errorMessage.classList.remove('hidden');
+        function showError(message) {
+            errorMessage.style.display = 'block';
             errorText.textContent = message;
-            
-            if (isLockout && remainingSeconds > 0) {
-                lockoutTimer.classList.remove('hidden');
-                startLockoutTimer(remainingSeconds);
-            } else {
-                lockoutTimer.classList.add('hidden');
-            }
-            
-            // Shake animation
             errorMessage.classList.add('shake');
             setTimeout(() => errorMessage.classList.remove('shake'), 500);
         }
 
-        // Hide error message
         function hideError() {
-            errorMessage.classList.add('hidden');
-            lockoutTimer.classList.add('hidden');
+            errorMessage.style.display = 'none';
         }
 
-        // Show success message
-        function showSuccess() {
-            successMessage.classList.remove('hidden');
-        }
-
-        // Lockout countdown timer
-        let lockoutInterval = null;
-        function startLockoutTimer(seconds) {
-            if (lockoutInterval) clearInterval(lockoutInterval);
-            
-            let remaining = seconds;
-            lockoutInterval = setInterval(() => {
-                const minutes = Math.floor(remaining / 60);
-                const secs = remaining % 60;
-                lockoutTimer.textContent = `Try again in ${minutes}m ${secs}s`;
-                
-                if (remaining <= 0) {
-                    clearInterval(lockoutInterval);
-                    hideError();
-                    loginBtn.disabled = false;
-                    btnText.innerHTML = '<i data-lucide="log-in" class="w-5 h-5 inline mr-1"></i>Sign In';
-                    lucide.createIcons();
-                }
-                remaining--;
-            }, 1000);
-        }
-
-        // Set loading state
         function setLoading(loading) {
             if (loading) {
                 loginBtn.disabled = true;
-                btnText.classList.add('hidden');
+                btnText.style.display = 'none';
                 btnSpinner.classList.remove('hidden');
             } else {
                 loginBtn.disabled = false;
-                btnText.classList.remove('hidden');
+                btnText.style.display = 'block';
                 btnSpinner.classList.add('hidden');
             }
         }
 
-        // Handle form submission
         loginForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             hideError();
-            
-            const username = usernameInput.value.trim();
-            const password = passwordInput.value;
-            const remember = rememberMe.checked;
-            
-            if (!username || !password) {
-                showError('Please enter both username and password.');
-                return;
-            }
-            
             setLoading(true);
-            
+
             try {
                 const formData = new FormData();
-                formData.append('username', username);
-                formData.append('password', password);
-                formData.append('remember_me', remember ? 'true' : 'false');
-                
+                formData.append('username', usernameInput.value);
+                formData.append('password', passwordInput.value);
+                formData.append('remember_me', rememberMe.checked);
+
                 const response = await fetch('/api/login', {
                     method: 'POST',
                     body: formData
                 });
-                
+
                 const data = await response.json();
-                
+
                 if (response.ok && data.success) {
-                    console.log('Login successful! Cookie set by server.');
-                    // Token is stored in HttpOnly cookie by server, no localStorage needed
-                    showSuccess();
-                    
-                    // Redirect after short delay
-                    setTimeout(() => {
-                        console.log('Redirecting to dashboard...');
-                        window.location.href = '/';
-                    }, 1000);
+                    successMessage.style.display = 'block';
+                    setTimeout(() => window.location.href = '/', 1000);
                 } else {
-                    // Handle error
-                    if (data.locked) {
-                        showError(data.error, true, data.remaining_seconds);
-                        loginBtn.disabled = true;
-                    } else {
-                        showError(data.error);
-                    }
-                }
-            } catch (error) {
-                showError('Connection error. Please check your network and try again.');
-                console.error('Login error:', error);
-            } finally {
-                if (!loginBtn.disabled) {
+                    showError(data.error || 'Login failed');
                     setLoading(false);
                 }
-            }
-        });
-
-        // Focus username field on load
-        usernameInput.focus();
-
-        // Enter key to submit
-        passwordInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                loginForm.dispatchEvent(new Event('submit'));
+            } catch (err) {
+                showError('Connection error');
+                setLoading(false);
             }
         });
     </script>

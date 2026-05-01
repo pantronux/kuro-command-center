@@ -250,13 +250,13 @@
                 
                 <!-- User Profile -->
                 <div class="p-4 border-t border-glass-border dark:border-glass-borderDark sidebar-user-area">
-                    <div class="flex items-center gap-3 px-4 py-3 rounded-xl bg-gray-50 dark:bg-gray-800/50">
-                        <div class="w-10 h-10 rounded-full bg-gradient-to-br from-purple-400 to-pink-500 flex items-center justify-center text-white font-bold flex-shrink-0">
-                            M
+                    <div class="flex items-center gap-3 px-4 py-3 rounded-2xl bg-gray-50/50 dark:bg-gray-900/20 border border-gray-100 dark:border-gray-800">
+                        <div class="w-10 h-10 rounded-full bg-emerald-500 flex items-center justify-center text-white font-bold flex-shrink-0 shadow-lg shadow-emerald-500/20">
+                            {{ display_name[0]|upper }}
                         </div>
                         <div class="flex-1 min-w-0 sidebar-text">
-                            <p class="text-sm font-medium text-gray-800 dark:text-white truncate" id="sidebarDisplayName">{{ display_name }}</p>
-                            <p class="text-xs text-gray-500 dark:text-gray-400" id="sidebarRole">{{ role }}</p>
+                            <p class="text-sm font-bold text-gray-800 dark:text-white truncate">{{ display_name }}</p>
+                            <p class="text-xs text-gray-500 dark:text-gray-400 truncate">{{ role }}</p>
                         </div>
                     </div>
                 </div>
@@ -290,6 +290,7 @@
                         </button>
                         <div id="personaDropdown" class="absolute right-0 mt-2 w-56 bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-gray-200 dark:border-gray-700 hidden z-50">
                             <div class="p-2 space-y-1">
+                                {% if not restricted_persona or restricted_persona == 'consultant' %}
                                 <button class="persona-option w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-2" data-persona="consultant">
                                     <span class="text-lg">🎯</span>
                                     <div>
@@ -297,6 +298,9 @@
                                         <p class="text-xs text-gray-500">IT governance, ISO, NIST, risk & compliance</p>
                                     </div>
                                 </button>
+                                {% endif %}
+                                
+                                {% if not restricted_persona or restricted_persona == 'chill' %}
                                 <button class="persona-option w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-2" data-persona="chill">
                                     <span class="text-lg">😎</span>
                                     <div>
@@ -304,6 +308,9 @@
                                         <p class="text-xs text-gray-500">Friendly, gaming, and relaxed mode</p>
                                     </div>
                                 </button>
+                                {% endif %}
+
+                                {% if not restricted_persona or restricted_persona == 'tactical' %}
                                 <button class="persona-option w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-2" data-persona="tactical">
                                     <span class="text-lg">🔧</span>
                                     <div>
@@ -311,6 +318,9 @@
                                         <p class="text-xs text-gray-500">Systems, code, and infra execution</p>
                                     </div>
                                 </button>
+                                {% endif %}
+
+                                {% if not restricted_persona or restricted_persona == 'advisor' %}
                                 <button class="persona-option w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-2" data-persona="advisor">
                                     <span class="text-lg">🧪</span>
                                     <div>
@@ -318,6 +328,9 @@
                                         <p class="text-xs text-gray-500">Socratic scholar for PhD research</p>
                                     </div>
                                 </button>
+                                {% endif %}
+
+                                {% if not restricted_persona or restricted_persona == 'chancellor' %}
                                 <button class="persona-option w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-2" data-persona="chancellor">
                                     <span class="text-lg">📒</span>
                                     <div>
@@ -325,6 +338,9 @@
                                         <p class="text-xs text-gray-500">Ledger, watchlist, and market tools</p>
                                     </div>
                                 </button>
+                                {% endif %}
+
+                                {% if not restricted_persona or restricted_persona == 'auditor' %}
                                 <button class="persona-option w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-2" data-persona="auditor">
                                     <span class="text-lg">🔍</span>
                                     <div>
@@ -332,6 +348,7 @@
                                         <p class="text-xs text-gray-500">BRD Conformance & Traceability</p>
                                     </div>
                                 </button>
+                                {% endif %}
                             </div>
                             <div class="border-t border-gray-200 dark:border-gray-700 p-2">
                                 <button id="applyPersona" class="w-full px-3 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-sm font-medium transition-colors">
@@ -345,15 +362,50 @@
                         <i data-lucide="sun" class="w-5 h-5 text-gray-600 dark:hidden"></i>
                         <i data-lucide="moon" class="w-5 h-5 text-gray-300 hidden dark:block"></i>
                     </button>
-                    <!-- User Info & Logout -->
-                    <div class="flex items-center gap-2 ml-2 pl-2 border-l border-gray-300 dark:border-gray-600">
-                        <div class="flex items-center gap-2 px-2 py-1 rounded-lg bg-emerald-100 dark:bg-emerald-900/30">
-                            <i data-lucide="user-check" class="w-4 h-4 text-emerald-600 dark:text-emerald-400"></i>
-                            <span id="userInfo" class="text-sm font-medium text-emerald-700 dark:text-emerald-300 max-w-[100px] truncate"></span>
-                        </div>
-                        <button id="logoutBtn" class="p-2 rounded-xl bg-red-100 dark:bg-red-900/30 hover:bg-red-200 dark:hover:bg-red-900/50 transition-all duration-300" title="Logout">
-                            <i data-lucide="log-out" class="w-4 h-4 text-red-600 dark:text-red-400"></i>
+                    <!-- User Account Dropdown -->
+                    <div class="relative ml-2 pl-2 border-l border-gray-300 dark:border-gray-600">
+                        <button id="userDropdownToggle" class="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 transition-all duration-300 focus:outline-none">
+                            <div class="w-8 h-8 rounded-full bg-emerald-500 flex items-center justify-center text-white font-bold text-xs flex-shrink-0">
+                                {{ display_name[0]|upper }}
+                            </div>
+                            <span class="text-sm font-semibold text-emerald-700 dark:text-emerald-400 hidden sm:inline max-w-[120px] truncate">{{ display_name }}</span>
+                            <i data-lucide="chevron-down" class="w-4 h-4 text-emerald-500"></i>
                         </button>
+                        
+                        <!-- Dropdown Menu -->
+                        <div id="userDropdownMenu" class="absolute right-0 mt-2 w-64 bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-gray-100 dark:border-gray-700 hidden z-50 overflow-hidden animate-fade-in">
+                            <div class="p-4 border-b border-gray-100 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-900/20">
+                                <div class="flex items-center gap-3">
+                                    <div class="w-10 h-10 rounded-full bg-emerald-500 flex items-center justify-center text-white font-bold">
+                                        {{ display_name[0]|upper }}
+                                    </div>
+                                    <div class="min-w-0">
+                                        <p class="text-sm font-bold text-gray-800 dark:text-white truncate">{{ display_name }}</p>
+                                        <p class="text-xs text-gray-500 dark:text-gray-400 truncate">{{ role }}</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="p-2">
+                                <a href="/profile" class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-gray-600 dark:text-gray-300 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 hover:text-emerald-600 dark:hover:text-emerald-400 transition-all group">
+                                    <i data-lucide="user" class="w-4 h-4 group-hover:scale-110 transition-transform"></i>
+                                    My Profile
+                                </a>
+                                <button id="openChangePasswordModal" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-gray-600 dark:text-gray-300 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 hover:text-emerald-600 dark:hover:text-emerald-400 transition-all group text-left">
+                                    <i data-lucide="key-round" class="w-4 h-4 group-hover:scale-110 transition-transform"></i>
+                                    Change Password
+                                </button>
+                                <button id="openPersonaModal" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-gray-600 dark:text-gray-300 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 hover:text-emerald-600 dark:hover:text-emerald-400 transition-all group text-left">
+                                    <i data-lucide="sparkles" class="w-4 h-4 group-hover:scale-110 transition-transform"></i>
+                                    Persona Settings
+                                </button>
+                            </div>
+                            <div class="p-2 bg-gray-50 dark:bg-gray-900/50 border-t border-gray-100 dark:border-gray-700">
+                                <button id="logoutBtn" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-red-600 hover:bg-red-100 dark:hover:bg-red-900/30 transition-all group text-left">
+                                    <i data-lucide="log-out" class="w-4 h-4 group-hover:translate-x-1 transition-transform"></i>
+                                    Sign Out
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </header>
@@ -526,6 +578,75 @@
     </div>
     
 
+    <!-- Change Password Modal -->
+    <div id="changePasswordModal" class="fixed inset-0 z-[70] hidden flex items-center justify-center">
+        <div class="absolute inset-0 bg-black/60 backdrop-blur-md" id="passwordBackdrop"></div>
+        <div class="relative w-full max-w-md mx-4 bg-white dark:bg-gray-800 rounded-3xl shadow-2xl overflow-hidden animate-slide-up">
+            <div class="p-8">
+                <div class="flex items-center justify-between mb-6">
+                    <h3 class="text-2xl font-bold text-gray-800 dark:text-white flex items-center gap-3">
+                        <i data-lucide="key-round" class="text-emerald-500"></i>
+                        Change Password
+                    </h3>
+                    <button class="close-modal p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                        <i data-lucide="x" class="w-6 h-6 text-gray-400"></i>
+                    </button>
+                </div>
+                
+                <form id="changePasswordForm" class="space-y-5">
+                    <div>
+                        <label class="block text-sm font-semibold text-gray-600 dark:text-gray-400 mb-2 ml-1">Current Password</label>
+                        <input type="password" id="oldPassword" required class="w-full px-4 py-3 bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700 rounded-2xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all dark:text-white" placeholder="••••••••">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-semibold text-gray-600 dark:text-gray-400 mb-2 ml-1">New Password</label>
+                        <input type="password" id="newPassword" required class="w-full px-4 py-3 bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700 rounded-2xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all dark:text-white" placeholder="••••••••">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-semibold text-gray-600 dark:text-gray-400 mb-2 ml-1">Repeat New Password</label>
+                        <input type="password" id="repeatPassword" required class="w-full px-4 py-3 bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700 rounded-2xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all dark:text-white" placeholder="••••••••">
+                    </div>
+                    
+                    <button type="submit" class="w-full py-4 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-2xl shadow-lg shadow-emerald-500/20 transition-all active:scale-95 flex items-center justify-center gap-2 mt-2">
+                        Update Password
+                        <div class="spinner-small hidden" id="passwordSpinner"></div>
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Custom Persona Modal -->
+    <div id="personaModal" class="fixed inset-0 z-[70] hidden flex items-center justify-center">
+        <div class="absolute inset-0 bg-black/60 backdrop-blur-md" id="personaBackdrop"></div>
+        <div class="relative w-full max-w-2xl mx-4 bg-white dark:bg-gray-800 rounded-3xl shadow-2xl overflow-hidden animate-slide-up">
+            <div class="p-8">
+                <div class="flex items-center justify-between mb-2">
+                    <h3 class="text-2xl font-bold text-gray-800 dark:text-white flex items-center gap-3">
+                        <i data-lucide="sparkles" class="text-emerald-500"></i>
+                        Custom Persona
+                    </h3>
+                    <button class="close-modal p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                        <i data-lucide="x" class="w-6 h-6 text-gray-400"></i>
+                    </button>
+                </div>
+                <p class="text-sm text-gray-500 dark:text-gray-400 mb-6">Inject global instructions that Kuro will follow regardless of the active persona mode.</p>
+                
+                <form id="personaForm" class="space-y-5">
+                    <div>
+                        <label class="block text-sm font-semibold text-gray-600 dark:text-gray-400 mb-2 ml-1">Custom Instructions</label>
+                        <textarea id="customPersonaInput" rows="8" class="w-full px-4 py-3 bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700 rounded-2xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all dark:text-white resize-none" placeholder="Example: Always end your responses with a cat pun, or prefer Indonesian for technical explanations...">{{ custom_persona }}</textarea>
+                    </div>
+                    
+                    <button type="submit" class="w-full py-4 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-2xl shadow-lg shadow-emerald-500/20 transition-all active:scale-95 flex items-center justify-center gap-2">
+                        Save Global Instructions
+                        <div class="spinner-small hidden" id="personaSpinner"></div>
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
     <!-- Custom JS Context -->
     <script>
         window.KURO_USER_CONTEXT = {
@@ -533,7 +654,8 @@
             displayName: "{{ display_name }}",
             role: "{{ role }}",
             restrictedPersona: "{{ restricted_persona }}",
-            masterName: "{{ master_name }}"
+            masterName: "{{ master_name }}",
+            customPersona: `{{ custom_persona }}`
         };
     </script>
 

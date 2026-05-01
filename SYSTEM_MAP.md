@@ -1,4 +1,4 @@
-# Kuro AI V7.2.1 "Sovereign Leviathan" — SYSTEM_MAP
+# Kuro AI V7.5.0 "Identity" — SYSTEM_MAP
 
 > Authoritative navigation map for the repository. Traced function-by-function
 > from the true entrypoint (`main.py`) outward. Only source code under version
@@ -90,6 +90,16 @@ Kuro AI is your **Intelligent Personal Sovereign**—a sophisticated digital com
 - **Cognitive Effort Allocator:** `agency/cognitive_effort.py` maps intent category to `low/medium/high` effort level, injecting scaled CoT depth into the system prompt.
 - **Gating:** All agency nodes self-bypass in O(1) for non-agency personas (chill, tactical, chancellor).
 - **New env vars:** `KURO_ALIGNMENT_THRESHOLD` (float, default `0.35`) — alignment conflict floor.
+
+### V7.5.0 Architecture Notes ("Identity")
+
+- **Database-Backed Identity System**: Fully decommissioned the hardcoded `USER_REGISTRY` in favor of a robust SQLite-backed `users` table in `kuro_auth.db`. Supports dynamic user creation, role assignment, and metadata persistence.
+- **Custom Global Persona**: Introduced `custom_persona` persistence. Users can inject persistent global instructions that are automatically appended to Kuro's system instructions across all personas (Advisor, Auditor, etc.), enabling deep behavioral tailoring.
+- **User Profile Management (V7.5 "Identity" UI)**:
+    - **Account Dropdown**: Replaced static user info with a premium, interactive dropdown menu in the dashboard header.
+    - **Profile Engine**: New `profile.html` and `/api/user/update` endpoints allow users to manage display names and email addresses.
+    - **Security Utility**: Integrated a "Change Password" modal with `bcrypt` verification and server-side validation.
+- **Auth Resilience**: Unified authentication logic to use `auth_db.get_user()`, supporting case-insensitive lookups and consistent session state across the LangGraph and Fast-path reasoning loops.
 
 ## Core Logic Flow (Function-Level Flowchart)
 

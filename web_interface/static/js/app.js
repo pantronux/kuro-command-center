@@ -154,6 +154,18 @@ const elements = {
     // User Info & Logout
     userInfo: document.getElementById('userInfo'),
     logoutBtn: document.getElementById('logoutBtn'),
+    // User Account Dropdown & Modals
+    userDropdownToggle: document.getElementById('userDropdownToggle'),
+    userDropdownMenu: document.getElementById('userDropdownMenu'),
+    openChangePasswordModal: document.getElementById('openChangePasswordModal'),
+    changePasswordModal: document.getElementById('changePasswordModal'),
+    changePasswordForm: document.getElementById('changePasswordForm'),
+    passwordBackdrop: document.getElementById('passwordBackdrop'),
+    openPersonaModal: document.getElementById('openPersonaModal'),
+    personaModal: document.getElementById('personaModal'),
+    personaForm: document.getElementById('personaForm'),
+    personaBackdrop: document.getElementById('personaBackdrop'),
+    customPersonaInput: document.getElementById('customPersonaInput'),
 };
 
 // ============================================
@@ -286,6 +298,57 @@ function setupEventListeners() {
         }
         
         loadPersona();
+    }
+
+    // User Dropdown Toggle
+    if (elements.userDropdownToggle) {
+        elements.userDropdownToggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            elements.userDropdownMenu.classList.toggle('hidden');
+        });
+
+        document.addEventListener('click', (e) => {
+            if (!elements.userDropdownMenu.contains(e.target)) {
+                elements.userDropdownMenu.classList.add('hidden');
+            }
+        });
+    }
+
+    // Modal Handlers
+    if (elements.openChangePasswordModal) {
+        elements.openChangePasswordModal.addEventListener('click', () => {
+            elements.changePasswordModal.classList.remove('hidden');
+            elements.userDropdownMenu.classList.add('hidden');
+        });
+    }
+
+    if (elements.openPersonaModal) {
+        elements.openPersonaModal.addEventListener('click', () => {
+            elements.personaModal.classList.remove('hidden');
+            elements.userDropdownMenu.classList.add('hidden');
+        });
+    }
+
+    document.querySelectorAll('.close-modal').forEach(btn => {
+        btn.addEventListener('click', () => {
+            elements.changePasswordModal?.classList.add('hidden');
+            elements.personaModal?.classList.add('hidden');
+        });
+    });
+
+    [elements.passwordBackdrop, elements.personaBackdrop].forEach(bg => {
+        bg?.addEventListener('click', () => {
+            elements.changePasswordModal?.classList.add('hidden');
+            elements.personaModal?.classList.add('hidden');
+        });
+    });
+
+    // Form Submissions
+    if (elements.changePasswordForm) {
+        elements.changePasswordForm.addEventListener('submit', handlePasswordChange);
+    }
+    if (elements.personaForm) {
+        elements.personaForm.addEventListener('submit', handlePersonaUpdate);
     }
 }
 
@@ -1836,3 +1899,82 @@ function addTableCopyButtons(container) {
 }
 
 // ============================================
+async function handlePasswordChange(e) {
+    e.preventDefault();
+    const oldPassword = document.getElementById('oldPassword').value;
+    const newPassword = document.getElementById('newPassword').value;
+    const repeatPassword = document.getElementById('repeatPassword').value;
+    const spinner = document.getElementById('passwordSpinner');
+    const submitBtn = e.target.querySelector('button[type="submit"]');
+
+    if (newPassword !== repeatPassword) {
+        showNotification('New passwords do not match', 'error');
+        return;
+    }
+
+    submitBtn.disabled = true;
+    spinner.classList.remove('hidden');
+
+    try {
+        const formData = new FormData();
+        formData.append('old_password', oldPassword);
+        formData.append('new_password', newPassword);
+        formData.append('repeat_password', repeatPassword);
+
+        const response = await fetch('/api/user/change-password', {
+            method: 'POST',
+            body: formData
+        });
+        
+        const result = await response.json();
+        if (result.success) {
+            showNotification('Password changed successfully!', 'success');
+            elements.changePasswordModal.classList.add('hidden');
+            elements.changePasswordForm.reset();
+        } else {
+            showNotification(result.error || 'Failed to change password', 'error');
+        }
+    } catch (err) {
+        showNotification('Connection error', 'error');
+    } finally {
+        submitBtn.disabled = false;
+        spinner.classList.add('hidden');
+    }
+}
+
+async function handlePersonaUpdate(e) {
+    e.preventDefault();
+    const customPersona = elements.customPersonaInput.value;
+    const spinner = document.getElementById('personaSpinner');
+    const submitBtn = e.target.querySelector('button[type="submit"]');
+
+    submitBtn.disabled = true;
+    spinner.classList.remove('hidden');
+
+    try {
+        const formData = new FormData();
+        formData.append('custom_persona', customPersona);
+
+        const response = await fetch('/api/user/update-persona', {
+            method: 'POST',
+            body: formData
+        });
+        
+        const result = await response.json();
+        if (result.success) {
+            showNotification('Global persona updated!', 'success');
+            elements.personaModal.classList.add('hidden');
+            // Update local context
+            if (window.KURO_USER_CONTEXT) {
+                window.KURO_USER_CONTEXT.customPersona = customPersona;
+            }
+        } else {
+            showNotification(result.error || 'Failed to update persona', 'error');
+        }
+    } catch (err) {
+        showNotification('Connection error', 'error');
+    } finally {
+        submitBtn.disabled = false;
+        spinner.classList.add('hidden');
+    }
+}

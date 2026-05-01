@@ -37,6 +37,7 @@ from langgraph.graph import END, START, StateGraph
 
 # Kuro imports
 from kuro_backend import (
+    auth_db,
     chat_history,
     memory_coordinator,
     memory_manager,
@@ -446,6 +447,7 @@ class KuroState(TypedDict):
     rewritten_query: str          # LLM-transformed query after grading fail
     master_name: str              # User-specific name (e.g. Pantronux, Master Faikhira)
     username: str                 # System username for memory isolation
+    custom_persona: str           # User-specific global instructions
 
 
 # ============================================
@@ -453,7 +455,7 @@ class KuroState(TypedDict):
 # ============================================
 
 
-def get_system_instruction(persona_override: Optional[str] = None, master_name: str = "Pantronux") -> str:
+def get_system_instruction(persona_override: Optional[str] = None, master_name: str = "Pantronux", custom_persona: str = "") -> str:
     """Get system instruction with current time and active persona (graph variant)."""
     current_time = settings.get_current_time_formatted()
     current_date = settings.get_current_time().strftime("%Y-%m-%d")
@@ -467,6 +469,7 @@ def get_system_instruction(persona_override: Optional[str] = None, master_name: 
         kuro_version_label="V5.5 LangGraph",
         variant="graph",
         master_name=master_name,
+        custom_persona=custom_persona,
     )
 
 # ============================================
@@ -1310,7 +1313,8 @@ def response_node(state: KuroState) -> Dict[str, Any]:
 
         # Build system prompt
         master_name = state.get("master_name", "Pantronux")
-        system_prompt = get_system_instruction(persona_override=persona_mode, master_name=master_name)
+        custom_persona = state.get("custom_persona", "")
+        system_prompt = get_system_instruction(persona_override=persona_mode, master_name=master_name, custom_persona=custom_persona)
         
         intent = state.get("_intent", "new")
         if intent == "edit":
@@ -2034,6 +2038,11 @@ async def process_chat_with_graph_stream(
             persona_override or memory_manager.get_active_persona()
         )
 
+        # V7.3 Identity: Fetch user info from database
+        user_info = auth_db.get_user(username) or {}
+        master_name = user_info.get("master_name", master_name)
+        custom_persona = user_info.get("custom_persona", "")
+
         # P3.1 — Semantic cache lookup BEFORE committing to any LLM path.
         # Disabled by default; opt-in via KURO_SEMANTIC_CACHE_ENABLED.
         if not image_paths:
@@ -2084,7 +2093,7 @@ async def process_chat_with_graph_stream(
             if ref_block:
                 prefix = f"{message}\n\n{ref_block}"
             full_message = f"{prefix}{memory_injection}"
-            system_prompt = get_system_instruction(persona_override=persona_mode, master_name=master_name)
+            system_prompt = get_system_instruction(persona_override=persona_mode, master_name=master_name, custom_persona=custom_persona)
 
             # Re-evaluate reflection node logic for fastpath
             intent = reflection_node({"user_input": message}).get("_intent", "new")
@@ -2174,6 +2183,8 @@ async def process_chat_with_graph_stream(
             "tool_execution_result": {},
             "requires_approval": False,
             "master_name": master_name,
+            "username": username,
+            "custom_persona": custom_persona,
             "_session_id": session_id,
             "_approval_scope": approval_scope,
             "_trace_id": trace_id,
@@ -2191,6 +2202,8 @@ async def process_chat_with_graph_stream(
             "retrieval_grade": "relevant",
             "retrieval_retry_count": 0,
             "rewritten_query": "",
+            "username": username,
+            "custom_persona": custom_persona,
         }
         
         thread_id = f"kuro_stream_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{session_id[:8]}"
@@ -2402,6 +2415,11 @@ def process_chat_with_graph(
                     logger.warning("[SEMANTIC_CACHE] persist failed: %s", exc)
                 return cached_response
 
+        # Fetch user-specific custom persona
+        user_info = auth_db.get_user(username)
+        custom_persona = user_info.get("custom_persona", "") if user_info else ""
+        master_name = user_info.get("master_name", "Pantronux") if user_info else "Pantronux"
+
         # Initialize state with session ID for observability
         initial_state = {
             "messages": [{"role": "user", "content": message}],
@@ -2416,6 +2434,7 @@ def process_chat_with_graph(
             "_session_id": session_id,
             "master_name": master_name,
             "username": username,
+            "custom_persona": custom_persona,
             "_approval_scope": approval_scope,
             "_trace_id": trace_id,
             # Natural Agency defaults (V7.2)

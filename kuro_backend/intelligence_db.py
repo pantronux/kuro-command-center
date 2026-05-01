@@ -35,31 +35,52 @@ def init_db():
     try:
         conn = _get_connection()
         cursor = conn.cursor()
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS intelligence_briefings (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT NOT NULL DEFAULT 'Pantronux',
-                date TEXT NOT NULL,
-                summary_text TEXT NOT NULL,
-                raw_json_data TEXT DEFAULT '{}',
-                experimental_signals TEXT DEFAULT '[]',
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(username, date)
-            )
-        """)
+
+        # Check if the table already exists with the OLD schema (no username column)
+        cursor.execute("PRAGMA table_info(intelligence_briefings)")
+        cols = [row["name"] for row in cursor.fetchall()]
+
+        if cols and "username" not in cols:
+            # Safe migration: recreate table to add username column with UNIQUE(username, date)
+            logger.info("[INTELLIGENCE] Running schema migration: adding username column via table recreation...")
+            cursor.execute("ALTER TABLE intelligence_briefings RENAME TO intelligence_briefings_old")
+            cursor.execute("""
+                CREATE TABLE intelligence_briefings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT NOT NULL DEFAULT 'Pantronux',
+                    date TEXT NOT NULL,
+                    summary_text TEXT NOT NULL,
+                    raw_json_data TEXT DEFAULT '{}',
+                    experimental_signals TEXT DEFAULT '[]',
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(username, date)
+                )
+            """)
+            cursor.execute("""
+                INSERT INTO intelligence_briefings (username, date, summary_text, raw_json_data, experimental_signals, created_at)
+                SELECT 'Pantronux', date, summary_text, raw_json_data, experimental_signals, created_at
+                FROM intelligence_briefings_old
+            """)
+            cursor.execute("DROP TABLE intelligence_briefings_old")
+            logger.info("[INTELLIGENCE] Schema migration complete.")
+        else:
+            # Create fresh if not yet existing
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS intelligence_briefings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT NOT NULL DEFAULT 'Pantronux',
+                    date TEXT NOT NULL,
+                    summary_text TEXT NOT NULL,
+                    raw_json_data TEXT DEFAULT '{}',
+                    experimental_signals TEXT DEFAULT '[]',
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(username, date)
+                )
+            """)
+
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_briefing_user_date ON intelligence_briefings(username, date DESC)
         """)
-        # Migration: check for username column
-        cursor.execute("PRAGMA table_info(intelligence_briefings)")
-        cols = [row["name"] for row in cursor.fetchall()]
-        if "username" not in cols:
-            # We need to drop the old UNIQUE constraint on date if it exists.
-            # SQLite doesn't support ALTER TABLE DROP CONSTRAINT. 
-            # But we can just add the column and use it.
-            cursor.execute("ALTER TABLE intelligence_briefings ADD COLUMN username TEXT NOT NULL DEFAULT 'Pantronux'")
-            logger.info("[INTELLIGENCE] Added username column to briefings table.")
-        
         conn.commit()
         logger.info(f"Intelligence briefings database initialized at {DB_PATH}")
     except Exception as e:
@@ -67,6 +88,7 @@ def init_db():
     finally:
         if conn:
             conn.close()
+
 
 def save_briefing(date: str, summary_text: str, raw_json_data: Dict, experimental_signals: List[str], username: str = "Pantronux") -> bool:
     """Save a daily intelligence briefing for a specific user."""

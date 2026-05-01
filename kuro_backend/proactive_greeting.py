@@ -93,10 +93,10 @@ async def maybe_send(ws: WebSocket, username: Optional[str]) -> bool:
         logger.warning("[GREETING] cooldown check failed: %s", exc)
         # Fail-open: one extra greeting is better than a silent boot.
 
-    # Resolve master_name from registry
+    # Resolve master_name from database
     try:
-        from main import USER_REGISTRY
-        master_name = USER_REGISTRY.get(user, {}).get("master_name", user)
+        user_info = auth_db.get_user(user)
+        master_name = user_info.get("master_name", user) if user_info else user
     except Exception:
         master_name = user
 

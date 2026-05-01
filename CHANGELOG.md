@@ -1,10 +1,44 @@
-# Kuro AI V7.2.1 "Sovereign Leviathan" - Changelog
+# Kuro AI V7.5.0 "Identity" - Changelog
 
-**Release Date:** 2026-04-29
-**Version:** 7.2.1
-**Codename:** "Sovereign Leviathan"
+**Release Date:** 2026-05-01
+**Version:** 7.5.0
+**Codename:** "Identity"
 
 ---
+
+## V7.5.0 - Identity & Technical Depth (2026-05-01)
+
+### Summary
+Major iteration focusing on the synergy between the new Identity System and technical reasoning depth. This release decouples rigid persona role-play from technical expertise, allowing the user's global personality settings to drive the interaction while the system provides the technical backbone. Integrated mandatory real-time grounding to bypass knowledge cut-offs.
+
+### Highlights
+
+- **Persona Technical Refactor (Depth over Template):**
+  - Shifted all system personas (Consultant, Advisor, Tactical, etc.) from prescriptive role-play to deep technical domain expertise.
+  - Removed restrictive "Tone" and "Mindset" mandates that caused templated responses.
+  - Enhanced system prompt logic to prioritize the User's Global Custom Persona for stylistic control.
+
+- **Real-Time Grounding & Anti-Gatekeeping:**
+  - Added mandatory directives for personas to use Google Grounding (Web Search) and OpenClaw skill bridge for up-to-date data.
+  - Eliminated "Knowledge Cut-off" limitations for technical documentation and regulatory updates.
+
+- **Granular Persona Access Control:**
+  - Implemented database-level `restricted_persona` enforcement to isolate users to specific personas (e.g., QA-only access for `Faikhira`).
+
+- **Identity Resilience & Hardening:**
+  - Hardened persona restrictions with database-level validation in `/api/persona` endpoints.
+  - Fixed database schema synchronization issue (missing `restricted_persona` column) and applied automated recovery.
+  - Implemented user-aware persona switching to prevent cross-account mode collisions.
+  - Enforced strict backend-side persona overrides for restricted roles (e.g., QA isolation).
+
+- **Full Registry Decommissioning:**
+  - Completed the removal of all legacy `USER_REGISTRY` references from background workers (`dreaming_worker.py`) and proactive services.
+
+---
+
+
+## V7.3.0 - Database-Backed Identity (2026-05-01)
+
 
 ## V7.2.1 - Natural Agency: Auto-RAG Self-Correction Loop (2026-04-29)
 

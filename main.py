@@ -137,24 +137,6 @@ FAIKHIRA_USERNAME = os.getenv("FAIKHIRA_USERNAME", "Faikhira")
 FAIKHIRA_PASSWORD_HASH = os.getenv("FAIKHIRA_PASSWORD_HASH", "")
 FAIKHIRA_MASTER_NAME = os.getenv("FAIKHIRA_MASTER_NAME", "Master Faikhira")
 
-# User Registry - maps username to credentials and session-specific behaviors
-USER_REGISTRY = {
-    ADMIN_USERNAME: {
-        "password_hash": ADMIN_PASSWORD_HASH,
-        "master_name": "Master Pantronux",
-        "display_name": "Pantronux",
-        "role": "Administrator",
-        "restricted_persona": None
-    },
-    FAIKHIRA_USERNAME: {
-        "password_hash": FAIKHIRA_PASSWORD_HASH,
-        "master_name": FAIKHIRA_MASTER_NAME,
-        "display_name": "Faikhira",
-        "role": "Quality Assurance",
-        "restricted_persona": "auditor"
-    }
-}
-
 # Cookie name for JWT token
 COOKIE_NAME = "kuro_access_token"
 CHAT_SESSION_HEADER = "X-Chat-Session"
@@ -269,8 +251,9 @@ async def login_endpoint(
             }
         )
     
-    # Validate user existence
-    user_info = USER_REGISTRY.get(username)
+    # Validate user existence (database-backed)
+    user_info = auth_db.get_user(username)
+    
     if not user_info:
         failed_count = auth_db.record_failed_attempt(username, client_ip, user_agent)
         if failed_count >= auth_db.MAX_FAILED_ATTEMPTS:
@@ -279,6 +262,9 @@ async def login_endpoint(
             status_code=401,
             content={"success": False, "error": "Username atau password salah."}
         )
+    
+    # Use the correctly-cased username from DB
+    username = user_info["username"]
     
     # Verify password
     if not verify_password(password, user_info["password_hash"]):
@@ -369,6 +355,103 @@ async def logout_endpoint():
     response = JSONResponse(content={"success": True, "message": "Logged out successfully"})
     response.delete_cookie(key=COOKIE_NAME, path="/")
     return response
+
+# --- User Management Routes ---
+
+@app.get("/profile", response_class=HTMLResponse)
+async def profile_page(request: Request):
+    """Serve the user profile page."""
+    token = get_token_from_cookie(request)
+    user = validate_token(token)
+    if not user:
+        return RedirectResponse(url="/login", status_code=302)
+        
+    username = user.get("username")
+    user_info = auth_db.get_user(username)
+    
+    return templates.TemplateResponse(
+        request=request,
+        name="profile.html",
+        context={
+            "username": username,
+            "display_name": user_info.get("display_name", username),
+            "email": user_info.get("email", ""),
+            "role": user_info.get("role", "User"),
+            "master_name": user_info.get("master_name", f"Master {username}"),
+            "custom_persona": user_info.get("custom_persona", "")
+        }
+    )
+
+@app.post("/api/user/update")
+async def update_profile(
+    request: Request,
+    username_new: str = Form(None),
+    display_name: str = Form(...),
+    email: str = Form(...)
+):
+    """Update user profile information."""
+    token = get_token_from_cookie(request)
+    user = validate_token(token)
+    if not user:
+        return JSONResponse(status_code=401, content={"success": False, "error": "Unauthorized"})
+    
+    username = user.get("username")
+    
+    # Note: username_new is currently ignored to prevent complex session invalidation issues,
+    # but could be implemented later if required.
+    
+    success = auth_db.update_user_profile(username, email, display_name)
+    if success:
+        return {"success": True, "message": "Profile updated successfully"}
+    return JSONResponse(status_code=500, content={"success": False, "error": "Failed to update profile"})
+
+@app.post("/api/user/change-password")
+async def change_password(
+    request: Request,
+    old_password: str = Form(...),
+    new_password: str = Form(...),
+    repeat_password: str = Form(...)
+):
+    """Handle password change with old password verification."""
+    token = get_token_from_cookie(request)
+    user = validate_token(token)
+    if not user:
+        return JSONResponse(status_code=401, content={"success": False, "error": "Unauthorized"})
+    
+    if new_password != repeat_password:
+        return JSONResponse(status_code=400, content={"success": False, "error": "New passwords do not match"})
+        
+    username = user.get("username")
+    user_info = auth_db.get_user(username)
+    
+    if not verify_password(old_password, user_info["password_hash"]):
+        return JSONResponse(status_code=401, content={"success": False, "error": "Old password incorrect"})
+    
+    # Hash new password
+    from passlib.hash import bcrypt
+    new_hash = bcrypt.hash(new_password)
+    
+    success = auth_db.update_password(username, new_hash)
+    if success:
+        return {"success": True, "message": "Password changed successfully"}
+    return JSONResponse(status_code=500, content={"success": False, "error": "Failed to update password"})
+
+@app.post("/api/user/update-persona")
+async def update_persona(
+    request: Request,
+    custom_persona: str = Form(...)
+):
+    """Update user's custom global persona instructions."""
+    token = get_token_from_cookie(request)
+    user = validate_token(token)
+    if not user:
+        return JSONResponse(status_code=401, content={"success": False, "error": "Unauthorized"})
+    
+    username = user.get("username")
+    success = auth_db.update_custom_persona(username, custom_persona)
+    if success:
+        return {"success": True, "message": "Custom persona updated successfully"}
+    return JSONResponse(status_code=500, content={"success": False, "error": "Failed to update persona"})
 
 # CORS Middleware - SECURITY: Restrict to specific allowed origins
 ALLOWED_ORIGINS = os.getenv(
@@ -560,7 +643,7 @@ async def index(request: Request):
         return RedirectResponse(url="/login", status_code=302)
     
     username = user.get("username")
-    user_info = USER_REGISTRY.get(username, {})
+    user_info = auth_db.get_user(username) or {}
     
     return templates.TemplateResponse(
         request=request,
@@ -584,7 +667,7 @@ async def chat_page(request: Request):
         return RedirectResponse(url="/login", status_code=302)
         
     username = user.get("username")
-    user_info = USER_REGISTRY.get(username, {})
+    user_info = auth_db.get_user(username) or {}
     
     return templates.TemplateResponse(
         request=request,
@@ -617,7 +700,7 @@ async def get_chat_history(
     token = get_token_from_cookie(request)
     user = validate_token(token)
     username = user.get("username") if user else ADMIN_USERNAME
-    user_info = USER_REGISTRY.get(username, {})
+    user_info = auth_db.get_user(username) or {}
     
     # Persona restriction enforcement
     restricted_persona = user_info.get("restricted_persona")
@@ -724,7 +807,7 @@ async def chat_endpoint(
         token = get_token_from_cookie(request)
         user = validate_token(token)
         username = user.get("username") if user else ADMIN_USERNAME
-        user_info = USER_REGISTRY.get(username, {})
+        user_info = auth_db.get_user(username) or {}
         master_name = user_info.get("master_name", "Master Pantronux")
         
         trace_id = f"chat_{uuid.uuid4().hex}"
@@ -910,7 +993,7 @@ async def chat_stream_endpoint(
             token = get_token_from_cookie(request)
             user = validate_token(token)
             username = user.get("username") if user else ADMIN_USERNAME
-            user_info = USER_REGISTRY.get(username, {})
+            user_info = auth_db.get_user(username) or {}
             master_name = user_info.get("master_name", "Master Pantronux")
             
             session_scope = _resolve_chat_session_id(request)
@@ -1683,19 +1766,45 @@ async def market_dashboard():
 @app.post("/api/persona")
 async def set_persona(request: Request):
     """Set the active persona for Kuro AI."""
+    token = get_token_from_cookie(request)
+    user = validate_token(token)
+    if not user:
+        return {"status": "error", "message": "Unauthorized"}
+    
+    username = user.get("username")
+    user_info = auth_db.get_user(username) or {}
+    restricted_persona = user_info.get("restricted_persona")
+    
     try:
         body = await request.json()
         persona = body.get('persona', 'consultant')
-        result = memory_manager.set_active_persona(persona)
+        
+        # Enforce restriction
+        if restricted_persona and persona != restricted_persona:
+            return {"status": "error", "message": f"Unauthorized. Your account is restricted to the {restricted_persona} persona."}
+            
+        result = memory_manager.set_active_persona(persona, username=username)
         return result
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
 @app.get("/api/persona")
-async def get_persona():
+async def get_persona(request: Request):
     """Get the current active persona."""
+    token = get_token_from_cookie(request)
+    user = validate_token(token)
+    if not user:
+        return {"status": "error", "message": "Unauthorized"}
+        
+    username = user.get("username")
+    user_info = auth_db.get_user(username) or {}
+    restricted_persona = user_info.get("restricted_persona")
+    
     try:
-        persona = memory_manager.get_active_persona()
+        if restricted_persona:
+            return {"status": "success", "persona": restricted_persona}
+            
+        persona = memory_manager.get_active_persona(username=username)
         return {"status": "success", "persona": persona}
     except Exception as e:
         return {"status": "error", "message": str(e)}
@@ -1979,8 +2088,7 @@ def send_daily_intelligence_briefing():
         from kuro_backend import telegram_notifier, memory_manager
         
         # Get all users to process
-        from main import USER_REGISTRY
-        all_usernames = list(USER_REGISTRY.keys())
+        all_usernames = auth_db.get_all_users()
         if not all_usernames:
             all_usernames = ["Pantronux"]
 
@@ -1992,8 +2100,8 @@ def send_daily_intelligence_briefing():
                 # Get display name for message
                 display_name = username
                 try:
-                    profile = memory_manager.load_master_profile(username)
-                    display_name = profile.get("master_name", username)
+                    user_info = auth_db.get_user(username)
+                    display_name = user_info.get("master_name", username) if user_info else username
                 except:
                     pass
 

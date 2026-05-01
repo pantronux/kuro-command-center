@@ -1,5 +1,5 @@
 """
-Kuro AI V6.0 "Sovereign" - Config [2026-04-17]
+Kuro AI V7.5.0 "Identity" - Config [2026-05-01]
 ================================================================================
 Centralized configuration for Kuro AI System.
 

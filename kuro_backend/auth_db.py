@@ -75,15 +75,29 @@ def init_auth_db():
             )
         """)
 
-        # V6.0 Sovereign — proactive greeting ledger. One row per user keyed
-        # by username; `last_sent_date` is an ISO date (YYYY-MM-DD) used by
-        # `greeting_sent_today` to enforce once-per-calendar-day delivery
-        # without needing a separate job to clean old rows.
+        # V6.0 Sovereign — proactive greeting ledger
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS proactive_greetings (
                 username TEXT PRIMARY KEY,
                 last_sent_date TEXT NOT NULL,
                 last_sent_ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # V7.3 Identity — Robust User Management
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                email TEXT,
+                display_name TEXT,
+                role TEXT,
+                master_name TEXT,
+                restricted_persona TEXT DEFAULT '',
+                custom_persona TEXT DEFAULT '',
+                preferences TEXT DEFAULT '{}',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
 
@@ -320,6 +334,107 @@ def get_login_stats() -> Dict:
     except Exception as e:
         logger.error(f"Failed to get login stats: {e}")
         return {"failed_attempts_today": 0, "successful_logins_today": 0, "locked_accounts": 0}
+    finally:
+        if conn:
+            conn.close()
+def get_user(username: str) -> Optional[Dict]:
+    """Get user information by username (case-insensitive)."""
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM users WHERE LOWER(username) = LOWER(?)", (username,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    except Exception as e:
+        logger.error(f"Failed to get user {username}: {e}")
+        return None
+    finally:
+        if conn:
+            conn.close()
+
+def create_user(username: str, password_hash: str, email: str = "", display_name: str = "", role: str = "", master_name: str = "", restricted_persona: str = ""):
+    """Create a new user in the database."""
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO users (username, password_hash, email, display_name, role, master_name, restricted_persona)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (username, password_hash, email, display_name, role, master_name, restricted_persona))
+        conn.commit()
+        logger.info(f"User created: {username}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to create user {username}: {e}")
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+def update_user_profile(username: str, email: str, display_name: str):
+    """Update basic user profile information."""
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE users 
+            SET email = ?, display_name = ? 
+            WHERE LOWER(username) = LOWER(?)
+        """, (email, display_name, username))
+        conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Failed to update profile for {username}: {e}")
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+def update_password(username: str, new_password_hash: str):
+    """Update user password."""
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE users SET password_hash = ? WHERE LOWER(username) = LOWER(?)", (new_password_hash, username))
+        conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Failed to update password for {username}: {e}")
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+def update_custom_persona(username: str, custom_persona: str):
+    """Update user's custom persona instructions."""
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE users SET custom_persona = ? WHERE LOWER(username) = LOWER(?)", (custom_persona, username))
+        conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Failed to update custom persona for {username}: {e}")
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+def get_all_users():
+    """Get all users for migration check."""
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT username FROM users")
+        return [row['username'] for row in cursor.fetchall()]
+    except Exception:
+        return []
     finally:
         if conn:
             conn.close()
