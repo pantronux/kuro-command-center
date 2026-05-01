@@ -66,44 +66,11 @@ from kuro_backend import persona_history_admin
 from kuro_backend import version as kuro_version
 from kuro_backend import proactive_greeting
 
-# --- Logging Setup with TimedRotatingFileHandler ---
-LOG_FILE = "kuro_sovereign.log"
-LOG_BACKUP_COUNT = 7  # Keep 7 days of logs
+from kuro_backend.logger_setup import setup_logging
 
-# Create rotating file handler that rotates at midnight
-file_handler = logging.handlers.TimedRotatingFileHandler(
-    LOG_FILE,
-    when='midnight',
-    interval=1,
-    backupCount=LOG_BACKUP_COUNT,
-    encoding='utf-8'
-)
-file_handler.suffix = "%Y-%m-%d"  # Log files will be named kuro_sovereign.log.YYYY-MM-DD
-file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+# --- Logging Setup with Centralized Config ---
+setup_logging(log_filename="kuro_sovereign.log", backup_count=30)
 
-# Console handler
-console_handler = logging.StreamHandler()
-console_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
-
-
-class OTelStatusNoiseFilter(logging.Filter):
-    """Silence non-error OpenTelemetry span-status chatter in normal operations."""
-
-    def filter(self, record: logging.LogRecord) -> bool:
-        if record.name.startswith("opentelemetry.trace.status") and record.levelno < logging.ERROR:
-            return False
-        return True
-
-# Configure root logger - V6.0: Single configuration, no duplication
-root_logger = logging.getLogger()
-root_logger.setLevel(logging.INFO)
-root_logger.propagate = False  # Do not propagate root records upward (avoids duplicate handlers in some setups)
-# Clear any existing handlers to prevent duplication on reload
-root_logger.handlers.clear()
-root_logger.addHandler(file_handler)
-root_logger.addHandler(console_handler)
-file_handler.addFilter(OTelStatusNoiseFilter())
-console_handler.addFilter(OTelStatusNoiseFilter())
 
 # APScheduler: prevent duplicate hardware-sentinel / job lines (root + apscheduler)
 logging.getLogger("apscheduler").handlers = []
@@ -115,7 +82,6 @@ logging.getLogger("pydantic").setLevel(logging.ERROR)
 logging.getLogger("opentelemetry").setLevel(logging.ERROR)
 
 logger = logging.getLogger(__name__)
-logger.info(f"Log rotation configured: {LOG_BACKUP_COUNT} days retention, rotating at midnight")
 
 # --- JWT Authentication Configuration (Cookie-Based) ---
 # Password hashing context (bcrypt)
@@ -731,14 +697,26 @@ async def get_chat_history(
     )
 
 @app.delete("/api/history")
-async def clear_chat_history(request: Request):
-    """Clear all chat history for the current user."""
+async def clear_chat_history(request: Request, persona: Optional[str] = None):
+    """Clear chat history for the current user, optionally filtered by persona."""
     token = get_token_from_cookie(request)
     user = validate_token(token)
     username = user.get("username") if user else ADMIN_USERNAME
     
-    chat_history.clear_history(username=username)
-    return api_success(data={"message": f"Chat history cleared for {username}"}, message=f"Chat history cleared for {username}")
+    chat_history.clear_history(username=username, persona=persona)
+    target = f"persona '{persona}'" if persona else "all personas"
+    return api_success(data={"message": f"Chat history for {target} cleared for {username}"}, message=f"Chat history for {target} cleared for {username}")
+
+
+@app.get("/api/chat/search")
+async def search_chat_history(request: Request, q: str, persona: Optional[str] = None):
+    """Search chat history for a keyword."""
+    token = get_token_from_cookie(request)
+    user = validate_token(token)
+    username = user.get("username") if user else ADMIN_USERNAME
+    
+    results = await run_db(chat_history.search_history, q, username, persona)
+    return api_success(data={"results": results})
 
 
 def _collect_research_status_snapshot(max_chars: int = 600) -> Dict[str, Any]:
@@ -2174,21 +2152,30 @@ def cleanup_old_artifacts(days: int = 14):
         return {"error": str(e)}
 
 def get_log_storage_usage() -> Dict:
-    """Calculate log storage usage for dashboard display."""
+    """Calculate log storage usage for dashboard display across the new centralized folders."""
     try:
-        log_dir = os.path.dirname(os.path.abspath(LOG_FILE))
+        base_log_dir = os.path.join(os.getcwd(), "logs")
+        system_dir = os.path.join(base_log_dir, "system")
+        archive_dir = os.path.join(base_log_dir, "archive")
+        
         total_size = 0
         log_count = 0
+        breakdown = {}
         
-        # Count current log file
-        if os.path.exists(LOG_FILE):
-            total_size += os.path.getsize(LOG_FILE)
-            log_count += 1
-        
-        # Count rotated log files
-        for f in os.listdir(log_dir):
-            if f.startswith('kuro_sovereign.log.'):
-                fp = os.path.join(log_dir, f)
+        # 1. Scan System Logs (Active)
+        if os.path.exists(system_dir):
+            for f in os.listdir(system_dir):
+                fp = os.path.join(system_dir, f)
+                if os.path.isfile(fp) and f.endswith(".log"):
+                    size = os.path.getsize(fp)
+                    total_size += size
+                    log_count += 1
+                    breakdown[f] = size / (1024 * 1024)
+                    
+        # 2. Scan Archive Logs (Rotated)
+        if os.path.exists(archive_dir):
+            for f in os.listdir(archive_dir):
+                fp = os.path.join(archive_dir, f)
                 if os.path.isfile(fp):
                     total_size += os.path.getsize(fp)
                     log_count += 1
@@ -2196,10 +2183,12 @@ def get_log_storage_usage() -> Dict:
         return {
             "total_size_mb": total_size / (1024 * 1024),
             "log_files": log_count,
-            "retention_days": LOG_BACKUP_COUNT
+            "retention_days": 30,  # Updated policy
+            "breakdown": breakdown
         }
     except Exception as e:
-        return {"error": str(e)}
+        logger.error(f"Failed to calculate log storage: {e}")
+        return {"error": str(e), "total_size_mb": 0, "log_files": 0, "retention_days": 30}
 
 def reset_daily_habits():
     """Midnight reset: Cleanup old artifacts."""

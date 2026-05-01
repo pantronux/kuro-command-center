@@ -182,7 +182,7 @@
                         <div class="sidebar-text">
                             <h1 class="text-lg font-bold text-gray-800 dark:text-white">Kuro AI</h1>
                             <p class="text-xs text-gray-500 dark:text-gray-400">
-                                <span id="kuroVersionBadge">Sovereign Leviathan V7.2.1</span>
+                                <span id="kuroVersionBadge">V7.5.3 Intelligence & Discovery</span>
                             </p>
                         </div>
                     </div>
@@ -246,6 +246,8 @@
                         <i data-lucide="settings" class="w-5 h-5 flex-shrink-0"></i>
                         <span class="sidebar-text">Settings</span>
                     </a>
+
+
                 </nav>
                 
                 <!-- User Profile -->
@@ -357,6 +359,10 @@
                             </div>
                         </div>
                     </div>
+                    <!-- Search Toggle -->
+                    <button id="openSearchBtn" class="p-2 rounded-xl bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-all duration-300">
+                        <i data-lucide="search" class="w-5 h-5 text-gray-600 dark:text-gray-300"></i>
+                    </button>
                     <!-- Dark Mode Toggle -->
                     <button id="darkModeToggle" class="p-2 rounded-xl bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-all duration-300">
                         <i data-lucide="sun" class="w-5 h-5 text-gray-600 dark:hidden"></i>
@@ -447,6 +453,10 @@
                     
                     <!-- Text Input -->
                     <div class="flex-1 relative">
+                        <!-- Scroll to bottom button (floating above input) -->
+                        <button id="scrollToBottomBtn" class="absolute -top-12 right-0 p-2.5 rounded-full bg-white/80 dark:bg-gray-800/80 backdrop-blur-md shadow-lg border border-gray-200 dark:border-gray-700 text-emerald-500 hover:text-emerald-600 transition-all duration-300 opacity-0 pointer-events-none translate-y-2">
+                            <i data-lucide="arrow-down" class="w-5 h-5"></i>
+                        </button>
                         <textarea
                             id="messageInput"
                             rows="1"
@@ -526,9 +536,14 @@
                         <h4 class="text-sm font-semibold text-gray-800 dark:text-gray-100 mb-3">Chat Controls</h4>
                         <div>
                             <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Clear Chat History</label>
-                            <button id="clearHistoryBtn" class="w-full px-4 py-2 bg-red-500/10 text-red-600 dark:text-red-400 rounded-xl hover:bg-red-500/20 transition-colors">
-                                Clear All History
-                            </button>
+                            <div class="grid grid-cols-1 gap-2">
+                                <button id="clearPersonaHistoryBtn" class="w-full px-4 py-2 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-xl hover:bg-amber-500/20 transition-colors">
+                                    Clear Current Persona
+                                </button>
+                                <button id="clearHistoryBtn" class="w-full px-4 py-2 bg-red-500/10 text-red-600 dark:text-red-400 rounded-xl hover:bg-red-500/20 transition-colors">
+                                    Clear All History
+                                </button>
+                            </div>
                         </div>
                     </div>
                     {% if role == 'Administrator' %}
@@ -643,6 +658,55 @@
                         <div class="spinner-small hidden" id="personaSpinner"></div>
                     </button>
                 </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Chat Search Modal -->
+    <div id="searchModal" class="fixed inset-0 z-[80] hidden flex items-center justify-center p-4">
+        <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" id="searchBackdrop"></div>
+        <div class="relative w-full max-w-2xl bg-white dark:bg-gray-800 rounded-3xl shadow-2xl overflow-hidden animate-slide-up">
+            <div class="p-6 border-b border-gray-100 dark:border-gray-700">
+                <div class="flex items-center gap-3 bg-gray-100 dark:bg-gray-900 px-4 py-3 rounded-2xl border border-gray-200 dark:border-gray-700 focus-within:ring-2 focus-within:ring-emerald-500/20 transition-all">
+                    <i data-lucide="search" class="w-5 h-5 text-gray-400"></i>
+                    <input type="text" id="searchInput" placeholder="Search chat history..." class="flex-1 bg-transparent border-none focus:outline-none text-gray-800 dark:text-white placeholder-gray-500">
+                    <button id="closeSearchModal" class="text-gray-400 hover:text-gray-600 dark:hover:text-white transition-colors">
+                        <i data-lucide="x" class="w-5 h-5"></i>
+                    </button>
+                </div>
+            </div>
+            <div id="searchResults" class="max-h-[60vh] overflow-y-auto p-4 space-y-3">
+                <div class="flex flex-col items-center justify-center py-12 text-gray-400">
+                    <i data-lucide="message-square" class="w-12 h-12 mb-3 opacity-20"></i>
+                    <p class="text-sm">Type a keyword to search your past conversations</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- File Preview Modal -->
+    <div id="filePreviewModal" class="fixed inset-0 z-[80] hidden flex items-center justify-center">
+        <div class="absolute inset-0 bg-black/80 backdrop-blur-md" id="filePreviewBackdrop"></div>
+        <div class="relative w-full h-[90vh] max-w-5xl mx-4 bg-white dark:bg-gray-800 rounded-3xl shadow-2xl overflow-hidden animate-slide-up flex flex-col">
+            <div class="p-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <div id="filePreviewIcon" class="p-2 rounded-lg bg-emerald-500/10 text-emerald-500">
+                        <i data-lucide="file-text"></i>
+                    </div>
+                    <div>
+                        <h3 id="filePreviewTitle" class="text-lg font-bold text-gray-800 dark:text-white">File Preview</h3>
+                        <p id="filePreviewSize" class="text-xs text-gray-500"></p>
+                    </div>
+                </div>
+                <button class="close-file-preview p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                    <i data-lucide="x" class="w-6 h-6 text-gray-400"></i>
+                </button>
+            </div>
+            <div class="flex-1 bg-gray-50 dark:bg-gray-900 overflow-hidden relative" id="filePreviewBody">
+                <!-- Preview content (iframe or text) will be injected here -->
+                <div id="filePreviewLoader" class="absolute inset-0 flex items-center justify-center bg-white/50 dark:bg-black/50 hidden">
+                    <div class="spinner border-emerald-500 border-t-transparent"></div>
+                </div>
             </div>
         </div>
     </div>

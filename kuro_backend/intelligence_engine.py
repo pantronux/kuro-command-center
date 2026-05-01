@@ -20,6 +20,7 @@ from typing import Dict, List, Any, Optional
 from kuro_backend.config import settings, PRIMARY_MODEL
 from kuro_backend.serper_tool import serper_search, serper_news, RESEARCH_PILLARS
 from kuro_backend import intelligence_db
+from kuro_backend.execution.openclaw_bridge import execute_openclaw_skill_blocking
 
 logger = logging.getLogger(__name__)
 logger.propagate = False  # Prevent double-reporting to root logger
@@ -28,38 +29,138 @@ logger.propagate = False  # Prevent double-reporting to root logger
 BRIEFINGS_LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs", "briefings")
 os.makedirs(BRIEFINGS_LOG_DIR, exist_ok=True)
 
-def generate_daily_queries() -> Dict[str, List[str]]:
+def generate_daily_queries(username: str = "Pantronux") -> Dict[str, List[str]]:
     """
-    Generate dynamic search queries based on research pillars.
-    Uses Gemini to add 1-2 dynamic queries per pillar based on current trends.
+    Generate dynamic search queries based on research pillars using Gemini.
     """
-    # Start with predefined pillar queries
-    queries = {}
-    for pillar, base_queries in RESEARCH_PILLARS.items():
-        queries[pillar] = base_queries[:3]  # Take top 3 from each pillar
+    from google import genai
+    from google.genai import types
     
-    return queries
+    genai_client = genai.Client(api_key=settings.GEMINI_API_KEY)
+    
+    pillars_context = json.dumps(RESEARCH_PILLARS, indent=2)
+    today = datetime.now().strftime("%A, %Y-%m-%d")
+    
+    prompt = f"""Kamu adalah Research Coordinator untuk Kuro AI. 
+Hari ini adalah {today}. 
+Tugasmu adalah memodifikasi dan memperluas keyword pencarian untuk Intelligence Hub agar hasil laporan harian selalu variatif dan up-to-date, namun tetap relevan dengan pilar riset utama.
+
+PILAR RISET & TEMPLATE AWAL:
+{pillars_context}
+
+INSTRUKSI:
+1. Untuk setiap pilar, berikan 3-4 query pencarian yang spesifik untuk HARI INI.
+2. Gunakan konteks tren terbaru di Indonesia (jika relevan).
+3. Pastikan query bervariasi dari hari kemarin (misal: fokus ke sub-topik yang berbeda).
+4. Hasil HARUS dalam format JSON: {{"pilar_name": ["query1", "query2", ...]}}
+
+OUTPUT JSON:"""
+
+    try:
+        response = genai_client.models.generate_content(
+            model=PRIMARY_MODEL,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                temperature=0.7,
+                response_mime_type="application/json"
+            )
+        )
+        
+        dynamic_queries = json.loads(response.text)
+        # Validate that all pillars are present, fallback to defaults if missing
+        for pillar in RESEARCH_PILLARS:
+            if pillar not in dynamic_queries:
+                dynamic_queries[pillar] = RESEARCH_PILLARS[pillar][:3]
+        
+        return dynamic_queries
+        
+    except Exception as e:
+        logger.warning(f"[INTELLIGENCE] Dynamic query generation failed: {e}. Falling back to defaults.")
+        queries = {}
+        for pillar, base_queries in RESEARCH_PILLARS.items():
+            queries[pillar] = base_queries[:3]
+        return queries
 
 
 def execute_research(queries: Dict[str, List[str]]) -> Dict[str, Any]:
     """
-    Execute search queries across all pillars.
-    Returns aggregated research results.
+    Execute search queries using Serper, Google Grounding, and OpenClaw.
     """
     results = {}
     
+    # 1. Traditional Search (Serper)
     for pillar, pillar_queries in queries.items():
         pillar_results = []
         for query in pillar_queries:
-            # Mix of general search and news
             search_result = serper_search(query, num_results=5)
             if search_result.get("organic_results"):
                 pillar_results.extend(search_result["organic_results"][:3])
-        
         results[pillar] = pillar_results
-        logger.info(f"[RESEARCH] {pillar}: {len(pillar_results)} results collected")
+        logger.info(f"[RESEARCH] Serper: {pillar} collected")
+
+    # 2. Google Grounding (Gemini Native Search)
+    logger.info("[RESEARCH] Starting Google Grounding search...")
+    google_grounding_results = execute_google_grounding_research(queries)
+    for pillar, g_results in google_grounding_results.items():
+        if pillar in results:
+            results[pillar].extend(g_results)
+        else:
+            results[pillar] = g_results
+
+    # 3. OpenClaw Specialized Skills
+    logger.info("[RESEARCH] Invoking OpenClaw skills...")
+    try:
+        # Prediction Markets
+        market_data = execute_openclaw_skill_blocking("prediction_market_scan", {"execution_mode": "readonly"})
+        if market_data.get("success"):
+            results["market_signals"] = market_data.get("result", [])
+            
+        # Security Vulnerabilities
+        vuln_data = execute_openclaw_skill_blocking("vulnerability_scan", {"execution_mode": "readonly"})
+        if vuln_data.get("success"):
+            results["security_vulnerabilities"] = vuln_data.get("result", [])
+    except Exception as e:
+        logger.warning(f"[RESEARCH] OpenClaw research failed: {e}")
     
     return results
+
+
+def execute_google_grounding_research(queries: Dict[str, List[str]]) -> Dict[str, Any]:
+    """Use Gemini with Google Search tool to get high-fidelity information."""
+    from google import genai
+    from google.genai import types
+    
+    genai_client = genai.Client(api_key=settings.GEMINI_API_KEY)
+    g_results = {}
+    
+    # Focus grounding on the most critical pillars to save tokens/time
+    critical_pillars = ["it_security_compliance", "ai_technology", "finance_business"]
+    
+    for pillar in critical_pillars:
+        if pillar not in queries: continue
+        
+        combined_query = " DAN ".join(queries[pillar][:2])
+        prompt = f"Berikan analisis mendalam dan fakta terbaru mengenai topik berikut di Indonesia: {combined_query}. Fokus pada akurasi data."
+        
+        try:
+            response = genai_client.models.generate_content(
+                model=PRIMARY_MODEL,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    tools=[{"google_search": {}}],
+                    temperature=0.2
+                )
+            )
+            
+            g_results[pillar] = [{
+                "title": f"Google Grounding: {pillar}",
+                "snippet": response.text,
+                "source": "Google Search Grounding"
+            }]
+        except Exception as e:
+            logger.warning(f"[RESEARCH] Google Grounding failed for {pillar}: {e}")
+            
+    return g_results
 
 
 def synthesize_intelligence(research_results: Dict[str, Any], username: str = "Pantronux", display_name: str = "Pantronux") -> Dict[str, Any]:
@@ -235,8 +336,8 @@ def run_daily_research(username: str = "Pantronux") -> Dict[str, Any]:
         pass
 
     # Step 1: Generate queries
-    queries = generate_daily_queries()
-    logger.info(f"[INTELLIGENCE] Generated queries for {len(queries)} pillars")
+    queries = generate_daily_queries(username=username)
+    logger.info(f"[INTELLIGENCE] Generated dynamic queries for {len(queries)} pillars")
     
     # Step 2: Execute research
     research_results = execute_research(queries)

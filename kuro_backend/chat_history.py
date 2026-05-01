@@ -236,18 +236,27 @@ def get_total_count(platform: str = None, persona: Optional[str] = None, usernam
         if conn:
             conn.close()
 
-def clear_history(platform: str = None, username: str = "Pantronux"):
-    """Clear chat history for a specific user and optionally a specific platform."""
+def clear_history(platform: str = None, username: str = "Pantronux", persona: str = None):
+    """Clear chat history for a specific user and optionally a specific platform or persona."""
     conn = None
     try:
         conn = _get_connection()
         cursor = conn.cursor()
+        
+        query = "DELETE FROM chat_history WHERE username = ?"
+        params = [username]
+        
         if platform:
-            cursor.execute("DELETE FROM chat_history WHERE platform = ? AND username = ?", (platform, username))
-        else:
-            cursor.execute("DELETE FROM chat_history WHERE username = ?", (username,))
+            query += " AND platform = ?"
+            params.append(platform)
+        
+        if persona:
+            query += " AND persona = ?"
+            params.append(persona)
+            
+        cursor.execute(query, tuple(params))
         conn.commit()
-        logger.info(f"Chat history cleared (platform: {platform or 'all'})")
+        logger.info(f"Chat history cleared for {username} (platform: {platform or 'all'}, persona: {persona or 'all'})")
     except Exception as e:
         logger.error(f"Failed to clear chat history: {e}")
     finally:
@@ -338,6 +347,29 @@ def get_uploaded_file_integrity(
         return [dict(r) for r in rows]
     except Exception as e:
         logger.error("Failed to query upload integrity metadata: %s", e)
+        return []
+def search_history(query: str, username: str = "Pantronux", persona: Optional[str] = None, limit: int = 20) -> List[Dict]:
+    """Search chat history for a specific keyword."""
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        
+        sql = "SELECT id, role, content, timestamp, persona FROM chat_history WHERE username = ? AND content LIKE ?"
+        params = [username, f"%{query}%"]
+        
+        if persona:
+            sql += " AND persona = ?"
+            params.append(persona)
+            
+        sql += " ORDER BY timestamp DESC LIMIT ?"
+        params.append(limit)
+        
+        cursor.execute(sql, params)
+        rows = cursor.fetchall()
+        return [dict(r) for r in rows]
+    except Exception as e:
+        logger.error(f"Failed to search chat history: {e}")
         return []
     finally:
         if conn:

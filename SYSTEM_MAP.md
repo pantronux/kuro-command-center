@@ -633,7 +633,8 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
 - **Migrations / seeds**: [`maintenance/`](maintenance/) +
   [`scripts/`](scripts/).
 - **Runtime output directories (excluded)**: `uploaded_files/` (user uploads),
-  `logs/` and top-level `kuro_butler.log*` (rotating app log),
+  `logs/` (structured: `logs/system/` for active `kuro_butler.log` + `kuro_sovereign.log`, 
+  `logs/archive/` for rotated history, `logs/briefings/` for research reports),
   `phoenix_data/` (OpenTelemetry traces).
 - **TLS**: [`certs/cert.pem`](certs/cert.pem) +
   [`certs/key.pem`](certs/key.pem) used by Uvicorn's HTTPS bind in

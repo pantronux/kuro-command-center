@@ -1355,15 +1355,14 @@ def _build_cli_parser() -> argparse.ArgumentParser:
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     args = _build_cli_parser().parse_args(argv)
-    logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
-    if getattr(args, "run_fiscal", False):
-        logging.basicConfig(
-            level=logging.DEBUG if args.verbose else logging.INFO,
-            format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-        )
+    from kuro_backend.logger_setup import setup_logging
+    
+    # Use centralized logging setup
+    setup_logging(log_filename="kuro_butler.log", backup_count=30)
+    
+    if args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+
         fc = _run_fiscal_sentinel(cycle_id=0, dry_run=args.dry_run)
         print(json.dumps({"fiscal": fc}, ensure_ascii=False, indent=2, default=str))
         return 0

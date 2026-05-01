@@ -166,6 +166,24 @@ const elements = {
     personaForm: document.getElementById('personaForm'),
     personaBackdrop: document.getElementById('personaBackdrop'),
     customPersonaInput: document.getElementById('customPersonaInput'),
+    clearPersonaHistoryBtn: document.getElementById('clearPersonaHistoryBtn'),
+    sidebarOpenChangePassword: document.getElementById('sidebarOpenChangePassword'),
+    sidebarOpenPersona: document.getElementById('sidebarOpenPersona'),
+    // File Preview Modal
+    filePreviewModal: document.getElementById('filePreviewModal'),
+    filePreviewBackdrop: document.getElementById('filePreviewBackdrop'),
+    filePreviewTitle: document.getElementById('filePreviewTitle'),
+    filePreviewIcon: document.getElementById('filePreviewIcon'),
+    filePreviewBody: document.getElementById('filePreviewBody'),
+    filePreviewLoader: document.getElementById('filePreviewLoader'),
+    scrollToBottomBtn: document.getElementById('scrollToBottomBtn'),
+    // Search Modal
+    openSearchBtn: document.getElementById('openSearchBtn'),
+    searchModal: document.getElementById('searchModal'),
+    searchBackdrop: document.getElementById('searchBackdrop'),
+    searchInput: document.getElementById('searchInput'),
+    searchResults: document.getElementById('searchResults'),
+    closeSearchModal: document.getElementById('closeSearchModal'),
 };
 
 // ============================================
@@ -269,6 +287,9 @@ function setupEventListeners() {
     });
     
     elements.clearHistoryBtn.addEventListener('click', clearChatHistory);
+    if (elements.clearPersonaHistoryBtn) {
+        elements.clearPersonaHistoryBtn.addEventListener('click', clearPersonaChatHistory);
+    }
     setupPersonaAdminControls();
     
     // Persona Toggle
@@ -329,6 +350,20 @@ function setupEventListeners() {
         });
     }
 
+    if (elements.sidebarOpenChangePassword) {
+        elements.sidebarOpenChangePassword.addEventListener('click', (e) => {
+            e.preventDefault();
+            elements.changePasswordModal.classList.remove('hidden');
+        });
+    }
+
+    if (elements.sidebarOpenPersona) {
+        elements.sidebarOpenPersona.addEventListener('click', (e) => {
+            e.preventDefault();
+            elements.personaModal.classList.remove('hidden');
+        });
+    }
+
     document.querySelectorAll('.close-modal').forEach(btn => {
         btn.addEventListener('click', () => {
             elements.changePasswordModal?.classList.add('hidden');
@@ -349,6 +384,34 @@ function setupEventListeners() {
     }
     if (elements.personaForm) {
         elements.personaForm.addEventListener('submit', handlePersonaUpdate);
+    }
+
+    // File Preview Modal
+    if (elements.filePreviewBackdrop) {
+        elements.filePreviewBackdrop.addEventListener('click', closeFilePreview);
+    }
+    document.querySelectorAll('.close-file-preview').forEach(btn => {
+        btn.addEventListener('click', closeFilePreview);
+    });
+
+    if (elements.scrollToBottomBtn) {
+        elements.scrollToBottomBtn.addEventListener('click', () => {
+            scrollToBottom();
+            elements.scrollToBottomBtn.classList.remove('visible');
+        });
+    }
+
+    if (elements.openSearchBtn) {
+        elements.openSearchBtn.addEventListener('click', openSearchModal);
+    }
+    if (elements.closeSearchModal) {
+        elements.closeSearchModal.addEventListener('click', closeSearchModal);
+    }
+    if (elements.searchBackdrop) {
+        elements.searchBackdrop.addEventListener('click', closeSearchModal);
+    }
+    if (elements.searchInput) {
+        elements.searchInput.addEventListener('input', debounce(handleSearch, 300));
     }
 }
 
@@ -403,6 +466,15 @@ function handleScroll() {
     if (elements.chatContainer.scrollTop < 50) {
         loadMoreMessages();
     }
+
+    // Toggle Scroll to Bottom button
+    if (elements.scrollToBottomBtn) {
+        if (!isNearBottom(200)) {
+            elements.scrollToBottomBtn.classList.add('visible');
+        } else {
+            elements.scrollToBottomBtn.classList.remove('visible');
+        }
+    }
 }
 
 async function loadMoreMessages() {
@@ -429,7 +501,8 @@ async function loadMoreMessages() {
             const messages = [...data.history].reverse();
             messages.forEach(msg => {
                 const role = msg.role === 'user' ? 'user' : 'ai';
-                prependMessageToChat(role, msg.content);
+                const attachments = Array.isArray(msg.attachments) ? msg.attachments : (typeof msg.attachments === 'string' ? JSON.parse(msg.attachments) : []);
+                prependMessageToChat(role, msg.content, attachments, msg.id);
             });
             
             chatOffset += data.history.length;
@@ -830,6 +903,9 @@ async function sendMessage() {
         <div class="w-8 h-8 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center flex-shrink-0"><i data-lucide="cat" class="w-4 h-4 text-white"></i></div>
         <div class="max-w-[85%] lg:max-w-[70%]">
             <div class="chat-bubble-ai px-4 py-3 shadow-sm">
+                <div class="typing-indicator" id="thinkingIndicator">
+                    <span></span><span></span><span></span>
+                </div>
                 <div class="markdown-content streaming-content"></div>
             </div>
             <span class="text-xs text-gray-400 mt-1 block">${getCurrentTime()}</span>
@@ -918,6 +994,9 @@ async function sendMessage() {
                     if (eventType === 'chunk' && piece != null && piece !== '') {
                         if (!streamStarted) {
                             streamStarted = true;
+                            // Hide thinking indicator
+                            const indicator = aiMessageDiv.querySelector('#thinkingIndicator');
+                            if (indicator) indicator.classList.add('hidden');
                         }
                         wasPinnedToBottom = isNearBottom();
                         pendingRender += piece;
@@ -1024,9 +1103,12 @@ function highlightInContainer(container) {
     });
 }
 
-function addMessageToChat(role, content, files = []) {
+function addMessageToChat(role, content, files = [], messageId = null) {
     const messageDiv = document.createElement('div');
     messageDiv.className = `flex items-start gap-3 message-enter ${role === 'user' ? 'flex-row-reverse' : ''}`;
+    if (messageId) {
+        messageDiv.setAttribute('data-message-id', messageId);
+    }
     
     // Avatar
     const avatar = role === 'user'
@@ -1041,9 +1123,17 @@ function addMessageToChat(role, content, files = []) {
                 const url = URL.createObjectURL(file);
                 contentHtml += `<img src="${url}" alt="${file.name}" class="chat-image" onclick="window.open(this.src)">`;
             } else {
-                contentHtml += `<div class="flex items-center gap-2 mt-2 p-2 bg-black/10 dark:bg-white/10 rounded-lg">
-                    <i data-lucide="${getFileIcon(file.type)}" class="w-4 h-4"></i>
-                    <span class="text-sm">${file.name}</span>
+                const ext = file.name.split('.').pop().toLowerCase();
+                contentHtml += `<div class="flex items-center justify-between gap-3 mt-2 p-3 bg-black/5 dark:bg-white/5 border border-gray-200 dark:border-gray-700 rounded-xl">
+                    <div class="flex items-center gap-2 overflow-hidden">
+                        <i data-lucide="${getIconForExt(ext)}" class="w-4 h-4 text-emerald-500"></i>
+                        <span class="text-xs font-medium truncate">${file.name}</span>
+                    </div>
+                    <div class="flex gap-1">
+                        <button onclick="previewFileLocal(this)" class="p-1.5 rounded-lg hover:bg-emerald-500/10 text-emerald-600 transition-colors" title="Preview">
+                            <i data-lucide="eye" class="w-3.5 h-3.5"></i>
+                        </button>
+                    </div>
                 </div>`;
             }
         });
@@ -1093,9 +1183,12 @@ function addMessageToChat(role, content, files = []) {
     elements.chatContainer.scrollTop = elements.chatContainer.scrollHeight;
 }
 
-function prependMessageToChat(role, content, files = []) {
+function prependMessageToChat(role, content, attachments = [], messageId = null) {
     const messageDiv = document.createElement('div');
-    messageDiv.className = `flex items-start gap-3 message-prepend ${role === 'user' ? 'flex-row-reverse' : ''}`;
+    messageDiv.className = `flex items-start gap-3 mb-6 message-prepend ${role === 'user' ? 'flex-row-reverse' : ''}`;
+    if (messageId) {
+        messageDiv.setAttribute('data-message-id', messageId);
+    }
     
     const avatar = role === 'user' 
         ? `<div class="w-8 h-8 rounded-full bg-gradient-to-br from-purple-400 to-pink-500 flex items-center justify-center flex-shrink-0 text-white font-bold text-sm">P</div>`
@@ -1103,6 +1196,34 @@ function prependMessageToChat(role, content, files = []) {
     
     let contentHtml = '';
     
+    // Handle persistent attachments from history
+    if (attachments && attachments.length > 0) {
+        attachments.forEach(att => {
+            const filename = typeof att === 'string' ? att : (att.stored_filename || att.filename);
+            const url = `/uploads/${filename}`;
+            const ext = filename.split('.').pop().toLowerCase();
+            
+            if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)) {
+                contentHtml += `<img src="${url}" alt="${filename}" class="chat-image" onclick="window.open(this.src)">`;
+            } else {
+                contentHtml += `<div class="flex items-center justify-between gap-3 mt-2 p-3 bg-black/5 dark:bg-white/5 border border-gray-200 dark:border-gray-700 rounded-xl">
+                    <div class="flex items-center gap-2 overflow-hidden">
+                        <i data-lucide="${getIconForExt(ext)}" class="w-4 h-4 text-emerald-500"></i>
+                        <span class="text-xs font-medium truncate">${filename}</span>
+                    </div>
+                    <div class="flex gap-1">
+                        <button onclick="previewFile('${filename}')" class="p-1.5 rounded-lg hover:bg-emerald-500/10 text-emerald-600 transition-colors" title="Preview">
+                            <i data-lucide="eye" class="w-3.5 h-3.5"></i>
+                        </button>
+                        <a href="${url}" download class="p-1.5 rounded-lg hover:bg-emerald-500/10 text-emerald-600 transition-colors" title="Download">
+                            <i data-lucide="download" class="w-3.5 h-3.5"></i>
+                        </a>
+                    </div>
+                </div>`;
+            }
+        });
+    }
+
     if (content) {
         if (role === 'ai') {
             contentHtml += `<div class="markdown-content">${marked.parse(content)}</div>`;
@@ -1132,6 +1253,186 @@ function prependMessageToChat(role, content, files = []) {
     
     lucide.createIcons();
 }
+
+function getIconForExt(ext) {
+    if (['pdf'].includes(ext)) return 'file-text';
+    if (['doc', 'docx'].includes(ext)) return 'file-text';
+    if (['xls', 'xlsx'].includes(ext)) return 'table';
+    if (['ppt', 'pptx'].includes(ext)) return 'presentation';
+    if (['py', 'js', 'html', 'css', 'json', 'yaml', 'yml'].includes(ext)) return 'file-code';
+    if (['txt', 'md'].includes(ext)) return 'file-text';
+    return 'file';
+}
+
+function previewFile(filename) {
+    const ext = filename.split('.').pop().toLowerCase();
+    const url = `/uploads/${filename}`;
+    
+    elements.filePreviewTitle.textContent = filename;
+    elements.filePreviewModal.classList.remove('hidden');
+    elements.filePreviewBody.innerHTML = '';
+    elements.filePreviewLoader.classList.remove('hidden');
+    
+    if (ext === 'pdf') {
+        const iframe = document.createElement('iframe');
+        iframe.src = url;
+        iframe.className = 'w-full h-full border-none';
+        iframe.onload = () => elements.filePreviewLoader.classList.add('hidden');
+        elements.filePreviewBody.appendChild(iframe);
+    } else if (['txt', 'md', 'py', 'js', 'json', 'yaml', 'yml', 'log', 'csv'].includes(ext)) {
+        fetch(url)
+            .then(res => res.text())
+            .then(text => {
+                const pre = document.createElement('pre');
+                pre.className = 'p-6 text-sm font-mono text-gray-800 dark:text-gray-200 h-full overflow-auto whitespace-pre-wrap';
+                pre.textContent = text;
+                elements.filePreviewBody.appendChild(pre);
+                elements.filePreviewLoader.classList.add('hidden');
+            })
+            .catch(err => {
+                elements.filePreviewBody.innerHTML = `<div class="p-8 text-center text-red-500">Failed to load file: ${err.message}</div>`;
+                elements.filePreviewLoader.classList.add('hidden');
+            });
+    } else {
+        elements.filePreviewBody.innerHTML = `
+            <div class="flex flex-col items-center justify-center h-full p-8 text-center">
+                <i data-lucide="eye-off" class="w-16 h-16 text-gray-300 mb-4"></i>
+                <h4 class="text-xl font-bold text-gray-800 dark:text-white mb-2">No Preview Available</h4>
+                <p class="text-gray-500 mb-6">Preview is not supported for .${ext} files.</p>
+                <a href="${url}" download class="px-6 py-3 bg-emerald-500 text-white rounded-xl font-bold hover:bg-emerald-600 transition-all">Download File</a>
+            </div>
+        `;
+        elements.filePreviewLoader.classList.add('hidden');
+        lucide.createIcons();
+    }
+}
+
+function previewFileLocal(btn) {
+    const messageDiv = btn.closest('.flex');
+    const filename = btn.closest('.rounded-xl').querySelector('span').textContent;
+    
+    // Find the file in selectedFiles if it was just added, 
+    // or if it's already in the chat, we might need a different approach.
+    // Actually, for simplicity, if it's a local file, we can't easily find it again 
+    // unless we store the Blobs. 
+    // Let's just alert that preview is available after sending/refreshing for now, 
+    // OR better: handle it if we have the blob.
+    
+    // For now, let's just make it work for images (already works) 
+    // and for other files, we'll just say "Please wait for upload to complete".
+    showNotification("Preview will be available after the message is processed.", "info");
+}
+
+function closeFilePreview() {
+    elements.filePreviewModal.classList.add('hidden');
+    elements.filePreviewBody.innerHTML = '';
+}
+
+// ============================================
+// Search Functions
+// ============================================
+function openSearchModal() {
+    elements.searchModal.classList.remove('hidden');
+    elements.searchInput.focus();
+}
+
+function closeSearchModal() {
+    elements.searchModal.classList.add('hidden');
+    elements.searchInput.value = '';
+    elements.searchResults.innerHTML = `
+        <div class="flex flex-col items-center justify-center py-12 text-gray-400">
+            <i data-lucide="message-square" class="w-12 h-12 mb-3 opacity-20"></i>
+            <p class="text-sm">Type a keyword to search your past conversations</p>
+        </div>
+    `;
+    lucide.createIcons();
+}
+
+async function handleSearch() {
+    const query = elements.searchInput.value.trim();
+    if (!query) {
+        elements.searchResults.innerHTML = '';
+        return;
+    }
+    
+    elements.searchResults.innerHTML = '<div class="flex justify-center py-8"><div class="spinner border-emerald-500 border-t-transparent"></div></div>';
+    
+    try {
+        const response = await authFetch(`${CONFIG.API_BASE}/chat/search?q=${encodeURIComponent(query)}&persona=${selectedPersona}`);
+        const data = await response.json();
+        
+        if (data.status === 'success' && data.data.results.length > 0) {
+            renderSearchResults(data.data.results);
+        } else {
+            elements.searchResults.innerHTML = `
+                <div class="flex flex-col items-center justify-center py-12 text-gray-400">
+                    <i data-lucide="search-x" class="w-12 h-12 mb-3 opacity-20"></i>
+                    <p class="text-sm">No results found for "${query}"</p>
+                </div>
+            `;
+            lucide.createIcons();
+        }
+    } catch (error) {
+        console.error('Search failed:', error);
+        elements.searchResults.innerHTML = '<p class="text-center text-red-500 py-8">Search failed. Please try again.</p>';
+    }
+}
+
+function renderSearchResults(results) {
+    elements.searchResults.innerHTML = '';
+    results.forEach(res => {
+        const card = document.createElement('div');
+        card.className = 'p-4 bg-gray-50 dark:bg-gray-900/40 border border-gray-100 dark:border-gray-700 rounded-2xl hover:border-emerald-500/50 hover:bg-emerald-500/5 transition-all cursor-pointer group';
+        card.onclick = () => jumpToMessage(res.id);
+        
+        const date = new Date(res.timestamp).toLocaleString();
+        const personaLabel = res.persona ? res.persona.charAt(0).toUpperCase() + res.persona.slice(1) : 'Unknown';
+        
+        card.innerHTML = `
+            <div class="flex items-center justify-between mb-2">
+                <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600">${personaLabel}</span>
+                <span class="text-[10px] text-gray-400">${date}</span>
+            </div>
+            <p class="text-sm text-gray-700 dark:text-gray-300 line-clamp-2 group-hover:text-gray-900 dark:group-hover:text-white transition-colors">
+                <span class="font-bold text-emerald-500">${res.role === 'user' ? 'You: ' : 'Kuro: '}</span>
+                ${escapeHtml(res.content)}
+            </p>
+        `;
+        elements.searchResults.appendChild(card);
+    });
+}
+
+function jumpToMessage(messageId) {
+    // 1. Close modal
+    closeSearchModal();
+    
+    // 2. Try to find the message in the current DOM
+    const target = document.querySelector(`[data-message-id="${messageId}"]`);
+    if (target) {
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        target.classList.add('highlight-pulse');
+        setTimeout(() => target.classList.remove('highlight-pulse'), 2000);
+    } else {
+        // 3. If not in DOM, we'd ideally load a slice of history around it.
+        // For now, let's just notify that it's further up in history.
+        showNotification("Message is further up in history. Try scrolling up to load more.", "info");
+    }
+}
+
+function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
+
+window.previewFile = previewFile;
+window.closeFilePreview = closeFilePreview;
 
 function showTypingIndicator() {
     const indicator = document.createElement('div');
@@ -1193,7 +1494,8 @@ async function loadChatHistory() {
             // Render messages in chronological order (oldest at top, newest at bottom)
             messages.forEach(msg => {
                 const role = msg.role === 'user' ? 'user' : 'ai';
-                addMessageToChat(role, msg.content);
+                const attachments = Array.isArray(msg.attachments) ? msg.attachments : (typeof msg.attachments === 'string' ? JSON.parse(msg.attachments) : []);
+                addMessageToChat(role, msg.content, attachments, msg.id);
             });
             
             chatOffset = data.history.length;
@@ -1226,16 +1528,32 @@ async function loadChatHistory() {
 }
 
 async function clearChatHistory() {
-    if (confirm('Are you sure you want to clear all chat history?')) {
+    if (confirm('Are you sure you want to clear ALL chat history? This cannot be undone.')) {
         try {
             await authFetch(`${CONFIG.API_BASE}/history`, { method: 'DELETE' });
             elements.chatContainer.innerHTML = '';
-            showNotification('Chat history cleared', 'success');
+            showNotification('All chat history cleared', 'success');
             closeSettings();
             // Reload chat with welcome message
             loadChatHistory();
         } catch (error) {
             showNotification('Failed to clear history', 'error');
+        }
+    }
+}
+
+async function clearPersonaChatHistory() {
+    const persona = selectedPersona;
+    if (confirm(`Are you sure you want to clear history for persona: ${persona}? Other persona history will be kept.`)) {
+        try {
+            await authFetch(`${CONFIG.API_BASE}/history?persona=${encodeURIComponent(persona)}`, { method: 'DELETE' });
+            elements.chatContainer.innerHTML = '';
+            showNotification(`History for ${persona} cleared`, 'success');
+            closeSettings();
+            // Reload chat
+            loadChatHistory();
+        } catch (error) {
+            showNotification('Failed to clear persona history', 'error');
         }
     }
 }
@@ -1261,6 +1579,21 @@ async function openSystemStatus() {
             let logStorageHtml = '';
             if (logData.status === 'success' && logData.data) {
                 const logInfo = logData.data;
+                let breakdownHtml = '';
+                
+                if (logInfo.breakdown) {
+                    breakdownHtml = '<div class="mt-3 space-y-1">';
+                    Object.entries(logInfo.breakdown).forEach(([name, size]) => {
+                        breakdownHtml += `
+                            <div class="flex justify-between items-center text-xs text-blue-700/70 dark:text-blue-300/60">
+                                <span>${name}</span>
+                                <span class="font-mono">${size.toFixed(2)} MB</span>
+                            </div>
+                        `;
+                    });
+                    breakdownHtml += '</div>';
+                }
+
                 logStorageHtml = `
                     <div class="mt-4 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-200 dark:border-blue-800">
                         <div class="flex items-center gap-2 mb-2">
@@ -1270,7 +1603,7 @@ async function openSystemStatus() {
                         <div class="grid grid-cols-3 gap-2 text-sm">
                             <div>
                                 <p class="text-blue-600 dark:text-blue-400">Total Size</p>
-                                <p class="font-medium text-blue-800 dark:text-blue-200">${logInfo.total_size_mb?.toFixed(2) || 'N/A'} MB</p>
+                                <p class="font-medium text-blue-800 dark:text-blue-200">${logInfo.total_size_mb?.toFixed(2) || '0.00'} MB</p>
                             </div>
                             <div>
                                 <p class="text-blue-600 dark:text-blue-400">Log Files</p>
@@ -1278,18 +1611,17 @@ async function openSystemStatus() {
                             </div>
                             <div>
                                 <p class="text-blue-600 dark:text-blue-400">Retention</p>
-                                <p class="font-medium text-blue-800 dark:text-blue-200">${logInfo.retention_days || 7} days</p>
+                                <p class="font-medium text-blue-800 dark:text-blue-200">${logInfo.retention_days || 30} days</p>
                             </div>
                         </div>
+                        ${breakdownHtml}
                     </div>
                 `;
             }
             
             elements.systemStatusContent.innerHTML = `
                 <div class="space-y-4">
-                    <div class="bg-gray-50 dark:bg-gray-700 rounded-xl p-4 font-mono text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
-                        ${sysData.data}
-                    </div>
+                    <div class="bg-gray-50 dark:bg-gray-700 rounded-xl p-4 font-mono text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">${sysData.data}</div>
                     ${logStorageHtml}
                 </div>
             `;
