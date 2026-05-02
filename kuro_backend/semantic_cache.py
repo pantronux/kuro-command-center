@@ -68,12 +68,19 @@ def _cosine(a: Iterable[float], b: Iterable[float]) -> float:
     bx = list(b)
     if not ax or not bx or len(ax) != len(bx):
         return 0.0
-    num = sum(x * y for x, y in zip(ax, bx))
-    da = math.sqrt(sum(x * x for x in ax))
-    db = math.sqrt(sum(y * y for y in bx))
-    if da == 0 or db == 0:
+
+    # ⚡ Bolt: Single pass computation avoids 3 generator loops
+    num = 0.0
+    da_sq = 0.0
+    db_sq = 0.0
+    for x, y in zip(ax, bx):
+        num += x * y
+        da_sq += x * x
+        db_sq += y * y
+
+    if da_sq == 0 or db_sq == 0:
         return 0.0
-    return num / (da * db)
+    return num / math.sqrt(da_sq * db_sq)
 
 
 def _current_revision() -> int:
