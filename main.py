@@ -1469,10 +1469,22 @@ async def intelligence_dashboard():
     return FileResponse(os.path.join(WEB_DIR, "templates", "intelligence.html"))
 
 @app.post("/api/read-file")
-async def read_file(file_path: str = Form("")):
+async def read_file(request: Request, file_path: str = Form("")):
     """Read a file using universal parser."""
+    token = get_token_from_cookie(request)
+    user = validate_token(token)
+    if not user:
+        return JSONResponse(status_code=401, content={"status": "error", "message": "Unauthorized"})
+
     if not file_path:
         return {"status": "error", "message": "No file path provided"}
+
+    # Security: Prevent path traversal
+    abs_upload_dir = os.path.abspath(tools.UPLOAD_DIR)
+    abs_file_path = os.path.abspath(file_path)
+    if not abs_file_path.startswith(abs_upload_dir + os.sep):
+        return {"status": "error", "message": "Invalid file path: Path traversal is not allowed"}
+
     result = tools.universal_read(file_path)
     return result
 
