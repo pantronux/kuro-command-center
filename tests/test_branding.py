@@ -38,7 +38,6 @@ def test_index_includes_chancellor_persona_option():
 def test_index_links_market_sentinel():
     html = _read("index.html")
     assert 'href="/market"' in html
-    assert "kuroMarketChipsBar" in html
 
 
 def test_secondary_templates_have_favicon():

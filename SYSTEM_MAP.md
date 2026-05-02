@@ -1,4 +1,4 @@
-# Kuro AI V7.5.1 "Identity" — SYSTEM_MAP
+# Kuro AI V1.0.0 Beta 1 "Sovereign Cat" — SYSTEM_MAP
 
 > Authoritative navigation map for the repository. Traced function-by-function
 > from the true entrypoint (`main.py`) outward. Only source code under version
@@ -92,15 +92,22 @@ Kuro AI is your **Intelligent Personal Sovereign**—a sophisticated digital com
 - **Gating:** All agency nodes self-bypass in O(1) for non-agency personas (chill, tactical, chancellor).
 - **New env vars:** `KURO_ALIGNMENT_THRESHOLD` (float, default `0.35`) — alignment conflict floor.
 
-### V7.5.0 Architecture Notes ("Identity")
+### V1.0.0 Beta 1 Architecture Notes ("Sovereign Cat")
 
-- **Database-Backed Identity System**: Fully decommissioned the hardcoded `USER_REGISTRY` in favor of a robust SQLite-backed `users` table in `kuro_auth.db`. Supports dynamic user creation, role assignment, and metadata persistence.
-- **Custom Global Persona**: Introduced `custom_persona` persistence. Users can inject persistent global instructions that are automatically appended to Kuro's system instructions across all personas (Advisor, Auditor, etc.), enabling deep behavioral tailoring.
-- **User Profile Management (V7.5 "Identity" UI)**:
-    - **Account Dropdown**: Replaced static user info with a premium, interactive dropdown menu in the dashboard header.
-    - **Profile Engine**: New `profile.html` and `/api/user/update` endpoints allow users to manage display names and email addresses.
-    - **Security Utility**: Integrated a "Change Password" modal with `bcrypt` verification and server-side validation.
-- **Auth Resilience**: Unified authentication logic to use `auth_db.get_user()`, supporting case-insensitive lookups and consistent session state across the LangGraph and Fast-path reasoning loops.
+- **Major Version Transition**: Promoted from Alpha/Legacy (V7.x) to V1.0.0 Beta 1, establishing a stable baseline for the "Magic/Sovereign Cat" era.
+- **Hybrid Market Sentinel (Triangulation Engine)**:
+    - `price_ticker_worker.py`: Dedicated quantitative anchor using `yfinance` for IDX tickers (.JK).
+    - `market_sentinel.py`: Qualitative engine using Google Grounding + OpenClaw to triangulate news with price action.
+- **Role-Based Access Control (RBAC)**:
+    - Implemented a strict enforcement gate for the "System Status" menu. Non-Administrator users (e.g., `Faikhira`) are 100% blocked via both UI modal and backend checks.
+- **Per-User File Isolation**:
+    - **Physical Partitioning**: Uploaded files are now stored in `uploaded_files/{username}/{category}/` subfolders to prevent cross-user file collisions.
+    - **Isolation Logic**: `main.py` and `app.js` now strictly filter file lists based on the authenticated `username`.
+- **180-Day Automated Retention Pipeline**:
+    - `file_retention_worker.py`: Autonomous worker running daily at 02:00 WIB.
+    - **Archival Flow**: Files exceeding 180 days are analyzed by LLM (summarization + entity extraction) before physical deletion.
+    - **Memory Persistence**: Intisari file disimpan ke Mem0 dan `research_ledger` (`archived_file_memory` kind), allowing Kuro to "remember" the contents of deleted files.
+    - **Archive Metadata**: Sidecar JSON files are persisted in `.archive/{username}/` as permanent records.
 
 ## Core Logic Flow (Function-Level Flowchart)
 
@@ -200,7 +207,7 @@ artefacts are excluded — see **Exclusions** at the bottom of this section.
 ├── INTEGRATION_HARDENING_DETAILS.md
 ├── SYSTEM_MAP.md                # this file
 ├── kuro_backend/
-│   ├── version.py               # V7.0.0 "Leviathan" single source of truth
+│   ├── version.py               # V1.0.0 "Sovereign Cat" single source of truth
 │   ├── config.py                # env keys -> typed Settings
 │   ├── personas.py              # butler/consultant/advisor/chill/tactical/chancellor
 │   ├── core.py                  # non-graph Gemini fallback
@@ -218,6 +225,8 @@ artefacts are excluded — see **Exclusions** at the bottom of this section.
 │   ├── telegram_notifier.py
 │   ├── proactive_events.py
 │   ├── proactive_greeting.py
+│   ├── file_retention_worker.py  # 180-day retention & AI archival (V1.0)
+│   ├── price_ticker_worker.py   # Quantitative market anchor (V1.0)
 │   ├── reminder_service.py      # [PURGED in V7.1]
 │   ├── habit_service.py         # [PURGED in V7.1]
 │   ├── fitness_service.py
@@ -228,7 +237,7 @@ artefacts are excluded — see **Exclusions** at the bottom of this section.
 │   ├── pricing.py               # static Gemini USD/token estimates
 │   ├── serper_tool.py
 │   ├── auth_db.py               # schema only; *.db files excluded
-│   ├── chat_history.py
+│   ├── chat_history.py          # schema: uploaded_file_integrity + retention
 │   ├── compliance_db.py
 │   ├── daily_habits_db.py       # [PURGED in V7.1]
 │   ├── intelligence_db.py

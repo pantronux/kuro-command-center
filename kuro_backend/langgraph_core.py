@@ -392,7 +392,7 @@ class KuroState(TypedDict):
     """
     Kuro Agent State - persists across graph nodes.
     V5.5: Guardrail-related fields removed for performance.
-    V7.2: Natural Agency (Tomasello 2025) tier fields added.
+    V1.0.0: Natural Agency (Tomasello 2025) tier fields added.
 
     Core Fields:
     - messages: Conversation history (list of dicts with role/content)
@@ -431,7 +431,7 @@ class KuroState(TypedDict):
     _approval_scope: str
     _trace_id: str
     _intent: str
-    # --- Natural Agency fields (V7.2) ---
+    # --- Natural Agency fields (V1.0.0) ---
     _intent_category: str
     inhibited: bool
     inhibition_reason: str
@@ -441,7 +441,7 @@ class KuroState(TypedDict):
     alignment_score: float
     metacognitive_flag: bool
     joint_goal_block: str
-    # --- Auto-RAG fields (V7.2.1 Self-Correction Loop) ---
+    # --- Auto-RAG fields (V1.0.0 Self-Correction Loop) ---
     retrieval_grade: str          # "relevant" | "ambiguous" | "irrelevant"
     retrieval_retry_count: int    # bounded 0–2; failover to Serper at max
     rewritten_query: str          # LLM-transformed query after grading fail
@@ -478,7 +478,7 @@ def get_system_instruction(persona_override: Optional[str] = None, master_name: 
 
 def reflection_node(state: KuroState) -> Dict[str, Any]:
     """
-    Pre-Processing Reflection Node (V7.2.1 Task Continuity) with LLM-Based Intent Router.
+    Pre-Processing Reflection Node (V1.0.0 Task Continuity) with LLM-Based Intent Router.
     Determines if the Master's intent is "Editing", "Adding", or "Revising".
     """
     user_input = state.get("user_input", "").lower()
@@ -676,7 +676,7 @@ def memory_retrieval_node(state: KuroState) -> Dict[str, Any]:
 
 def memory_extraction_node(state: KuroState) -> Dict[str, Any]:
     """
-    V7.2.1 Memory Extraction Node: Consolidates Mem0 usage as a Declarative Fact Store.
+    V1.0.0 Memory Extraction Node: Consolidates Mem0 usage as a Declarative Fact Store.
     Only triggers memory extraction when a task is successfully completed and NOT during an edit cycle.
     """
     user_input = state.get("user_input", "")
@@ -690,7 +690,7 @@ def memory_extraction_node(state: KuroState) -> Dict[str, Any]:
         logger.warning("[MEM0_EXTRACTION] Skipped: No final_response found in state.")
         return {}
 
-    # V7.2.1 Guard Clause: Skip extraction during edit/revision loops
+    # V1.0.0 Guard Clause: Skip extraction during edit/revision loops
     if intent == "edit":
         logger.info("[MEM0_EXTRACTION] Skipped: Currently in 'edit' intent cycle.")
         return {}
@@ -749,7 +749,7 @@ Status:"""
 
 
 # ============================================
-# AUTO-RAG: SELF-CORRECTION LOOP (V7.2.1)
+# AUTO-RAG: SELF-CORRECTION LOOP (V1.0.0)
 # References: Self-RAG (Asai et al. 2023), CRAG (Yan et al. 2024),
 #             Adaptive-RAG (Jeong et al. 2024)
 # ============================================
@@ -945,7 +945,7 @@ def route_after_grader(state: KuroState) -> str:
 
 
 # ============================================
-# NATURAL AGENCY TIER (Tomasello 2025) — V7.2
+# NATURAL AGENCY TIER (Tomasello 2025) — V1.0.0
 # Gated to: advisor, consultant, auditor personas only
 # ============================================
 
@@ -1827,7 +1827,7 @@ def build_kuro_graph() -> StateGraph:
     """
     Build the Kuro LangGraph state machine.
 
-    V7.2.1 Auto-RAG + Natural Agency Graph Structure:
+    V1.0.0 Auto-RAG + Natural Agency Graph Structure:
     START
       → reflection_node             (edit/new intent)
       → supervisor_node             (tool vs response routing)
@@ -1859,11 +1859,11 @@ def build_kuro_graph() -> StateGraph:
     graph_builder.add_node("response_node", response_node)
     graph_builder.add_node("memory_extraction_node", memory_extraction_node)
 
-    # ── Auto-RAG nodes (V7.2.1) ───────────────────────────────────────────────
+    # ── Auto-RAG nodes (V1.0.0) ───────────────────────────────────────────────
     graph_builder.add_node("retrieval_grader_node", retrieval_grader_node)
     graph_builder.add_node("query_transform_node", query_transform_node)
 
-    # ── Natural Agency nodes (V7.2) ───────────────────────────────────────────
+    # ── Natural Agency nodes (V1.0.0) ───────────────────────────────────────────
     graph_builder.add_node("attention_filter_node", attention_filter_node)
     graph_builder.add_node("executive_monitor_node", executive_monitor_node)
     graph_builder.add_node("metacognitive_review_node", metacognitive_review_node)
@@ -1917,7 +1917,7 @@ def build_kuro_graph() -> StateGraph:
     graph_builder.add_edge("memory_extraction_node", END)
 
     graph = graph_builder.compile(checkpointer=checkpointer)
-    logger.info("[LANGGRAPH] V7.2.1 Auto-RAG + Natural Agency graph compiled successfully.")
+    logger.info("[LANGGRAPH] V1.0.0 Auto-RAG + Natural Agency graph compiled successfully.")
     return graph
 
 
@@ -2038,7 +2038,7 @@ async def process_chat_with_graph_stream(
             persona_override or memory_manager.get_active_persona()
         )
 
-        # V7.3 Identity: Fetch user info from database
+        # V1.0.0 Sovereign Cat: Fetch user info from database
         user_info = auth_db.get_user(username) or {}
         master_name = user_info.get("master_name", master_name)
         custom_persona = user_info.get("custom_persona", "")
@@ -2141,7 +2141,7 @@ async def process_chat_with_graph_stream(
                 emitted += 1
             _persist_short_term_and_enqueue_writes(message, response_text, persona_mode, username)
 
-            # V7.2.1 Mem0 Check inside streaming fast-path
+            # V1.0.0 Mem0 Check inside streaming fast-path
             if intent != "edit":
                 task_success = False
                 success_keywords = ["thanks", "terima kasih", "selesai", "fixed", "done", "berhasil", "sip", "ok", "confirmed"]
@@ -2188,7 +2188,7 @@ async def process_chat_with_graph_stream(
             "_session_id": session_id,
             "_approval_scope": approval_scope,
             "_trace_id": trace_id,
-            # Natural Agency defaults (V7.2)
+            # Natural Agency defaults (V1.0.0)
             "_intent_category": "general",
             "inhibited": False,
             "inhibition_reason": "",
@@ -2198,7 +2198,7 @@ async def process_chat_with_graph_stream(
             "alignment_score": 1.0,
             "metacognitive_flag": False,
             "joint_goal_block": "",
-            # Auto-RAG defaults (V7.2.1)
+            # Auto-RAG defaults (V1.0.0)
             "retrieval_grade": "relevant",
             "retrieval_retry_count": 0,
             "rewritten_query": "",
@@ -2207,7 +2207,7 @@ async def process_chat_with_graph_stream(
             "_intent": "new",
         }
         
-        # V7.3 Identity: Use stable thread_id for persistence (user + session)
+        # V1.0.0 Sovereign Cat: Use stable thread_id for persistence (user + session)
         thread_id = f"{username}_{session_id}"
         config = {"configurable": {"thread_id": thread_id}}
         
@@ -2439,7 +2439,7 @@ def process_chat_with_graph(
             "custom_persona": custom_persona,
             "_approval_scope": approval_scope,
             "_trace_id": trace_id,
-            # Natural Agency defaults (V7.2)
+            # Natural Agency defaults (V1.0.0)
             "_intent_category": "general",
             "inhibited": False,
             "inhibition_reason": "",
@@ -2449,7 +2449,7 @@ def process_chat_with_graph(
             "alignment_score": 1.0,
             "metacognitive_flag": False,
             "joint_goal_block": "",
-            # Auto-RAG defaults (V7.2.1)
+            # Auto-RAG defaults (V1.0.0)
             "retrieval_grade": "relevant",
             "retrieval_retry_count": 0,
             "rewritten_query": "",
@@ -2457,7 +2457,7 @@ def process_chat_with_graph(
         }
 
         # Create unique thread ID for persistence
-        # V7.3 Identity: Use stable thread_id for persistence (user + session)
+        # V1.0.0 Sovereign Cat: Use stable thread_id for persistence (user + session)
         thread_id = f"{username}_{session_id}"
         config = {"configurable": {"thread_id": thread_id}}
 

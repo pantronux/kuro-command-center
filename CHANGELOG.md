@@ -1,10 +1,36 @@
-# Kuro AI V7.5.0 "Identity" - Changelog
+# CHANGELOG — Kuro AI
 
-**Release Date:** 2026-05-01
-**Version:** 7.5.0
-**Codename:** "Identity"
+> All entries prior to V1.0.0 Beta 1 are classified as **Legacy (Alpha Version)** entries.
+
+## [V1.0.0 Beta 1] — "Sovereign Cat" — 2026-05-02
+### New Features
+- **Hybrid Market Sentinel (Triangulation Engine):** 
+  - Split analysis into Quantitative Anchor (`price_ticker_worker.py`) and Qualitative Triangulation (`market_sentinel.py`).
+  - High-frequency price updates via `yfinance` (.JK for IDX).
+  - Sentinel Hub V3: Filter bar, pinning system (max 3), and ROI projections.
+- **Role-Gated Access Control:**
+  - Implemented RBAC gate for "System Status" menu. Non-Administrator users are fully blocked with a red "Access Denied" modal.
+- **Per-User File Isolation:**
+  - Refactored upload storage into `uploaded_files/{username}/{category}/` subfolders.
+  - Users only see their own files in the "Uploaded Files" panel.
+  - Administrator role simplified from "Administrator & IT Security Consultant" to just "Administrator".
+- **180-Day File Retention & Memory Archival:**
+  - Automated nightly job (02:00 WIB) to process expiring files.
+  - **AI Analysis Pipeline**: Files are analyzed (summary, entities, topics) before deletion.
+  - **Memory Persistence**: Intisari file disimpan ke Mem0 dan research_ledger sebagai metadata permanen (archived_file_memory).
+  - Sidecar `.json` archive metadata is persisted in `.archive/{username}/`.
+
+### Architecture
+- `file_retention_worker.py`: New autonomous worker for file archival.
+- `price_ticker_worker.py`: Quantitative market anchor.
+- `chat_history.py`: Database schema upgrade for user-aware uploads and retention tracking.
+- `app.js`: Upgraded to handle structured JSON file lists and role-based modal gating.
 
 ---
+
+## Legacy (Alpha Version) Entries
+
+## V7.5.0 [Alpha] - Identity (2026-05-01)
 
 ## V7.5.1 - State Compression & Reducer Hardening (2026-05-01)
 

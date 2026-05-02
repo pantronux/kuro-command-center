@@ -25,3 +25,4 @@ arize-phoenix
 opentelemetry-sdk
 opentelemetry-exporter-otlp
 opentelemetry-instrumentation-langchain
+yfinance>=0.2.54

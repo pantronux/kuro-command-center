@@ -2,7 +2,7 @@
 Kuro finances SSoT — SQLite ledger for budgets, recurring expenses, and
 daily API usage rollups (The Chancellor domain).
 
-V7.2.1 Natural Agency audit:
+V1.0.0 Natural Agency audit:
 - init_db() is guarded by an in-memory `_SCHEMA_READY` flag + `threading.Lock`
   so hot-path CRUD helpers never re-issue 6x CREATE TABLE IF NOT EXISTS each
   call (measured as ~40-50 fewer DDL parse/verifications per Chancellor turn).
@@ -37,11 +37,12 @@ guarded by `_SCHEMA_READY` + lock; logs on bootstrap + anomalies.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import sqlite3
 import threading
-from datetime import date
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -50,7 +51,7 @@ logger.propagate = False
 _BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 _DEFAULT_DB = os.path.join(_BASE_DIR, "kuro_finances.db")
 
-# V7.2.1 Natural Agency audit:
+# V1.0.0 Natural Agency audit:
 # hot-path helpers call init_db() defensively. Running 6x CREATE TABLE IF NOT
 # EXISTS + an INSERT OR IGNORE on every CRUD is wasted DDL parse/verify work.
 # We short-circuit via an in-memory flag keyed by the resolved DB path so
@@ -217,6 +218,83 @@ def _init_db_locked() -> None:
             """
         )
         c.execute(
+            """
+            CREATE TABLE IF NOT EXISTS market_sentinel_history (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                username            TEXT NOT NULL DEFAULT 'Pantronux',
+                scan_timestamp      TEXT NOT NULL,
+                stock_code          TEXT NOT NULL,
+                company_name        TEXT NOT NULL,
+                legal_name          TEXT,
+                price_per_share     INTEGER NOT NULL,
+                price_per_lot       INTEGER NOT NULL,
+                price_category      TEXT NOT NULL,
+                conclusion          TEXT NOT NULL,
+                full_analysis_json  TEXT NOT NULL,
+                created_at          DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        c.execute(
+            """
+            CREATE TABLE IF NOT EXISTS market_sentinel_stocks (
+                id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+                username                 TEXT NOT NULL DEFAULT 'Pantronux',
+                stock_code               TEXT NOT NULL,
+                company_name             TEXT NOT NULL,
+                sector                   TEXT DEFAULT '',
+                current_price_per_share  INTEGER NOT NULL DEFAULT 0,
+                current_price_per_lot    INTEGER NOT NULL DEFAULT 0,
+                price_category           TEXT NOT NULL DEFAULT '',
+                volume_24h               INTEGER NOT NULL DEFAULT 0,
+                ytd_performance          REAL NOT NULL DEFAULT 0.0,
+                projected_roi_1m         REAL DEFAULT NULL,
+                projected_roi_1y         REAL DEFAULT NULL,
+                triangulation_summary    TEXT DEFAULT '',
+                conclusion               TEXT DEFAULT '',
+                price_updated_at         TEXT DEFAULT NULL,
+                analysis_updated_at      TEXT DEFAULT NULL,
+                created_at               DATETIME DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(stock_code)
+            )
+            """
+        )
+        c.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_pinned_stocks (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                username   TEXT NOT NULL,
+                stock_code TEXT NOT NULL,
+                pinned_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(username, stock_code)
+            )
+            """
+        )
+        c.execute(
+            "CREATE INDEX IF NOT EXISTS idx_sentinel_stocks_price "
+            "ON market_sentinel_stocks(current_price_per_lot ASC)"
+        )
+        c.execute(
+            "CREATE INDEX IF NOT EXISTS idx_sentinel_stocks_volume "
+            "ON market_sentinel_stocks(volume_24h DESC)"
+        )
+        c.execute(
+            "CREATE INDEX IF NOT EXISTS idx_sentinel_stocks_roi_1m "
+            "ON market_sentinel_stocks(projected_roi_1m DESC)"
+        )
+        c.execute(
+            "CREATE INDEX IF NOT EXISTS idx_sentinel_stocks_roi_1y "
+            "ON market_sentinel_stocks(projected_roi_1y DESC)"
+        )
+        c.execute(
+            "CREATE INDEX IF NOT EXISTS idx_sentinel_code_ts "
+            "ON market_sentinel_history (stock_code, scan_timestamp DESC)"
+        )
+        c.execute(
+            "CREATE INDEX IF NOT EXISTS idx_sentinel_ts "
+            "ON market_sentinel_history (scan_timestamp DESC)"
+        )
+        c.execute(
             "INSERT OR IGNORE INTO market_hud_snapshot (username, brief_text) VALUES ('Pantronux', '')"
         )
         c.execute(
@@ -232,7 +310,8 @@ def _init_db_locked() -> None:
         tables = [
             "monthly_budget", "financial_goals", "recurring_expenses",
             "api_usage_daily", "watched_symbols", "prediction_watch",
-            "market_hud_snapshot"
+            "market_hud_snapshot", "market_sentinel_history",
+            "market_sentinel_stocks", "user_pinned_stocks"
         ]
         for tbl in tables:
             c.execute(f"PRAGMA table_info({tbl})")
@@ -831,6 +910,110 @@ def get_last_n_days_spend(n: int = 7, username: str = "Pantronux") -> List[Dict[
         conn.close()
 
 
+def insert_sentinel_scan(username: str, scan_timestamp: str, stocks: list[dict]) -> bool:
+    """Insert a batch of stock scan results into history."""
+    conn = None
+    try:
+        conn = _conn()
+        c = conn.cursor()
+        for s in stocks:
+            c.execute(
+                """
+                INSERT INTO market_sentinel_history (
+                    username, scan_timestamp, stock_code, company_name, legal_name,
+                    price_per_share, price_per_lot, price_category, conclusion, full_analysis_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    username, scan_timestamp, s["stock_code"], s["company_name"], s.get("legal_name"),
+                    s["current_price_per_share"], s["current_price_per_lot"], s["price_category"],
+                    s["conclusion"], json.dumps(s)
+                )
+            )
+        conn.commit()
+        return True
+    except Exception as exc:
+        logger.error("[FINANCE] insert_sentinel_scan failed: %s", exc)
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+
+def get_sentinel_latest_per_stock(username: str = "Pantronux", hours: int = 24) -> list[dict]:
+    """Get the latest unique scan result for each stock code within the last N hours."""
+    conn = None
+    try:
+        conn = _conn()
+        # Using a subquery to find the max(id) for each stock_code to get the absolute latest
+        # within the time window.
+        since = (datetime.now() - timedelta(hours=hours)).isoformat()
+        cursor = conn.execute(
+            """
+            SELECT * FROM market_sentinel_history 
+            WHERE username = ? AND scan_timestamp >= ?
+            GROUP BY stock_code
+            HAVING id = MAX(id)
+            ORDER BY price_category ASC, stock_code ASC
+            """,
+            (username, since)
+        )
+        return [json.loads(row["full_analysis_json"]) for row in cursor.fetchall()]
+    except Exception as exc:
+        logger.error("[FINANCE] get_sentinel_latest_per_stock failed: %s", exc)
+        return []
+    finally:
+        if conn:
+            conn.close()
+
+
+def get_sentinel_history_for_chart(stock_code: str, username: str = "Pantronux", days: int = 7) -> list[dict]:
+    """Get price history for a specific stock for charting."""
+    conn = None
+    try:
+        conn = _conn()
+        since = (datetime.now() - timedelta(days=days)).isoformat()
+        cursor = conn.execute(
+            """
+            SELECT scan_timestamp, price_per_share, price_per_lot
+            FROM market_sentinel_history
+            WHERE username = ? AND stock_code = ? AND scan_timestamp >= ?
+            ORDER BY scan_timestamp ASC
+            """,
+            (username, stock_code, since)
+        )
+        return [dict(row) for row in cursor.fetchall()]
+    except Exception as exc:
+        logger.error("[FINANCE] get_sentinel_history_for_chart failed: %s", exc)
+        return []
+    finally:
+        if conn:
+            conn.close()
+
+
+def get_sentinel_latest_summary(username: str = "Pantronux", limit: int = 10) -> list[dict]:
+    """Get the latest scan results (unfiltered by stock_code uniqueness) for overview."""
+    conn = None
+    try:
+        conn = _conn()
+        cursor = conn.execute(
+            """
+            SELECT * FROM market_sentinel_history
+            WHERE username = ?
+            ORDER BY scan_timestamp DESC, id DESC
+            LIMIT ?
+            """,
+            (username, limit)
+        )
+        return [dict(row) for row in cursor.fetchall()]
+    except Exception as exc:
+        logger.error("[FINANCE] get_sentinel_latest_summary failed: %s", exc)
+        return []
+    finally:
+        if conn:
+            conn.close()
+
+
 def format_ledger_snapshot(username: str = "Pantronux") -> str:
     """Compact block for Chancellor prompt injection for a specific user."""
     try:
@@ -871,6 +1054,193 @@ def format_ledger_snapshot(username: str = "Pantronux") -> str:
         return "[FINANCES SSoT — ledger unavailable]"
 
 
+def upsert_sentinel_stock_price(stock_code, company_name, sector,
+                               price_per_share, price_per_lot, price_category,
+                               volume_24h, ytd_performance, username="Pantronux") -> bool:
+    """Upsert price and volume from yfinance. Does NOT touch LLM analysis columns."""
+    conn = None
+    try:
+        conn = _conn()
+        now = datetime.now().isoformat()
+        conn.execute(
+            """
+            INSERT INTO market_sentinel_stocks (
+                username, stock_code, company_name, sector,
+                current_price_per_share, current_price_per_lot, price_category,
+                volume_24h, ytd_performance, price_updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(stock_code) DO UPDATE SET
+                current_price_per_share = excluded.current_price_per_share,
+                current_price_per_lot = excluded.current_price_per_lot,
+                price_category = excluded.price_category,
+                volume_24h = excluded.volume_24h,
+                ytd_performance = excluded.ytd_performance,
+                price_updated_at = excluded.price_updated_at
+            """,
+            (username, stock_code, company_name, sector, 
+             price_per_share, price_per_lot, price_category,
+             volume_24h, ytd_performance, now)
+        )
+        conn.commit()
+        return True
+    except Exception as exc:
+        logger.error("[FINANCE] upsert_sentinel_stock_price failed: %s", exc)
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+
+def update_sentinel_stock_analysis(stock_code, projected_roi_1m, projected_roi_1y,
+                                  triangulation_summary, conclusion, username="Pantronux") -> bool:
+    """Update only LLM-generated columns (ROI, summary, conclusion)."""
+    conn = None
+    try:
+        conn = _conn()
+        now = datetime.now().isoformat()
+        conn.execute(
+            """
+            UPDATE market_sentinel_stocks SET
+                projected_roi_1m = ?,
+                projected_roi_1y = ?,
+                triangulation_summary = ?,
+                conclusion = ?,
+                analysis_updated_at = ?
+            WHERE stock_code = ?
+            """,
+            (projected_roi_1m, projected_roi_1y, triangulation_summary, conclusion, now, stock_code)
+        )
+        conn.commit()
+        return True
+    except Exception as exc:
+        logger.error("[FINANCE] update_sentinel_stock_analysis failed: %s", exc)
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+
+def get_all_sentinel_stocks(sort_by="latest", category=None, username="Pantronux") -> list[dict]:
+    """Fetch all stocks with sorting and optional category filtering."""
+    conn = None
+    try:
+        conn = _conn()
+        query = "SELECT * FROM market_sentinel_stocks WHERE 1=1"
+        params = []
+        
+        if category:
+            query += " AND price_category = ?"
+            params.append(category)
+            
+        # Sorting logic
+        if sort_by == "latest":
+            query += " ORDER BY price_updated_at DESC"
+        elif sort_by == "oldest":
+            query += " ORDER BY price_updated_at ASC"
+        elif sort_by == "price_asc":
+            query += " ORDER BY current_price_per_lot ASC"
+        elif sort_by == "price_desc":
+            query += " ORDER BY current_price_per_lot DESC"
+        elif sort_by == "volume":
+            query += " ORDER BY volume_24h DESC"
+        elif sort_by == "roi_1m":
+            query += " ORDER BY projected_roi_1m DESC"
+        elif sort_by == "roi_1y":
+            query += " ORDER BY projected_roi_1y DESC"
+            
+        cursor = conn.execute(query, params)
+        return [dict(r) for r in cursor.fetchall()]
+    except Exception as exc:
+        logger.error("[FINANCE] get_all_sentinel_stocks failed: %s", exc)
+        return []
+    finally:
+        if conn:
+            conn.close()
+
+
+def get_sentinel_stock_detail(stock_code, username="Pantronux") -> dict | None:
+    """Fetch a single stock by code."""
+    conn = None
+    try:
+        conn = _conn()
+        cursor = conn.execute("SELECT * FROM market_sentinel_stocks WHERE stock_code = ?", (stock_code,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    except Exception as exc:
+        logger.error("[FINANCE] get_sentinel_stock_detail failed: %s", exc)
+        return None
+    finally:
+        if conn:
+            conn.close()
+
+
+def toggle_pin_stock(username, stock_code) -> dict:
+    """Toggle pin/unpin status. Max 3 pins per user."""
+    conn = None
+    try:
+        conn = _conn()
+        # Check current pin status
+        cursor = conn.execute(
+            "SELECT id FROM user_pinned_stocks WHERE username = ? AND stock_code = ?",
+            (username, stock_code)
+        )
+        existing = cursor.fetchone()
+        
+        if existing:
+            conn.execute("DELETE FROM user_pinned_stocks WHERE id = ?", (existing["id"],))
+            conn.commit()
+            return {"action": "unpinned", "count": count_user_pins(username)}
+        else:
+            # Check pin count limit
+            if count_user_pins(username) >= 3:
+                raise ValueError("Maksimal 3 pin diperbolehkan per user.")
+            
+            conn.execute(
+                "INSERT INTO user_pinned_stocks (username, stock_code) VALUES (?, ?)",
+                (username, stock_code)
+            )
+            conn.commit()
+            return {"action": "pinned", "count": count_user_pins(username)}
+    except Exception as exc:
+        if isinstance(exc, ValueError):
+            raise exc
+        logger.error("[FINANCE] toggle_pin_stock failed: %s", exc)
+        return {"action": "error", "message": str(exc)}
+    finally:
+        if conn:
+            conn.close()
+
+
+def get_user_pins(username) -> list[str]:
+    """Return list of stock_codes pinned by the user."""
+    conn = None
+    try:
+        conn = _conn()
+        cursor = conn.execute("SELECT stock_code FROM user_pinned_stocks WHERE username = ?", (username,))
+        return [r["stock_code"] for r in cursor.fetchall()]
+    except Exception as exc:
+        logger.error("[FINANCE] get_user_pins failed: %s", exc)
+        return []
+    finally:
+        if conn:
+            conn.close()
+
+
+def count_user_pins(username) -> int:
+    """Return count of pins for a user."""
+    conn = None
+    try:
+        conn = _conn()
+        cursor = conn.execute("SELECT COUNT(*) FROM user_pinned_stocks WHERE username = ?", (username,))
+        return cursor.fetchone()[0]
+    except Exception as exc:
+        logger.error("[FINANCE] count_user_pins failed: %s", exc)
+        return 0
+    finally:
+        if conn:
+            conn.close()
+
+
 __all__ = [
     "DB_PATH",
     "init_db",
@@ -900,4 +1270,15 @@ __all__ = [
     "get_market_brief_parts",
     "get_market_hud_items",
     "format_market_snapshot_for_prompt",
+    "insert_sentinel_scan",
+    "get_sentinel_latest_per_stock",
+    "get_sentinel_history_for_chart",
+    "get_sentinel_latest_summary",
+    "upsert_sentinel_stock_price",
+    "update_sentinel_stock_analysis",
+    "get_all_sentinel_stocks",
+    "get_sentinel_stock_detail",
+    "toggle_pin_stock",
+    "get_user_pins",
+    "count_user_pins",
 ]

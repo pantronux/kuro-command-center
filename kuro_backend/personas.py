@@ -103,7 +103,7 @@ _CHANCELLOR_SSOT_ADDENDUM: Final[str] = (
 _REALTIME_GROUNDING_DIRECTIVE: Final[str] = (
     "\n\nREAL-TIME GROUNDING & ANTI-GATEKEEPING:\n"
     "- You are not limited by your internal knowledge cut-off.\n"
-    "- If a query involves recent events, specific technical data, or regulatory updates not present in your local state, you MUST proactively use the 'advanced_execution_tool' (OpenClaw) or web search to ground your response.\n"
+    "- If a query involves recent events, specific technical data, or regulatory updates not present in your local state, you MUST proactively use the 'advanced_execution_tool' (OpenClaw) or web search (Google Grounding) to ground your response.\n"
     "- Do not restrict yourself to hardcoded data; if the Master's request requires live verification, execute the search immediately to provide the most current and accurate technical information."
 )
 

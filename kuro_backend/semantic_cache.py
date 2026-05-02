@@ -188,7 +188,7 @@ def classify_tags(query: str) -> frozenset[str]:
     if not query:
         return frozenset()
     q = query.lower()
-    # Habit and reminder tokens removed in V7.2.1
+    # Habit and reminder tokens removed in V1.0.0
     return frozenset()
 
 

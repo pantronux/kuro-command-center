@@ -400,6 +400,53 @@
                             <div class="markdown-content glass-panel rounded-2xl p-6">
                                 ${marked.parse(briefing.summary_text)}
                             </div>
+                            ${briefing.stock_recommendations && briefing.stock_recommendations.length > 0 ? `
+                                <div class="mt-6 glass-panel rounded-2xl p-6">
+                                    <h4 class="text-lg font-semibold text-gray-800 dark:text-white mb-4 flex items-center gap-2">
+                                        <i data-lucide="trending-up" class="w-5 h-5 text-emerald-500"></i>
+                                        📈 Rekomendasi Saham
+                                    </h4>
+                                    <div class="space-y-6">
+                                        ${['below_100k', 'below_500k', 'above_500k'].map(cat => {
+                                            const catStocks = briefing.stock_recommendations.filter(s => s.price_category === cat);
+                                            if (catStocks.length === 0) return '';
+                                            
+                                            const titles = {
+                                                'below_100k': '💸 Di bawah Rp 100.000 / LOT',
+                                                'below_500k': '💰 Rp 100rb – Rp 500rb / LOT',
+                                                'above_500k': '💎 Di atas Rp 500.000 / LOT'
+                                            };
+                                            
+                                            return `
+                                                <div>
+                                                    <h5 class="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-3">${titles[cat]}</h5>
+                                                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                        ${catStocks.map(s => `
+                                                            <div class="p-4 rounded-xl border border-gray-100 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-800/30">
+                                                                <div class="flex justify-between items-start mb-2">
+                                                                    <div>
+                                                                        <span class="font-bold text-gray-800 dark:text-white">${s.stock_code}</span>
+                                                                        <p class="text-[10px] text-gray-500 truncate max-w-[150px]">${s.company_name}</p>
+                                                                    </div>
+                                                                    <span class="px-2 py-0.5 rounded text-[10px] font-bold ${
+                                                                        s.conclusion === 'WORTH BUYING' ? 'bg-emerald-100 text-emerald-700' : 
+                                                                        s.conclusion === 'HOLD' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'
+                                                                    }">${s.conclusion}</span>
+                                                                </div>
+                                                                <div class="text-xs space-y-1 mb-3">
+                                                                    <p class="flex justify-between"><span class="text-gray-500 dark:text-gray-400">Harga / LOT:</span> <span class="font-mono font-medium dark:text-gray-300">Rp ${s.current_price_per_lot.toLocaleString('id-ID')}</span></p>
+                                                                    <p class="flex justify-between"><span class="text-gray-500 dark:text-gray-400">Proyeksi 1thn:</span> <span class="font-medium ${s.projections['1y'].toLowerCase().includes('bull') ? 'text-emerald-500' : 'text-amber-500'}">${s.projections['1y']}</span></p>
+                                                                </div>
+                                                                <p class="text-[11px] text-gray-600 dark:text-gray-400 line-clamp-2 italic">"${s.reasoning}"</p>
+                                                            </div>
+                                                        `).join('')}
+                                                    </div>
+                                                </div>
+                                            `;
+                                        }).join('')}
+                                    </div>
+                                </div>
+                            ` : ''}
                             ${briefing.experimental_signals && briefing.experimental_signals.length > 0 ? `
                                 <div class="mt-6 glass-panel rounded-2xl p-6">
                                     <h4 class="text-lg font-semibold text-gray-800 dark:text-white mb-3 flex items-center gap-2">

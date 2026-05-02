@@ -404,7 +404,7 @@ def _init_short_term_db_locked():
         )
     """)
 
-    # Active Buffer / Session File Store (V7.2.1)
+    # Active Buffer / Session File Store (V1.0.0)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS session_file_store (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -769,7 +769,7 @@ def query_short_term_latest_timestamp() -> Optional[str]:
     return str(row["timestamp"])
 
 # ---------------------------------------------------------------------------
-# Session File Store (Active Buffer V7.2.1)
+# Session File Store (Active Buffer V1.0.0)
 # ---------------------------------------------------------------------------
 def upsert_session_file(session_id: str, filename: str, content: str) -> None:
     """Upsert file content for a specific session."""
@@ -1029,7 +1029,7 @@ def query_memory(
     """
     Pre-process memory before AI response.
     
-    KURO V7.2.1: Preserve only short-term raw context + master profile.
+    KURO V1.0.0: Preserve only short-term raw context + master profile.
     Long-term semantic context is handled by Mem0 in memory_coordinator.
     """
     # Tier 1: Short-term

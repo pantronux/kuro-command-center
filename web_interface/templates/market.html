@@ -1,136 +1,237 @@
 <!DOCTYPE html>
 <!--
   Header Doc ---
-  Purpose: Chancellor market stewardship dashboard (brief + watchlist + HUD chips).
-  Caller: main.py GET "/market".
-  Dependencies: /api/market/watch, /api/market/hud, /api/market/brief; Tailwind CDN.
-  Main Sections: morning brief, watchlist CRUD forms, HUD chip row.
-  Side Effects: Polls /api/market/* endpoints every ~60s; issues POST/DELETE on watch CRUD.
+  Purpose: Sentinel Hub - Hybrid Architecture.
+  Features: Filter Bar, Pinned Stocks, Quantitative (yfinance) + Qualitative (Triangulation).
 -->
-<html lang="en" class="dark scroll-smooth">
+<html lang="en" class="dark">
+
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Kuro — Market Sentinel</title>
-    <link rel="icon" type="image/x-icon" href="/profile/favicon.ico">
-    <link rel="apple-touch-icon" href="/profile/kuro_avatar.png">
+    <title>Kuro — Sentinel Hub</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="icon" type="image/x-icon" href="/profile/favicon.ico">
     <link rel="stylesheet" href="/static/css/style.css">
+    <style>
+        .glass-card {
+            background: rgba(31, 41, 55, 0.4);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(75, 85, 99, 0.3);
+        }
+
+        .badge-worth { background: rgba(16, 185, 129, 0.2); color: #10b981; }
+        .badge-hold  { background: rgba(245, 158, 11, 0.2); color: #f59e0b; }
+        .badge-avoid { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
+
+        .conclusion-badge {
+            font-size: 0.65rem;
+            padding: 0.15rem 0.5rem;
+            border-radius: 9999px;
+            font-weight: 800;
+            text-transform: uppercase;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: rgba(75, 85, 99, 0.5);
+            border-radius: 10px;
+        }
+
+        /* --- Filter Buttons --- */
+        .filter-btn {
+            display: flex; align-items: center; gap: 4px;
+            transition: all 0.15s ease;
+            cursor: pointer;
+            padding: 4px 10px;
+            border-radius: 8px;
+            font-size: 10px;
+            font-weight: 700;
+            border: 1px solid;
+            white-space: nowrap;
+            background: rgba(31, 41, 55, 0.4);
+            color: #6b7280;
+            border-color: rgba(75, 85, 99, 0.3);
+        }
+        .filter-btn.active {
+            background: rgba(16, 185, 129, 0.2) !important;
+            color: #10b981 !important;
+            border-color: rgba(16, 185, 129, 0.4) !important;
+        }
+        /* Rec toggle – uses amber when active */
+        .rec-filter-btn.active {
+            background: rgba(245, 158, 11, 0.2) !important;
+            color: #f59e0b !important;
+            border-color: rgba(245, 158, 11, 0.4) !important;
+        }
+
+        /* --- Category Tabs --- */
+        .category-tab {
+            transition: all 0.15s ease;
+            cursor: pointer;
+            font-size: 10px;
+            font-weight: 900;
+            padding-bottom: 4px;
+            border-bottom: 2px solid transparent;
+            flex: 1;
+            color: #6b7280;
+        }
+        .category-tab.active {
+            border-bottom-color: #10b981;
+            color: #10b981;
+        }
+
+        /* --- Rec card border --- */
+        .rec-worth { border-left-color: #10b981; background: rgba(16,185,129,0.05); }
+        .rec-hold  { border-left-color: #f59e0b; background: rgba(245,158,11,0.05); }
+        .rec-avoid { border-left-color: #ef4444; background: rgba(239,68,68,0.05); }
+
+        /* chevron rotation for sort toggle */
+        .chevron-up   { transform: rotate(0deg);   transition: transform 0.2s; }
+        .chevron-down { transform: rotate(180deg);  transition: transform 0.2s; }
+    </style>
 </head>
-<body class="bg-gray-900 text-gray-100 min-h-screen">
-    <header class="border-b border-gray-700 px-4 py-3 flex items-center justify-between gap-4">
-        <div class="flex items-center gap-3">
-            <a href="/" class="text-emerald-400 hover:underline text-sm">← Chat</a>
-            <h1 class="text-lg font-semibold tracking-tight">Market Sentinel</h1>
+
+<body class="bg-[#0b0f1a] text-gray-100 min-h-screen font-sans">
+    <header class="border-b border-gray-800/60 bg-[#0d111d]/80 backdrop-blur-md sticky top-0 z-50 px-6 py-3 flex items-center justify-between">
+        <div class="flex items-center gap-4">
+            <a href="/" class="p-2 rounded-lg hover:bg-gray-800 text-gray-400 transition-colors">
+                <i data-lucide="arrow-left" class="w-5 h-5"></i>
+            </a>
+            <div>
+                <h1 class="text-xl font-black tracking-tight bg-gradient-to-r from-emerald-400 to-blue-500 bg-clip-text text-transparent">
+                    Sentinel Hub</h1>
+                <p class="text-[9px] text-gray-500 font-mono uppercase tracking-widest">Hybrid Triangulation Engine</p>
+            </div>
         </div>
-        <div id="kuroMarketProbTicker" class="font-mono text-xs text-cyan-300 truncate max-w-[50vw]"></div>
+        <div class="flex gap-2">
+            <button id="runPriceUpdateBtn"
+                class="px-3 py-1.5 rounded-lg bg-blue-600/10 text-blue-400 border border-blue-500/30 hover:bg-blue-600/20 text-xs font-bold transition-all flex items-center gap-2">
+                <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Sync Prices
+            </button>
+            <button id="runTriangulationBtn"
+                class="px-3 py-1.5 rounded-lg bg-emerald-600/10 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-600/20 text-xs font-bold transition-all flex items-center gap-2">
+                <i data-lucide="zap" class="w-3.5 h-3.5"></i> Run Triangulation
+            </button>
+        </div>
     </header>
-    <main class="max-w-4xl mx-auto p-4 space-y-8">
-        <section class="rounded-xl border border-gray-700 bg-gray-800/50 p-4">
-            <h2 class="text-sm font-medium text-gray-400 mb-2">Morning brief (cached)</h2>
-            <p id="marketBrief" class="text-sm text-gray-200 whitespace-pre-wrap">Loading…</p>
-        </section>
-        <section class="rounded-xl border border-gray-700 bg-gray-800/50 p-4">
-            <h2 class="text-sm font-medium text-gray-400 mb-3">Watchlist</h2>
-            <form id="addWatch" class="flex flex-wrap gap-2 mb-4">
-                <input name="symbol" placeholder="Symbol (e.g. NVDA)" class="px-3 py-2 rounded bg-gray-900 border border-gray-600 text-sm w-40" required />
-                <input name="label" placeholder="Label (optional)" class="px-3 py-2 rounded bg-gray-900 border border-gray-600 text-sm flex-1 min-w-[8rem]" />
-                <button type="submit" class="px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-sm font-medium">Add</button>
-            </form>
-            <ul id="watchList" class="divide-y divide-gray-700 text-sm"></ul>
-        </section>
-        <section class="rounded-xl border border-gray-700 bg-gray-800/50 p-4">
-            <h2 class="text-sm font-medium text-gray-400 mb-2">HUD chips</h2>
-            <ul id="hudChips" class="font-mono text-xs text-cyan-200 space-y-1"></ul>
+
+    <main class="flex h-[calc(100vh-65px)] overflow-hidden">
+        <!-- Sidebar -->
+        <aside class="w-80 border-r border-gray-800/60 bg-[#0d111d]/40 flex flex-col">
+
+            <!-- Filter Bar -->
+            <div class="p-4 border-b border-gray-800/60 space-y-3">
+
+                <!-- Row 1: Sort filters with toggle direction -->
+                <div class="flex gap-1.5 flex-wrap">
+                    <button id="sortDate" data-sort="latest" data-dir="desc"
+                        class="filter-btn active" title="Sort by Date">
+                        <i data-lucide="calendar" class="w-3 h-3"></i>
+                        <span>Date</span>
+                        <i data-lucide="chevron-down" class="w-3 h-3 chevron-down sort-chevron"></i>
+                    </button>
+                    <button id="sortPrice" data-sort="price_desc" data-dir="desc"
+                        class="filter-btn" title="Sort by Price">
+                        <i data-lucide="banknote" class="w-3 h-3"></i>
+                        <span>Price</span>
+                        <i data-lucide="chevron-down" class="w-3 h-3 chevron-down sort-chevron"></i>
+                    </button>
+                    <button id="sortVolume" data-sort="volume" data-dir="desc"
+                        class="filter-btn" title="Most picked">
+                        <i data-lucide="bar-chart-2" class="w-3 h-3"></i>
+                        <span>Most Pick</span>
+                    </button>
+                    <button id="sortRoi1m" data-sort="roi_1m" data-dir="desc"
+                        class="filter-btn" title="Sort by 1-Month ROI">
+                        <i data-lucide="trending-up" class="w-3 h-3"></i>
+                        <span>ROI 1M</span>
+                    </button>
+                    <button id="sortRoi1y" data-sort="roi_1y" data-dir="desc"
+                        class="filter-btn" title="Sort by 1-Year ROI">
+                        <i data-lucide="line-chart" class="w-3 h-3"></i>
+                        <span>ROI 1 Year</span>
+                    </button>
+                </div>
+
+                <!-- Row 2: Kuro Recommendation toggle -->
+                <button id="toggleKuroRec"
+                    class="filter-btn rec-filter-btn w-full justify-center gap-2" title="Show only Kuro's recommended stocks">
+                    <i data-lucide="bot" class="w-3 h-3"></i>
+                    <span>Kuro Recommendation</span>
+                </button>
+
+                <!-- Row 3: Category tabs -->
+                <div class="flex justify-between border-b border-gray-800/40">
+                    <button data-category="all" class="category-tab active">ALL</button>
+                    <button data-category="below_100k" class="category-tab">SUB 100K</button>
+                    <button data-category="above_500k" class="category-tab">PREMIUM</button>
+                </div>
+            </div>
+
+            <!-- Stock List -->
+            <div class="flex-1 overflow-y-auto p-4 space-y-6 custom-scrollbar">
+                <div>
+                    <h3 class="text-[10px] font-black text-amber-500/80 uppercase tracking-tighter mb-3 flex items-center gap-2">
+                        <i data-lucide="pin" class="w-3 h-3"></i> Pinned Watchlist (Max 3)
+                    </h3>
+                    <div id="pinnedStocks" class="space-y-2"></div>
+                </div>
+                <div>
+                    <h3 class="text-[10px] font-black text-gray-500 uppercase tracking-tighter mb-3">Market Feed</h3>
+                    <div id="stockList" class="space-y-2"></div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <section class="flex-1 overflow-y-auto bg-[#0b0f1a] custom-scrollbar">
+            <div id="emptyState" class="h-full flex flex-col items-center justify-center opacity-40">
+                <i data-lucide="layout" class="w-16 h-16 mb-4 text-gray-600"></i>
+                <p class="text-sm font-bold uppercase tracking-widest text-gray-500">Pilih saham untuk analisis triangulasi</p>
+            </div>
+
+            <div id="contentArea" class="hidden p-8 space-y-8">
+                <div id="detailHeader" class="flex justify-between items-start"></div>
+
+                <!-- Kuro Recommendation Card -->
+                <div id="kuroRecCard" class="hidden glass-card rounded-2xl p-6 border-l-4">
+                    <h4 class="text-xs font-black uppercase tracking-widest mb-3 flex items-center gap-2 text-amber-400">
+                        <i data-lucide="bot" class="w-4 h-4"></i> Kuro Recommendation
+                    </h4>
+                    <div class="flex items-center gap-4 mb-3">
+                        <span id="kuroConclusion" class="conclusion-badge text-sm px-4 py-1.5">PENDING</span>
+                        <div class="flex gap-4 text-sm">
+                            <span class="text-gray-400">ROI 1M: <span id="kuroRoi1m" class="font-bold text-emerald-400">N/A</span></span>
+                            <span class="text-gray-400">ROI 1Y: <span id="kuroRoi1y" class="font-bold text-blue-400">N/A</span></span>
+                        </div>
+                    </div>
+                    <p id="kuroSummary" class="text-sm text-gray-300 leading-relaxed italic"></p>
+                </div>
+
+                <!-- Price Chart -->
+                <div class="glass-card rounded-3xl p-8 border border-gray-800/60">
+                    <h4 class="text-xs font-black text-gray-500 uppercase tracking-widest mb-6 flex items-center gap-2">
+                        <i data-lucide="line-chart" class="w-4 h-4 text-emerald-500"></i> Price Trajectory
+                    </h4>
+                    <div class="h-80 w-full">
+                        <canvas id="priceChart"></canvas>
+                    </div>
+                </div>
+
+                <div id="analysisArea" class="space-y-6"></div>
+            </div>
         </section>
     </main>
+
+    <script src="/static/js/sentinel_logic.js"></script>
     <script>
-        async function api(path, opts) {
-            const r = await fetch(path, Object.assign({ credentials: 'same-origin' }, opts || {}));
-            return r.json();
-        }
-        function chipLine(it) {
-            const id = (it.id || '').toString();
-            const lab = (it.label || id).toString();
-            if (it.kind === 'equity') {
-                const s = it.sentiment || 'FLAT';
-                const p = it.last_pct_change != null ? it.last_pct_change.toFixed(2) + '%' : '—';
-                return '[' + id + ': ' + s + ' ' + p + ']';
-            }
-            const prob = it.prob != null ? it.prob.toFixed(0) + '%' : '—';
-            const tr = (it.trend || 'flat').toString();
-            const arrow = tr === 'up' ? '↗' : tr === 'down' ? '↘' : '→';
-            return '[' + id + ': ' + prob + ' ' + arrow + ' ' + lab.slice(0, 24) + ']';
-        }
-        async function refresh() {
-            try {
-                const b = await api('/api/market/brief');
-                document.getElementById('marketBrief').textContent =
-                    (b && b.brief) ? b.brief : '(empty)';
-            } catch (e) {
-                document.getElementById('marketBrief').textContent = 'Could not load brief.';
-            }
-            try {
-                const h = await api('/api/market/hud');
-                const items = (h && h.items) ? h.items : [];
-                const el = document.getElementById('hudChips');
-                const tick = document.getElementById('kuroMarketProbTicker');
-                el.innerHTML = '';
-                const lines = items.map(chipLine);
-                tick.textContent = lines.slice(0, 6).join(' ');
-                lines.forEach(function (line) {
-                    const li = document.createElement('li');
-                    li.textContent = line;
-                    el.appendChild(li);
-                });
-            } catch (e) {
-                document.getElementById('hudChips').innerHTML = '<li>HUD unavailable</li>';
-            }
-            try {
-                const w = await api('/api/market/watch');
-                const rows = (w && w.symbols) ? w.symbols : [];
-                const ul = document.getElementById('watchList');
-                ul.innerHTML = '';
-                if (!rows.length) {
-                    ul.innerHTML = '<li class="py-2 text-gray-500">No symbols yet.</li>';
-                } else {
-                    rows.forEach(function (r) {
-                        const li = document.createElement('li');
-                        li.className = 'py-2 flex justify-between items-center gap-2';
-                        const left = document.createElement('span');
-                        left.textContent = r.symbol + (r.label ? ' — ' + r.label : '') +
-                            (r.last_price != null ? ' @ ' + r.last_price : '');
-                        const btn = document.createElement('button');
-                        btn.className = 'text-red-400 hover:underline text-xs';
-                        btn.textContent = 'Remove';
-                        btn.onclick = async function () {
-                            await api('/api/market/watch/' + encodeURIComponent(r.symbol), { method: 'DELETE' });
-                            refresh();
-                        };
-                        li.appendChild(left);
-                        li.appendChild(btn);
-                        ul.appendChild(li);
-                    });
-                }
-            } catch (e) {
-                document.getElementById('watchList').innerHTML = '<li class="py-2 text-red-400">Watchlist API error</li>';
-            }
-        }
-        document.getElementById('addWatch').addEventListener('submit', async function (ev) {
-            ev.preventDefault();
-            const fd = new FormData(ev.target);
-            await fetch('/api/market/watch', {
-                method: 'POST',
-                credentials: 'same-origin',
-                body: fd,
-            });
-            ev.target.reset();
-            refresh();
+        document.addEventListener('DOMContentLoaded', () => {
+            if (window.lucide) lucide.createIcons();
+            initSentinelHub();
         });
-        refresh();
-        setInterval(refresh, 45000);
-        if (window.lucide) lucide.createIcons();
     </script>
 </body>
+
 </html>

@@ -68,6 +68,23 @@ def init_db():
                 "ALTER TABLE chat_history ADD COLUMN username TEXT NOT NULL DEFAULT 'Pantronux'"
             )
             logger.info("chat_history migration: added username column with Pantronux default")
+        
+        # uploaded_file_integrity migration
+        cursor.execute("PRAGMA table_info(uploaded_file_integrity)")
+        upload_cols = {row[1] for row in cursor.fetchall()}
+        if "username" not in upload_cols:
+            cursor.execute("ALTER TABLE uploaded_file_integrity ADD COLUMN username TEXT NOT NULL DEFAULT 'Pantronux'")
+            logger.info("uploaded_file_integrity migration: added username column")
+        if "expires_at" not in upload_cols:
+            cursor.execute("ALTER TABLE uploaded_file_integrity ADD COLUMN expires_at DATETIME")
+            logger.info("uploaded_file_integrity migration: added expires_at column")
+        if "archived_at" not in upload_cols:
+            cursor.execute("ALTER TABLE uploaded_file_integrity ADD COLUMN archived_at DATETIME")
+            logger.info("uploaded_file_integrity migration: added archived_at column")
+        if "archive_path" not in upload_cols:
+            cursor.execute("ALTER TABLE uploaded_file_integrity ADD COLUMN archive_path TEXT")
+            logger.info("uploaded_file_integrity migration: added archive_path column")
+
         cursor.execute(
             "UPDATE chat_history SET persona = 'consultant' WHERE persona IS NULL OR TRIM(persona) = ''"
         )
@@ -96,7 +113,11 @@ def init_db():
                 content_type TEXT NOT NULL DEFAULT '',
                 size_bytes INTEGER NOT NULL DEFAULT 0,
                 sha256 TEXT NOT NULL,
-                uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                username TEXT NOT NULL DEFAULT 'Pantronux',
+                expires_at DATETIME,
+                archived_at DATETIME,
+                archive_path TEXT
             )
             """
         )
@@ -116,6 +137,19 @@ def init_db():
             """
             CREATE INDEX IF NOT EXISTS idx_uploaded_integrity_request_id
             ON uploaded_file_integrity(request_id)
+            """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_uploaded_username
+            ON uploaded_file_integrity(username)
+            """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_uploaded_expires
+            ON uploaded_file_integrity(expires_at, archived_at)
+            WHERE archived_at IS NULL
             """
         )
         conn.commit()
@@ -274,6 +308,7 @@ def record_uploaded_file_integrity(
     content_type: str,
     size_bytes: int,
     sha256: str,
+    username: str = "Pantronux",
 ) -> None:
     """Persist immutable upload integrity metadata for chain-of-custody checks."""
     conn = None
@@ -281,13 +316,18 @@ def record_uploaded_file_integrity(
         conn = _get_connection()
         cursor = conn.cursor()
         normalized_persona = memory_manager.normalize_persona(persona)
+        
+        # Expiry is 180 days from now
+        from datetime import timedelta
+        expires_at = (datetime.now() + timedelta(days=180)).isoformat()
+
         cursor.execute(
             """
             INSERT INTO uploaded_file_integrity (
                 request_id, platform, persona, original_filename, stored_filename,
-                stored_path, content_type, size_bytes, sha256
+                stored_path, content_type, size_bytes, sha256, username, expires_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 request_id,
@@ -299,6 +339,8 @@ def record_uploaded_file_integrity(
                 content_type or "",
                 int(size_bytes or 0),
                 sha256,
+                username,
+                expires_at
             ),
         )
         conn.commit()
@@ -371,6 +413,68 @@ def search_history(query: str, username: str = "Pantronux", persona: Optional[st
     except Exception as e:
         logger.error(f"Failed to search chat history: {e}")
         return []
+    finally:
+        if conn:
+            conn.close()
+
+
+def list_user_files(username: str) -> List[Dict]:
+    """Get active (non-archived) files for a specific user."""
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM uploaded_file_integrity WHERE username = ? AND archived_at IS NULL ORDER BY uploaded_at DESC",
+            (username,)
+        )
+        rows = cursor.fetchall()
+        return [dict(r) for r in rows]
+    except Exception as e:
+        logger.error(f"Failed to list user files: {e}")
+        return []
+    finally:
+        if conn:
+            conn.close()
+
+
+def get_expiring_files(days_ahead: int = 0) -> List[Dict]:
+    """Get files that are expiring (expires_at <= now + days_ahead)."""
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        from datetime import timedelta
+        cutoff = (datetime.now() + timedelta(days=days_ahead)).isoformat()
+        cursor.execute(
+            "SELECT * FROM uploaded_file_integrity WHERE expires_at <= ? AND archived_at IS NULL",
+            (cutoff,)
+        )
+        rows = cursor.fetchall()
+        return [dict(r) for r in rows]
+    except Exception as e:
+        logger.error(f"Failed to query expiring files: {e}")
+        return []
+    finally:
+        if conn:
+            conn.close()
+
+
+def mark_file_archived(stored_filename: str, archive_path: str) -> bool:
+    """Mark a file as archived in the DB."""
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE uploaded_file_integrity SET archived_at = CURRENT_TIMESTAMP, archive_path = ?, stored_path = NULL WHERE stored_filename = ?",
+            (archive_path, stored_filename)
+        )
+        conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Failed to mark file archived: {e}")
+        return False
     finally:
         if conn:
             conn.close()

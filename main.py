@@ -65,6 +65,8 @@ from kuro_backend import intelligence_db
 from kuro_backend import persona_history_admin
 from kuro_backend import version as kuro_version
 from kuro_backend import proactive_greeting
+from kuro_backend import market_sentinel
+from kuro_backend import price_ticker_worker
 
 from kuro_backend.logger_setup import setup_logging
 
@@ -98,7 +100,7 @@ ACCESS_TOKEN_EXPIRE_HOURS = int(os.getenv("JWT_EXPIRATION_HOURS", "12"))
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "Pantronux")
 ADMIN_PASSWORD_HASH = os.getenv("ADMIN_PASSWORD_HASH", "")
 
-# Secondary User: Faikhira (V7.2.2 Restricted Access)
+# Secondary User: Faikhira (V1.0.0 Restricted Access)
 FAIKHIRA_USERNAME = os.getenv("FAIKHIRA_USERNAME", "Faikhira")
 FAIKHIRA_PASSWORD_HASH = os.getenv("FAIKHIRA_PASSWORD_HASH", "")
 FAIKHIRA_MASTER_NAME = os.getenv("FAIKHIRA_MASTER_NAME", "Master Faikhira")
@@ -498,16 +500,17 @@ def _build_unique_filename(original_name: str, timestamp: str, random_suffix: st
     return f"{slug_base}_{timestamp}{suffix}{ext}"
 
 
-async def save_upload_file(file: UploadFile) -> Dict[str, str]:
+async def save_upload_file(file: UploadFile, username: str = "Pantronux") -> Dict[str, str]:
     """
-    Save uploaded file with deterministic unique filename and category folder.
-    Format: {slugified_original}_{YYYYMMDD_HHMMSS}.{ext}
-    Failsafe: append random 4-digit suffix on collision.
+    Save uploaded file with deterministic unique filename and user-category subfolder.
+    Format: uploaded_files/{username}/{category}/{slugified_original}_{YYYYMMDD_HHMMSS}.{ext}
     """
     original_name = (file.filename or "").strip() or "file"
     _, ext = _slugify_filename_base(original_name)
     subdir = _resolve_upload_subdir(file.content_type or "", ext)
-    target_dir = os.path.join(UPLOAD_DIR, subdir)
+    
+    # Path: uploaded_files/{username}/{category}/
+    target_dir = os.path.join(UPLOAD_DIR, username, subdir)
     os.makedirs(target_dir, exist_ok=True)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -517,7 +520,6 @@ async def save_upload_file(file: UploadFile) -> Dict[str, str]:
 
     if os.path.exists(target_path):
         collision_used = True
-        # Very rare same-second collision; use 4-digit random suffix as failsafe.
         for _ in range(10):
             suffix = f"{random.randint(1000, 9999)}"
             unique_name = _build_unique_filename(original_name, timestamp, random_suffix=suffix)
@@ -528,8 +530,18 @@ async def save_upload_file(file: UploadFile) -> Dict[str, str]:
     content = await file.read()
     with open(target_path, "wb") as f:
         f.write(content)
+    
     sha256_hash = hashlib.sha256(content).hexdigest()
     size_bytes = len(content)
+
+    return {
+        "original_filename": original_name,
+        "stored_filename": unique_name,
+        "stored_path": target_path,
+        "content_type": file.content_type or "",
+        "size_bytes": size_bytes,
+        "sha256": sha256_hash
+    }
 
     logger.info(
         "Upload saved: original=%s stored=%s subdir=%s collision_failsafe=%s sha256=%s size_bytes=%s",
@@ -835,7 +847,7 @@ async def chat_endpoint(
         
         for file in files:
             if file.filename:
-                saved_file = await save_upload_file(file)
+                saved_file = await save_upload_file(file, username=username)
                 file_path = saved_file["stored_path"]
                 stored_filename = saved_file["stored_filename"]
                 chat_history.record_uploaded_file_integrity(
@@ -848,6 +860,7 @@ async def chat_endpoint(
                     content_type=saved_file["content_type"],
                     size_bytes=saved_file["size_bytes"],
                     sha256=saved_file["sha256"],
+                    username=username
                 )
                 
                 # Check if it's an image for vision processing
@@ -1028,7 +1041,7 @@ async def chat_stream_endpoint(
             
             for file in files:
                 if file.filename:
-                    saved_file = await save_upload_file(file)
+                    saved_file = await save_upload_file(file, username=username)
                     file_path = saved_file["stored_path"]
                     stored_filename = saved_file["stored_filename"]
                     chat_history.record_uploaded_file_integrity(
@@ -1041,6 +1054,7 @@ async def chat_stream_endpoint(
                         content_type=saved_file["content_type"],
                         size_bytes=saved_file["size_bytes"],
                         sha256=saved_file["sha256"],
+                        username=username
                     )
                     
                     if file.content_type and file.content_type.startswith("image/"):
@@ -1396,15 +1410,15 @@ async def memory_stats():
 
 @app.post("/api/compliance/ingest")
 async def compliance_ingest(clear: bool = Form(False)):
-    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Compliance module purged in KURO V7.2.1"})
+    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Compliance module purged in KURO V1.0.0"})
 
 @app.get("/api/compliance/stats")
 async def compliance_stats():
-    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Compliance module purged in KURO V7.2.1"})
+    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Compliance module purged in KURO V1.0.0"})
 
 @app.get("/api/compliance/search")
 async def compliance_search(query: str):
-    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Compliance module purged in KURO V7.2.1"})
+    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Compliance module purged in KURO V1.0.0"})
 
 # --- Intelligence Hub Routes ---
 @app.get("/api/intelligence/history")
@@ -1439,11 +1453,12 @@ async def intelligence_latest():
     return {"status": "success", "briefing": None, "message": "No briefings available yet"}
 
 @app.get("/api/intelligence/run")
-async def intelligence_run():
+async def intelligence_run(force: str = "false"):
     """Manually trigger daily intelligence research."""
     try:
+        force_bool = force.lower() == "true"
         from kuro_backend.intelligence_engine import run_daily_research
-        briefing = run_daily_research()
+        briefing = run_daily_research(force=force_bool)
         return {"status": "success", "briefing": briefing}
     except Exception as e:
         return {"status": "error", "message": str(e)}
@@ -1462,10 +1477,13 @@ async def read_file(file_path: str = Form("")):
     return result
 
 @app.get("/api/list-files")
-async def list_files(directory: str = None):
-    """List all files in a directory (reality check - no memory reliance)."""
-    result = tools.list_my_files(directory)
-    return {"status": "success", "data": result}
+async def list_files(request: Request):
+    """List files for the current user."""
+    token = get_token_from_cookie(request)
+    user = validate_token(token)
+    username = user.get("username") if user else ADMIN_USERNAME
+    files = chat_history.list_user_files(username)
+    return {"status": "success", "data": files}
 
 # --- Documentation Routes ---
 @app.get("/tutorial", response_class=HTMLResponse)
@@ -1493,23 +1511,23 @@ async def compliance_dashboard():
 
 @app.get("/api/compliance/progress/{standard}")
 async def compliance_progress(standard: str):
-    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Compliance module purged in KURO V7.2.1"})
+    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Compliance module purged in KURO V1.0.0"})
 
 @app.get("/api/compliance/evidence")
 async def compliance_evidence(standard: str = None):
-    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Compliance module purged in KURO V7.2.1"})
+    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Compliance module purged in KURO V1.0.0"})
 
 @app.get("/api/compliance/search")
 async def compliance_search(query: str, standard: str = None):
-    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Compliance module purged in KURO V7.2.1"})
+    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Compliance module purged in KURO V1.0.0"})
 
 @app.post("/api/compliance/analyze")
 async def compliance_analyze(document: str = Form(""), standard: str = Form("iso27001")):
-    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Compliance module purged in KURO V7.2.1"})
+    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Compliance module purged in KURO V1.0.0"})
 
 @app.get("/api/compliance/audit-trail")
 async def audit_trail(limit: int = 50):
-    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Compliance module purged in KURO V7.2.1"})
+    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Compliance module purged in KURO V1.0.0"})
 
 
 @app.get("/api/dashboard/data-revision")
@@ -1717,6 +1735,76 @@ async def market_hud(request: Request):
     raw = await run_db(finance_db.get_market_hud_items, username)
     items = [MarketHudChip.model_validate(x).model_dump(mode="json") for x in raw]
     return {"status": "success", "items": items}
+
+
+# --- Market Sentinel (V2) Routes ---
+
+@app.get("/api/sentinel/latest")
+async def api_sentinel_latest(request: Request):
+    """Fetch the latest unique scan for each stock."""
+# --- Hybrid Market Sentinel V3 ---
+@app.get("/api/sentinel/stocks")
+async def api_sentinel_stocks(request: Request, sort_by: str = "latest", category: Optional[str] = None):
+    token = get_token_from_cookie(request)
+    user = validate_token(token)
+    username = user.get("username") if user else "Pantronux"
+    stocks = await run_db(finance_db.get_all_sentinel_stocks, sort_by, category, username)
+    return {"status": "success", "stocks": stocks}
+
+
+@app.get("/api/sentinel/stock/{code}")
+async def api_sentinel_stock_detail(code: str, request: Request):
+    token = get_token_from_cookie(request)
+    user = validate_token(token)
+    username = user.get("username") if user else "Pantronux"
+    stock = await run_db(finance_db.get_sentinel_stock_detail, code, username)
+    history = await run_db(finance_db.get_sentinel_history_for_chart, code, username)
+    return {"status": "success", "stock": stock, "history": history}
+
+
+@app.get("/api/sentinel/pins")
+async def api_sentinel_pins(request: Request):
+    token = get_token_from_cookie(request)
+    user = validate_token(token)
+    username = user.get("username") if user else "Pantronux"
+    pins = await run_db(finance_db.get_user_pins, username)
+    return {"status": "success", "pins": pins}
+
+
+@app.post("/api/sentinel/pins/{code}")
+async def api_sentinel_toggle_pin(code: str, request: Request):
+    token = get_token_from_cookie(request)
+    user = validate_token(token)
+    username = user.get("username") if user else "Pantronux"
+    try:
+        res = await run_db(finance_db.toggle_pin_stock, username, code)
+        return {"status": "success", **res}
+    except ValueError as e:
+        return JSONResponse(status_code=400, content={"status": "error", "message": str(e)})
+
+
+@app.post("/api/sentinel/run")
+async def api_sentinel_manual_run(request: Request):
+    """Manually trigger a triangulation scan (restricted to master)."""
+    token = get_token_from_cookie(request)
+    user = validate_token(token)
+    username = user.get("username") if user else "Pantronux"
+    if username != os.getenv("ADMIN_USERNAME", "Pantronux"):
+        raise HTTPException(status_code=403, detail="Only Master can trigger Sentinel scans.")
+    asyncio.create_task(asyncio.to_thread(market_sentinel.run_triangulation_scan, username))
+    return {"status": "success", "message": "Triangulation scan triggered in background."}
+
+
+@app.post("/api/sentinel/price-update")
+async def api_sentinel_price_update(request: Request):
+    """Manually trigger a price ticker update (restricted to master)."""
+    token = get_token_from_cookie(request)
+    user = validate_token(token)
+    username = user.get("username") if user else "Pantronux"
+    if username != os.getenv("ADMIN_USERNAME", "Pantronux"):
+        raise HTTPException(status_code=403, detail="Only Master can trigger price updates.")
+    asyncio.create_task(asyncio.to_thread(price_ticker_worker.run_price_update, username))
+    return {"status": "success", "message": "Price update triggered in background."}
 
 
 @app.get("/api/market/brief")
@@ -2012,6 +2100,34 @@ def start_reminder_scheduler():
         replace_existing=True
     )
 
+    # Price ticker update (every 30 min, market-aligned)
+    _reminder_scheduler.add_job(
+        price_ticker_worker.run_price_update,
+        'cron',
+        day_of_week='mon-fri',
+        hour='9-16',
+        minute='0,30',
+        id='price_ticker_update',
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True
+    )
+    logger.info("Price Ticker updates scheduled (Mon-Fri 09:00-16:00 every 30m).")
+
+    # Market Sentinel autonomous scans (Mon-Fri market-aligned)
+    _reminder_scheduler.add_job(
+        market_sentinel.run_triangulation_scan,
+        'cron',
+        day_of_week='mon-fri',
+        hour='9,13,17,21',
+        minute=0,
+        id='market_sentinel_scan',
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True
+    )
+    logger.info("Market Sentinel Triangulation scans scheduled (Mon-Fri 09/13/17/21).")
+
     # Autonomous memory dreaming cycle (Kuro AI V6.0 Sovereign).
     if os.getenv("KURO_DREAMING_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on"):
         try:
@@ -2055,6 +2171,13 @@ def start_reminder_scheduler():
                 f"Fitness anomaly sentinel scheduled every {fitness_interval} minute(s)."
             )
 
+    from kuro_backend import file_retention_worker
+    _reminder_scheduler.add_job(
+        file_retention_worker.run_retention_cycle,
+        'cron', hour=2, minute=0,
+        id='file_retention_cycle', replace_existing=True
+    )
+    
     _reminder_scheduler.start()
     logger.info("Intelligence scheduler started.")
 
@@ -2062,7 +2185,7 @@ def start_reminder_scheduler():
 def send_daily_intelligence_briefing():
     """Send daily intelligence briefing to Telegram at 08:00 AM for all users."""
     try:
-        from kuro_backend.intelligence_engine import run_daily_research, format_telegram_message
+        from kuro_backend.intelligence_engine import run_daily_research, format_telegram_message, format_stock_telegram_message
         from kuro_backend import telegram_notifier, memory_manager
         
         # Get all users to process
@@ -2075,6 +2198,11 @@ def send_daily_intelligence_briefing():
                 logger.info(f"[INTELLIGENCE] Running daily research for {username} (08:00 AM briefing)...")
                 briefing = run_daily_research(username=username)
                 
+                # Check if it was skipped (already exists) to avoid re-sending Telegram
+                if briefing.get("_already_exists"):
+                    logger.info(f"[INTELLIGENCE] Briefing already exists for {username}, skipping Telegram delivery.")
+                    continue
+
                 # Get display name for message
                 display_name = username
                 try:
@@ -2083,12 +2211,14 @@ def send_daily_intelligence_briefing():
                 except:
                     pass
 
-                # Format for Telegram
+                # Message 1: Main Briefing
                 telegram_message = format_telegram_message(briefing, display_name=display_name)
-                
-                # Send to Telegram (Note: telegram_notifier might need user-specific chat_id in future, 
-                # but for now it sends to the configured admin bot)
                 telegram_notifier.send_message(telegram_message)
+                
+                # Message 2: Stock Recommendations
+                stock_message = format_stock_telegram_message(briefing)
+                if stock_message:
+                    telegram_notifier.send_message(stock_message)
                 
                 logger.info(f"[INTELLIGENCE] Daily briefing sent to Telegram for {username}")
             except Exception as user_exc:

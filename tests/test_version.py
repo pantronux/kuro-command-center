@@ -1,4 +1,4 @@
-"""Tests for Kuro AI V7.2.1 Natural Agency version metadata.
+"""Tests for Kuro AI V1.0.0 Beta 1 Sovereign Cat version metadata.
 
 Purpose: Lock version constants, banner, and `version_info()` payload shape.
 Covers: kuro_backend.version.
@@ -14,20 +14,20 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 
-def test_version_constants_match_v7_agency():
+def test_version_constants_match_v1_sovereign():
     from kuro_backend import version as v
-    assert v.VERSION == "7.2.1"
-    assert v.CODENAME == "Sovereign Leviathan"
-    assert v.VERSION_LABEL == "V7.2"
-    assert "V7.2" in v.VERSION_BANNER
-    assert "Natural Agency" in v.VERSION_BANNER
+    assert v.VERSION == "1.0.0-beta.1"
+    assert v.CODENAME == "Sovereign Cat"
+    assert v.VERSION_LABEL == "V1.0 Beta 1"
+    assert "V1.0 Beta 1" in v.VERSION_BANNER
+    assert "Sovereign Cat" in v.VERSION_BANNER
 
 
 def test_version_info_payload_shape():
     from kuro_backend import version as v
     info = v.version_info()
     assert set(info.keys()) == {"version", "codename", "label", "banner"}
-    assert info["version"] == "7.2.1"
-    assert info["codename"] == "Sovereign Leviathan"
-    assert info["label"] == "V7.2"
+    assert info["version"] == "1.0.0-beta.1"
+    assert info["codename"] == "Sovereign Cat"
+    assert info["label"] == "V1.0 Beta 1"
     assert info["banner"] == v.VERSION_BANNER

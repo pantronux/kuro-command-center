@@ -84,7 +84,7 @@ def init_auth_db():
             )
         """)
 
-        # V7.3 Identity — Robust User Management
+        # V1.0.0 Sovereign Cat — Robust User Management
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,

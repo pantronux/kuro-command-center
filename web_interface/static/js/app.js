@@ -6,7 +6,7 @@
  * Purpose: Frontend app for the main chat dashboard (chat, personas, HUD, market chips, infinite scroll).
  * Caller: Loaded from web_interface/templates/index.html.
  * Dependencies: Tailwind (CDN), Lucide icons, live2d_manager.js (avatar), browser Web APIs (WebSocket, fetch).
- * Main Functions: kuroSendMessage, kuroLoadHistory, kuroPollMarketHudOnce, kuroStartMarketHudPoll, kuroRenderSentinelTicker, persona switcher.
+ * Main Functions: kuroSendMessage, kuroLoadHistory, kuroRenderSentinelTicker, persona switcher.
  * Side Effects: /api/chat XHR, WebSocket /ws/dashboard, localStorage cache, DOM mutations.
  */
 
@@ -210,7 +210,6 @@ document.addEventListener('DOMContentLoaded', () => {
     updateUserInfo();
     kuroRestoreUIMode();
     kuroConnectDashboardWS();
-    kuroStartMarketHudPoll();
 });
 
 // ============================================
@@ -261,7 +260,12 @@ function setupEventListeners() {
     // System Status Modal
     elements.navSystemStatus.addEventListener('click', (e) => {
         e.preventDefault();
-        openSystemStatus();
+        const role = window.KURO_USER_CONTEXT?.role || '';
+        if (role === 'Administrator') {
+            openSystemStatus();
+        } else {
+            openAccessDeniedModal();
+        }
     });
     elements.closeSystemStatus.addEventListener('click', closeSystemStatus);
     elements.systemStatusBackdrop.addEventListener('click', closeSystemStatus);
@@ -616,29 +620,6 @@ function kuroMarketHudChipLine(it) {
     return '[' + id + ': ' + prob + ' ' + arrow + ']';
 }
 
-async function kuroPollMarketHudOnce() {
-    const el = document.getElementById('kuroMarketChipsBar');
-    if (!el) return;
-    try {
-        const r = await fetch('/api/market/hud', { credentials: 'same-origin' });
-        const h = await r.json();
-        const items = (h && h.items) ? h.items : [];
-        if (!items.length) {
-            el.classList.add('hidden');
-            el.textContent = '';
-            return;
-        }
-        el.textContent = items.slice(0, 10).map(kuroMarketHudChipLine).join('  ');
-        el.classList.remove('hidden');
-    } catch (_) {
-        el.classList.add('hidden');
-    }
-}
-
-function kuroStartMarketHudPoll() {
-    kuroPollMarketHudOnce();
-    setInterval(kuroPollMarketHudOnce, 60000);
-}
 
 function kuroRenderSentinelTicker(payload) {
     // HUD-mode sentinel presentation. Outside HUD_MODE we stay silent to
@@ -729,7 +710,6 @@ function kuroRestoreUIMode() {
 window.kuroApplyUIMode = kuroApplyUIMode;
 window.kuroRenderSentinelTicker = kuroRenderSentinelTicker;
 window.kuroMarketHudChipLine = kuroMarketHudChipLine;
-window.kuroStartMarketHudPoll = kuroStartMarketHudPoll;
 window.kuroConnectDashboardWS = kuroConnectDashboardWS;
 window.kuroRestoreUIMode = kuroRestoreUIMode;
 
@@ -1847,10 +1827,10 @@ async function openFilesModal() {
         const response = await authFetch(`${CONFIG.API_BASE}/list-files`);
         const data = await response.json();
         
-        if (data.status === 'success' && data.data) {
-            const lines = data.data.split('\n').filter(l => l.trim());
+        if (data.status === 'success' && Array.isArray(data.data)) {
+            const files = data.data;
             
-            if (lines.length === 0 || data.data.includes('empty') || data.data.includes('does not exist')) {
+            if (files.length === 0) {
                 elements.filesContent.innerHTML = `
                     <div class="text-center py-8 text-gray-500">
                         <i data-lucide="folder-open" class="w-12 h-12 mx-auto mb-3 opacity-50"></i>
@@ -1859,29 +1839,10 @@ async function openFilesModal() {
                 `;
             } else {
                 let html = '';
-                let currentFile = null;
-                
-                for (const line of lines) {
-                    if (line.startsWith('📁')) {
-                        continue;
-                    } else if (line.startsWith('📕') || line.startsWith('📄') || line.startsWith('🖼️') || line.startsWith('💻')) {
-                        if (currentFile) {
-                            html += renderFileCard(currentFile);
-                        }
-                        currentFile = { icon: line.substring(0, 2), name: line.substring(2).trim(), path: '', size: '', modified: '' };
-                    } else if (line.startsWith('Path:') && currentFile) {
-                        currentFile.path = line.replace('Path:', '').trim();
-                    } else if (line.startsWith('Size:') && currentFile) {
-                        const parts = line.replace('Size:', '').trim().split('|');
-                        currentFile.size = parts[0]?.trim() || '';
-                        currentFile.modified = parts[1]?.replace('Modified:', '').trim() || '';
-                    }
-                }
-                if (currentFile) {
-                    html += renderFileCard(currentFile);
-                }
-                
-                elements.filesContent.innerHTML = html || '<p class="text-center text-gray-500 py-8">No files found</p>';
+                files.forEach(file => {
+                    html += renderFileCard(file);
+                });
+                elements.filesContent.innerHTML = html;
             }
         } else {
             elements.filesContent.innerHTML = '<p class="text-red-500 text-center py-8">Failed to load files</p>';
@@ -1894,23 +1855,68 @@ async function openFilesModal() {
 }
 
 function renderFileCard(file) {
-    const ext = file.name.split('.').pop().toLowerCase();
+    const name = file.original_filename || file.stored_filename;
+    const ext = name.split('.').pop().toLowerCase();
     let colorClass = 'text-gray-400';
     if (['pdf'].includes(ext)) colorClass = 'text-red-400';
     else if (['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext)) colorClass = 'text-blue-400';
     else if (['py', 'js', 'json'].includes(ext)) colorClass = 'text-yellow-400';
     
+    const size = formatBytes(file.size_bytes);
+    const date = new Date(file.uploaded_at).toLocaleString();
+    
+    // Check for expiry
+    let expiryBadge = '';
+    if (file.expires_at) {
+        const expires = new Date(file.expires_at);
+        const now = new Date();
+        const diffDays = Math.ceil((expires - now) / (1000 * 60 * 60 * 24));
+        if (diffDays <= 30) {
+            expiryBadge = `<span class="ml-2 text-[10px] px-1.5 py-0.5 bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 rounded flex items-center gap-1">
+                <i data-lucide="clock" class="w-3 h-3"></i> Expires in ${diffDays}d
+            </span>`;
+        }
+    }
+
     return `
         <div class="bg-gray-50 dark:bg-gray-700 rounded-xl p-4 hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors">
             <div class="flex items-center gap-3">
                 <i data-lucide="file" class="w-5 h-5 ${colorClass}"></i>
                 <div class="flex-1 min-w-0">
-                    <p class="text-sm font-medium text-gray-800 dark:text-white truncate">${escapeHtml(file.name)}</p>
-                    <p class="text-xs text-gray-500">${file.size} • ${file.modified}</p>
+                    <div class="flex items-center">
+                        <p class="text-sm font-medium text-gray-800 dark:text-white truncate">${escapeHtml(name)}</p>
+                        ${expiryBadge}
+                    </div>
+                    <p class="text-xs text-gray-500">${size} • ${date}</p>
                 </div>
             </div>
         </div>
     `;
+}
+
+function formatBytes(bytes, decimals = 2) {
+    if (!+bytes) return '0 Bytes';
+    const k = 1024;
+    const dm = decimals < 0 ? 0 : decimals;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
+}
+
+function openAccessDeniedModal() {
+    const modal = document.getElementById('accessDeniedModal');
+    if (modal) {
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+    }
+}
+
+function closeAccessDeniedModal() {
+    const modal = document.getElementById('accessDeniedModal');
+    if (modal) {
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+    }
 }
 
 function closeFilesModal() {

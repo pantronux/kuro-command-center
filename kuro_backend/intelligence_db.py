@@ -52,6 +52,7 @@ def init_db():
                     summary_text TEXT NOT NULL,
                     raw_json_data TEXT DEFAULT '{}',
                     experimental_signals TEXT DEFAULT '[]',
+                    stock_recommendations TEXT DEFAULT '[]',
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(username, date)
                 )
@@ -73,10 +74,18 @@ def init_db():
                     summary_text TEXT NOT NULL,
                     raw_json_data TEXT DEFAULT '{}',
                     experimental_signals TEXT DEFAULT '[]',
+                    stock_recommendations TEXT DEFAULT '[]',
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(username, date)
                 )
             """)
+            
+            # Check for stock_recommendations column if table exists
+            cursor.execute("PRAGMA table_info(intelligence_briefings)")
+            cols = [row["name"] for row in cursor.fetchall()]
+            if "stock_recommendations" not in cols:
+                logger.info("[INTELLIGENCE] Adding stock_recommendations column...")
+                cursor.execute("ALTER TABLE intelligence_briefings ADD COLUMN stock_recommendations TEXT DEFAULT '[]'")
 
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_briefing_user_date ON intelligence_briefings(username, date DESC)
@@ -90,7 +99,7 @@ def init_db():
             conn.close()
 
 
-def save_briefing(date: str, summary_text: str, raw_json_data: Dict, experimental_signals: List[str], username: str = "Pantronux") -> bool:
+def save_briefing(date: str, summary_text: str, raw_json_data: Dict, experimental_signals: List[str], stock_recommendations: List[Dict] = None, username: str = "Pantronux") -> bool:
     """Save a daily intelligence briefing for a specific user."""
     conn = None
     try:
@@ -98,9 +107,9 @@ def save_briefing(date: str, summary_text: str, raw_json_data: Dict, experimenta
         cursor = conn.cursor()
         cursor.execute(
             """INSERT OR REPLACE INTO intelligence_briefings 
-               (username, date, summary_text, raw_json_data, experimental_signals) 
-               VALUES (?, ?, ?, ?, ?)""",
-            (username, date, summary_text, json.dumps(raw_json_data, ensure_ascii=False), json.dumps(experimental_signals))
+               (username, date, summary_text, raw_json_data, experimental_signals, stock_recommendations) 
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (username, date, summary_text, json.dumps(raw_json_data, ensure_ascii=False), json.dumps(experimental_signals), json.dumps(stock_recommendations or []))
         )
         conn.commit()
         logger.info(f"[INTELLIGENCE] Briefing saved for {username} on {date}")
@@ -132,6 +141,7 @@ def get_briefings(limit: int = 20, offset: int = 0, username: str = "Pantronux")
                 "summary_text": row["summary_text"],
                 "raw_json_data": json.loads(row["raw_json_data"]),
                 "experimental_signals": json.loads(row["experimental_signals"]),
+                "stock_recommendations": json.loads(row["stock_recommendations"] or '[]'),
                 "created_at": row["created_at"]
             })
         
@@ -159,6 +169,7 @@ def get_briefing_by_date(date: str, username: str = "Pantronux") -> Optional[Dic
                 "summary_text": row["summary_text"],
                 "raw_json_data": json.loads(row["raw_json_data"]),
                 "experimental_signals": json.loads(row["experimental_signals"]),
+                "stock_recommendations": json.loads(row["stock_recommendations"] or '[]'),
                 "created_at": row["created_at"]
             }
         return None
@@ -189,6 +200,7 @@ def search_briefings(query: str, username: str = "Pantronux", limit: int = 20) -
                 "summary_text": row["summary_text"],
                 "raw_json_data": json.loads(row["raw_json_data"]),
                 "experimental_signals": json.loads(row["experimental_signals"]),
+                "stock_recommendations": json.loads(row["stock_recommendations"] or '[]'),
                 "created_at": row["created_at"]
             })
         
