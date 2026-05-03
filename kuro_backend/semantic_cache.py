@@ -35,7 +35,7 @@ import os
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Final, Iterable, Optional
+from typing import Final, Iterable, Optional, Sequence
 
 from kuro_backend import embedding_cache
 
@@ -63,17 +63,15 @@ _entries: list[_Entry] = []
 _lock = threading.RLock()
 
 
-def _cosine(a: Iterable[float], b: Iterable[float]) -> float:
-    ax = list(a)
-    bx = list(b)
-    if not ax or not bx or len(ax) != len(bx):
+def _cosine(a: Sequence[float], b: Sequence[float]) -> float:
+    if not a or not b or len(a) != len(b):
         return 0.0
 
     # ⚡ Bolt: Single pass computation avoids 3 generator loops
     num = 0.0
     da_sq = 0.0
     db_sq = 0.0
-    for x, y in zip(ax, bx):
+    for x, y in zip(a, b):
         num += x * y
         da_sq += x * x
         db_sq += y * y

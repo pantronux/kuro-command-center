@@ -22,3 +22,5 @@ kuro_auth.db
 compliance_cache/
 kuro_compliance_chroma/
 *.compliance.db
+test_venv/
+test_venv3/
