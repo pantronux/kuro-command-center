@@ -1,6 +1,7 @@
 """
 Kuro AI V6.0 "Sovereign" — FastAPI application entry point (web dashboard, API, Telegram).
 """
+
 import warnings
 import hashlib
 import logging
@@ -19,17 +20,40 @@ import psutil
 import uvicorn
 from typing import Any, Dict, Optional
 from datetime import date, datetime, timedelta
-from fastapi import FastAPI, UploadFile, File, Form, Request, Depends, HTTPException, status, WebSocket, WebSocketDisconnect
+from fastapi import (
+    FastAPI,
+    UploadFile,
+    File,
+    Form,
+    Request,
+    Depends,
+    HTTPException,
+    status,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.templating import Jinja2Templates
-from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import (
+    HTMLResponse,
+    JSONResponse,
+    FileResponse,
+    RedirectResponse,
+    StreamingResponse,
+)
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel, Field
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    filters,
+    ContextTypes,
+)
 from telegram.error import NetworkError, TimedOut
 
 # --- Early warning suppression (must run before heavy imports initialize) ---
@@ -40,7 +64,10 @@ logging.getLogger("opentelemetry").setLevel(logging.ERROR)
 
 from kuro_backend.config import settings
 from kuro_backend.core import process_chat
-from kuro_backend.langgraph_core import process_chat_with_graph, process_chat_with_graph_stream
+from kuro_backend.langgraph_core import (
+    process_chat_with_graph,
+    process_chat_with_graph_stream,
+)
 from kuro_backend import memory_manager
 from kuro_backend import memory_coordinator
 from kuro_backend import chat_history
@@ -94,7 +121,9 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 # JWT Configuration - SECURITY: No hardcoded fallback for secret key
 SECRET_KEY = os.getenv("JWT_SECRET_KEY")
 if not SECRET_KEY:
-    raise RuntimeError("JWT_SECRET_KEY environment variable is required. Set it in .env file.")
+    raise RuntimeError(
+        "JWT_SECRET_KEY environment variable is required. Set it in .env file."
+    )
 ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_HOURS = int(os.getenv("JWT_EXPIRATION_HOURS", "12"))
 
@@ -112,21 +141,26 @@ COOKIE_NAME = "kuro_access_token"
 CHAT_SESSION_HEADER = "X-Chat-Session"
 _CHAT_SESSION_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{8,128}$")
 
+
 class ChatSessionUpdate(BaseModel):
     title: str
+
 
 class NewChatSession(BaseModel):
     persona: str
     title: str = "New Chat"
 
+
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verify a plain password against a bcrypt hash."""
     try:
         from passlib.hash import bcrypt
+
         return bcrypt.verify(plain_password, hashed_password)
     except Exception as e:
         logger.error(f"Password verification error: {e}")
         return False
+
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     """Create a JWT access token."""
@@ -139,12 +173,14 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
+
 def get_token_from_cookie(request: Request) -> Optional[str]:
     """Extract JWT token from HttpOnly cookie."""
     cookie_value = request.cookies.get(COOKIE_NAME)
     if cookie_value and cookie_value.startswith("Bearer "):
         return cookie_value[7:]
     return None
+
 
 def validate_token(token: str) -> Optional[Dict]:
     """Validate JWT token and return user info."""
@@ -160,14 +196,28 @@ def validate_token(token: str) -> Optional[Dict]:
     return None
 
 
-def api_success(data: Any = None, trace_id: Optional[str] = None, **extra: Any) -> Dict[str, Any]:
-    payload: Dict[str, Any] = {"status": "success", "data": data, "error": None, "trace_id": trace_id}
+def api_success(
+    data: Any = None, trace_id: Optional[str] = None, **extra: Any
+) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {
+        "status": "success",
+        "data": data,
+        "error": None,
+        "trace_id": trace_id,
+    }
     payload.update(extra)
     return payload
 
 
-def api_error(error: str, trace_id: Optional[str] = None, **extra: Any) -> Dict[str, Any]:
-    payload: Dict[str, Any] = {"status": "error", "data": None, "error": error, "trace_id": trace_id}
+def api_error(
+    error: str, trace_id: Optional[str] = None, **extra: Any
+) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {
+        "status": "error",
+        "data": None,
+        "error": error,
+        "trace_id": trace_id,
+    }
     payload.update(extra)
     return payload
 
@@ -179,6 +229,7 @@ def _resolve_chat_session_id(request: Request, form_chat_id: str = None) -> str:
     if raw and _CHAT_SESSION_PATTERN.match(raw):
         return raw
     return f"fallback_{request.client.host}_default"
+
 
 # --- FastAPI App ---
 app = FastAPI(title="Kuro AI Web Dashboard")
@@ -206,17 +257,18 @@ async def login_page(request: Request):
         return RedirectResponse(url="/", status_code=302)
     return FileResponse(os.path.join(WEB_DIR, "templates", "login.html"))
 
+
 @app.post("/api/login")
 async def login_endpoint(
     request: Request,
     username: str = Form(...),
     password: str = Form(...),
-    remember_me: str = Form("false")
+    remember_me: str = Form("false"),
 ):
     """Authenticate user and set JWT token in HttpOnly cookie with brute force protection."""
     client_ip = request.client.host
     user_agent = request.headers.get("user-agent", "")
-    
+
     # Check if account is locked
     lockout_status = auth_db.is_account_locked(username)
     if lockout_status.get("locked"):
@@ -226,70 +278,71 @@ async def login_endpoint(
                 "success": False,
                 "error": f"Terlalu banyak percobaan login. Akun dikunci selama {lockout_status['remaining_minutes']} menit {lockout_status['remaining_seconds']} detik untuk keamanan.",
                 "locked": True,
-                "remaining_seconds": lockout_status['remaining_minutes'] * 60 + lockout_status['remaining_seconds']
-            }
+                "remaining_seconds": lockout_status["remaining_minutes"] * 60
+                + lockout_status["remaining_seconds"],
+            },
         )
-    
+
     # Validate user existence (database-backed)
     user_info = auth_db.get_user(username)
-    
+
     if not user_info:
         failed_count = auth_db.record_failed_attempt(username, client_ip, user_agent)
         if failed_count >= auth_db.MAX_FAILED_ATTEMPTS:
             auth_db.lock_account(username)
         return JSONResponse(
             status_code=401,
-            content={"success": False, "error": "Username atau password salah."}
+            content={"success": False, "error": "Username atau password salah."},
         )
-    
+
     # Use the correctly-cased username from DB
     username = user_info["username"]
-    
+
     # Verify password
     if not verify_password(password, user_info["password_hash"]):
         failed_count = auth_db.record_failed_attempt(username, client_ip, user_agent)
-        logger.warning(f"Failed login attempt {failed_count} for user: {username} from {client_ip}")
-        
+        logger.warning(
+            f"Failed login attempt {failed_count} for user: {username} from {client_ip}"
+        )
+
         if failed_count >= auth_db.MAX_FAILED_ATTEMPTS:
             auth_db.lock_account(username)
-            logger.warning(f"ACCOUNT LOCKED: {username} - Too many failed attempts ({failed_count})")
+            logger.warning(
+                f"ACCOUNT LOCKED: {username} - Too many failed attempts ({failed_count})"
+            )
             return JSONResponse(
                 status_code=429,
                 content={
                     "success": False,
                     "error": "Terlalu banyak percobaan login. Akun dikunci selama 15 menit untuk keamanan.",
                     "locked": True,
-                    "remaining_seconds": auth_db.LOCKOUT_DURATION_MINUTES * 60
-                }
+                    "remaining_seconds": auth_db.LOCKOUT_DURATION_MINUTES * 60,
+                },
             )
-        
+
         return JSONResponse(
             status_code=401,
             content={
                 "success": False,
                 "error": f"Username atau password salah. ({auth_db.MAX_FAILED_ATTEMPTS - failed_count} percobaan tersisa)",
-                "attempts_remaining": auth_db.MAX_FAILED_ATTEMPTS - failed_count
-            }
+                "attempts_remaining": auth_db.MAX_FAILED_ATTEMPTS - failed_count,
+            },
         )
-    
+
     # Successful login
     auth_db.clear_failed_attempts(username)
     auth_db.record_successful_login(username, client_ip, user_agent)
-    
+
     # Create access token
     access_token_expires = timedelta(hours=ACCESS_TOKEN_EXPIRE_HOURS)
     access_token = create_access_token(
-        data={"sub": username},
-        expires_delta=access_token_expires
+        data={"sub": username}, expires_delta=access_token_expires
     )
-    
+
     logger.info(f"Successful login: {username} from {client_ip}")
-    
+
     # Set token in HttpOnly cookie
-    response = JSONResponse(content={
-        "success": True,
-        "username": username
-    })
+    response = JSONResponse(content={"success": True, "username": username})
     response.set_cookie(
         key=COOKIE_NAME,
         value=f"Bearer {access_token}",
@@ -297,9 +350,10 @@ async def login_endpoint(
         secure=True,
         samesite="lax",
         max_age=ACCESS_TOKEN_EXPIRE_HOURS * 3600,
-        path="/"
+        path="/",
     )
     return response
+
 
 @app.get("/api/auth/verify")
 async def verify_token_endpoint(request: Request):
@@ -309,9 +363,9 @@ async def verify_token_endpoint(request: Request):
     if user:
         return {"success": True, "username": user.get("username")}
     return JSONResponse(
-        status_code=401,
-        content={"success": False, "error": "Invalid or expired token"}
+        status_code=401, content={"success": False, "error": "Invalid or expired token"}
     )
+
 
 @app.get("/api/auth/stats")
 async def auth_stats():
@@ -328,14 +382,19 @@ async def get_version():
     """
     return {"status": "success", "data": kuro_version.version_info()}
 
+
 @app.post("/api/auth/logout")
 async def logout_endpoint():
     """Logout endpoint - clear the cookie."""
-    response = JSONResponse(content={"success": True, "message": "Logged out successfully"})
+    response = JSONResponse(
+        content={"success": True, "message": "Logged out successfully"}
+    )
     response.delete_cookie(key=COOKIE_NAME, path="/")
     return response
 
+
 # --- User Management Routes ---
+
 
 @app.get("/profile", response_class=HTMLResponse)
 async def profile_page(request: Request):
@@ -344,10 +403,10 @@ async def profile_page(request: Request):
     user = validate_token(token)
     if not user:
         return RedirectResponse(url="/login", status_code=302)
-        
+
     username = user.get("username")
     user_info = auth_db.get_user(username)
-    
+
     return templates.TemplateResponse(
         request=request,
         name="profile.html",
@@ -357,85 +416,106 @@ async def profile_page(request: Request):
             "email": user_info.get("email", ""),
             "role": user_info.get("role", "User"),
             "master_name": user_info.get("master_name", f"Master {username}"),
-            "custom_persona": user_info.get("custom_persona", "")
-        }
+            "custom_persona": user_info.get("custom_persona", ""),
+        },
     )
+
 
 @app.post("/api/user/update")
 async def update_profile(
     request: Request,
     username_new: str = Form(None),
     display_name: str = Form(...),
-    email: str = Form(...)
+    email: str = Form(...),
 ):
     """Update user profile information."""
     token = get_token_from_cookie(request)
     user = validate_token(token)
     if not user:
-        return JSONResponse(status_code=401, content={"success": False, "error": "Unauthorized"})
-    
+        return JSONResponse(
+            status_code=401, content={"success": False, "error": "Unauthorized"}
+        )
+
     username = user.get("username")
-    
+
     # Note: username_new is currently ignored to prevent complex session invalidation issues,
     # but could be implemented later if required.
-    
+
     success = auth_db.update_user_profile(username, email, display_name)
     if success:
         return {"success": True, "message": "Profile updated successfully"}
-    return JSONResponse(status_code=500, content={"success": False, "error": "Failed to update profile"})
+    return JSONResponse(
+        status_code=500, content={"success": False, "error": "Failed to update profile"}
+    )
+
 
 @app.post("/api/user/change-password")
 async def change_password(
     request: Request,
     old_password: str = Form(...),
     new_password: str = Form(...),
-    repeat_password: str = Form(...)
+    repeat_password: str = Form(...),
 ):
     """Handle password change with old password verification."""
     token = get_token_from_cookie(request)
     user = validate_token(token)
     if not user:
-        return JSONResponse(status_code=401, content={"success": False, "error": "Unauthorized"})
-    
+        return JSONResponse(
+            status_code=401, content={"success": False, "error": "Unauthorized"}
+        )
+
     if new_password != repeat_password:
-        return JSONResponse(status_code=400, content={"success": False, "error": "New passwords do not match"})
-        
+        return JSONResponse(
+            status_code=400,
+            content={"success": False, "error": "New passwords do not match"},
+        )
+
     username = user.get("username")
     user_info = auth_db.get_user(username)
-    
+
     if not verify_password(old_password, user_info["password_hash"]):
-        return JSONResponse(status_code=401, content={"success": False, "error": "Old password incorrect"})
-    
+        return JSONResponse(
+            status_code=401,
+            content={"success": False, "error": "Old password incorrect"},
+        )
+
     # Hash new password
     from passlib.hash import bcrypt
+
     new_hash = bcrypt.hash(new_password)
-    
+
     success = auth_db.update_password(username, new_hash)
     if success:
         return {"success": True, "message": "Password changed successfully"}
-    return JSONResponse(status_code=500, content={"success": False, "error": "Failed to update password"})
+    return JSONResponse(
+        status_code=500,
+        content={"success": False, "error": "Failed to update password"},
+    )
+
 
 @app.post("/api/user/update-persona")
-async def update_persona(
-    request: Request,
-    custom_persona: str = Form(...)
-):
+async def update_persona(request: Request, custom_persona: str = Form(...)):
     """Update user's custom global persona instructions."""
     token = get_token_from_cookie(request)
     user = validate_token(token)
     if not user:
-        return JSONResponse(status_code=401, content={"success": False, "error": "Unauthorized"})
-    
+        return JSONResponse(
+            status_code=401, content={"success": False, "error": "Unauthorized"}
+        )
+
     username = user.get("username")
     success = auth_db.update_custom_persona(username, custom_persona)
     if success:
         return {"success": True, "message": "Custom persona updated successfully"}
-    return JSONResponse(status_code=500, content={"success": False, "error": "Failed to update persona"})
+    return JSONResponse(
+        status_code=500, content={"success": False, "error": "Failed to update persona"}
+    )
+
 
 # CORS Middleware - SECURITY: Restrict to specific allowed origins
 ALLOWED_ORIGINS = os.getenv(
     "ALLOWED_ORIGINS",
-    "https://localhost:8443,https://127.0.0.1:8443,http://localhost:8000"
+    "https://localhost:8443,https://127.0.0.1:8443,http://localhost:8000",
 ).split(",")
 
 app.add_middleware(
@@ -449,9 +529,10 @@ app.add_middleware(
 # Static files and templates
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 WEB_DIR = os.path.join(BASE_DIR, "web_interface")
-app.mount("/static", StaticFiles(directory=os.path.join(WEB_DIR, "static")), name="static")
+app.mount(
+    "/static", StaticFiles(directory=os.path.join(WEB_DIR, "static")), name="static"
+)
 templates = Jinja2Templates(directory=os.path.join(WEB_DIR, "templates"))
-
 
 
 # Profile assets mount (Kuro V6.1 — branding + Live2D Hijiki). Exposes the
@@ -467,8 +548,20 @@ UPLOAD_DIR = tools.UPLOAD_DIR
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 _DOC_EXTENSIONS = {
-    ".pdf", ".csv", ".txt", ".md", ".rtf", ".doc", ".docx",
-    ".xls", ".xlsx", ".ppt", ".pptx", ".json", ".yaml", ".yml",
+    ".pdf",
+    ".csv",
+    ".txt",
+    ".md",
+    ".rtf",
+    ".doc",
+    ".docx",
+    ".xls",
+    ".xlsx",
+    ".ppt",
+    ".pptx",
+    ".json",
+    ".yaml",
+    ".yml",
 }
 _LOG_EXTENSIONS = {".log"}
 
@@ -491,27 +584,36 @@ def _resolve_upload_subdir(content_type: str, extension: str) -> str:
         return "images"
     if ext in _LOG_EXTENSIONS or "log" in ctype:
         return "logs"
-    if ctype.startswith("text/") or ext in _DOC_EXTENSIONS or ctype in {
-        "application/pdf",
-        "application/msword",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "application/vnd.ms-excel",
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "application/vnd.ms-powerpoint",
-        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-    }:
+    if (
+        ctype.startswith("text/")
+        or ext in _DOC_EXTENSIONS
+        or ctype
+        in {
+            "application/pdf",
+            "application/msword",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/vnd.ms-excel",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "application/vnd.ms-powerpoint",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        }
+    ):
         return "docs"
     return "misc"
 
 
-def _build_unique_filename(original_name: str, timestamp: str, random_suffix: str = "") -> str:
+def _build_unique_filename(
+    original_name: str, timestamp: str, random_suffix: str = ""
+) -> str:
     """Build storage filename with optional random suffix failsafe."""
     slug_base, ext = _slugify_filename_base(original_name)
     suffix = f"_{random_suffix}" if random_suffix else ""
     return f"{slug_base}_{timestamp}{suffix}{ext}"
 
 
-async def save_upload_file(file: UploadFile, username: str = "Pantronux") -> Dict[str, str]:
+async def save_upload_file(
+    file: UploadFile, username: str = "Pantronux"
+) -> Dict[str, str]:
     """
     Save uploaded file with deterministic unique filename and user-category subfolder.
     Format: uploaded_files/{username}/{category}/{slugified_original}_{YYYYMMDD_HHMMSS}.{ext}
@@ -519,7 +621,7 @@ async def save_upload_file(file: UploadFile, username: str = "Pantronux") -> Dic
     original_name = (file.filename or "").strip() or "file"
     _, ext = _slugify_filename_base(original_name)
     subdir = _resolve_upload_subdir(file.content_type or "", ext)
-    
+
     # Path: uploaded_files/{username}/{category}/
     target_dir = os.path.join(UPLOAD_DIR, username, subdir)
     os.makedirs(target_dir, exist_ok=True)
@@ -533,7 +635,9 @@ async def save_upload_file(file: UploadFile, username: str = "Pantronux") -> Dic
         collision_used = True
         for _ in range(10):
             suffix = f"{random.randint(1000, 9999)}"
-            unique_name = _build_unique_filename(original_name, timestamp, random_suffix=suffix)
+            unique_name = _build_unique_filename(
+                original_name, timestamp, random_suffix=suffix
+            )
             target_path = os.path.join(target_dir, unique_name)
             if not os.path.exists(target_path):
                 break
@@ -541,7 +645,7 @@ async def save_upload_file(file: UploadFile, username: str = "Pantronux") -> Dic
     content = await file.read()
     with open(target_path, "wb") as f:
         f.write(content)
-    
+
     sha256_hash = hashlib.sha256(content).hexdigest()
     size_bytes = len(content)
 
@@ -551,7 +655,7 @@ async def save_upload_file(file: UploadFile, username: str = "Pantronux") -> Dic
         "stored_path": target_path,
         "content_type": file.content_type or "",
         "size_bytes": size_bytes,
-        "sha256": sha256_hash
+        "sha256": sha256_hash,
     }
 
     logger.info(
@@ -575,53 +679,63 @@ async def save_upload_file(file: UploadFile, username: str = "Pantronux") -> Dic
         "size_bytes": size_bytes,
     }
 
+
 # --- Routes ---
 # Public API routes (no auth required)
-PUBLIC_API_ROUTES = ["/api/login", "/api/auth/verify", "/api/auth/stats", "/api/auth/logout"]
+PUBLIC_API_ROUTES = [
+    "/api/login",
+    "/api/auth/verify",
+    "/api/auth/stats",
+    "/api/auth/logout",
+]
+
 
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     """
     Cookie-based authentication middleware.
-    
+
     ARCHITECTURE:
     - HTML pages: Backend handles redirect based on cookie
     - API routes: Require valid JWT in cookie
     """
     path = request.url.path
-    
+
     # Allow static files without auth check
     if path.startswith("/static"):
         return await call_next(request)
-    
+
     # Get token from cookie
     token = get_token_from_cookie(request)
     is_authenticated = validate_token(token) is not None
-    
+
     # For HTML pages, handle redirect based on auth status
     if path == "/login":
         # Already handled in login_page endpoint, just pass through
         return await call_next(request)
-    
-    if path == "/" or path in ["/chat"] :
+
+    if path == "/" or path in ["/chat"]:
         if not is_authenticated:
-            logger.info(f"Unauthenticated access to {path} from {request.client.host}, redirecting to /login")
+            logger.info(
+                f"Unauthenticated access to {path} from {request.client.host}, redirecting to /login"
+            )
             return RedirectResponse(url="/login", status_code=302)
         return await call_next(request)
-    
+
     # For API routes
     if path.startswith("/api/"):
         if path in PUBLIC_API_ROUTES:
             return await call_next(request)
-        
+
         if not is_authenticated:
             logger.info(f"API auth failed for {request.client.host} on {path}")
             return JSONResponse(
                 status_code=401,
-                content=api_error("Authentication required. Please log in.")
+                content=api_error("Authentication required. Please log in."),
             )
-    
+
     return await call_next(request)
+
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
@@ -630,10 +744,10 @@ async def index(request: Request):
     user = validate_token(token)
     if not user:
         return RedirectResponse(url="/login", status_code=302)
-    
+
     username = user.get("username")
     user_info = auth_db.get_user(username) or {}
-    
+
     return templates.TemplateResponse(
         request=request,
         name="index.html",
@@ -642,8 +756,8 @@ async def index(request: Request):
             "display_name": user_info.get("display_name", username),
             "role": user_info.get("role", "User"),
             "restricted_persona": user_info.get("restricted_persona") or "",
-            "master_name": user_info.get("master_name", f"Master {username}")
-        }
+            "master_name": user_info.get("master_name", f"Master {username}"),
+        },
     )
 
 
@@ -654,10 +768,10 @@ async def chat_page(request: Request):
     user = validate_token(token)
     if not user:
         return RedirectResponse(url="/login", status_code=302)
-        
+
     username = user.get("username")
     user_info = auth_db.get_user(username) or {}
-    
+
     return templates.TemplateResponse(
         request=request,
         name="index.html",
@@ -666,9 +780,10 @@ async def chat_page(request: Request):
             "display_name": user_info.get("display_name", username),
             "role": user_info.get("role", "User"),
             "restricted_persona": user_info.get("restricted_persona") or "",
-            "master_name": user_info.get("master_name", f"Master {username}")
-        }
+            "master_name": user_info.get("master_name", f"Master {username}"),
+        },
     )
+
 
 @app.get("/api/history")
 async def get_chat_history(
@@ -676,10 +791,10 @@ async def get_chat_history(
     limit: int = 20,
     offset: int = 0,
     platform: str = None,
-    persona: str = None
+    persona: str = None,
 ):
     """Get chat history from database with pagination for infinite scroll.
-    
+
     Args:
         limit: Number of messages to return
         offset: Pagination offset
@@ -688,15 +803,19 @@ async def get_chat_history(
     """
     token = get_token_from_cookie(request)
     user = validate_token(token)
-    username = user.get("username") if user else ADMIN_USERNAME
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    username = user.get("username")
     user_info = auth_db.get_user(username) or {}
-    
+
     # Persona restriction enforcement
     restricted_persona = user_info.get("restricted_persona")
     if restricted_persona:
         resolved_persona = restricted_persona
     else:
-        resolved_persona = memory_manager.normalize_persona(persona or memory_manager.get_active_persona())
+        resolved_persona = memory_manager.normalize_persona(
+            persona or memory_manager.get_active_persona()
+        )
 
     history = chat_history.get_history(
         limit=limit,
@@ -705,7 +824,9 @@ async def get_chat_history(
         persona=resolved_persona,
         username=username,
     )
-    total = chat_history.get_total_count(platform=platform, persona=resolved_persona, username=username)
+    total = chat_history.get_total_count(
+        platform=platform, persona=resolved_persona, username=username
+    )
     return api_success(
         data={
             "history": history,
@@ -719,16 +840,22 @@ async def get_chat_history(
         has_more=offset + len(history) < total,
     )
 
+
 @app.delete("/api/history")
 async def clear_chat_history(request: Request, persona: Optional[str] = None):
     """Clear chat history for the current user, optionally filtered by persona."""
     token = get_token_from_cookie(request)
     user = validate_token(token)
-    username = user.get("username") if user else ADMIN_USERNAME
-    
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    username = user.get("username")
+
     chat_history.clear_history(username=username, persona=persona)
     target = f"persona '{persona}'" if persona else "all personas"
-    return api_success(data={"message": f"Chat history for {target} cleared for {username}"}, message=f"Chat history for {target} cleared for {username}")
+    return api_success(
+        data={"message": f"Chat history for {target} cleared for {username}"},
+        message=f"Chat history for {target} cleared for {username}",
+    )
 
 
 @app.get("/api/chat/search")
@@ -736,8 +863,10 @@ async def search_chat_history(request: Request, q: str, persona: Optional[str] =
     """Search chat history for a keyword."""
     token = get_token_from_cookie(request)
     user = validate_token(token)
-    username = user.get("username") if user else ADMIN_USERNAME
-    
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    username = user.get("username")
+
     results = await run_db(chat_history.search_history, q, username, persona)
     return api_success(data={"results": results})
 
@@ -747,16 +876,18 @@ def _collect_research_status_snapshot(max_chars: int = 600) -> Dict[str, Any]:
     snapshot: Dict[str, Any] = {}
     try:
         from kuro_backend.tools.base_tools import check_proxmox_infrastructure
+
         text = check_proxmox_infrastructure() or ""
         snapshot["proxmox"] = text[:max_chars]
     except Exception as exc:
         snapshot["proxmox"] = f"(unavailable: {exc})"
     try:
         import psutil as _psutil
+
         snapshot["host"] = {
             "cpu": _psutil.cpu_percent(interval=0.1),
             "ram": _psutil.virtual_memory().percent,
-            "disk": _psutil.disk_usage('/').percent,
+            "disk": _psutil.disk_usage("/").percent,
         }
     except Exception:
         pass
@@ -808,29 +939,40 @@ async def chat_endpoint(
         # Resolve user context
         token = get_token_from_cookie(request)
         user = validate_token(token)
-        username = user.get("username") if user else ADMIN_USERNAME
+
+        if not user:
+
+            raise HTTPException(status_code=401, detail="Unauthorized")
+
+        username = user.get("username")
         user_info = auth_db.get_user(username) or {}
         master_name = user_info.get("master_name", "Master Pantronux")
-        
+
         trace_id = f"chat_{uuid.uuid4().hex}"
-        
+
         # Persona restriction
         restricted_persona = user_info.get("restricted_persona")
         if restricted_persona:
             resolved_persona = restricted_persona
         else:
             resolved_persona = memory_manager.normalize_persona(
-                persona or request.query_params.get("persona") or memory_manager.get_active_persona()
+                persona
+                or request.query_params.get("persona")
+                or memory_manager.get_active_persona()
             )
-            
+
         request_id = f"web_{uuid.uuid4().hex}"
-        
+
         is_new_session = False
-        if not chat_id or not str(chat_id).strip() or str(chat_id).strip().lower() == "null":
+        if (
+            not chat_id
+            or not str(chat_id).strip()
+            or str(chat_id).strip().lower() == "null"
+        ):
             chat_id = str(uuid.uuid4())
             is_new_session = True
             chat_history.create_session(chat_id, username, resolved_persona, "New Chat")
-            
+
         session_scope = _resolve_chat_session_id(request, chat_id)
 
         # UI mode router gate — intercept "Kuro, mode riset" style commands
@@ -843,12 +985,19 @@ async def chat_endpoint(
             if mode_envelope and not (mode_envelope.get("cleaned_text") or "").strip():
                 ack = mode_envelope["acknowledgement"]
                 chat_history.add_message(
-                    "web", "user", message, [],
-                    persona=resolved_persona, request_id=request_id,
+                    "web",
+                    "user",
+                    message,
+                    [],
+                    persona=resolved_persona,
+                    request_id=request_id,
                 )
                 chat_history.add_message(
-                    "web", "assistant", ack,
-                    persona=resolved_persona, request_id=request_id,
+                    "web",
+                    "assistant",
+                    ack,
+                    persona=resolved_persona,
+                    request_id=request_id,
                 )
                 return api_success(
                     data={"response": ack, "ui_command": mode_envelope["command"]},
@@ -863,7 +1012,7 @@ async def chat_endpoint(
         file_contents = []
         file_attachments = []
         session_extractions = []
-        
+
         for file in files:
             if file.filename:
                 saved_file = await save_upload_file(file, username=username)
@@ -879,50 +1028,70 @@ async def chat_endpoint(
                     content_type=saved_file["content_type"],
                     size_bytes=saved_file["size_bytes"],
                     sha256=saved_file["sha256"],
-                    username=username
+                    username=username,
                 )
-                
+
                 # Check if it's an image for vision processing
                 if file.content_type and file.content_type.startswith("image/"):
                     image_paths.append(file_path)
-                    file_attachments.append({
-                        "type": "image",
-                        "original_filename": saved_file["original_filename"],
-                        "stored_filename": stored_filename,
-                        "path": file_path,
-                    })
-                    file_contents.append(f"\n--- Gambar Dilampirkan: {saved_file['original_filename']} ---\n(Gambar ini telah diteruskan ke modul Vision Anda untuk dianalisis)")
+                    file_attachments.append(
+                        {
+                            "type": "image",
+                            "original_filename": saved_file["original_filename"],
+                            "stored_filename": stored_filename,
+                            "path": file_path,
+                        }
+                    )
+                    file_contents.append(
+                        f"\n--- Gambar Dilampirkan: {saved_file['original_filename']} ---\n(Gambar ini telah diteruskan ke modul Vision Anda untuk dianalisis)"
+                    )
                 else:
                     # Use smart_read facade for Office/PDF/text/log files
-                    read_result = tools.smart_read(file_ref=file_path, instruction="ekstrak konten utama file ini", max_chars=10000)
-                    parsed_content = read_result.get("summary") or read_result.get("content")
+                    read_result = tools.smart_read(
+                        file_ref=file_path,
+                        instruction="ekstrak konten utama file ini",
+                        max_chars=10000,
+                    )
+                    parsed_content = read_result.get("summary") or read_result.get(
+                        "content"
+                    )
                     if parsed_content:
-                        file_contents.append(f"\n--- File: {saved_file['original_filename']} ---\n{parsed_content}")
-                    session_extractions.append({
-                        "original_filename": saved_file["original_filename"],
-                        "stored_filename": stored_filename,
-                        "path": file_path,
-                        "extracted_content": (parsed_content or "")[:5000],
-                    })
-                    
-                    file_attachments.append({
-                        "type": "file",
-                        "original_filename": saved_file["original_filename"],
-                        "stored_filename": stored_filename,
-                        "path": file_path,
-                    })
-                
+                        file_contents.append(
+                            f"\n--- File: {saved_file['original_filename']} ---\n{parsed_content}"
+                        )
+                    session_extractions.append(
+                        {
+                            "original_filename": saved_file["original_filename"],
+                            "stored_filename": stored_filename,
+                            "path": file_path,
+                            "extracted_content": (parsed_content or "")[:5000],
+                        }
+                    )
+
+                    file_attachments.append(
+                        {
+                            "type": "file",
+                            "original_filename": saved_file["original_filename"],
+                            "stored_filename": stored_filename,
+                            "path": file_path,
+                        }
+                    )
+
                 logger.info(f"File saved: {file_path}")
-        
+
         # Build enhanced message with file contents
         enhanced_message = message
         if file_contents:
-            enhanced_message += "\n\n[Attached Files Content:]\n" + "\n".join(file_contents)
+            enhanced_message += "\n\n[Attached Files Content:]\n" + "\n".join(
+                file_contents
+            )
         att_idx = memory_coordinator.format_same_turn_attachment_index(file_attachments)
         if att_idx:
             enhanced_message += "\n\n" + att_idx
         if image_paths:
-            memory_manager.set_runtime_context_value("last_accessed_file", image_paths[-1])
+            memory_manager.set_runtime_context_value(
+                "last_accessed_file", image_paths[-1]
+            )
         if file_attachments:
             memory_manager.set_runtime_context_value(
                 "current_session_state",
@@ -940,7 +1109,7 @@ async def chat_endpoint(
                 memory_manager.upsert_session_file(
                     session_id=session_scope,
                     filename=ex["original_filename"],
-                    content=ex.get("extracted_content", "")
+                    content=ex.get("extracted_content", ""),
                 )
 
         # Save user message to chat history
@@ -954,7 +1123,7 @@ async def chat_endpoint(
             username=username,
             chat_id=session_scope,
         )
-        
+
         # Check if we need to generate a title (if session has only 1 user message)
         # This is done in a background task to not block the chat response
         async def _maybe_generate_title(cid, msg):
@@ -968,7 +1137,7 @@ async def chat_endpoint(
 
         if not session_scope.startswith("legacy_"):
             asyncio.create_task(_maybe_generate_title(session_scope, message))
-        
+
         # Process with AI core using LangGraph (with vision if images uploaded)
         response = process_chat_with_graph(
             enhanced_message,
@@ -980,7 +1149,7 @@ async def chat_endpoint(
             master_name=master_name,
             username=username,
         )
-        
+
         # Save AI response to chat history
         chat_history.add_message(
             "web",
@@ -992,13 +1161,13 @@ async def chat_endpoint(
             username=username,
             chat_id=session_scope,
         )
-        
+
         return api_success(
             data={"response": response},
             trace_id=trace_id,
             response=response,  # backward compatibility for current frontend
         )
-        
+
     except Exception as e:
         logger.exception(f"Error in chat endpoint: {e}")
         return api_error(f"My apologies, {master_name} — an error occurred: {e}")
@@ -1014,7 +1183,7 @@ async def chat_stream_endpoint(
 ):
     """V6.0 STREAMING: Handle chat requests with Server-Sent Events (SSE) streaming."""
     from fastapi.responses import StreamingResponse
-    
+
     async def event_generator():
         """Generate SSE events for streaming response."""
         request_started = time.perf_counter()
@@ -1026,34 +1195,47 @@ async def chat_stream_endpoint(
             # Resolve user context
             token = get_token_from_cookie(request)
             user = validate_token(token)
-            username = user.get("username") if user else ADMIN_USERNAME
+
+            if not user:
+
+                raise HTTPException(status_code=401, detail="Unauthorized")
+
+            username = user.get("username")
             user_info = auth_db.get_user(username) or {}
             master_name = user_info.get("master_name", "Master Pantronux")
-            
+
             # Persona restriction
             restricted_persona = user_info.get("restricted_persona")
             if restricted_persona:
                 resolved_persona = restricted_persona
             else:
                 resolved_persona = memory_manager.normalize_persona(
-                    persona or request.query_params.get("persona") or memory_manager.get_active_persona()
+                    persona
+                    or request.query_params.get("persona")
+                    or memory_manager.get_active_persona()
                 )
 
             # Auto-provision chat session if not provided
             is_new_session = False
-            if not chat_id or not str(chat_id).strip() or str(chat_id).strip().lower() == "null":
+            if (
+                not chat_id
+                or not str(chat_id).strip()
+                or str(chat_id).strip().lower() == "null"
+            ):
                 resolved_chat_id = str(uuid.uuid4())
                 is_new_session = True
-                chat_history.create_session(resolved_chat_id, username, resolved_persona, "New Chat")
+                chat_history.create_session(
+                    resolved_chat_id, username, resolved_persona, "New Chat"
+                )
             else:
                 resolved_chat_id = str(chat_id).strip()
-                
+
             session_scope = _resolve_chat_session_id(request, resolved_chat_id)
-            
-            meta_payload = {'trace_id': trace_id, 'phase': 'started'}
+
+            meta_payload = {"trace_id": trace_id, "phase": "started"}
             if is_new_session:
-                meta_payload['chat_id'] = session_scope
-                
+                meta_payload["chat_id"] = session_scope
+
             yield f"event: meta\ndata: {json.dumps(meta_payload, ensure_ascii=False)}\n\n"
 
             # UI mode router gate — broadcast the UI command and short-
@@ -1063,16 +1245,26 @@ async def chat_stream_endpoint(
             user_message = message
             if user_message and not files:
                 mode_envelope = await _maybe_handle_ui_mode_command(user_message)
-                if mode_envelope and not (mode_envelope.get("cleaned_text") or "").strip():
+                if (
+                    mode_envelope
+                    and not (mode_envelope.get("cleaned_text") or "").strip()
+                ):
                     ack = mode_envelope["acknowledgement"]
                     chat_history.add_message(
-                        "web", "user", user_message, [],
-                        persona=resolved_persona, request_id=request_id,
+                        "web",
+                        "user",
+                        user_message,
+                        [],
+                        persona=resolved_persona,
+                        request_id=request_id,
                         username=username,
                     )
                     chat_history.add_message(
-                        "web", "assistant", ack,
-                        persona=resolved_persona, request_id=request_id,
+                        "web",
+                        "assistant",
+                        ack,
+                        persona=resolved_persona,
+                        request_id=request_id,
                         username=username,
                     )
                     yield (
@@ -1096,7 +1288,7 @@ async def chat_stream_endpoint(
             file_contents = []
             file_attachments = []
             session_extractions = []
-            
+
             for file in files:
                 if file.filename:
                     saved_file = await save_upload_file(file, username=username)
@@ -1112,47 +1304,69 @@ async def chat_stream_endpoint(
                         content_type=saved_file["content_type"],
                         size_bytes=saved_file["size_bytes"],
                         sha256=saved_file["sha256"],
-                        username=username
+                        username=username,
                     )
-                    
+
                     if file.content_type and file.content_type.startswith("image/"):
                         image_paths.append(file_path)
                         # FIX: Store image metadata separately, don't send raw metadata in text chunks
-                        file_attachments.append({
-                            "type": "image",
-                            "original_filename": saved_file["original_filename"],
-                            "stored_filename": stored_filename,
-                            "path": file_path,
-                        })
-                        file_contents.append(f"\n--- Gambar Dilampirkan: {saved_file['original_filename']} ---\n(Gambar ini telah diteruskan ke modul Vision Anda untuk dianalisis)")
+                        file_attachments.append(
+                            {
+                                "type": "image",
+                                "original_filename": saved_file["original_filename"],
+                                "stored_filename": stored_filename,
+                                "path": file_path,
+                            }
+                        )
+                        file_contents.append(
+                            f"\n--- Gambar Dilampirkan: {saved_file['original_filename']} ---\n(Gambar ini telah diteruskan ke modul Vision Anda untuk dianalisis)"
+                        )
                     else:
-                        read_result = tools.smart_read(file_ref=file_path, instruction="ekstrak konten utama file ini", max_chars=10000)
-                        parsed_content = read_result.get("summary") or read_result.get("content")
+                        read_result = tools.smart_read(
+                            file_ref=file_path,
+                            instruction="ekstrak konten utama file ini",
+                            max_chars=10000,
+                        )
+                        parsed_content = read_result.get("summary") or read_result.get(
+                            "content"
+                        )
                         if parsed_content:
-                            file_contents.append(f"\n--- File: {saved_file['original_filename']} ---\n{parsed_content}")
-                        session_extractions.append({
-                            "original_filename": saved_file["original_filename"],
-                            "stored_filename": stored_filename,
-                            "path": file_path,
-                            "extracted_content": (parsed_content or "")[:5000],
-                        })
-                        file_attachments.append({
-                            "type": "file",
-                            "original_filename": saved_file["original_filename"],
-                            "stored_filename": stored_filename,
-                            "path": file_path,
-                        })
-            
+                            file_contents.append(
+                                f"\n--- File: {saved_file['original_filename']} ---\n{parsed_content}"
+                            )
+                        session_extractions.append(
+                            {
+                                "original_filename": saved_file["original_filename"],
+                                "stored_filename": stored_filename,
+                                "path": file_path,
+                                "extracted_content": (parsed_content or "")[:5000],
+                            }
+                        )
+                        file_attachments.append(
+                            {
+                                "type": "file",
+                                "original_filename": saved_file["original_filename"],
+                                "stored_filename": stored_filename,
+                                "path": file_path,
+                            }
+                        )
+
             # Build enhanced message - image paths are passed separately to LangGraph
             # Image metadata is NOT injected into the text message to prevent raw metadata in chunks
             enhanced_message = user_message
             if file_contents:
-                enhanced_message += "\n\n[Attached Files Content:]\n" + "\n".join(file_contents)
-            att_idx = memory_coordinator.format_same_turn_attachment_index(file_attachments)
+                enhanced_message += "\n\n[Attached Files Content:]\n" + "\n".join(
+                    file_contents
+                )
+            att_idx = memory_coordinator.format_same_turn_attachment_index(
+                file_attachments
+            )
             if att_idx:
                 enhanced_message += "\n\n" + att_idx
             if image_paths:
-                memory_manager.set_runtime_context_value("last_accessed_file", image_paths[-1])
+                memory_manager.set_runtime_context_value(
+                    "last_accessed_file", image_paths[-1]
+                )
             if file_attachments:
                 memory_manager.set_runtime_context_value(
                     "current_session_state",
@@ -1170,7 +1384,7 @@ async def chat_stream_endpoint(
                     memory_manager.upsert_session_file(
                         session_id=session_scope,
                         filename=ex["original_filename"],
-                        content=ex.get("extracted_content", "")
+                        content=ex.get("extracted_content", ""),
                     )
 
             # Save user message (post UI mode router cleanup)
@@ -1184,10 +1398,12 @@ async def chat_stream_endpoint(
                 username=username,
                 chat_id=session_scope,
             )
-            
+
             # Check if we need to generate a title (if session has only 1 user message)
             async def _maybe_generate_title(cid, msg):
-                history = chat_history.get_history(username=username, chat_id=cid, limit=5)
+                history = chat_history.get_history(
+                    username=username, chat_id=cid, limit=5
+                )
                 # Filter user messages
                 user_msgs = [m for m in history if m["role"] == "user"]
                 if len(user_msgs) == 1:
@@ -1197,10 +1413,10 @@ async def chat_stream_endpoint(
 
             if not session_scope.startswith("legacy_"):
                 asyncio.create_task(_maybe_generate_title(session_scope, user_message))
-            
+
             # V6.0: Stream response - no guardrail overhead, direct LLM response
             full_response = []
-            
+
             async for chunk in process_chat_with_graph_stream(
                 enhanced_message,
                 image_paths=image_paths if image_paths else None,
@@ -1214,11 +1430,15 @@ async def chat_stream_endpoint(
             ):
                 full_response.append(chunk)
                 if first_chunk_ms is None:
-                    first_chunk_ms = round((time.perf_counter() - request_started) * 1000, 2)
+                    first_chunk_ms = round(
+                        (time.perf_counter() - request_started) * 1000, 2
+                    )
                 # SSE: UI accepts `text` (preferred) or `chunk`; ensure_ascii=False for Indonesian / markdown
-                payload = json.dumps({"text": chunk, "chunk": chunk}, ensure_ascii=False)
+                payload = json.dumps(
+                    {"text": chunk, "chunk": chunk}, ensure_ascii=False
+                )
                 yield f"event: chunk\ndata: {payload}\n\n"
-            
+
             # Send completion event
             response_text = "".join(full_response)
             chat_history.add_message(
@@ -1234,15 +1454,27 @@ async def chat_stream_endpoint(
             total_ms = round((time.perf_counter() - request_started) * 1000, 2)
             observability.record_latency_metric("chat_stream_total_ms", total_ms)
             if first_chunk_ms is not None:
-                observability.record_latency_metric("chat_stream_ttfb_ms", first_chunk_ms)
+                observability.record_latency_metric(
+                    "chat_stream_ttfb_ms", first_chunk_ms
+                )
             if stream_metrics.get("guardrail_input_ms") is not None:
-                observability.record_latency_metric("chat_stream_guardrail_input_ms", stream_metrics["guardrail_input_ms"])
+                observability.record_latency_metric(
+                    "chat_stream_guardrail_input_ms",
+                    stream_metrics["guardrail_input_ms"],
+                )
             if stream_metrics.get("guardrail_output_ms") is not None:
-                observability.record_latency_metric("chat_stream_guardrail_output_ms", stream_metrics["guardrail_output_ms"])
+                observability.record_latency_metric(
+                    "chat_stream_guardrail_output_ms",
+                    stream_metrics["guardrail_output_ms"],
+                )
             if stream_metrics.get("graph_collect_ms") is not None:
-                observability.record_latency_metric("chat_stream_graph_collect_ms", stream_metrics["graph_collect_ms"])
+                observability.record_latency_metric(
+                    "chat_stream_graph_collect_ms", stream_metrics["graph_collect_ms"]
+                )
             if stream_metrics.get("sse_chunk_count") is not None:
-                observability.record_latency_metric("chat_stream_sse_chunk_count", stream_metrics["sse_chunk_count"])
+                observability.record_latency_metric(
+                    "chat_stream_sse_chunk_count", stream_metrics["sse_chunk_count"]
+                )
 
             complete_payload = api_success(
                 data={"response": response_text},
@@ -1256,11 +1488,11 @@ async def chat_stream_endpoint(
                 },
             )
             yield f"event: complete\ndata: {json.dumps(complete_payload, ensure_ascii=False)}\n\n"
-            
+
         except Exception as e:
             logger.exception(f"Error in streaming endpoint: {e}")
             yield f"event: error\ndata: {json.dumps(api_error(f'Maaf, {master_name} — ' + str(e), trace_id=trace_id), ensure_ascii=False)}\n\n"
-    
+
     return StreamingResponse(
         event_generator(),
         media_type="text/event-stream",
@@ -1268,14 +1500,14 @@ async def chat_stream_endpoint(
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",  # Disable nginx buffering
-        }
+        },
     )
+
 
 @app.get("/api/system-status")
 async def system_status():
     """Get real-time system status."""
     return api_success(data=tools.get_system_status())
-
 
 
 @app.get("/api/log-storage")
@@ -1284,15 +1516,20 @@ async def log_storage():
     usage = get_log_storage_usage()
     return api_success(data=usage)
 
+
 @app.get("/api/proxmox-status")
 async def proxmox_status():
     """Get Proxmox infrastructure status."""
     return api_success(data=tools.check_proxmox_infrastructure())
 
+
 @app.get("/api/health")
 async def health_check():
     """Health check endpoint."""
-    return api_success(data={"health": "healthy", "memory_stats": memory_manager.get_memory_stats()})
+    return api_success(
+        data={"health": "healthy", "memory_stats": memory_manager.get_memory_stats()}
+    )
+
 
 @app.get("/api/observability/status")
 async def observability_status():
@@ -1302,10 +1539,13 @@ async def observability_status():
         "data": {
             "phoenix_running": observability._phoenix_app is not None,
             "opentelemetry_enabled": observability.get_tracer() is not None,
-            "dashboard_url": observability._phoenix_app.url if observability._phoenix_app else None,
+            "dashboard_url": (
+                observability._phoenix_app.url if observability._phoenix_app else None
+            ),
             "phoenix_port": observability.PHOENIX_PORT,
-        }
+        },
     }
+
 
 @app.get("/api/observability/tokens")
 async def token_usage(session_id: str = None):
@@ -1320,14 +1560,14 @@ async def token_usage(session_id: str = None):
         for sid, usage in observability._token_tracker.items():
             all_usage[sid] = usage
             total_tokens += usage.get("total_tokens", 0)
-        
+
         return {
             "status": "success",
             "data": {
                 "sessions": all_usage,
                 "total_sessions": len(all_usage),
                 "total_tokens_all_sessions": total_tokens,
-            }
+            },
         }
 
 
@@ -1339,11 +1579,13 @@ async def latency_metrics():
         "data": observability.get_latency_metrics_snapshot(),
     }
 
+
 @app.get("/api/observability/cleanup")
 async def cleanup_observability():
     """Cleanup old observability data."""
     observability.cleanup_old_sessions()
     return {"status": "success", "message": "Observability cleanup completed"}
+
 
 @app.get("/observability", response_class=HTMLResponse)
 async def observability_dashboard(request: Request):
@@ -1399,10 +1641,12 @@ async def observability_dashboard(request: Request):
     </html>
     """
 
+
 @app.get("/api/system-analysis")
 async def system_analysis():
     """Full system health analysis from /var/log."""
     return {"status": "success", "data": tools.analyze_system_health()}
+
 
 @app.post("/api/index-path")
 async def index_path(path: str = Form("/home/kuro/projects/")):
@@ -1412,24 +1656,26 @@ async def index_path(path: str = Form("/home/kuro/projects/")):
     is_whitelisted = any(path.startswith(wp) for wp in tools.WHITELIST_PATHS)
     if not is_whitelisted:
         return {"status": "error", "message": "Path not in whitelist"}
-    
+
     result = tools.index_system_path(path)
     return result
+
 
 @app.post("/api/memory/reindex")
 async def memory_reindex(source: str = Form("uploaded_files")):
     """
     V3.0 CONTEXTUAL RAG RE-INDEXING:
     Clear old ChromaDB and re-index files with contextual enrichment.
-    
+
     source: "uploaded_files" (default) or "all" (includes system paths)
     """
     try:
         import time
+
         start_time = time.time()
-        
+
         file_texts = {}
-        
+
         if source == "uploaded_files":
             # Read all files from uploaded_files directory
             upload_dir = tools.UPLOAD_DIR
@@ -1440,59 +1686,90 @@ async def memory_reindex(source: str = Form("uploaded_files")):
                         try:
                             # Only process text-based files
                             ext = os.path.splitext(filename)[1].lower()
-                            if ext in ['.txt', '.md', '.py', '.js', '.json', '.log', '.csv', '.yaml', '.yml']:
-                                with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
-                                    file_texts[filename] = f.read()[:100000]  # Limit to 100k chars
+                            if ext in [
+                                ".txt",
+                                ".md",
+                                ".py",
+                                ".js",
+                                ".json",
+                                ".log",
+                                ".csv",
+                                ".yaml",
+                                ".yml",
+                            ]:
+                                with open(
+                                    filepath, "r", encoding="utf-8", errors="replace"
+                                ) as f:
+                                    file_texts[filename] = f.read()[
+                                        :100000
+                                    ]  # Limit to 100k chars
                         except Exception as e:
                             logger.warning(f"Could not read {filepath}: {e}")
-        
+
         if not file_texts:
             return {
                 "status": "error",
                 "message": "No files found to re-index",
-                "source": source
+                "source": source,
             }
-        
+
         # Run contextual re-indexing
         result = memory_manager.reindex_all_files(file_texts)
-        
+
         elapsed = time.time() - start_time
-        
+
         return {
             "status": "success" if result["success"] else "partial",
             "files_processed": result["files_processed"],
             "total_chunks": result["total_chunks"],
             "errors": result["errors"],
             "contexts": result["contexts"],
-            "elapsed_seconds": round(elapsed, 2)
+            "elapsed_seconds": round(elapsed, 2),
         }
-        
+
     except Exception as e:
         logger.error(f"Memory re-indexing failed: {e}")
-        return {
-            "status": "error",
-            "message": str(e)
-        }
+        return {"status": "error", "message": str(e)}
+
 
 @app.get("/api/memory/stats")
 async def memory_stats():
     """V3.0 Enhanced memory statistics."""
-    return {
-        "status": "success",
-        "data": memory_manager.get_memory_stats()
-    }
+    return {"status": "success", "data": memory_manager.get_memory_stats()}
+
 
 @app.post("/api/compliance/ingest")
 async def compliance_ingest(clear: bool = Form(False)):
-    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Compliance module purged in KURO V1.0.0"})
+    return JSONResponse(
+        status_code=410,
+        content={
+            "status": "disabled",
+            "message": "Compliance module purged in KURO V1.0.0",
+        },
+    )
+
 
 @app.get("/api/compliance/stats")
 async def compliance_stats():
-    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Compliance module purged in KURO V1.0.0"})
+    return JSONResponse(
+        status_code=410,
+        content={
+            "status": "disabled",
+            "message": "Compliance module purged in KURO V1.0.0",
+        },
+    )
+
 
 @app.get("/api/compliance/search")
 async def compliance_search(query: str):
-    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Compliance module purged in KURO V1.0.0"})
+    return JSONResponse(
+        status_code=410,
+        content={
+            "status": "disabled",
+            "message": "Compliance module purged in KURO V1.0.0",
+        },
+    )
+
 
 # --- Chat Session Management ---
 @app.get("/api/chats")
@@ -1500,33 +1777,39 @@ async def get_chats(request: Request, persona: str = None):
     """Get all chat sessions for the current user and persona."""
     token = get_token_from_cookie(request)
     user = validate_token(token)
-    username = user.get("username") if user else ADMIN_USERNAME
-    
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    username = user.get("username")
+
     if not persona:
         persona = memory_manager.get_active_persona()
-    
+
     sessions = chat_history.get_sessions(username, persona)
     return api_success(data=sessions)
+
 
 @app.post("/api/chats")
 async def create_chat(request: Request, session_data: NewChatSession):
     """Create a new chat session."""
     token = get_token_from_cookie(request)
     user = validate_token(token)
-    username = user.get("username") if user else ADMIN_USERNAME
-    
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    username = user.get("username")
+
     chat_id = f"chat_{uuid.uuid4().hex[:12]}"
     success = chat_history.create_session(
         chat_id=chat_id,
         username=username,
         persona=session_data.persona,
-        title=session_data.title
+        title=session_data.title,
     )
-    
+
     if success:
         return api_success(data={"chat_id": chat_id, "title": session_data.title})
     else:
         return api_error("Gagal membuat sesi chat baru.")
+
 
 @app.put("/api/chats/{chat_id}")
 async def update_chat_title(request: Request, chat_id: str, update: ChatSessionUpdate):
@@ -1534,12 +1817,13 @@ async def update_chat_title(request: Request, chat_id: str, update: ChatSessionU
     token = get_token_from_cookie(request)
     if not validate_token(token):
         raise HTTPException(status_code=401, detail="Unauthorized")
-    
+
     success = chat_history.update_session_title(chat_id, update.title)
     if success:
         return api_success(message="Judul chat diperbarui.")
     else:
         return api_error("Gagal memperbarui judul chat.")
+
 
 @app.delete("/api/chats/{chat_id}")
 async def delete_chat(request: Request, chat_id: str):
@@ -1547,12 +1831,13 @@ async def delete_chat(request: Request, chat_id: str):
     token = get_token_from_cookie(request)
     if not validate_token(token):
         raise HTTPException(status_code=401, detail="Unauthorized")
-    
+
     success = chat_history.delete_session(chat_id)
     if success:
         return api_success(message="Sesi chat dihapus.")
     else:
         return api_error("Gagal menghapus sesi chat.")
+
 
 # --- Intelligence Hub Routes ---
 @app.get("/api/intelligence/history")
@@ -1565,18 +1850,19 @@ async def intelligence_history(limit: int = 20, offset: int = 0, search: str = N
             "briefings": briefings,
             "total": len(briefings),
             "has_more": False,
-            "search_query": search
+            "search_query": search,
         }
-    
+
     briefings = intelligence_db.get_briefings(limit=limit, offset=offset)
     total = intelligence_db.get_total_count()
-    
+
     return {
         "status": "success",
         "briefings": briefings,
         "total": total,
-        "has_more": offset + len(briefings) < total
+        "has_more": offset + len(briefings) < total,
     }
+
 
 @app.get("/api/intelligence/latest")
 async def intelligence_latest():
@@ -1584,7 +1870,12 @@ async def intelligence_latest():
     briefings = intelligence_db.get_briefings(limit=1)
     if briefings:
         return {"status": "success", "briefing": briefings[0]}
-    return {"status": "success", "briefing": None, "message": "No briefings available yet"}
+    return {
+        "status": "success",
+        "briefing": None,
+        "message": "No briefings available yet",
+    }
+
 
 @app.get("/api/intelligence/run")
 async def intelligence_run(force: str = "false"):
@@ -1592,15 +1883,18 @@ async def intelligence_run(force: str = "false"):
     try:
         force_bool = force.lower() == "true"
         from kuro_backend.intelligence_engine import run_daily_research
+
         briefing = run_daily_research(force=force_bool)
         return {"status": "success", "briefing": briefing}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
+
 @app.get("/intelligence", response_class=HTMLResponse)
 async def intelligence_dashboard():
     """Serve the intelligence hub dashboard."""
     return FileResponse(os.path.join(WEB_DIR, "templates", "intelligence.html"))
+
 
 @app.post("/api/read-file")
 async def read_file(request: Request, file_path: str = Form("")):
@@ -1608,7 +1902,9 @@ async def read_file(request: Request, file_path: str = Form("")):
     token = get_token_from_cookie(request)
     user = validate_token(token)
     if not user:
-        return JSONResponse(status_code=401, content={"status": "error", "message": "Unauthorized"})
+        return JSONResponse(
+            status_code=401, content={"status": "error", "message": "Unauthorized"}
+        )
 
     if not file_path:
         return {"status": "error", "message": "No file path provided"}
@@ -1617,25 +1913,33 @@ async def read_file(request: Request, file_path: str = Form("")):
     abs_upload_dir = os.path.abspath(tools.UPLOAD_DIR)
     abs_file_path = os.path.abspath(file_path)
     if not abs_file_path.startswith(abs_upload_dir + os.sep):
-        return {"status": "error", "message": "Invalid file path: Path traversal is not allowed"}
+        return {
+            "status": "error",
+            "message": "Invalid file path: Path traversal is not allowed",
+        }
 
     result = tools.universal_read(file_path)
     return result
+
 
 @app.get("/api/list-files")
 async def list_files(request: Request):
     """List files for the current user."""
     token = get_token_from_cookie(request)
     user = validate_token(token)
-    username = user.get("username") if user else ADMIN_USERNAME
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    username = user.get("username")
     files = chat_history.list_user_files(username)
     return {"status": "success", "data": files}
+
 
 # --- Documentation Routes ---
 @app.get("/tutorial", response_class=HTMLResponse)
 async def tutorial_frontend():
     """Serve the documentation/tutorial frontend."""
     return FileResponse(os.path.join(WEB_DIR, "templates", "tutorial.html"))
+
 
 @app.get("/api/tutorial/content")
 async def tutorial_content():
@@ -1650,30 +1954,68 @@ async def tutorial_content():
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
+
 # --- Compliance Routes ---
 @app.get("/compliance")
 async def compliance_dashboard():
     return RedirectResponse(url="/tutorial")
 
+
 @app.get("/api/compliance/progress/{standard}")
 async def compliance_progress(standard: str):
-    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Compliance module purged in KURO V1.0.0"})
+    return JSONResponse(
+        status_code=410,
+        content={
+            "status": "disabled",
+            "message": "Compliance module purged in KURO V1.0.0",
+        },
+    )
+
 
 @app.get("/api/compliance/evidence")
 async def compliance_evidence(standard: str = None):
-    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Compliance module purged in KURO V1.0.0"})
+    return JSONResponse(
+        status_code=410,
+        content={
+            "status": "disabled",
+            "message": "Compliance module purged in KURO V1.0.0",
+        },
+    )
+
 
 @app.get("/api/compliance/search")
 async def compliance_search(query: str, standard: str = None):
-    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Compliance module purged in KURO V1.0.0"})
+    return JSONResponse(
+        status_code=410,
+        content={
+            "status": "disabled",
+            "message": "Compliance module purged in KURO V1.0.0",
+        },
+    )
+
 
 @app.post("/api/compliance/analyze")
-async def compliance_analyze(document: str = Form(""), standard: str = Form("iso27001")):
-    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Compliance module purged in KURO V1.0.0"})
+async def compliance_analyze(
+    document: str = Form(""), standard: str = Form("iso27001")
+):
+    return JSONResponse(
+        status_code=410,
+        content={
+            "status": "disabled",
+            "message": "Compliance module purged in KURO V1.0.0",
+        },
+    )
+
 
 @app.get("/api/compliance/audit-trail")
 async def audit_trail(limit: int = 50):
-    return JSONResponse(status_code=410, content={"status": "disabled", "message": "Compliance module purged in KURO V1.0.0"})
+    return JSONResponse(
+        status_code=410,
+        content={
+            "status": "disabled",
+            "message": "Compliance module purged in KURO V1.0.0",
+        },
+    )
 
 
 @app.get("/api/dashboard/data-revision")
@@ -1700,7 +2042,8 @@ async def dashboard_sync_websocket(websocket: WebSocket):
     try:
         try:
             await proactive_greeting.maybe_send(
-                websocket, token_info.get("username"),
+                websocket,
+                token_info.get("username"),
             )
         except Exception as greeting_exc:
             logger.warning(f"[GREETING] maybe_send failed: {greeting_exc}")
@@ -1712,13 +2055,14 @@ async def dashboard_sync_websocket(websocket: WebSocket):
         await dashboard_broadcast.disconnect(websocket)
 
 
-
 # --- Finances SSoT (The Chancellor) ---
 @app.get("/api/finances/budget")
 async def finances_get_budget(request: Request, month: Optional[str] = None):
     token = get_token_from_cookie(request)
     user = validate_token(token)
-    username = user.get("username") if user else "Pantronux"
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    username = user.get("username")
     m = (month or "").strip() or date.today().strftime("%Y-%m")
     row = await run_db(finance_db.get_budget, m, username)
     if not row:
@@ -1737,7 +2081,12 @@ async def finances_set_budget(
     try:
         token = get_token_from_cookie(request)
         user = validate_token(token)
-        username = user.get("username") if user else "Pantronux"
+
+        if not user:
+
+            raise HTTPException(status_code=401, detail="Unauthorized")
+
+        username = user.get("username")
         await run_db(finance_db.add_budget, month, amount_usd, notes or "", username)
         await run_db(core_data.bump_data_revision)
         return {"status": "success", "month": month.strip()}
@@ -1753,9 +2102,14 @@ async def finances_set_budget(
 async def finances_list_expenses(request: Request):
     token = get_token_from_cookie(request)
     user = validate_token(token)
-    username = user.get("username") if user else "Pantronux"
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    username = user.get("username")
     rows = await run_db(finance_db.list_recurring_expenses, True, username)
-    out = [RecurringExpenseRecord.model_validate(dict(r)).model_dump(mode="json") for r in rows]
+    out = [
+        RecurringExpenseRecord.model_validate(dict(r)).model_dump(mode="json")
+        for r in rows
+    ]
     return {"status": "success", "expenses": out}
 
 
@@ -1771,7 +2125,12 @@ async def finances_add_expense(
     try:
         token = get_token_from_cookie(request)
         user = validate_token(token)
-        username = user.get("username") if user else "Pantronux"
+
+        if not user:
+
+            raise HTTPException(status_code=401, detail="Unauthorized")
+
+        username = user.get("username")
         await run_db(
             finance_db.upsert_recurring_expense,
             label,
@@ -1797,7 +2156,12 @@ async def finances_delete_expense(expense_id: int, request: Request):
     try:
         token = get_token_from_cookie(request)
         user = validate_token(token)
-        username = user.get("username") if user else "Pantronux"
+
+        if not user:
+
+            raise HTTPException(status_code=401, detail="Unauthorized")
+
+        username = user.get("username")
         ok = await run_db(finance_db.delete_recurring_expense, expense_id, username)
         if ok:
             await run_db(core_data.bump_data_revision)
@@ -1814,9 +2178,16 @@ async def finances_delete_expense(expense_id: int, request: Request):
 async def finances_api_usage(request: Request, days: int = 7):
     token = get_token_from_cookie(request)
     user = validate_token(token)
-    username = user.get("username") if user else "Pantronux"
-    rows = await run_db(finance_db.get_last_n_days_spend, max(1, min(int(days), 90)), username)
-    out = [ApiUsageDailyRecord.model_validate(dict(r)).model_dump(mode="json") for r in rows]
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    username = user.get("username")
+    rows = await run_db(
+        finance_db.get_last_n_days_spend, max(1, min(int(days), 90)), username
+    )
+    out = [
+        ApiUsageDailyRecord.model_validate(dict(r)).model_dump(mode="json")
+        for r in rows
+    ]
     return {"status": "success", "usage": out}
 
 
@@ -1825,18 +2196,30 @@ async def finances_api_usage(request: Request, days: int = 7):
 async def market_list_watch(request: Request):
     token = get_token_from_cookie(request)
     user = validate_token(token)
-    username = user.get("username") if user else "Pantronux"
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    username = user.get("username")
     rows = await run_db(finance_db.list_watched_symbols, True, username)
-    out = [WatchedSymbolRecord.model_validate(dict(r)).model_dump(mode="json") for r in rows]
+    out = [
+        WatchedSymbolRecord.model_validate(dict(r)).model_dump(mode="json")
+        for r in rows
+    ]
     return {"status": "success", "symbols": out}
 
 
 @app.post("/api/market/watch")
-async def market_add_watch(request: Request, symbol: str = Form(...), label: str = Form("")):
+async def market_add_watch(
+    request: Request, symbol: str = Form(...), label: str = Form("")
+):
     try:
         token = get_token_from_cookie(request)
         user = validate_token(token)
-        username = user.get("username") if user else "Pantronux"
+
+        if not user:
+
+            raise HTTPException(status_code=401, detail="Unauthorized")
+
+        username = user.get("username")
         sym = (symbol or "").strip().upper()
         if not sym:
             return JSONResponse(
@@ -1859,7 +2242,12 @@ async def market_delete_watch(symbol: str, request: Request):
     try:
         token = get_token_from_cookie(request)
         user = validate_token(token)
-        username = user.get("username") if user else "Pantronux"
+
+        if not user:
+
+            raise HTTPException(status_code=401, detail="Unauthorized")
+
+        username = user.get("username")
         sym = (symbol or "").strip().upper()
         ok = await run_db(finance_db.delete_watched_symbol, sym, username)
         if ok:
@@ -1877,7 +2265,9 @@ async def market_delete_watch(symbol: str, request: Request):
 async def market_hud(request: Request):
     token = get_token_from_cookie(request)
     user = validate_token(token)
-    username = user.get("username") if user else "Pantronux"
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    username = user.get("username")
     raw = await run_db(finance_db.get_market_hud_items, username)
     items = [MarketHudChip.model_validate(x).model_dump(mode="json") for x in raw]
     return {"status": "success", "items": items}
@@ -1885,16 +2275,25 @@ async def market_hud(request: Request):
 
 # --- Market Sentinel (V2) Routes ---
 
+
 @app.get("/api/sentinel/latest")
 async def api_sentinel_latest(request: Request):
     """Fetch the latest unique scan for each stock."""
+
+
 # --- Hybrid Market Sentinel V3 ---
 @app.get("/api/sentinel/stocks")
-async def api_sentinel_stocks(request: Request, sort_by: str = "latest", category: Optional[str] = None):
+async def api_sentinel_stocks(
+    request: Request, sort_by: str = "latest", category: Optional[str] = None
+):
     token = get_token_from_cookie(request)
     user = validate_token(token)
-    username = user.get("username") if user else "Pantronux"
-    stocks = await run_db(finance_db.get_all_sentinel_stocks, sort_by, category, username)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    username = user.get("username")
+    stocks = await run_db(
+        finance_db.get_all_sentinel_stocks, sort_by, category, username
+    )
     return {"status": "success", "stocks": stocks}
 
 
@@ -1902,7 +2301,9 @@ async def api_sentinel_stocks(request: Request, sort_by: str = "latest", categor
 async def api_sentinel_stock_detail(code: str, request: Request):
     token = get_token_from_cookie(request)
     user = validate_token(token)
-    username = user.get("username") if user else "Pantronux"
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    username = user.get("username")
     stock = await run_db(finance_db.get_sentinel_stock_detail, code, username)
     history = await run_db(finance_db.get_sentinel_history_for_chart, code, username)
     return {"status": "success", "stock": stock, "history": history}
@@ -1912,7 +2313,9 @@ async def api_sentinel_stock_detail(code: str, request: Request):
 async def api_sentinel_pins(request: Request):
     token = get_token_from_cookie(request)
     user = validate_token(token)
-    username = user.get("username") if user else "Pantronux"
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    username = user.get("username")
     pins = await run_db(finance_db.get_user_pins, username)
     return {"status": "success", "pins": pins}
 
@@ -1921,12 +2324,16 @@ async def api_sentinel_pins(request: Request):
 async def api_sentinel_toggle_pin(code: str, request: Request):
     token = get_token_from_cookie(request)
     user = validate_token(token)
-    username = user.get("username") if user else "Pantronux"
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    username = user.get("username")
     try:
         res = await run_db(finance_db.toggle_pin_stock, username, code)
         return {"status": "success", **res}
     except ValueError as e:
-        return JSONResponse(status_code=400, content={"status": "error", "message": str(e)})
+        return JSONResponse(
+            status_code=400, content={"status": "error", "message": str(e)}
+        )
 
 
 @app.post("/api/sentinel/run")
@@ -1934,11 +2341,20 @@ async def api_sentinel_manual_run(request: Request):
     """Manually trigger a triangulation scan (restricted to master)."""
     token = get_token_from_cookie(request)
     user = validate_token(token)
-    username = user.get("username") if user else "Pantronux"
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    username = user.get("username")
     if username != os.getenv("ADMIN_USERNAME", "Pantronux"):
-        raise HTTPException(status_code=403, detail="Only Master can trigger Sentinel scans.")
-    asyncio.create_task(asyncio.to_thread(market_sentinel.run_triangulation_scan, username))
-    return {"status": "success", "message": "Triangulation scan triggered in background."}
+        raise HTTPException(
+            status_code=403, detail="Only Master can trigger Sentinel scans."
+        )
+    asyncio.create_task(
+        asyncio.to_thread(market_sentinel.run_triangulation_scan, username)
+    )
+    return {
+        "status": "success",
+        "message": "Triangulation scan triggered in background.",
+    }
 
 
 @app.post("/api/sentinel/price-update")
@@ -1946,10 +2362,16 @@ async def api_sentinel_price_update(request: Request):
     """Manually trigger a price ticker update (restricted to master)."""
     token = get_token_from_cookie(request)
     user = validate_token(token)
-    username = user.get("username") if user else "Pantronux"
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    username = user.get("username")
     if username != os.getenv("ADMIN_USERNAME", "Pantronux"):
-        raise HTTPException(status_code=403, detail="Only Master can trigger price updates.")
-    asyncio.create_task(asyncio.to_thread(price_ticker_worker.run_price_update, username))
+        raise HTTPException(
+            status_code=403, detail="Only Master can trigger price updates."
+        )
+    asyncio.create_task(
+        asyncio.to_thread(price_ticker_worker.run_price_update, username)
+    )
     return {"status": "success", "message": "Price update triggered in background."}
 
 
@@ -1957,14 +2379,15 @@ async def api_sentinel_price_update(request: Request):
 async def market_brief(request: Request):
     token = get_token_from_cookie(request)
     user = validate_token(token)
-    username = user.get("username") if user else "Pantronux"
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    username = user.get("username")
     parts = await run_db(finance_db.get_market_brief_parts, username)
     brief = (parts.get("brief_text") or "").strip()
     if not brief:
         brief = (
-            (parts.get("last_sentinel_note") or "").strip()
-            or "No market briefing cached yet. The nightly sentinel will populate this."
-        )
+            parts.get("last_sentinel_note") or ""
+        ).strip() or "No market briefing cached yet. The nightly sentinel will populate this."
     return {"status": "success", "brief": brief}
 
 
@@ -1982,23 +2405,27 @@ async def set_persona(request: Request):
     user = validate_token(token)
     if not user:
         return {"status": "error", "message": "Unauthorized"}
-    
+
     username = user.get("username")
     user_info = auth_db.get_user(username) or {}
     restricted_persona = user_info.get("restricted_persona")
-    
+
     try:
         body = await request.json()
-        persona = body.get('persona', 'consultant')
-        
+        persona = body.get("persona", "consultant")
+
         # Enforce restriction
         if restricted_persona and persona != restricted_persona:
-            return {"status": "error", "message": f"Unauthorized. Your account is restricted to the {restricted_persona} persona."}
-            
+            return {
+                "status": "error",
+                "message": f"Unauthorized. Your account is restricted to the {restricted_persona} persona.",
+            }
+
         result = memory_manager.set_active_persona(persona, username=username)
         return result
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
 
 @app.get("/api/persona")
 async def get_persona(request: Request):
@@ -2007,15 +2434,15 @@ async def get_persona(request: Request):
     user = validate_token(token)
     if not user:
         return {"status": "error", "message": "Unauthorized"}
-        
+
     username = user.get("username")
     user_info = auth_db.get_user(username) or {}
     restricted_persona = user_info.get("restricted_persona")
-    
+
     try:
         if restricted_persona:
             return {"status": "success", "persona": restricted_persona}
-            
+
         persona = memory_manager.get_active_persona(username=username)
         return {"status": "success", "persona": persona}
     except Exception as e:
@@ -2067,7 +2494,9 @@ async def persona_history_override(request: Request):
         body = await request.json()
         row_ids = body.get("row_ids", [])
         persona = body.get("persona", "")
-        result = persona_history_admin.override_persona(row_ids=row_ids, persona=persona)
+        result = persona_history_admin.override_persona(
+            row_ids=row_ids, persona=persona
+        )
         return {"status": "success", "result": result}
     except Exception as e:
         logger.exception("persona_history_override failed: %s", e)
@@ -2080,53 +2509,59 @@ async def persona_history_restore(request: Request):
     try:
         body = await request.json()
         backup_file = body.get("backup_file", "")
-        result = persona_history_admin.restore_persona_from_backup(backup_file=backup_file)
+        result = persona_history_admin.restore_persona_from_backup(
+            backup_file=backup_file
+        )
         return {"status": "success", "result": result}
     except Exception as e:
         logger.exception("persona_history_restore failed: %s", e)
         return {"status": "error", "message": str(e)}
 
+
 # --- Hardware Sentinel ---
 _hardware_sentinel_scheduler = None
+
 
 def start_hardware_sentinel():
     """Start the hardware monitoring scheduler with dynamic intervals."""
     global _hardware_sentinel_scheduler
     from apscheduler.schedulers.background import BackgroundScheduler
-    
+
     _hardware_sentinel_scheduler = BackgroundScheduler(daemon=True)
-    
+
     # Add job that runs every 30 seconds but checks time-based intervals internally
     _hardware_sentinel_scheduler.add_job(
         hardware_sentinel_check,
-        'interval',
+        "interval",
         seconds=30,
-        id='hardware_sentinel',
-        replace_existing=True
+        id="hardware_sentinel",
+        replace_existing=True,
     )
-    
+
     _hardware_sentinel_scheduler.start()
     logger.info("Hardware Sentinel scheduler started.")
+
 
 # Track last check times to implement dynamic intervals
 _last_hardware_check = None
 
+
 def hardware_sentinel_check():
     """Check hardware metrics with dynamic intervals: 2hr work hours, 4hr off-hours."""
     global _last_hardware_check
-    
+
     now = datetime.now()
     current_hour = now.hour
-    
+
     # Determine interval based on time of day
     # Work hours: 8 AM - 4 PM (08:00 - 16:00)
     is_work_hours = 8 <= current_hour < 16
     check_interval = timedelta(hours=2) if is_work_hours else timedelta(hours=4)
-    
+
     # Skip if not enough time has passed since last check
     if _last_hardware_check and (now - _last_hardware_check) < check_interval:
         return
-    
+
     _last_hardware_check = now
     dashboard_broadcast.schedule_ui_command(
         "STATUS_TICKER",
@@ -2138,21 +2573,21 @@ def hardware_sentinel_check():
         cpu_percent = psutil.cpu_percent(interval=1)
         ram = psutil.virtual_memory()
         ram_percent = ram.percent
-        disk = psutil.disk_usage('/')
+        disk = psutil.disk_usage("/")
         disk_percent = disk.percent
-        
+
         # Network I/O
         net_io = psutil.net_io_counters()
         net_sent_mb = net_io.bytes_sent / (1024 * 1024)
         net_recv_mb = net_io.bytes_recv / (1024 * 1024)
-        
+
         # Log metrics
         logger.info(
             f"Hardware Sentinel Check [{ 'work hours' if is_work_hours else 'off-hours' }]: "
             f"CPU={cpu_percent}%, RAM={ram_percent}%, Disk={disk_percent}%, "
             f"Net TX={net_sent_mb:.1f}MB, RX={net_recv_mb:.1f}MB"
         )
-        
+
         # Check thresholds and route through the proactive event bus so
         # dedup + severity gating stay centralised.
         try:
@@ -2160,35 +2595,41 @@ def hardware_sentinel_check():
 
             alert_specs = []
             if ram_percent > 90:
-                alert_specs.append((
-                    "warning",
-                    f"RAM usage {ram_percent}%",
+                alert_specs.append(
                     (
-                        f"Master, Kuro's VM memory utilisation has reached "
-                        f"{ram_percent}%. Kindly review the active processes."
-                    ),
-                    f"hw:ram:{int(ram_percent)//5*5}",
-                ))
+                        "warning",
+                        f"RAM usage {ram_percent}%",
+                        (
+                            f"Master, Kuro's VM memory utilisation has reached "
+                            f"{ram_percent}%. Kindly review the active processes."
+                        ),
+                        f"hw:ram:{int(ram_percent)//5*5}",
+                    )
+                )
             if cpu_percent > 85:
-                alert_specs.append((
-                    "warning",
-                    f"CPU usage {cpu_percent}%",
+                alert_specs.append(
                     (
-                        f"Master, Kuro's VM CPU utilisation has reached "
-                        f"{cpu_percent}%. An intensive workload has been detected."
-                    ),
-                    f"hw:cpu:{int(cpu_percent)//5*5}",
-                ))
+                        "warning",
+                        f"CPU usage {cpu_percent}%",
+                        (
+                            f"Master, Kuro's VM CPU utilisation has reached "
+                            f"{cpu_percent}%. An intensive workload has been detected."
+                        ),
+                        f"hw:cpu:{int(cpu_percent)//5*5}",
+                    )
+                )
             if disk_percent > 85:
-                alert_specs.append((
-                    "critical" if disk_percent > 95 else "warning",
-                    f"Disk usage {disk_percent}%",
+                alert_specs.append(
                     (
-                        f"Master, disk utilisation has reached {disk_percent}%. "
-                        f"Do consider pruning any files that are no longer required."
-                    ),
-                    f"hw:disk:{int(disk_percent)//5*5}",
-                ))
+                        "critical" if disk_percent > 95 else "warning",
+                        f"Disk usage {disk_percent}%",
+                        (
+                            f"Master, disk utilisation has reached {disk_percent}%. "
+                            f"Do consider pruning any files that are no longer required."
+                        ),
+                        f"hw:disk:{int(disk_percent)//5*5}",
+                    )
+                )
 
             for severity, title, body, seed in alert_specs:
                 logger.warning("[HARDWARE] %s — %s", title, body)
@@ -2226,24 +2667,26 @@ def hardware_sentinel_check():
         except Exception:
             pass
 
+
 # --- Background Scheduler ---
 _reminder_scheduler = None
+
 
 def start_reminder_scheduler():
     """Start the background scheduler for automated intelligence cycles."""
     global _reminder_scheduler
     from apscheduler.schedulers.background import BackgroundScheduler
-    
+
     _reminder_scheduler = BackgroundScheduler(daemon=True)
-    
+
     # Daily intelligence briefing at 08:00 AM
     _reminder_scheduler.add_job(
         send_daily_intelligence_briefing,
-        'cron',
+        "cron",
         hour=8,
         minute=0,
-        id='daily_intelligence_briefing',
-        replace_existing=True
+        id="daily_intelligence_briefing",
+        replace_existing=True,
     )
 
     # Quantitative updates for all users
@@ -2257,14 +2700,14 @@ def start_reminder_scheduler():
 
     _reminder_scheduler.add_job(
         run_all_price_updates,
-        'cron',
-        day_of_week='mon-fri',
-        hour='9-16',
-        minute='0,30',
-        id='price_ticker_update',
+        "cron",
+        day_of_week="mon-fri",
+        hour="9-16",
+        minute="0,30",
+        id="price_ticker_update",
         replace_existing=True,
         max_instances=1,
-        coalesce=True
+        coalesce=True,
     )
     logger.info("Price Ticker updates scheduled for all users.")
 
@@ -2279,31 +2722,37 @@ def start_reminder_scheduler():
 
     _reminder_scheduler.add_job(
         run_all_sentinel_scans,
-        'cron',
-        day_of_week='mon-fri',
-        hour='9,13,17,21',
+        "cron",
+        day_of_week="mon-fri",
+        hour="9,13,17,21",
         minute=0,
-        id='market_sentinel_scan',
+        id="market_sentinel_scan",
         replace_existing=True,
         max_instances=1,
-        coalesce=True
+        coalesce=True,
     )
     logger.info("Market Sentinel Triangulation scans scheduled for all users.")
 
     # Autonomous memory dreaming cycle (Kuro AI V6.0 Sovereign).
-    if os.getenv("KURO_DREAMING_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on"):
+    if os.getenv("KURO_DREAMING_ENABLED", "true").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    ):
         try:
             from kuro_backend import dreaming_worker
+
             dreaming_cron_hour = int(os.getenv("KURO_DREAMING_CRON_HOUR", "3"))
         except Exception as dreaming_exc:
             logger.warning(f"Dreaming worker hook skipped: {dreaming_exc}")
         else:
             _reminder_scheduler.add_job(
                 dreaming_worker.run_dreaming_cycle,
-                'cron',
+                "cron",
                 hour=dreaming_cron_hour,
                 minute=0,
-                id='kuro_dreaming_cycle',
+                id="kuro_dreaming_cycle",
                 replace_existing=True,
                 max_instances=1,
                 coalesce=True,
@@ -2313,18 +2762,24 @@ def start_reminder_scheduler():
             )
 
     # Fitness anomaly sentinel (Kuro AI V6.0 Sovereign).
-    if os.getenv("KURO_FITNESS_ENABLED", "false").strip().lower() in ("1", "true", "yes", "on"):
+    if os.getenv("KURO_FITNESS_ENABLED", "false").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    ):
         try:
             from kuro_backend import fitness_service
+
             fitness_interval = int(os.getenv("KURO_FITNESS_INTERVAL_MIN", "30"))
         except Exception as fitness_exc:
             logger.warning(f"Fitness sentinel hook skipped: {fitness_exc}")
         else:
             _reminder_scheduler.add_job(
                 fitness_service.run_fitness_sentinel,
-                'interval',
+                "interval",
                 minutes=max(5, fitness_interval),
-                id='kuro_fitness_sentinel',
+                id="kuro_fitness_sentinel",
                 replace_existing=True,
                 max_instances=1,
                 coalesce=True,
@@ -2334,12 +2789,16 @@ def start_reminder_scheduler():
             )
 
     from kuro_backend import file_retention_worker
+
     _reminder_scheduler.add_job(
         file_retention_worker.run_retention_cycle,
-        'cron', hour=2, minute=0,
-        id='file_retention_cycle', replace_existing=True
+        "cron",
+        hour=2,
+        minute=0,
+        id="file_retention_cycle",
+        replace_existing=True,
     )
-    
+
     _reminder_scheduler.start()
     logger.info("Intelligence scheduler started.")
 
@@ -2347,9 +2806,13 @@ def start_reminder_scheduler():
 def send_daily_intelligence_briefing():
     """Send daily intelligence briefing to Telegram at 08:00 AM for all users."""
     try:
-        from kuro_backend.intelligence_engine import run_daily_research, format_telegram_message, format_stock_telegram_message
+        from kuro_backend.intelligence_engine import (
+            run_daily_research,
+            format_telegram_message,
+            format_stock_telegram_message,
+        )
         from kuro_backend import telegram_notifier, memory_manager
-        
+
         # Get all users to process
         all_usernames = auth_db.get_all_users()
         if not all_usernames:
@@ -2357,61 +2820,78 @@ def send_daily_intelligence_briefing():
 
         for username in all_usernames:
             try:
-                logger.info(f"[INTELLIGENCE] Running daily research for {username} (08:00 AM briefing)...")
+                logger.info(
+                    f"[INTELLIGENCE] Running daily research for {username} (08:00 AM briefing)..."
+                )
                 briefing = run_daily_research(username=username)
-                
+
                 # Check if it was skipped (already exists) to avoid re-sending Telegram
                 if briefing.get("_already_exists"):
-                    logger.info(f"[INTELLIGENCE] Briefing already exists for {username}, skipping Telegram delivery.")
+                    logger.info(
+                        f"[INTELLIGENCE] Briefing already exists for {username}, skipping Telegram delivery."
+                    )
                     continue
 
                 # Get display name for message
                 display_name = username
                 try:
                     user_info = auth_db.get_user(username)
-                    display_name = user_info.get("master_name", username) if user_info else username
+                    display_name = (
+                        user_info.get("master_name", username)
+                        if user_info
+                        else username
+                    )
                 except:
                     pass
 
                 # Message 1: Main Briefing
                 # TELEGRAM FILTER: Only send to Master/Admin to avoid double-spamming global channel
-                is_admin = (username == os.getenv("ADMIN_USERNAME", "Pantronux"))
-                
+                is_admin = username == os.getenv("ADMIN_USERNAME", "Pantronux")
+
                 if is_admin:
-                    telegram_message = format_telegram_message(briefing, display_name=display_name)
+                    telegram_message = format_telegram_message(
+                        briefing, display_name=display_name
+                    )
                     telegram_notifier.send_message(telegram_message)
-                    
+
                     # Message 2: Stock Recommendations
                     stock_message = format_stock_telegram_message(briefing)
                     if stock_message:
                         telegram_notifier.send_message(stock_message)
-                    
-                    logger.info(f"[INTELLIGENCE] Daily briefing sent to Telegram for {username}")
+
+                    logger.info(
+                        f"[INTELLIGENCE] Daily briefing sent to Telegram for {username}"
+                    )
                 else:
-                    logger.info(f"[INTELLIGENCE] Briefing generated for {username}, skipping Telegram (non-Admin).")
+                    logger.info(
+                        f"[INTELLIGENCE] Briefing generated for {username}, skipping Telegram (non-Admin)."
+                    )
             except Exception as user_exc:
-                logger.error(f"[INTELLIGENCE] Failed to send briefing for {username}: {user_exc}")
-                
+                logger.error(
+                    f"[INTELLIGENCE] Failed to send briefing for {username}: {user_exc}"
+                )
+
     except Exception as e:
         logger.error(f"[INTELLIGENCE] Global failure in daily briefing: {e}")
 
+
 def cleanup_old_artifacts(days: int = 14):
     """Clean up uploaded files and cache older than specified days.
-    
+
     Security Rule: Does not delete files marked as identity or essential in database.
     """
     try:
         cutoff_date = datetime.now() - timedelta(days=days)
         deleted_count = 0
         deleted_size = 0
-        
+
         # Clean uploaded_files directory
         if os.path.exists(tools.UPLOAD_DIR):
             for filename in os.listdir(tools.UPLOAD_DIR):
                 filepath = os.path.join(tools.UPLOAD_DIR, filename)
                 if not os.path.isfile(filepath):
                     continue
-                
+
                 # Check file modification time
                 file_mtime = datetime.fromtimestamp(os.path.getmtime(filepath))
                 if file_mtime < cutoff_date:
@@ -2422,14 +2902,16 @@ def cleanup_old_artifacts(days: int = 14):
                         os.remove(filepath)
                         deleted_count += 1
                         deleted_size += file_size
-                        logger.info(f"Deleted old artifact: {filename} ({file_size / 1024:.1f}KB, {days}+ days old)")
+                        logger.info(
+                            f"Deleted old artifact: {filename} ({file_size / 1024:.1f}KB, {days}+ days old)"
+                        )
                     except Exception as e:
                         logger.warning(f"Failed to delete {filename}: {e}")
-        
+
         # Clean __pycache__ directories
-        for root, dirs, files in os.walk('/home/kuro/projects/kuro'):
-            if '__pycache__' in dirs:
-                cache_dir = os.path.join(root, '__pycache__')
+        for root, dirs, files in os.walk("/home/kuro/projects/kuro"):
+            if "__pycache__" in dirs:
+                cache_dir = os.path.join(root, "__pycache__")
                 try:
                     for f in os.listdir(cache_dir):
                         fp = os.path.join(cache_dir, f)
@@ -2440,14 +2922,17 @@ def cleanup_old_artifacts(days: int = 14):
                                 deleted_count += 1
                 except Exception as e:
                     logger.warning(f"Error cleaning __pycache__ in {root}: {e}")
-        
+
         deleted_mb = deleted_size / (1024 * 1024)
-        logger.info(f"Artifact cleanup complete: {deleted_count} files deleted, {deleted_mb:.2f}MB freed")
+        logger.info(
+            f"Artifact cleanup complete: {deleted_count} files deleted, {deleted_mb:.2f}MB freed"
+        )
         return {"deleted_count": deleted_count, "freed_mb": deleted_mb}
-        
+
     except Exception as e:
         logger.error(f"Error in artifact cleanup: {e}")
         return {"error": str(e)}
+
 
 def get_log_storage_usage() -> Dict:
     """Calculate log storage usage for dashboard display across the new centralized folders."""
@@ -2455,11 +2940,11 @@ def get_log_storage_usage() -> Dict:
         base_log_dir = os.path.join(os.getcwd(), "logs")
         system_dir = os.path.join(base_log_dir, "system")
         archive_dir = os.path.join(base_log_dir, "archive")
-        
+
         total_size = 0
         log_count = 0
         breakdown = {}
-        
+
         # 1. Scan System Logs (Active)
         if os.path.exists(system_dir):
             for f in os.listdir(system_dir):
@@ -2469,7 +2954,7 @@ def get_log_storage_usage() -> Dict:
                     total_size += size
                     log_count += 1
                     breakdown[f] = size / (1024 * 1024)
-                    
+
         # 2. Scan Archive Logs (Rotated)
         if os.path.exists(archive_dir):
             for f in os.listdir(archive_dir):
@@ -2477,51 +2962,63 @@ def get_log_storage_usage() -> Dict:
                 if os.path.isfile(fp):
                     total_size += os.path.getsize(fp)
                     log_count += 1
-        
+
         return {
             "total_size_mb": total_size / (1024 * 1024),
             "log_files": log_count,
             "retention_days": 30,  # Updated policy
-            "breakdown": breakdown
+            "breakdown": breakdown,
         }
     except Exception as e:
         logger.error(f"Failed to calculate log storage: {e}")
-        return {"error": str(e), "total_size_mb": 0, "log_files": 0, "retention_days": 30}
+        return {
+            "error": str(e),
+            "total_size_mb": 0,
+            "log_files": 0,
+            "retention_days": 30,
+        }
+
 
 def reset_daily_habits():
     """Midnight reset: Cleanup old artifacts."""
     try:
         # Log rotation audit message
-        today = datetime.now().strftime('%Y-%m-%d')
+        today = datetime.now().strftime("%Y-%m-%d")
         logger.info(f"--- END OF LOG FOR {today} - ROTATING NOW ---")
-        
+
         # Run artifact cleanup
         cleanup_result = cleanup_old_artifacts(days=14)
         logger.info(f"Midnight artifact cleanup: {cleanup_result}")
-        
+
     except Exception as e:
         logger.error(f"Failed to run midnight cleanup: {e}")
+
 
 # --- Telegram Bot Logic ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
-        text="Greetings, Master. Kuro is at your service."
+        text="Greetings, Master. Kuro is at your service.",
     )
+
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_chat.id) != settings.TELEGRAM_CHAT_ID:
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
-            text="I apologize, but I am only authorized to serve Pantronux."
+            text="I apologize, but I am only authorized to serve Pantronux.",
         )
-        logger.warning(f"Unauthorized access attempt by chat_id: {update.effective_chat.id}")
+        logger.warning(
+            f"Unauthorized access attempt by chat_id: {update.effective_chat.id}"
+        )
         return
 
     message_text = update.message.text
     logger.info(f"Received message from Pantronux: {message_text}")
 
-    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+    await context.bot.send_chat_action(
+        chat_id=update.effective_chat.id, action="typing"
+    )
 
     try:
         telegram_persona = route_telegram_persona(message_text)
@@ -2552,21 +3049,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if len(response_text) > 4096:
             for i in range(0, len(response_text), 4000):
-                chunk = response_text[i:i+4000]
+                chunk = response_text[i : i + 4000]
                 await context.bot.send_message(
-                    chat_id=settings.TELEGRAM_CHAT_ID,
-                    text=chunk
+                    chat_id=settings.TELEGRAM_CHAT_ID, text=chunk
                 )
         else:
             await context.bot.send_message(
-                chat_id=settings.TELEGRAM_CHAT_ID,
-                text=response_text
+                chat_id=settings.TELEGRAM_CHAT_ID, text=response_text
             )
     except Exception as e:
         logger.exception(f"Error sending response to Telegram: {e}")
         await context.bot.send_message(
             chat_id=settings.TELEGRAM_CHAT_ID,
-            text="My apologies, Master — I encountered an error while delivering the response. Please try once more."
+            text="My apologies, Master — I encountered an error while delivering the response. Please try once more.",
         )
 
 
@@ -2578,13 +3073,45 @@ def route_telegram_persona(message_text: str) -> str:
     """
     text = (message_text or "").lower()
     technical_keywords = [
-        "proxmox", "server", "docker", "kubernetes", "code", "python", "error", "bug",
-        "api", "database", "sql", "log", "linux", "deploy", "security", "iso", "audit",
-        "openclaw", "memory", "websocket", "revision", "ci", "cd",
+        "proxmox",
+        "server",
+        "docker",
+        "kubernetes",
+        "code",
+        "python",
+        "error",
+        "bug",
+        "api",
+        "database",
+        "sql",
+        "log",
+        "linux",
+        "deploy",
+        "security",
+        "iso",
+        "audit",
+        "openclaw",
+        "memory",
+        "websocket",
+        "revision",
+        "ci",
+        "cd",
     ]
     casual_keywords = [
-        "gym", "musik", "lagu", "hindia", "hsr", "honkai", "capek", "semangat",
-        "mood", "curhat", "istirahat", "ngobrol", "santai", "hari ini",
+        "gym",
+        "musik",
+        "lagu",
+        "hindia",
+        "hsr",
+        "honkai",
+        "capek",
+        "semangat",
+        "mood",
+        "curhat",
+        "istirahat",
+        "ngobrol",
+        "santai",
+        "hari ini",
     ]
     if any(keyword in text for keyword in technical_keywords):
         logger.info("[TELEGRAM_PERSONA] Routed to tactical")
@@ -2594,6 +3121,7 @@ def route_telegram_persona(message_text: str) -> str:
         return "chill"
     logger.info("[TELEGRAM_PERSONA] Ambiguous intent -> default tactical")
     return "tactical"
+
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     error = context.error
@@ -2610,7 +3138,9 @@ def run_bot_with_recovery():
 
     for attempt in range(max_retries):
         try:
-            logger.info(f"Starting Telegram bot polling... (Attempt {attempt + 1}/{max_retries})")
+            logger.info(
+                f"Starting Telegram bot polling... (Attempt {attempt + 1}/{max_retries})"
+            )
 
             # Create a new event loop for each attempt, as python-telegram-bot closes the loop on exit
             loop = asyncio.new_event_loop()
@@ -2618,8 +3148,10 @@ def run_bot_with_recovery():
 
             application = ApplicationBuilder().token(settings.TELEGRAM_TOKEN).build()
 
-            start_handler = CommandHandler('start', start)
-            message_handler = MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
+            start_handler = CommandHandler("start", start)
+            message_handler = MessageHandler(
+                filters.TEXT & ~filters.COMMAND, handle_message
+            )
 
             application.add_handler(start_handler)
             application.add_handler(message_handler)
@@ -2655,28 +3187,28 @@ def run_bot_with_recovery():
 def run_uvicorn():
     """Runs FastAPI server with HTTPS support via mkcert."""
     import ssl
-    
+
     # SSL Certificate paths
     CERT_FILE = os.path.join(BASE_DIR, "certs", "cert.pem")
     KEY_FILE = os.path.join(BASE_DIR, "certs", "key.pem")
-    
+
     # Check if SSL certificates exist
     if os.path.exists(CERT_FILE) and os.path.exists(KEY_FILE):
         # Create SSL context
         ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         ssl_context.load_cert_chain(CERT_FILE, KEY_FILE)
-        
+
         logger.info("HTTPS enabled with mkcert certificates")
         logger.info(f"Secure Web Dashboard: https://0.0.0.0:8443")
         logger.info(f"Secure Login Page: https://0.0.0.0:8443/login")
-        
+
         uvicorn.run(
             app,
             host="0.0.0.0",
             port=8443,
             log_level="info",
             ssl_keyfile=KEY_FILE,
-            ssl_certfile=CERT_FILE
+            ssl_certfile=CERT_FILE,
         )
     else:
         logger.warning("SSL certificates not found. Running on HTTP only.")
@@ -2690,7 +3222,9 @@ if __name__ == "__main__":
         import requests
         import google.genai
     except ImportError as e:
-        logger.critical(f"CRITICAL ERROR: Missing essential library - {e}. Please install requirements. Shutting down.")
+        logger.critical(
+            f"CRITICAL ERROR: Missing essential library - {e}. Please install requirements. Shutting down."
+        )
         sys.exit(1)
 
     logger.info("Kuro AI Reborn is starting...")
@@ -2699,7 +3233,7 @@ if __name__ == "__main__":
     logger.info(f"Login Page: http://0.0.0.0:8000/login")
     logger.info(f"Reminder Dashboard: http://0.0.0.0:8000/reminders")
     logger.info(f"Habits Dashboard: http://0.0.0.0:8000/habits")
-    
+
     # Initialize databases
     auth_db.init_auth_db()
     chat_history.init_db()
@@ -2720,31 +3254,33 @@ if __name__ == "__main__":
 
     # Start reminder scheduler
     start_reminder_scheduler()
-    
+
     # Start hardware sentinel scheduler
     start_hardware_sentinel()
-    
+
     # Initialize observability (Phoenix + OpenTelemetry)
     obs_status = observability.initialize_observability()
     if obs_status["phoenix"]:
-        logger.info(f"[OBSERVABILITY] Phoenix dashboard available at: {obs_status['dashboard_url']}")
+        logger.info(
+            f"[OBSERVABILITY] Phoenix dashboard available at: {obs_status['dashboard_url']}"
+        )
         logger.info(f"[OBSERVABILITY] Auth: DISABLED (local private network)")
         logger.info(f"[OBSERVABILITY] Project: Kuro-AI-Audit")
     else:
         logger.warning("[OBSERVABILITY] Failed to start Phoenix server")
-    
+
     if obs_status["opentelemetry"]:
         logger.info("[OBSERVABILITY] OpenTelemetry instrumentation enabled")
 
     # CRITICAL: python-telegram-bot v20+ requires main thread for asyncio event loop.
     # Error: "set_wakeup_fd only works in main thread of the main interpreter"
     # Solution: Run Telegram bot in main thread, FastAPI in daemon thread.
-    
+
     # Start FastAPI in daemon thread (non-blocking)
     uvicorn_thread = threading.Thread(target=run_uvicorn, daemon=True)
     uvicorn_thread.start()
     logger.info("FastAPI server started in background thread on port 8443")
-    
+
     # Give FastAPI a moment to start
     time.sleep(2)
 
