@@ -426,18 +426,18 @@
                                                                 <div class="flex justify-between items-start mb-2">
                                                                     <div>
                                                                         <span class="font-bold text-gray-800 dark:text-white">${s.stock_code}</span>
-                                                                        <p class="text-[10px] text-gray-500 truncate max-w-[150px]">${s.company_name}</p>
+                                                                        <p class="text-[10px] text-gray-500 truncate max-w-[150px]">${s.company_name || 'IDX'}</p>
                                                                     </div>
                                                                     <span class="px-2 py-0.5 rounded text-[10px] font-bold ${
                                                                         s.conclusion === 'WORTH BUYING' ? 'bg-emerald-100 text-emerald-700' : 
                                                                         s.conclusion === 'HOLD' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'
-                                                                    }">${s.conclusion}</span>
+                                                                    }">${s.conclusion || 'N/A'}</span>
                                                                 </div>
                                                                 <div class="text-xs space-y-1 mb-3">
-                                                                    <p class="flex justify-between"><span class="text-gray-500 dark:text-gray-400">Harga / LOT:</span> <span class="font-mono font-medium dark:text-gray-300">Rp ${s.current_price_per_lot.toLocaleString('id-ID')}</span></p>
-                                                                    <p class="flex justify-between"><span class="text-gray-500 dark:text-gray-400">Proyeksi 1thn:</span> <span class="font-medium ${s.projections['1y'].toLowerCase().includes('bull') ? 'text-emerald-500' : 'text-amber-500'}">${s.projections['1y']}</span></p>
+                                                                    <p class="flex justify-between"><span class="text-gray-500 dark:text-gray-400">Harga / LOT:</span> <span class="font-mono font-medium dark:text-gray-300">Rp ${(s.current_price_per_lot || 0).toLocaleString('id-ID')}</span></p>
+                                                                    <p class="flex justify-between"><span class="text-gray-500 dark:text-gray-400">Proyeksi 1thn (ROI):</span> <span class="font-medium ${s.projected_roi_1y > 0 ? 'text-emerald-500' : 'text-amber-500'}">${s.projected_roi_1y ? s.projected_roi_1y + '%' : 'N/A'}</span></p>
                                                                 </div>
-                                                                <p class="text-[11px] text-gray-600 dark:text-gray-400 line-clamp-2 italic">"${s.reasoning}"</p>
+                                                                <p class="text-[11px] text-gray-600 dark:text-gray-400 line-clamp-2 italic">"${s.triangulation_summary || ''}"</p>
                                                             </div>
                                                         `).join('')}
                                                     </div>

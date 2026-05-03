@@ -89,6 +89,8 @@ let selectedFiles = [];
 let isProcessing = false;
 let chatHistory = [];
 let selectedPersona = 'consultant';
+let currentChatId = null;
+let chatSessions = [];
 
 // Infinite Scroll State
 let chatOffset = 0;
@@ -184,6 +186,22 @@ const elements = {
     searchInput: document.getElementById('searchInput'),
     searchResults: document.getElementById('searchResults'),
     closeSearchModal: document.getElementById('closeSearchModal'),
+    // Chat Sessions & Persona Accordion
+    chatDrawer: document.getElementById('chatDrawer'),
+    chatSessionsList: document.getElementById('chatSessionsList'),
+    toggleChatDrawer: document.getElementById('toggleChatDrawer'),
+    newChatBtn: document.getElementById('newChatBtn'),
+    personaAccordionBtn: document.getElementById('personaAccordionBtn'),
+    personaAccordionContent: document.getElementById('personaAccordionContent'),
+    personaChevron: document.getElementById('personaChevron'),
+    activePersonaName: document.getElementById('activePersonaName'),
+    // Welcome Screen
+    welcomeScreen: document.getElementById('welcomeScreen'),
+    welcomeInput: document.getElementById('welcomeInput'),
+    welcomeSendBtn: document.getElementById('welcomeSendBtn'),
+    welcomeUploadBtn: document.getElementById('welcomeUploadBtn'),
+    mainInputArea: document.getElementById('mainInputArea'),
+    backToSidebarBtn: document.getElementById('backToSidebarBtn'),
 };
 
 // ============================================
@@ -210,19 +228,41 @@ document.addEventListener('DOMContentLoaded', () => {
     updateUserInfo();
     kuroRestoreUIMode();
     kuroConnectDashboardWS();
+    // Show welcome screen on first load
+    showWelcomeScreen();
 });
 
 // ============================================
 // Event Listeners
 // ============================================
 function setupEventListeners() {
-    elements.sendBtn.addEventListener('click', sendMessage);
+    elements.sendBtn.addEventListener('click', () => sendMessage(false));
     elements.messageInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
-            sendMessage();
+            sendMessage(false);
         }
     });
+
+    if (elements.welcomeSendBtn) {
+        elements.welcomeSendBtn.addEventListener('click', () => sendMessage(true));
+        elements.welcomeInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage(true);
+            }
+        });
+        elements.welcomeUploadBtn.addEventListener('click', () => elements.fileInput.click());
+        // Auto resize welcome input
+        elements.welcomeInput.addEventListener('input', function() {
+            this.style.height = 'auto';
+            this.style.height = Math.min(this.scrollHeight, 200) + 'px';
+        });
+    }
+    
+    if (elements.backToSidebarBtn) {
+        elements.backToSidebarBtn.addEventListener('click', () => toggleChatDrawer(false));
+    }
     
     elements.uploadBtn.addEventListener('click', () => elements.fileInput.click());
     elements.fileInput.addEventListener('change', handleFileSelect);
@@ -290,40 +330,41 @@ function setupEventListeners() {
         elements.temperatureValue.textContent = e.target.value;
     });
     
-    elements.clearHistoryBtn.addEventListener('click', clearChatHistory);
-    if (elements.clearPersonaHistoryBtn) {
-        elements.clearPersonaHistoryBtn.addEventListener('click', clearPersonaChatHistory);
-    }
+    // clearHistoryBtn and clearPersonaHistoryBtn removed in V1.0.0
     setupPersonaAdminControls();
     
-    // Persona Toggle
-    if (elements.personaToggle && elements.personaDropdown) {
-        elements.personaToggle.addEventListener('click', (e) => {
-            e.stopPropagation();
-            elements.personaDropdown.classList.toggle('hidden');
-        });
+    // Persona Accordion & Sessions
+    if (elements.personaAccordionBtn) {
+        elements.personaAccordionBtn.addEventListener('click', togglePersonaAccordion);
         
-        document.addEventListener('click', (e) => {
-            if (!elements.personaDropdown.contains(e.target) && !elements.personaToggle.contains(e.target)) {
-                elements.personaDropdown.classList.add('hidden');
-            }
-        });
-        
-        document.querySelectorAll('.persona-option').forEach(option => {
+        document.querySelectorAll('.persona-option-v2').forEach(option => {
             option.addEventListener('click', () => {
-                selectedPersona = option.dataset.persona;
-                updatePersonaLabel();
-                document.querySelectorAll('.persona-option').forEach(o => o.classList.remove('bg-emerald-50', 'dark:bg-emerald-900/30'));
-                option.classList.add('bg-emerald-50', 'dark:bg-emerald-900/30');
+                const newPersona = option.dataset.persona;
+                if (newPersona !== selectedPersona) {
+                    selectedPersona = newPersona;
+                    localStorage.setItem('kuro_persona', selectedPersona);
+                    localStorage.setItem('kuro-persona', selectedPersona); // compatibility
+                    // Directly refresh page as requested to apply persona context
+                    window.location.href = `/chat?persona=${encodeURIComponent(selectedPersona)}`;
+                }
             });
         });
-        
-        if (elements.applyPersonaBtn) {
-            elements.applyPersonaBtn.addEventListener('click', applyPersona);
-        }
-        
-        loadPersona();
     }
+
+    if (elements.toggleChatDrawer) {
+        elements.toggleChatDrawer.addEventListener('click', toggleChatDrawer);
+    }
+
+    if (elements.newChatBtn) {
+        elements.newChatBtn.addEventListener('click', () => {
+            startNewChat();
+            if (window.innerWidth < 1024) toggleChatDrawer(false);
+        });
+    }
+
+    // Load initial data
+    loadPersona();
+    loadChatSessions();
 
     // User Dropdown Toggle
     if (elements.userDropdownToggle) {
@@ -425,6 +466,182 @@ function closeSidebar() {
 }
 
 // ============================================
+// Chat Session & Persona Accordion Helpers
+// ============================================
+function togglePersonaAccordion(force) {
+    const isExpanded = typeof force === 'boolean' ? !force : elements.personaAccordionContent.classList.contains('opacity-100');
+    
+    if (isExpanded) {
+        // Collapse
+        elements.personaAccordionContent.style.maxHeight = '0px';
+        elements.personaAccordionContent.classList.remove('opacity-100');
+        elements.personaAccordionContent.classList.add('opacity-0');
+        elements.personaChevron.style.transform = 'rotate(0deg)';
+    } else {
+        // Expand
+        elements.personaAccordionContent.style.maxHeight = elements.personaAccordionContent.scrollHeight + 'px';
+        elements.personaAccordionContent.classList.remove('opacity-0');
+        elements.personaAccordionContent.classList.add('opacity-100');
+        elements.personaChevron.style.transform = 'rotate(180deg)';
+    }
+}
+
+function updatePersonaUI() {
+    let personaName = selectedPersona.charAt(0).toUpperCase() + selectedPersona.slice(1);
+    
+    document.querySelectorAll('.persona-option-v2').forEach(opt => {
+        if (opt.dataset.persona === selectedPersona) {
+            opt.classList.add('active');
+            const span = opt.querySelector('.font-medium');
+            if (span) personaName = span.textContent.trim();
+        } else {
+            opt.classList.remove('active');
+        }
+    });
+    
+    if (elements.activePersonaName) elements.activePersonaName.textContent = personaName;
+}
+
+function toggleChatDrawer(force) {
+    const isOpen = typeof force === 'boolean' ? !force : elements.chatDrawer.classList.contains('active');
+    
+    if (isOpen) {
+        elements.chatDrawer.classList.remove('active', 'translate-x-0');
+        elements.chatDrawer.classList.add('-translate-x-full');
+        
+        elements.sidebar.classList.remove('lg:-translate-x-full');
+        elements.sidebar.classList.add('lg:translate-x-0');
+        if (window.innerWidth >= 1024) {
+            elements.sidebar.classList.remove('-translate-x-full');
+        }
+        elements.mainContent.classList.remove('drawer-open');
+    } else {
+        elements.chatDrawer.classList.add('active', 'translate-x-0');
+        elements.chatDrawer.classList.remove('-translate-x-full');
+        
+        elements.sidebar.classList.remove('lg:translate-x-0');
+        elements.sidebar.classList.add('-translate-x-full', 'lg:-translate-x-full');
+        
+        elements.mainContent.classList.add('drawer-open');
+        loadChatSessions();
+    }
+}
+
+async function loadChatSessions() {
+    try {
+        const response = await authFetch(`${CONFIG.API_BASE}/chats?persona=${selectedPersona}`);
+        const result = await response.json();
+        if (result.status === 'success') {
+            chatSessions = result.data;
+            renderChatSessions();
+        }
+    } catch (error) {
+        console.error('Failed to load sessions:', error);
+    }
+}
+
+function renderChatSessions() {
+    if (!elements.chatSessionsList) return;
+    
+    if (chatSessions.length === 0) {
+        elements.chatSessionsList.innerHTML = `
+            <div class="flex flex-col items-center justify-center h-full text-gray-400 space-y-2 opacity-50">
+                <i data-lucide="message-square" class="w-8 h-8"></i>
+                <p class="text-xs">No sessions for ${selectedPersona}</p>
+            </div>
+        `;
+        lucide.createIcons();
+        return;
+    }
+    
+    elements.chatSessionsList.innerHTML = chatSessions.map(session => `
+        <div class="session-item group relative flex items-center gap-3 px-3 py-2.5 rounded-xl cursor-pointer ${currentChatId === session.chat_id ? 'active' : 'text-gray-600 dark:text-gray-400'}" 
+             onclick="selectChatSession('${session.chat_id}')" data-chat-id="${session.chat_id}">
+            <i data-lucide="message-circle" class="w-4 h-4 flex-shrink-0"></i>
+            <span class="text-sm font-medium truncate flex-1">${session.title || 'New Chat'}</span>
+            <div class="flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
+                <button onclick="event.stopPropagation(); renameChatSession('${session.chat_id}')" class="p-1 hover:text-emerald-500">
+                    <i data-lucide="pencil" class="w-3 h-3"></i>
+                </button>
+                <button onclick="event.stopPropagation(); deleteChatSession('${session.chat_id}')" class="p-1 hover:text-red-500">
+                    <i data-lucide="trash-2" class="w-3 h-3"></i>
+                </button>
+            </div>
+        </div>
+    `).join('');
+    lucide.createIcons();
+}
+
+function startNewChat() {
+    currentChatId = null;
+    chatHistory = [];
+    chatOffset = 0;
+    hasMoreMessages = true;
+    elements.chatContainer.innerHTML = '';
+    
+    elements.chatContainer.classList.add('hidden');
+    if (elements.mainInputArea) elements.mainInputArea.classList.add('hidden');
+    if (elements.welcomeScreen) {
+        elements.welcomeScreen.classList.remove('hidden');
+        elements.welcomeInput.value = '';
+        setTimeout(() => elements.welcomeInput.focus(), 100);
+    }
+    
+    renderChatSessions();
+    lucide.createIcons();
+}
+
+async function selectChatSession(chatId) {
+    if (currentChatId === chatId) return;
+    currentChatId = chatId;
+    chatOffset = 0;
+    hasMoreMessages = true;
+    chatHistory = [];
+    
+    if (elements.welcomeScreen) elements.welcomeScreen.classList.add('hidden');
+    elements.chatContainer.classList.remove('hidden');
+    if (elements.mainInputArea) elements.mainInputArea.classList.remove('hidden');
+    
+    elements.chatContainer.innerHTML = '<div class="flex justify-center p-8"><div class="spinner border-emerald-500"></div></div>';
+    
+    renderChatSessions();
+    await kuroLoadHistory(true);
+}
+
+async function deleteChatSession(chatId) {
+    if (!confirm('Are you sure you want to delete this chat session?')) return;
+    
+    try {
+        const response = await authFetch(`${CONFIG.API_BASE}/chats/${chatId}`, { method: 'DELETE' });
+        if (response.ok) {
+            if (currentChatId === chatId) startNewChat();
+            loadChatSessions();
+        }
+    } catch (error) {
+        console.error('Delete failed:', error);
+    }
+}
+
+async function renameChatSession(chatId) {
+    const session = chatSessions.find(s => s.chat_id === chatId);
+    const newTitle = prompt('Enter new title:', session?.title || '');
+    if (!newTitle || newTitle === session?.title) return;
+    
+    try {
+        const response = await authFetch(`${CONFIG.API_BASE}/chats/${chatId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title: newTitle })
+        });
+        if (response.ok) {
+            loadChatSessions();
+        }
+    } catch (error) {
+        console.error('Rename failed:', error);
+    }
+}
+
+// ============================================
 // Sidebar Collapse Toggle (Desktop)
 // ============================================
 function toggleSidebarCollapse() {
@@ -481,27 +698,30 @@ function handleScroll() {
     }
 }
 
-async function loadMoreMessages() {
-    if (isLoadingMore || !hasMoreMessages) return;
+async function kuroLoadHistory(isInitial = false) {
+    if (isLoadingMore) return;
+    if (isInitial) {
+        chatOffset = 0;
+        hasMoreMessages = true;
+        chatHistory = [];
+        elements.chatContainer.innerHTML = '';
+    }
+    if (!hasMoreMessages) return;
     
     isLoadingMore = true;
     elements.scrollLoader.classList.add('visible');
     
-    // Save current scroll height and position for anchor retention
     const previousScrollHeight = elements.chatContainer.scrollHeight;
     const previousScrollTop = elements.chatContainer.scrollTop;
     
     try {
-        // FIX: Add platform=web filter to only load web messages
-        const response = await authFetch(
-            `${CONFIG.API_BASE}/history?limit=${CONFIG.CHAT_PAGE_SIZE}&offset=${chatOffset}&platform=web&persona=${encodeURIComponent(selectedPersona)}`
-        );
+        let url = `${CONFIG.API_BASE}/history?limit=${CONFIG.CHAT_PAGE_SIZE}&offset=${chatOffset}&platform=web&persona=${encodeURIComponent(selectedPersona)}`;
+        if (currentChatId) url += `&chat_id=${currentChatId}`;
+        
+        const response = await authFetch(url);
         const data = await response.json();
         
         if (data.status === 'success' && data.history.length > 0) {
-            // FIX: Backend already returns data in chronological order (oldest first).
-            // For infinite scroll (loading older messages), we need to prepend them
-            // in reverse order so the oldest appears at the very top.
             const messages = [...data.history].reverse();
             messages.forEach(msg => {
                 const role = msg.role === 'user' ? 'user' : 'ai';
@@ -512,21 +732,32 @@ async function loadMoreMessages() {
             chatOffset += data.history.length;
             hasMoreMessages = data.has_more;
             
-            // Scroll anchor retention: maintain visual position
-            requestAnimationFrame(() => {
-                const newScrollHeight = elements.chatContainer.scrollHeight;
-                const heightDifference = newScrollHeight - previousScrollHeight;
-                elements.chatContainer.scrollTop = previousScrollTop + heightDifference;
-            });
+            if (isInitial) {
+                scrollToBottom();
+            } else {
+                requestAnimationFrame(() => {
+                    const newScrollHeight = elements.chatContainer.scrollHeight;
+                    const heightDifference = newScrollHeight - previousScrollHeight;
+                    elements.chatContainer.scrollTop = previousScrollTop + heightDifference;
+                });
+            }
         } else {
             hasMoreMessages = false;
+            if (isInitial) {
+                startNewChat();
+            }
         }
     } catch (error) {
-        console.error('Failed to load more messages:', error);
+        console.error('Failed to load history:', error);
     } finally {
         isLoadingMore = false;
         elements.scrollLoader.classList.remove('visible');
     }
+}
+
+// Keep loadMoreMessages as alias for scroll handler
+async function loadMoreMessages() {
+    return kuroLoadHistory(false);
 }
 
 // ============================================
@@ -850,26 +1081,43 @@ function removeFile(index) {
     updateFilePreview();
 }
 
-// ============================================
-// Chat Functions
+function showWelcomeScreen() {
+    if (elements.welcomeScreen) elements.welcomeScreen.classList.remove('hidden');
+    elements.chatContainer.classList.add('hidden');
+    if (elements.mainInputArea) elements.mainInputArea.classList.add('hidden');
+    
+    // Close sidebar on mobile when starting new chat
+    if (window.innerWidth < 1024) {
+        closeSidebar();
+    }
+}
 // ============================================
 // V5.5 STREAMING: Send message with SSE streaming
 // ============================================
-async function sendMessage() {
-    const message = elements.messageInput.value.trim();
+async function sendMessage(isFromWelcome = false) {
+    const inputElement = isFromWelcome ? elements.welcomeInput : elements.messageInput;
+    const sendBtnElement = isFromWelcome ? elements.welcomeSendBtn : elements.sendBtn;
+    const message = inputElement.value.trim();
     
     if (!message && selectedFiles.length === 0) return;
     if (isProcessing) return;
     
     isProcessing = true;
-    elements.sendBtn.disabled = true;
+    if (elements.sendBtn) elements.sendBtn.disabled = true;
+    if (elements.welcomeSendBtn) elements.welcomeSendBtn.disabled = true;
+    
+    if (isFromWelcome) {
+        if (elements.welcomeScreen) elements.welcomeScreen.classList.add('hidden');
+        elements.chatContainer.classList.remove('hidden');
+        if (elements.mainInputArea) elements.mainInputArea.classList.remove('hidden');
+    }
     
     // Add user message to chat
     addMessageToChat('user', message, selectedFiles);
     
     // Clear input
-    elements.messageInput.value = '';
-    elements.messageInput.style.height = 'auto';
+    inputElement.value = '';
+    inputElement.style.height = 'auto';
     
     // Prepare files for upload
     const filesToSend = [...selectedFiles];
@@ -880,7 +1128,7 @@ async function sendMessage() {
     const aiMessageDiv = document.createElement('div');
     aiMessageDiv.className = 'flex items-start gap-3 message-enter';
     aiMessageDiv.innerHTML = `
-        <div class="w-8 h-8 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center flex-shrink-0"><i data-lucide="cat" class="w-4 h-4 text-white"></i></div>
+        <div class="w-8 h-8 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center flex-shrink-0"><i class="fa-solid fa-shield-cat text-white text-sm"></i></div>
         <div class="max-w-[85%] lg:max-w-[70%]">
             <div class="chat-bubble-ai px-4 py-3 shadow-sm">
                 <div class="typing-indicator" id="thinkingIndicator">
@@ -919,6 +1167,7 @@ async function sendMessage() {
         const formData = new FormData();
         formData.append('message', message);
         formData.append('persona', selectedPersona);
+        if (currentChatId) formData.append('chat_id', currentChatId);
         filesToSend.forEach(file => formData.append('files', file));
         
         // STEP 2: Fetch the streaming endpoint
@@ -1012,11 +1261,18 @@ async function sendMessage() {
                         if (wasPinnedToBottom) {
                             scrollToBottom();
                         }
+                        // Refresh session list to catch title updates
+                        loadChatSessions();
                     } else if (eventType === 'error' && data.error) {
                         streamHadError = true;
                         streamingContent.innerHTML = `<span style="color:red">Error: ${escapeHtml(data.error)}</span>`;
                     } else if (eventType === 'meta') {
                         streamMeta = data;
+                        if (data && data.chat_id) {
+                            currentChatId = data.chat_id;
+                            // Re-load sessions to show the new one
+                            loadChatSessions();
+                        }
                         if (data && data.ui_command) {
                             kuroApplyUIMode(data.ui_command, data.payload || {});
                         }
@@ -1042,11 +1298,17 @@ async function sendMessage() {
             scrollToBottom();
         }
         
+        // V1.0.0: After completion, if this was the first message, refresh sessions to show the new title
+        if (!currentChatId || chatHistory.length <= 2) {
+            setTimeout(loadChatSessions, 1500); // Wait for background title gen
+        }
+
+        // Save AI message to internal history
+        chatHistory.push({ role: 'assistant', content: botMessage });
+        
     } catch (error) {
         console.error('Chat error:', error);
-        // Error handling with recovery - show red text in the SAME bubble
         if (streamingContent) {
-            // If we already have partial content, show it with error notice
             if (botMessage) {
                 streamingContent.innerHTML = marked.parse(botMessage) +
                     `<p style="color:#f59e0b;margin-top:8px"><em>⚠️ Connection interrupted, but partial response above is available.</em></p>`;
@@ -1058,8 +1320,12 @@ async function sendMessage() {
         }
     } finally {
         isProcessing = false;
-        elements.sendBtn.disabled = false;
-        // FIX: DO NOT call loadHistory() here - DOM is already updated in real-time
+        if (elements.sendBtn) elements.sendBtn.disabled = false;
+        if (elements.welcomeSendBtn) elements.welcomeSendBtn.disabled = false;
+        // Fix Bug 2: Reset file input and state
+        elements.fileInput.value = '';
+        selectedFiles = [];
+        updateFilePreview();
     }
 }
 
@@ -1093,7 +1359,7 @@ function addMessageToChat(role, content, files = [], messageId = null) {
     // Avatar
     const avatar = role === 'user'
         ? `<div class="w-8 h-8 rounded-full bg-gradient-to-br from-purple-400 to-pink-500 flex items-center justify-center flex-shrink-0 text-white font-bold text-sm">P</div>`
-        : `<div class="w-8 h-8 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center flex-shrink-0"><i data-lucide="cat" class="w-4 h-4 text-white"></i></div>`;
+        : `<div class="w-8 h-8 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center flex-shrink-0"><i class="fa-solid fa-shield-cat text-white text-sm"></i></div>`;
     
     let contentHtml = '';
     
@@ -1172,7 +1438,7 @@ function prependMessageToChat(role, content, attachments = [], messageId = null)
     
     const avatar = role === 'user' 
         ? `<div class="w-8 h-8 rounded-full bg-gradient-to-br from-purple-400 to-pink-500 flex items-center justify-center flex-shrink-0 text-white font-bold text-sm">P</div>`
-        : `<div class="w-8 h-8 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center flex-shrink-0"><i data-lucide="cat" class="w-4 h-4 text-white"></i></div>`;
+        : `<div class="w-8 h-8 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center flex-shrink-0"><i class="fa-solid fa-shield-cat text-white text-sm"></i></div>`;
     
     let contentHtml = '';
     
@@ -2066,16 +2332,11 @@ async function loadPersona() {
     }
     
     localStorage.setItem('kuro-persona', selectedPersona);
+    localStorage.setItem('kuro_persona', selectedPersona); // consistency
     setPersonaInUrl(selectedPersona, false);
     
-    updatePersonaLabel();
-    
-    document.querySelectorAll('.persona-option').forEach(option => {
-        option.classList.remove('bg-emerald-50', 'dark:bg-emerald-900/30');
-        if (option.dataset.persona === selectedPersona) {
-            option.classList.add('bg-emerald-50', 'dark:bg-emerald-900/30');
-        }
-    });
+    // Use the new UI updater for the sidebar accordion
+    updatePersonaUI();
     await loadChatHistory();
 }
 

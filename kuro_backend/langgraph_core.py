@@ -448,6 +448,9 @@ class KuroState(TypedDict):
     master_name: str              # User-specific name (e.g. Pantronux, Master Faikhira)
     username: str                 # System username for memory isolation
     custom_persona: str           # User-specific global instructions
+    # --- Anti-Halusinasi epistemic fields (V1.0.0) ---
+    _autorag_notification: str    # Pre-formatted notification if retrieval was poor
+    epistemic_labels: Dict[str, List[str]]  # claim_text -> [label, source_ref]
 
 
 # ============================================
@@ -784,7 +787,8 @@ def retrieval_grader_node(state: KuroState) -> Dict[str, Any]:
     # ── Fast path: nothing retrieved ─────────────────────────────────────────
     if not memories:
         logger.info("[RAG_GRADER] No memories retrieved — grade=irrelevant")
-        return {"retrieval_grade": "irrelevant"}
+        notification = personas.build_autorag_notification_block("irrelevant", retry_count)
+        return {"retrieval_grade": "irrelevant", "_autorag_notification": notification}
 
     # Summarise retrieved context for the grader prompt (cap at 1200 chars)
     context_preview = "\n".join(
@@ -824,7 +828,8 @@ def retrieval_grader_node(state: KuroState) -> Dict[str, Any]:
         "[RAG_GRADER] retry=%d grade=%s memories=%d",
         retry_count, grade, len(memories),
     )
-    return {"retrieval_grade": grade}
+    notification = personas.build_autorag_notification_block(grade, retry_count)
+    return {"retrieval_grade": grade, "_autorag_notification": notification}
 
 
 def query_transform_node(state: KuroState) -> Dict[str, Any]:
@@ -1126,8 +1131,13 @@ def executive_monitor_node(state: KuroState) -> Dict[str, Any]:
                 simulated_outcomes,
                 key=lambda d: int(d.get(score_key, 0)),
             ) if pick_highest else draft_a
+            # Anti-Halusinasi: label all simulation drafts as SPECULATIVE
+            for draft in simulated_outcomes:
+                draft["_epistemic"] = "SPECULATIVE"
+            if selected_outcome:
+                selected_outcome["_epistemic"] = "SPECULATIVE"
             logger.info(
-                "[EXECUTIVE] Simulation done. Selected=%s score=%s",
+                "[EXECUTIVE] Simulation done. Selected=%s score=%s [SPECULATIVE]",
                 selected_outcome.get("label"),
                 selected_outcome.get(score_key),
             )
@@ -1267,9 +1277,33 @@ def reflective_response_node(state: KuroState) -> Dict[str, Any]:
             f"Mohon arahkan kembali ke tujuan disertasi kita. "
             f"Jika ini memang diperlukan, gunakan persona yang sesuai (chill/tactical)."
         )
+        # Anti-Halusinasi: epistemic disclaimer for inhibition messages
+        # (Note: tags like [INFERRED] are NOT included here — they are
+        #  stripped from user-facing output by the epistemic post-filter)
+        msg += (
+            "\n\n---\n"
+            "⚠️ **Epistemic Notice:** This inhibition is based on "
+            "pattern matching and intent classification. The determination "
+            "that this request is off-track has not been verified with "
+            "external sources."
+        )
         return {"final_response": msg}
 
     # Metacognitive reflective message already in final_response — pass through.
+    # Anti-Halusinasi: add user-facing notice if this is a conflict-based message
+    if state.get("metacognitive_flag"):
+        existing = state.get("final_response", "")
+        if existing and "Epistemic Notice" not in existing:
+            return {
+                "final_response": (
+                    existing
+                    + "\n\n---\n"
+                    "⚠️ **Epistemic Notice:** This realignment "
+                    "assessment is based on a comparison between current input "
+                    "and prior BRD commitments. The recommendation is an "
+                    "inference from stored research ledger data."
+                )
+            }
     return {}
 
 
@@ -1360,6 +1394,25 @@ def response_node(state: KuroState) -> Dict[str, Any]:
                 system_prompt += cot_inj
         except Exception as _cot_exc:
             logger.debug("[RESPONSE_NODE] cognitive_effort CoT skipped: %s", _cot_exc)
+
+        # ── Anti-Halusinasi Epistemic Pre-Filter ─────────────────────────────
+        autorag_notice = state.get("_autorag_notification", "")
+        if autorag_notice:
+            system_prompt += f"\n\n{autorag_notice}"
+
+        retrieval_grade = state.get("retrieval_grade", "relevant")
+        if retrieval_grade in ("irrelevant", "ambiguous"):
+            # Dedup: skip if metacognitive already emitted evidence note
+            mc_flag = state.get("metacognitive_flag", False)
+            mc_score = state.get("alignment_score", 1.0)
+            if not (mc_flag and mc_score < 0.35):
+                system_prompt += (
+                    "\n\n⚠️ EPISTEMIC CAUTION: Memory retrieval quality is POOR. "
+                    "You MUST label every factual claim with [VERIFIED: search], "
+                    "[INFERRED], or [SPECULATIVE]. DO NOT fabricate specific "
+                    "numbers, dates, filenames, or function names without a "
+                    "verifiable source."
+                )
 
         # Assemble per-section context blocks so we can apply the token budget
         # uniformly. Each block is independently trimmed to its quota before
@@ -1520,6 +1573,42 @@ def response_node(state: KuroState) -> Dict[str, Any]:
                 _v7_reset_announcement_sent = True
 
 
+
+        # ── Anti-Halusinasi Epistemic Post-Filter ────────────────────────────
+        if response_text:
+            try:
+                from kuro_backend.epistemic_filter import epistemic_filter as ef
+
+                retrieval_grade = state.get("retrieval_grade", "relevant")
+                has_memory = bool(state.get("mem0_retrieved_memories"))
+
+                # Step 1: Internally label claims for hard-rule checking & audit
+                labeled = ef.label_claims_in_response(
+                    response_text,
+                    retrieval_grade=retrieval_grade,
+                    has_memory=has_memory,
+                )
+
+                # Step 2: Check hard rules against labeled version
+                violation = ef.check_hard_rules(labeled)
+                if violation:
+                    logger.warning("[EPISTEMIC] Hard rule violation: %s", violation)
+
+                # Step 3: Count claim density for audit logging
+                density = ef.count_claim_density(labeled)
+                logger.info("[EPISTEMIC] Claim density: %s", density)
+
+                # Step 4: Inject disclaimer if speculative/unknown claims exist
+                #         (disclaimer IS user-facing — not an internal tag)
+                labeled = ef.inject_disclaimer_if_needed(labeled)
+
+                # Step 5: Strip all internal tags from the final user-facing text
+                #         Tags like [VERIFIED: memory], [INFERRED], [SPECULATIVE]
+                #         are used for internal audit only — not shown in chat stream.
+                response_text = ef.strip_labels(labeled)
+
+            except Exception as _ep_exc:
+                logger.warning("[EPISTEMIC] Post-filter skipped: %s", _ep_exc)
 
         # Single consolidated persist path (short-term + enqueue memory_write + mem0_extract).
         # memory_extraction_node still runs as a dedupe/guardian, but mem0 fingerprint dedupe
@@ -2202,6 +2291,9 @@ async def process_chat_with_graph_stream(
             "retrieval_grade": "relevant",
             "retrieval_retry_count": 0,
             "rewritten_query": "",
+            # Anti-Halusinasi defaults
+            "_autorag_notification": "",
+            "epistemic_labels": {},
             "username": username,
             "custom_persona": custom_persona,
             "_intent": "new",
@@ -2453,6 +2545,9 @@ def process_chat_with_graph(
             "retrieval_grade": "relevant",
             "retrieval_retry_count": 0,
             "rewritten_query": "",
+            # Anti-Halusinasi defaults
+            "_autorag_notification": "",
+            "epistemic_labels": {},
             "_intent": "new",
         }
 

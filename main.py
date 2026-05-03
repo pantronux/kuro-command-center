@@ -57,7 +57,9 @@ from kuro_backend.services.schemas import (
     PredictionWatchRecord,
     RecurringExpenseRecord,
     WatchedSymbolRecord,
+    ChatSessionRecord,
 )
+from kuro_backend import llm_utils
 from kuro_backend import finance_db
 from kuro_backend import auth_db
 from kuro_backend import observability
@@ -109,6 +111,13 @@ FAIKHIRA_MASTER_NAME = os.getenv("FAIKHIRA_MASTER_NAME", "Master Faikhira")
 COOKIE_NAME = "kuro_access_token"
 CHAT_SESSION_HEADER = "X-Chat-Session"
 _CHAT_SESSION_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{8,128}$")
+
+class ChatSessionUpdate(BaseModel):
+    title: str
+
+class NewChatSession(BaseModel):
+    persona: str
+    title: str = "New Chat"
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verify a plain password against a bcrypt hash."""
@@ -163,7 +172,9 @@ def api_error(error: str, trace_id: Optional[str] = None, **extra: Any) -> Dict[
     return payload
 
 
-def _resolve_chat_session_id(request: Request) -> str:
+def _resolve_chat_session_id(request: Request, form_chat_id: str = None) -> str:
+    if form_chat_id and _CHAT_SESSION_PATTERN.match(form_chat_id):
+        return form_chat_id
     raw = (request.headers.get(CHAT_SESSION_HEADER) or "").strip()
     if raw and _CHAT_SESSION_PATTERN.match(raw):
         return raw
@@ -790,6 +801,7 @@ async def chat_endpoint(
     message: str = Form(""),
     files: list[UploadFile] = File([]),
     persona: str = Form(None),
+    chat_id: str = Form(None),
 ):
     """Handle chat requests from the web interface with vision and file reading support. (Non-streaming fallback)"""
     try:
@@ -812,7 +824,14 @@ async def chat_endpoint(
             )
             
         request_id = f"web_{uuid.uuid4().hex}"
-        session_scope = _resolve_chat_session_id(request)
+        
+        is_new_session = False
+        if not chat_id or not str(chat_id).strip() or str(chat_id).strip().lower() == "null":
+            chat_id = str(uuid.uuid4())
+            is_new_session = True
+            chat_history.create_session(chat_id, username, resolved_persona, "New Chat")
+            
+        session_scope = _resolve_chat_session_id(request, chat_id)
 
         # UI mode router gate — intercept "Kuro, mode riset" style commands
         # before hitting the LangGraph core. When the cleaned remainder is
@@ -933,7 +952,22 @@ async def chat_endpoint(
             persona=resolved_persona,
             request_id=request_id,
             username=username,
+            chat_id=session_scope,
         )
+        
+        # Check if we need to generate a title (if session has only 1 user message)
+        # This is done in a background task to not block the chat response
+        async def _maybe_generate_title(cid, msg):
+            history = chat_history.get_history(username=username, chat_id=cid, limit=5)
+            # Filter user messages
+            user_msgs = [m for m in history if m["role"] == "user"]
+            if len(user_msgs) == 1:
+                new_title = llm_utils.generate_chat_title(msg)
+                chat_history.update_session_title(cid, new_title)
+                logger.info(f"[TITLE_GEN] Generated title for {cid}: {new_title}")
+
+        if not session_scope.startswith("legacy_"):
+            asyncio.create_task(_maybe_generate_title(session_scope, message))
         
         # Process with AI core using LangGraph (with vision if images uploaded)
         response = process_chat_with_graph(
@@ -948,7 +982,16 @@ async def chat_endpoint(
         )
         
         # Save AI response to chat history
-        chat_history.add_message("web", "assistant", response, persona=resolved_persona, request_id=request_id, username=username)
+        chat_history.add_message(
+            "web",
+            "assistant",
+            response,
+            [],
+            persona=resolved_persona,
+            request_id=request_id,
+            username=username,
+            chat_id=session_scope,
+        )
         
         return api_success(
             data={"response": response},
@@ -967,6 +1010,7 @@ async def chat_stream_endpoint(
     message: str = Form(""),
     files: list[UploadFile] = File([]),
     persona: str = Form(None),
+    chat_id: str = Form(None),
 ):
     """V6.0 STREAMING: Handle chat requests with Server-Sent Events (SSE) streaming."""
     from fastapi.responses import StreamingResponse
@@ -979,15 +1023,12 @@ async def chat_stream_endpoint(
         first_chunk_ms = None
         stream_metrics: Dict[str, Any] = {}
         try:
-            yield f"event: meta\ndata: {json.dumps({'trace_id': trace_id, 'phase': 'started'}, ensure_ascii=False)}\n\n"
             # Resolve user context
             token = get_token_from_cookie(request)
             user = validate_token(token)
             username = user.get("username") if user else ADMIN_USERNAME
             user_info = auth_db.get_user(username) or {}
             master_name = user_info.get("master_name", "Master Pantronux")
-            
-            session_scope = _resolve_chat_session_id(request)
             
             # Persona restriction
             restricted_persona = user_info.get("restricted_persona")
@@ -997,6 +1038,23 @@ async def chat_stream_endpoint(
                 resolved_persona = memory_manager.normalize_persona(
                     persona or request.query_params.get("persona") or memory_manager.get_active_persona()
                 )
+
+            # Auto-provision chat session if not provided
+            is_new_session = False
+            if not chat_id or not str(chat_id).strip() or str(chat_id).strip().lower() == "null":
+                resolved_chat_id = str(uuid.uuid4())
+                is_new_session = True
+                chat_history.create_session(resolved_chat_id, username, resolved_persona, "New Chat")
+            else:
+                resolved_chat_id = str(chat_id).strip()
+                
+            session_scope = _resolve_chat_session_id(request, resolved_chat_id)
+            
+            meta_payload = {'trace_id': trace_id, 'phase': 'started'}
+            if is_new_session:
+                meta_payload['chat_id'] = session_scope
+                
+            yield f"event: meta\ndata: {json.dumps(meta_payload, ensure_ascii=False)}\n\n"
 
             # UI mode router gate — broadcast the UI command and short-
             # circuit the SSE stream when the user's message is purely a
@@ -1124,7 +1182,21 @@ async def chat_stream_endpoint(
                 persona=resolved_persona,
                 request_id=request_id,
                 username=username,
+                chat_id=session_scope,
             )
+            
+            # Check if we need to generate a title (if session has only 1 user message)
+            async def _maybe_generate_title(cid, msg):
+                history = chat_history.get_history(username=username, chat_id=cid, limit=5)
+                # Filter user messages
+                user_msgs = [m for m in history if m["role"] == "user"]
+                if len(user_msgs) == 1:
+                    new_title = llm_utils.generate_chat_title(msg)
+                    chat_history.update_session_title(cid, new_title)
+                    logger.info(f"[TITLE_GEN] Generated title for {cid}: {new_title}")
+
+            if not session_scope.startswith("legacy_"):
+                asyncio.create_task(_maybe_generate_title(session_scope, user_message))
             
             # V6.0: Stream response - no guardrail overhead, direct LLM response
             full_response = []
@@ -1153,9 +1225,11 @@ async def chat_stream_endpoint(
                 "web",
                 "assistant",
                 response_text,
+                [],
                 persona=resolved_persona,
                 request_id=request_id,
                 username=username,
+                chat_id=session_scope,
             )
             total_ms = round((time.perf_counter() - request_started) * 1000, 2)
             observability.record_latency_metric("chat_stream_total_ms", total_ms)
@@ -1419,6 +1493,66 @@ async def compliance_stats():
 @app.get("/api/compliance/search")
 async def compliance_search(query: str):
     return JSONResponse(status_code=410, content={"status": "disabled", "message": "Compliance module purged in KURO V1.0.0"})
+
+# --- Chat Session Management ---
+@app.get("/api/chats")
+async def get_chats(request: Request, persona: str = None):
+    """Get all chat sessions for the current user and persona."""
+    token = get_token_from_cookie(request)
+    user = validate_token(token)
+    username = user.get("username") if user else ADMIN_USERNAME
+    
+    if not persona:
+        persona = memory_manager.get_active_persona()
+    
+    sessions = chat_history.get_sessions(username, persona)
+    return api_success(data=sessions)
+
+@app.post("/api/chats")
+async def create_chat(request: Request, session_data: NewChatSession):
+    """Create a new chat session."""
+    token = get_token_from_cookie(request)
+    user = validate_token(token)
+    username = user.get("username") if user else ADMIN_USERNAME
+    
+    chat_id = f"chat_{uuid.uuid4().hex[:12]}"
+    success = chat_history.create_session(
+        chat_id=chat_id,
+        username=username,
+        persona=session_data.persona,
+        title=session_data.title
+    )
+    
+    if success:
+        return api_success(data={"chat_id": chat_id, "title": session_data.title})
+    else:
+        return api_error("Gagal membuat sesi chat baru.")
+
+@app.put("/api/chats/{chat_id}")
+async def update_chat_title(request: Request, chat_id: str, update: ChatSessionUpdate):
+    """Update chat session title."""
+    token = get_token_from_cookie(request)
+    if not validate_token(token):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    success = chat_history.update_session_title(chat_id, update.title)
+    if success:
+        return api_success(message="Judul chat diperbarui.")
+    else:
+        return api_error("Gagal memperbarui judul chat.")
+
+@app.delete("/api/chats/{chat_id}")
+async def delete_chat(request: Request, chat_id: str):
+    """Delete a chat session and its history."""
+    token = get_token_from_cookie(request)
+    if not validate_token(token):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    success = chat_history.delete_session(chat_id)
+    if success:
+        return api_success(message="Sesi chat dihapus.")
+    else:
+        return api_error("Gagal menghapus sesi chat.")
 
 # --- Intelligence Hub Routes ---
 @app.get("/api/intelligence/history")
@@ -2112,9 +2246,17 @@ def start_reminder_scheduler():
         replace_existing=True
     )
 
-    # Price ticker update (every 30 min, market-aligned)
+    # Quantitative updates for all users
+    def run_all_price_updates():
+        all_users = auth_db.get_all_users() or ["Pantronux"]
+        for u in all_users:
+            try:
+                price_ticker_worker.run_price_update(username=u)
+            except Exception as e:
+                logger.error(f"[TICKER] Failed for {u}: {e}")
+
     _reminder_scheduler.add_job(
-        price_ticker_worker.run_price_update,
+        run_all_price_updates,
         'cron',
         day_of_week='mon-fri',
         hour='9-16',
@@ -2124,11 +2266,19 @@ def start_reminder_scheduler():
         max_instances=1,
         coalesce=True
     )
-    logger.info("Price Ticker updates scheduled (Mon-Fri 09:00-16:00 every 30m).")
+    logger.info("Price Ticker updates scheduled for all users.")
 
-    # Market Sentinel autonomous scans (Mon-Fri market-aligned)
+    # Market Sentinel autonomous scans for all users
+    def run_all_sentinel_scans():
+        all_users = auth_db.get_all_users() or ["Pantronux"]
+        for u in all_users:
+            try:
+                market_sentinel.run_triangulation_scan(username=u)
+            except Exception as e:
+                logger.error(f"[SENTINEL] Failed for {u}: {e}")
+
     _reminder_scheduler.add_job(
-        market_sentinel.run_triangulation_scan,
+        run_all_sentinel_scans,
         'cron',
         day_of_week='mon-fri',
         hour='9,13,17,21',
@@ -2138,7 +2288,7 @@ def start_reminder_scheduler():
         max_instances=1,
         coalesce=True
     )
-    logger.info("Market Sentinel Triangulation scans scheduled (Mon-Fri 09/13/17/21).")
+    logger.info("Market Sentinel Triangulation scans scheduled for all users.")
 
     # Autonomous memory dreaming cycle (Kuro AI V6.0 Sovereign).
     if os.getenv("KURO_DREAMING_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on"):
@@ -2224,15 +2374,21 @@ def send_daily_intelligence_briefing():
                     pass
 
                 # Message 1: Main Briefing
-                telegram_message = format_telegram_message(briefing, display_name=display_name)
-                telegram_notifier.send_message(telegram_message)
+                # TELEGRAM FILTER: Only send to Master/Admin to avoid double-spamming global channel
+                is_admin = (username == os.getenv("ADMIN_USERNAME", "Pantronux"))
                 
-                # Message 2: Stock Recommendations
-                stock_message = format_stock_telegram_message(briefing)
-                if stock_message:
-                    telegram_notifier.send_message(stock_message)
-                
-                logger.info(f"[INTELLIGENCE] Daily briefing sent to Telegram for {username}")
+                if is_admin:
+                    telegram_message = format_telegram_message(briefing, display_name=display_name)
+                    telegram_notifier.send_message(telegram_message)
+                    
+                    # Message 2: Stock Recommendations
+                    stock_message = format_stock_telegram_message(briefing)
+                    if stock_message:
+                        telegram_notifier.send_message(stock_message)
+                    
+                    logger.info(f"[INTELLIGENCE] Daily briefing sent to Telegram for {username}")
+                else:
+                    logger.info(f"[INTELLIGENCE] Briefing generated for {username}, skipping Telegram (non-Admin).")
             except Exception as user_exc:
                 logger.error(f"[INTELLIGENCE] Failed to send briefing for {username}: {user_exc}")
                 
@@ -2544,9 +2700,10 @@ if __name__ == "__main__":
     logger.info(f"Reminder Dashboard: http://0.0.0.0:8000/reminders")
     logger.info(f"Habits Dashboard: http://0.0.0.0:8000/habits")
     
-    # Initialize auth database
+    # Initialize databases
     auth_db.init_auth_db()
-    logger.info("Auth database initialized for brute force protection")
+    chat_history.init_db()
+    logger.info("Databases initialized (Auth & Chat History)")
 
     def signal_handler(sig, frame):
         logger.info("Received interrupt signal. Shutting down gracefully...")

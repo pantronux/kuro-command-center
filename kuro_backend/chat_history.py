@@ -145,13 +145,30 @@ def init_db():
             ON uploaded_file_integrity(username)
             """
         )
-        cursor.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_uploaded_expires
-            ON uploaded_file_integrity(expires_at, archived_at)
-            WHERE archived_at IS NULL
-            """
-        )
+        # chat_sessions table for multi-session support
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS chat_sessions (
+                chat_id TEXT PRIMARY KEY,
+                username TEXT NOT NULL,
+                persona TEXT NOT NULL,
+                title TEXT DEFAULT 'New Chat',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_chat_sessions_user_persona ON chat_sessions(username, persona)")
+
+        # Migration: Add chat_id to chat_history
+        cursor.execute("PRAGMA table_info(chat_history)")
+        columns = {row[1] for row in cursor.fetchall()}
+        if "chat_id" not in columns:
+            cursor.execute("ALTER TABLE chat_history ADD COLUMN chat_id TEXT")
+            logger.info("chat_history migration: added chat_id column")
+            # Populate legacy chats with a default ID based on user_persona
+            cursor.execute("UPDATE chat_history SET chat_id = 'legacy_' || username || '_' || persona WHERE chat_id IS NULL")
+        
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_chat_history_chat_id ON chat_history(chat_id)")
+
         conn.commit()
         logger.info(f"Chat history database initialized at {DB_PATH}")
     except Exception as e:
@@ -168,6 +185,7 @@ def add_message(
     persona: Optional[str] = None,
     request_id: Optional[str] = None,
     username: str = "Pantronux",
+    chat_id: Optional[str] = None,
 ):
     """Add a message to the chat history."""
     conn = None
@@ -175,10 +193,21 @@ def add_message(
         conn = _get_connection()
         cursor = conn.cursor()
         normalized_persona = memory_manager.normalize_persona(persona)
+        
+        # If no chat_id provided, fallback to legacy format
+        final_chat_id = chat_id or f"legacy_{username}_{normalized_persona}"
+        
         cursor.execute(
-            "INSERT OR IGNORE INTO chat_history (platform, role, content, attachments, persona, request_id, username) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (platform, role, content, json.dumps(attachments or []), normalized_persona, request_id, username)
+            "INSERT OR IGNORE INTO chat_history (platform, role, content, attachments, persona, request_id, username, chat_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (platform, role, content, json.dumps(attachments or []), normalized_persona, request_id, username, final_chat_id)
         )
+        
+        # Update session timestamp
+        cursor.execute(
+            "UPDATE chat_sessions SET updated_at = CURRENT_TIMESTAMP WHERE chat_id = ?",
+            (final_chat_id,)
+        )
+        
         conn.commit()
     except Exception as e:
         logger.error(f"Failed to add chat message: {e}")
@@ -192,50 +221,61 @@ def get_history(
     platform: str = None,
     persona: Optional[str] = None,
     username: str = "Pantronux",
+    chat_id: Optional[str] = None,
 ) -> List[Dict]:
-    """Get recent chat history with pagination and optional platform/persona/username filters."""
+    """Get recent chat history with pagination and optional filters."""
     conn = None
     try:
         conn = _get_connection()
         cursor = conn.cursor()
         normalized_persona = memory_manager.normalize_persona(persona)
+        
+        query = "SELECT * FROM chat_history WHERE username = ?"
+        params = [username]
+        
+        if chat_id:
+            query += " AND chat_id = ?"
+            params.append(chat_id)
+        elif persona:
+            query += " AND persona = ?"
+            params.append(normalized_persona)
+            
         if platform:
-            cursor.execute(
-                "SELECT * FROM chat_history WHERE platform = ? AND persona = ? AND username = ? ORDER BY timestamp DESC LIMIT ? OFFSET ?",
-                (platform, normalized_persona, username, limit, offset)
-            )
-        else:
-            cursor.execute(
-                "SELECT * FROM chat_history WHERE persona = ? AND username = ? ORDER BY timestamp DESC LIMIT ? OFFSET ?",
-                (normalized_persona, username, limit, offset)
-            )
+            query += " AND platform = ?"
+            params.append(platform)
+            
+        query += " ORDER BY timestamp DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+        
+        cursor.execute(query, params)
         rows = cursor.fetchall()
         
         history = []
         for row in rows:
+            # Bug 1 Fix: Safe JSON parsing for multimodal and attachments
             raw_att = row["attachments"]
             try:
                 attachments = json.loads(raw_att) if raw_att else []
-                if not isinstance(attachments, list):
-                    logger.warning(
-                        "chat_history attachments not a list id=%s raw=%r",
-                        row["id"],
-                        raw_att,
-                    )
-                    attachments = []
-            except json.JSONDecodeError:
-                logger.warning(
-                    "chat_history attachments JSON decode failed id=%s raw=%r",
-                    row["id"],
-                    raw_att,
-                )
+            except:
                 attachments = []
+                
+            raw_content = row["content"]
+            # If content is stored as JSON (multimodal), we keep it as is for frontend processing
+            # otherwise it's a raw string.
+            processed_content = raw_content
+            try:
+                if raw_content.startswith("[") or raw_content.startswith("{"):
+                    processed_content = json.loads(raw_content)
+            except:
+                pass
+
             history.append({
                 "id": row["id"],
+                "chat_id": row["chat_id"],
                 "platform": row["platform"],
                 "persona": row["persona"],
                 "role": row["role"],
-                "content": row["content"],
+                "content": processed_content,
                 "attachments": attachments,
                 "timestamp": row["timestamp"]
             })
@@ -474,6 +514,99 @@ def mark_file_archived(stored_filename: str, archive_path: str) -> bool:
         return True
     except Exception as e:
         logger.error(f"Failed to mark file archived: {e}")
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+def create_session(chat_id: str, username: str, persona: str, title: str = "New Chat") -> bool:
+    """Create a new chat session."""
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO chat_sessions (chat_id, username, persona, title) VALUES (?, ?, ?, ?)",
+            (chat_id, username, persona, title)
+        )
+        conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Failed to create chat session: {e}")
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+def get_sessions(username: str, persona: str) -> List[Dict]:
+    """Get all chat sessions for a user and persona."""
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM chat_sessions WHERE username = ? AND persona = ? ORDER BY updated_at DESC",
+            (username, persona)
+        )
+        rows = cursor.fetchall()
+        return [dict(r) for r in rows]
+    except Exception as e:
+        logger.error(f"Failed to get chat sessions: {e}")
+        return []
+    finally:
+        if conn:
+            conn.close()
+
+def update_session_title(chat_id: str, title: str) -> bool:
+    """Update the title of a chat session."""
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE chat_sessions SET title = ?, updated_at = CURRENT_TIMESTAMP WHERE chat_id = ?",
+            (title, chat_id)
+        )
+        conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Failed to update chat session title: {e}")
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+def delete_session(chat_id: str) -> bool:
+    """Delete a chat session and its history."""
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        # Delete history first
+        cursor.execute("DELETE FROM chat_history WHERE chat_id = ?", (chat_id,))
+        # Delete session
+        cursor.execute("DELETE FROM chat_sessions WHERE chat_id = ?", (chat_id,))
+        conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Failed to delete chat session: {e}")
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+def clear_all_history(username: str) -> bool:
+    """Delete ALL chat history and sessions for a user. (Legacy support)"""
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM chat_history WHERE username = ?", (username,))
+        cursor.execute("DELETE FROM chat_sessions WHERE username = ?", (username,))
+        conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Failed to clear all history: {e}")
         return False
     finally:
         if conn:

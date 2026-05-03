@@ -337,6 +337,8 @@ def format_stock_telegram_message(briefing: Dict[str, Any]) -> str:
 
 ━━━━━━━━━━━━━━━━━━━━\n\n"""
 
+    has_content = False
+
     categories = {
         "below_100k": "💸 *Kategori: < Rp100.000 / LOT*",
         "below_500k": "💰 *Kategori: Rp100rb – Rp500rb / LOT*",
@@ -347,6 +349,7 @@ def format_stock_telegram_message(briefing: Dict[str, Any]) -> str:
         cat_stocks = [s for s in stocks if s.get("price_category") == cat_id]
         if not cat_stocks: continue
         
+        has_content = True
         message += f"{cat_title}\n"
         for s in cat_stocks:
             conclusion_emoji = "✅" if s.get("conclusion") == "WORTH BUYING" else "⚠️" if s.get("conclusion") == "HOLD" else "❌"
@@ -355,6 +358,9 @@ def format_stock_telegram_message(briefing: Dict[str, Any]) -> str:
             message += f"  Proyeksi: 1bln {'▲' if 'bull' in s.get('projections', {}).get('1m', '').lower() else '▼' if 'bear' in s.get('projections', {}).get('1m', '').lower() else '→'} | 6bln {'▲' if 'bull' in s.get('projections', {}).get('6m', '').lower() else '▼' if 'bear' in s.get('projections', {}).get('6m', '').lower() else '→'} | 1thn {'▲' if 'bull' in s.get('projections', {}).get('1y', '').lower() else '▼' if 'bear' in s.get('projections', {}).get('1y', '').lower() else '→'}\n"
             message += f"  📌 Kesimpulan: {conclusion_emoji} *{s.get('conclusion')}*\n\n"
         message += "━━━━━━━━━━━━━━━━━━━━\n\n"
+
+    if not has_content:
+        return ""
 
     message += "_Analisis otomatis Kuro | Bukan saran investasi resmi_"
     return message

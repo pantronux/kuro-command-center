@@ -161,6 +161,14 @@ def publish(event: ProactiveEvent, *, dry_run: bool = False) -> bool:
         return False
     if not _should_notify(event):
         return False
+
+    # USER FILTER: Only send Telegram for the Admin/Master to avoid duplicate spam on global chat
+    event_username = event.context.get("username")
+    admin_username = os.getenv("ADMIN_USERNAME", "Pantronux")
+    if event_username and event_username != admin_username:
+        logger.info("[PROACTIVE] skipping Telegram dispatch for non-admin user: %s", event_username)
+        return False
+
     return _dispatch_telegram(event, dry_run=dry_run)
 
 

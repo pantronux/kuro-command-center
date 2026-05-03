@@ -1,4 +1,4 @@
-"""Tests for Kuro AI V1.0.0 Beta 1 Sovereign Cat version metadata.
+"""Tests for Kuro AI V1.0.0 Beta 2 Sovereign Cat version metadata.
 
 Purpose: Lock version constants, banner, and `version_info()` payload shape.
 Covers: kuro_backend.version.
@@ -16,10 +16,10 @@ if str(PROJECT_ROOT) not in sys.path:
 
 def test_version_constants_match_v1_sovereign():
     from kuro_backend import version as v
-    assert v.VERSION == "1.0.0-beta.1"
+    assert v.VERSION == "1.0.0-beta.2"
     assert v.CODENAME == "Sovereign Cat"
-    assert v.VERSION_LABEL == "V1.0 Beta 1"
-    assert "V1.0 Beta 1" in v.VERSION_BANNER
+    assert v.VERSION_LABEL == "V1.0 Beta 2"
+    assert "V1.0 Beta 2" in v.VERSION_BANNER
     assert "Sovereign Cat" in v.VERSION_BANNER
 
 
@@ -27,7 +27,7 @@ def test_version_info_payload_shape():
     from kuro_backend import version as v
     info = v.version_info()
     assert set(info.keys()) == {"version", "codename", "label", "banner"}
-    assert info["version"] == "1.0.0-beta.1"
+    assert info["version"] == "1.0.0-beta.2"
     assert info["codename"] == "Sovereign Cat"
-    assert info["label"] == "V1.0 Beta 1"
+    assert info["label"] == "V1.0 Beta 2"
     assert info["banner"] == v.VERSION_BANNER

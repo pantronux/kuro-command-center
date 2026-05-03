@@ -99,3 +99,14 @@ class MarketHudChip(BaseModel):
     sentiment: Optional[str] = None
     kind: str = "prediction"
     last_pct_change: Optional[float] = None
+
+
+class ChatSessionRecord(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    chat_id: str
+    username: str
+    persona: str
+    title: str = "New Chat"
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None

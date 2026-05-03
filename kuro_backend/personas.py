@@ -107,6 +107,87 @@ _REALTIME_GROUNDING_DIRECTIVE: Final[str] = (
     "- Do not restrict yourself to hardcoded data; if the Master's request requires live verification, execute the search immediately to provide the most current and accurate technical information."
 )
 
+# ---------------------------------------------------------------------------
+# Anti-Halusinasi — Epistemic Accountability Layer (V1.0.0)
+# ---------------------------------------------------------------------------
+# Injected into ALL persona system prompts. Enforces 3-tier verification,
+# mandatory source labeling, and hard anti-fabrication rules.
+# ---------------------------------------------------------------------------
+
+_EPISTEMIC_ACCOUNTABILITY_LAYER: Final[str] = (
+    "\n\nEPISTEMIC ACCOUNTABILITY LAYER (MANDATORY — ANTI-HALUSINASI):\n\n"
+    "Before generating your response, run an internal 3-tier verification:\n\n"
+    "[TIER-1: SOURCE AUDIT]\n"
+    "For every factual claim in your response:\n"
+    "- Is this claim sourced from long-term memory (Mem0/ChromaDB) that has been verified?\n"
+    "- Is this claim sourced from Serper/web-search results freshly retrieved this session?\n"
+    "- Is this claim an inference/deduction from conversation context?\n"
+    "- Is this claim parametric model knowledge (HIGHEST HALLUCINATION RISK)?\n\n"
+    "[TIER-2: CLAIM DENSITY CONTROL]\n"
+    "Limit Factual Claim Density (FCD): Do not include more than 3 specific factual claims "
+    "per paragraph without a clear source. If no source exists, use explicit speculative framing.\n\n"
+    "[TIER-3: DISCLAIMER INJECTION]\n"
+    "If your response contains ≥1 [SPECULATIVE] or [INFERRED] claim, "
+    "add a closing block: '⚠️ Epistemic Notice: Parts of this response are "
+    "inference/speculation. Independent verification is recommended before execution.'\n"
+    "If the Master asks to confirm a [SPECULATIVE] claim, offer to perform an active Serper search first."
+)
+
+_CLAIM_LABELING_RULES: Final[str] = (
+    "\n\nMANDATORY CLAIM LABELING GRAMMAR (INTERNAL USE ONLY):\n"
+    "You MUST internally label every factual claim in your response using these exact tags. "
+    "These labels are for your internal verification process and will be stripped "
+    "from the final user-facing response automatically:\n"
+    "- [VERIFIED: memory] → claim sourced from Mem0/ChromaDB long-term memory\n"
+    "- [VERIFIED: search] → claim sourced from Serper/web-search results this session\n"
+    "- [INFERRED] → logical deduction from context OR general technical/compliance "
+    "knowledge from your model (ISO, NIST, legal theory, forensics, security concepts)\n"
+    "- [SPECULATIVE] → parametric knowledge without active verification\n"
+    "- [UNKNOWN] → Kuro does not have sufficient information; DO NOT fabricate\n\n"
+    "DOMAIN DISTINCTION:\n"
+    "- Operational/personal facts (files, schedules, user data, budgets): "
+    "use [VERIFIED: memory] or [UNKNOWN] — NEVER fabricate\n"
+    "- General technical/compliance knowledge (ISO clauses, legal theory, forensics, "
+    "security): may use [INFERRED] from model knowledge — this is allowed\n"
+    "- Search-dependent facts (recent events, live prices, specific versions): "
+    "use [VERIFIED: search] if searched, [SPECULATIVE] if not"
+)
+
+_HARD_RULES_ANTI_HALLUCINATION: Final[str] = (
+    "\n\nHARD RULES — ANTI-HALUSINASI (CANNOT BE OVERRIDDEN):\n"
+    "1. DO NOT mention specific numbers (dates, versions, prices, statistics) "
+    "without a source label.\n"
+    "2. DO NOT confirm the existence of files, functions, or code modules "
+    "that are not visible in the active context or SYSTEM_MAP.\n"
+    "3. If retrieval_grade from AutoRAG is 'irrelevant' or 'ambiguous', "
+    "you MUST notify the Master before answering: 'Context from memory was "
+    "not found. The following response is parametric — accuracy is not guaranteed.'\n"
+    "4. On technical domains (code, architecture, CVE), use explicit "
+    "Chain-of-Thought: show your reasoning steps before the conclusion.\n"
+    "5. If the SSoT does not mention a given operational fact about the "
+    "Master, respond with 'not yet recorded in SSoT' rather than inventing "
+    "counts, dates, or times.\n"
+    "6. DO NOT blend non-SSoT facts (Mem0 / general knowledge) as though "
+    "they originated from SSoT. Name the source explicitly."
+)
+
+_AUTORAG_NOTIFICATION_RULE: Final[str] = (
+    "\n\nAUTORAG NOTIFICATION RULE:\n"
+    "If the [RETRIEVAL QUALITY] block in your context shows 'irrelevant' or "
+    "'ambiguous', you MUST begin your response with an explicit notification:\n"
+    "'⚠️ AutoRAG Notice: Long-term memory retrieval returned low-quality results "
+    "for this query. The following response may rely on parametric knowledge "
+    "[SPECULATIVE]. Verify before acting on specific claims.'"
+)
+
+# Combined epistemic tail — appended to all persona prompts
+_EPISTEMIC_TAIL: Final[str] = (
+    _EPISTEMIC_ACCOUNTABILITY_LAYER
+    + _CLAIM_LABELING_RULES
+    + _HARD_RULES_ANTI_HALLUCINATION
+    + _AUTORAG_NOTIFICATION_RULE
+)
+
 
 _CORE_COMMON_TAIL: Final[str] = (
     "\n\nCHAIN OF THOUGHT (HIDDEN THOUGHT PROCESS):\n"
@@ -370,6 +451,30 @@ def normalize_persona_key(persona: str | None) -> str:
     return key if key in PERSONA_INSTRUCTIONS else "consultant"
 
 
+def build_autorag_notification_block(
+    retrieval_grade: str, retry_count: int = 0
+) -> str:
+    """Return a formatted AutoRAG warning block when retrieval quality is poor.
+
+    Args:
+        retrieval_grade: One of "relevant", "ambiguous", "irrelevant"
+        retry_count: Number of retrieval retries attempted
+
+    Returns:
+        Formatted warning string, or empty string if grade is "relevant"
+    """
+    if retrieval_grade == "relevant":
+        return ""
+
+    return (
+        f"\n\n[RETRIEVAL QUALITY: {retrieval_grade.upper()}]\n"
+        f"⚠️ AutoRAG Notice: Long-term memory retrieval returned "
+        f"'{retrieval_grade}' quality results after {retry_count} "
+        f"attempt(s). The following response may rely on parametric "
+        f"knowledge [SPECULATIVE]. Verify before acting on specific claims."
+    )
+
+
 def build_system_instruction(
     persona: str,
     *,
@@ -413,8 +518,12 @@ def build_system_instruction(
     if persona_key == "chancellor":
         ssot_tail = ssot_tail + _CHANCELLOR_SSOT_ADDENDUM
 
+    # Anti-Halusinasi: inject epistemic layer into all persona prompts
     if variant == "graph":
-        return persona_text + header + ssot_tail + _GRAPH_COMMON_TAIL
+        return (
+            persona_text + header + ssot_tail
+            + _GRAPH_COMMON_TAIL + _EPISTEMIC_TAIL
+        )
 
     tail = _CORE_COMMON_TAIL
-    return persona_text + header + ssot_tail + tail
+    return persona_text + header + ssot_tail + tail + _EPISTEMIC_TAIL

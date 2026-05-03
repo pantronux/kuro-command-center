@@ -1,10 +1,11 @@
 <!DOCTYPE html>
 <html lang="en" class="scroll-smooth">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Kuro AI | Documentation</title>
-    
+
     <!-- Branding -->
     <link rel="icon" type="image/x-icon" href="/profile/favicon.ico">
     <link rel="apple-touch-icon" href="/profile/kuro_avatar.png">
@@ -30,17 +31,18 @@
             }
         }
     </script>
-    
+
     <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
-    
+
     <!-- Marked.js for Markdown -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    
+
     <!-- Highlight.js for Code -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+    <link rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-    
+
     <!-- Mermaid.js for flowcharts -->
     <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
 
@@ -53,7 +55,7 @@
             background-color: #020617;
             color: #e2e8f0;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            background-image: 
+            background-image:
                 radial-gradient(circle at 15% 50%, rgba(6, 182, 212, 0.04), transparent 50%),
                 radial-gradient(circle at 85% 30%, rgba(16, 185, 129, 0.04), transparent 50%);
             background-attachment: fixed;
@@ -74,27 +76,75 @@
             line-height: 1.7;
             font-size: 0.95rem;
         }
-        .prose-kuro h1, .prose-kuro h2, .prose-kuro h3, .prose-kuro h4 {
+
+        .prose-kuro h1,
+        .prose-kuro h2,
+        .prose-kuro h3,
+        .prose-kuro h4 {
             color: #f8fafc;
             font-weight: 600;
             margin-top: 2em;
             margin-bottom: 0.75em;
             scroll-margin-top: 5rem;
         }
-        .prose-kuro h1 { font-size: 2.25em; margin-top: 0; color: #06b6d4; }
-        .prose-kuro h2 { font-size: 1.5em; border-bottom: 1px solid rgba(30, 41, 59, 0.8); padding-bottom: 0.3em; }
-        .prose-kuro h3 { font-size: 1.25em; color: #38bdf8; }
+
+        .prose-kuro h1 {
+            font-size: 2.25em;
+            margin-top: 0;
+            color: #06b6d4;
+        }
+
+        .prose-kuro h2 {
+            font-size: 1.5em;
+            border-bottom: 1px solid rgba(30, 41, 59, 0.8);
+            padding-bottom: 0.3em;
+        }
+
+        .prose-kuro h3 {
+            font-size: 1.25em;
+            color: #38bdf8;
+        }
+
         .prose-kuro a {
             color: #06b6d4;
             text-decoration: none;
             transition: color 0.2s ease;
         }
-        .prose-kuro a:hover { color: #22d3ee; text-decoration: underline; }
-        .prose-kuro p { margin-top: 0; margin-bottom: 1.25em; }
-        .prose-kuro ul { list-style-type: disc; margin-top: 0; margin-bottom: 1.25em; padding-left: 1.625em; }
-        .prose-kuro ol { list-style-type: decimal; margin-top: 0; margin-bottom: 1.25em; padding-left: 1.625em; }
-        .prose-kuro li { margin-top: 0.25em; margin-bottom: 0.25em; }
-        .prose-kuro strong { color: #f8fafc; font-weight: 600; }
+
+        .prose-kuro a:hover {
+            color: #22d3ee;
+            text-decoration: underline;
+        }
+
+        .prose-kuro p {
+            margin-top: 0;
+            margin-bottom: 1.25em;
+        }
+
+        .prose-kuro ul {
+            list-style-type: disc;
+            margin-top: 0;
+            margin-bottom: 1.25em;
+            padding-left: 1.625em;
+        }
+
+        .prose-kuro ol {
+            list-style-type: decimal;
+            margin-top: 0;
+            margin-bottom: 1.25em;
+            padding-left: 1.625em;
+        }
+
+        .prose-kuro li {
+            margin-top: 0.25em;
+            margin-bottom: 0.25em;
+        }
+
+        .prose-kuro strong {
+            color: #f8fafc;
+            font-weight: 600;
+        }
+
         .prose-kuro code {
             color: #38bdf8;
             background-color: rgba(15, 23, 42, 0.8);
@@ -103,6 +153,7 @@
             font-size: 0.875em;
             font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
         }
+
         .prose-kuro pre {
             background-color: #0f172a;
             padding: 1em;
@@ -112,12 +163,14 @@
             margin-bottom: 1.5em;
             border: 1px solid rgba(30, 41, 59, 0.8);
         }
+
         .prose-kuro pre code {
             background-color: transparent;
             padding: 0;
             color: inherit;
             border-radius: 0;
         }
+
         .prose-kuro blockquote {
             border-left: 4px solid #06b6d4;
             padding-left: 1em;
@@ -130,12 +183,14 @@
             padding-bottom: 0.5em;
             border-radius: 0 0.25rem 0.25rem 0;
         }
+
         .prose-kuro table {
             width: 100%;
             border-collapse: collapse;
             margin-top: 1.5em;
             margin-bottom: 1.5em;
         }
+
         .prose-kuro th {
             background-color: rgba(30, 41, 59, 0.8);
             padding: 0.75em;
@@ -143,12 +198,16 @@
             border: 1px solid rgba(51, 65, 85, 0.5);
             color: #e2e8f0;
         }
+
         .prose-kuro td {
             padding: 0.75em;
             border: 1px solid rgba(51, 65, 85, 0.5);
         }
-        .prose-kuro tr:nth-child(even) { background-color: rgba(15, 23, 42, 0.4); }
-        
+
+        .prose-kuro tr:nth-child(even) {
+            background-color: rgba(15, 23, 42, 0.4);
+        }
+
         /* Mark.js highlight styling */
         mark {
             background-color: rgba(6, 182, 212, 0.4);
@@ -174,14 +233,28 @@
             border-left-color: #06b6d4;
             background-color: rgba(6, 182, 212, 0.1);
         }
-        
+
         /* Custom scrollbar */
-        ::-webkit-scrollbar { width: 6px; height: 6px; }
-        ::-webkit-scrollbar-track { background: #020617; }
-        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
-        ::-webkit-scrollbar-thumb:hover { background: #475569; }
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #020617;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 3px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #475569;
+        }
     </style>
 </head>
+
 <body class="h-screen flex flex-col overflow-hidden text-kuro-text antialiased">
 
     <!-- Navbar -->
@@ -189,13 +262,15 @@
         <div class="h-full px-6 flex items-center justify-between">
             <div class="flex items-center space-x-3">
                 <div class="w-8 h-8 rounded-full bg-gradient-to-tr from-cyan-500 to-emerald-400 p-[1px]">
-                    <div class="w-full h-full rounded-full bg-slate-900 flex items-center justify-center overflow-hidden">
+                    <div
+                        class="w-full h-full rounded-full bg-slate-900 flex items-center justify-center overflow-hidden">
                         <img src="/profile/kuro_avatar.png" alt="Kuro" class="w-full h-full object-cover">
                     </div>
                 </div>
                 <div>
                     <h1 class="font-bold text-slate-100 tracking-wide flex items-center gap-2">
-                        KURO V1.0.0 Beta 1 <span class="text-xs font-mono text-cyan-400 bg-cyan-900/30 px-2 py-0.5 rounded-full border border-cyan-800/50">TUTORIAL</span>
+                        KURO V1.0.0 Beta 2 <span
+                            class="text-xs font-mono text-cyan-400 bg-cyan-900/30 px-2 py-0.5 rounded-full border border-cyan-800/50">TUTORIAL</span>
                     </h1>
                 </div>
             </div>
@@ -206,9 +281,10 @@
                     <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                         <i data-lucide="search" class="w-4 h-4 text-slate-400"></i>
                     </div>
-                    <input type="text" id="searchInput" placeholder="Search documentation..." 
-                           class="block w-full pl-10 pr-3 py-1.5 border border-slate-700 rounded-lg leading-5 bg-slate-800/50 text-slate-300 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-cyan-500 focus:border-cyan-500 sm:text-sm transition-colors">
-                    <div class="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none hidden" id="searchCount">
+                    <input type="text" id="searchInput" placeholder="Search documentation..."
+                        class="block w-full pl-10 pr-3 py-1.5 border border-slate-700 rounded-lg leading-5 bg-slate-800/50 text-slate-300 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-cyan-500 focus:border-cyan-500 sm:text-sm transition-colors">
+                    <div class="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none hidden"
+                        id="searchCount">
                         <span class="text-xs text-cyan-400 bg-cyan-900/40 px-1.5 rounded">0</span>
                     </div>
                 </div>
@@ -238,7 +314,8 @@
         <main class="flex-1 overflow-y-auto p-6 md:p-10 relative scroll-smooth" id="mainScrollArea">
             <div class="max-w-4xl mx-auto">
                 <!-- Loader -->
-                <div id="loadingIndicator" class="flex flex-col items-center justify-center py-20 opacity-100 transition-opacity duration-300">
+                <div id="loadingIndicator"
+                    class="flex flex-col items-center justify-center py-20 opacity-100 transition-opacity duration-300">
                     <i data-lucide="loader-2" class="w-8 h-8 text-cyan-500 animate-spin mb-4"></i>
                     <p class="text-slate-400 animate-pulse text-sm">Decoding System Map...</p>
                 </div>
@@ -248,27 +325,31 @@
                     <!-- Markdown will be injected here -->
                 </div>
             </div>
-            
+
             <!-- Mobile TOC Button -->
-            <button id="mobileTocBtn" class="lg:hidden fixed bottom-6 right-6 bg-cyan-600 text-white p-3 rounded-full shadow-lg hover:bg-cyan-500 transition-colors z-50">
+            <button id="mobileTocBtn"
+                class="lg:hidden fixed bottom-6 right-6 bg-cyan-600 text-white p-3 rounded-full shadow-lg hover:bg-cyan-500 transition-colors z-50">
                 <i data-lucide="list" class="w-5 h-5"></i>
             </button>
         </main>
-        
+
         <!-- Mobile TOC Overlay -->
-        <div id="mobileTocOverlay" class="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-50 hidden opacity-0 transition-opacity">
-            <div class="absolute right-0 top-0 bottom-0 w-64 bg-slate-900 border-l border-slate-700 p-4 overflow-y-auto shadow-2xl transform translate-x-full transition-transform" id="mobileTocPanel">
+        <div id="mobileTocOverlay"
+            class="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-50 hidden opacity-0 transition-opacity">
+            <div class="absolute right-0 top-0 bottom-0 w-64 bg-slate-900 border-l border-slate-700 p-4 overflow-y-auto shadow-2xl transform translate-x-full transition-transform"
+                id="mobileTocPanel">
                 <div class="flex justify-between items-center mb-6 border-b border-slate-800 pb-2">
                     <h2 class="text-sm font-semibold text-slate-300 uppercase tracking-wider">Contents</h2>
-                    <button id="closeTocBtn" class="text-slate-400 hover:text-white"><i data-lucide="x" class="w-5 h-5"></i></button>
+                    <button id="closeTocBtn" class="text-slate-400 hover:text-white"><i data-lucide="x"
+                            class="w-5 h-5"></i></button>
                 </div>
                 <!-- Mobile Search -->
                 <div class="relative w-full mb-4 md:hidden">
                     <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                         <i data-lucide="search" class="w-4 h-4 text-slate-400"></i>
                     </div>
-                    <input type="text" id="mobileSearchInput" placeholder="Search..." 
-                           class="block w-full pl-9 pr-3 py-1.5 border border-slate-700 rounded-lg leading-5 bg-slate-800 text-slate-300 placeholder-slate-500 focus:outline-none focus:border-cyan-500 sm:text-sm">
+                    <input type="text" id="mobileSearchInput" placeholder="Search..."
+                        class="block w-full pl-9 pr-3 py-1.5 border border-slate-700 rounded-lg leading-5 bg-slate-800 text-slate-300 placeholder-slate-500 focus:outline-none focus:border-cyan-500 sm:text-sm">
                 </div>
                 <div id="mobileTocContainer" class="space-y-1"></div>
             </div>
@@ -280,7 +361,7 @@
         lucide.createIcons();
 
         // Configure Mermaid
-        mermaid.initialize({ 
+        mermaid.initialize({
             startOnLoad: false,
             theme: 'dark',
             themeVariables: {
@@ -313,8 +394,8 @@
         // Custom Marked.js renderer for Mermaid blocks and code highlighting
         const renderer = new marked.Renderer();
         const originalCode = renderer.code.bind(renderer);
-        
-        renderer.code = function({text, lang}) {
+
+        renderer.code = function ({ text, lang }) {
             if (lang === 'mermaid') {
                 return `
                 <div class="mermaid-container relative group my-8">
@@ -340,13 +421,13 @@
         function buildTOC() {
             const headings = docContent.querySelectorAll('h2, h3');
             let tocHTML = '';
-            
+
             headings.forEach((heading, index) => {
                 // Ensure heading has an ID
                 if (!heading.id) {
                     heading.id = heading.textContent.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-');
                 }
-                
+
                 // Avoid duplicate IDs
                 if (document.querySelectorAll(`#${heading.id}`).length > 1) {
                     heading.id = `${heading.id}-${index}`;
@@ -355,7 +436,7 @@
                 const isH3 = heading.tagName.toLowerCase() === 'h3';
                 const paddingClass = isH3 ? 'pl-6 text-xs' : 'pl-3 text-sm font-medium';
                 const colorClass = isH3 ? 'text-slate-400' : 'text-slate-300';
-                
+
                 tocHTML += `
                     <a href="#${heading.id}" class="toc-link block py-1.5 border-l-2 border-transparent ${paddingClass} ${colorClass} hover:text-cyan-400 hover:border-slate-500 transition-colors truncate" data-target="${heading.id}">
                         ${heading.textContent}
@@ -372,19 +453,19 @@
         function setupScrollSpy() {
             const headings = docContent.querySelectorAll('h2, h3');
             const tocLinks = document.querySelectorAll('.toc-link');
-            
+
             mainScrollArea.addEventListener('scroll', () => {
                 let current = '';
-                
+
                 // Add a small offset (100px) to trigger earlier
                 const scrollTop = mainScrollArea.scrollTop + 100;
-                
+
                 headings.forEach(h => {
                     if (h.offsetTop <= scrollTop) {
                         current = h.getAttribute('id');
                     }
                 });
-                
+
                 tocLinks.forEach(link => {
                     link.classList.remove('active');
                     if (link.getAttribute('data-target') === current) {
@@ -407,17 +488,17 @@
             try {
                 const response = await fetch('/api/tutorial/content');
                 const data = await response.json();
-                
+
                 if (data.status === 'success') {
                     // 1. Render Markdown
                     docContent.innerHTML = marked.parse(data.markdown);
-                    
+
                     // 2. Hide loader & show content
                     loadingIndicator.classList.add('hidden');
                     docContent.classList.remove('hidden');
                     // Small delay to allow CSS display to apply before opacity transition
                     setTimeout(() => docContent.classList.remove('opacity-0'), 50);
-                    
+
                     // 3. Render Mermaid charts
                     try {
                         await mermaid.run({
@@ -430,16 +511,16 @@
                     } catch (mermaidErr) {
                         console.error('Mermaid render error:', mermaidErr);
                     }
-                    
+
                     // 4. Build TOC
                     buildTOC();
-                    
+
                     // 5. Initialize search
                     markInstance = new window.Mark(docContent);
 
                     // 6. Final cleanup: Purge kuro-speak-btn if it ever appeared dynamically
                     document.querySelectorAll('.kuro-speak-btn, #kuro-speak-btn, [class*="speak-btn"]').forEach(el => el.remove());
-                    
+
                 } else {
                     throw new Error(data.message || 'Failed to load documentation');
                 }
@@ -460,7 +541,7 @@
             if (!svg) return;
             svg.setAttribute('width', '100%');
             svg.setAttribute('height', '100%');
-            
+
             const pz = svgPanZoom(svg, {
                 zoomEnabled: true,
                 controlIconsEnabled: false,
@@ -469,12 +550,12 @@
                 minZoom: 0.1,
                 maxZoom: 10,
             });
-            
+
             const container = svg.closest('.mermaid-container');
             panZoomInstances.set(container, pz);
         }
 
-        window.resetZoom = function(btn) {
+        window.resetZoom = function (btn) {
             const container = btn.closest('.mermaid-container');
             const pz = panZoomInstances.get(container);
             if (pz) {
@@ -487,24 +568,24 @@
         // Search Implementation
         function performSearch(keyword) {
             if (!markInstance) return;
-            
+
             // Unmark previous
             markInstance.unmark({
-                done: function() {
+                done: function () {
                     if (!keyword.trim()) {
                         searchCount.classList.add('hidden');
                         return;
                     }
-                    
+
                     // Mark new
                     let count = 0;
                     markInstance.mark(keyword, {
                         separateWordSearch: false,
-                        done: function(totalMatches) {
+                        done: function (totalMatches) {
                             if (totalMatches > 0) {
                                 searchCountSpan.textContent = totalMatches;
                                 searchCount.classList.remove('hidden');
-                                
+
                                 // Scroll to first match
                                 const firstMatch = document.querySelector('mark');
                                 if (firstMatch) {
@@ -581,4 +662,5 @@
 
     </script>
 </body>
+
 </html>

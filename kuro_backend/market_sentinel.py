@@ -157,10 +157,12 @@ def run_triangulation_scan(username: str = "Pantronux") -> bool:
             username=username
         )
         
-    # Send Telegram
-    msg = format_sentinel_telegram(analysis)
-    if msg:
-        telegram_notifier.send_message(msg)
+    # Send Telegram (Filter: Only for Admin)
+    import os
+    if username == os.getenv("ADMIN_USERNAME", "Pantronux"):
+        msg = format_sentinel_telegram(analysis)
+        if msg:
+            telegram_notifier.send_message(msg)
         
     logger.info("[SENTINEL] Hybrid Triangulation scan complete for %d stocks.", len(analysis))
     return True

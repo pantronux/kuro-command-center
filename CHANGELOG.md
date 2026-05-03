@@ -2,12 +2,38 @@
 
 > All entries prior to V1.0.0 Beta 1 are classified as **Legacy (Alpha Version)** entries.
 
+## [V1.0.0 Beta 2] — "Anti-Halusinasi" — 2026-05-03
+### New Features
+- **Epistemic Accountability Layer (3-Tier Verification):**
+  - **Tier-1 Source Audit**: Every factual claim is classified by source (Mem0/ChromaDB, Serper, inference, parametric).
+  - **Tier-2 Claim Density Control**: Max 3 specific factual claims per paragraph without labeled source.
+  - **Tier-3 Disclaimer Injection**: Auto-appends `⚠️ Epistemic Notice` block for [SPECULATIVE]/[INFERRED] claims.
+- **Mandatory Claim Labeling Grammar**: All responses now carry source labels: `[VERIFIED: memory]`, `[VERIFIED: search]`, `[INFERRED]`, `[SPECULATIVE]`, `[UNKNOWN]`.
+- **Hard Anti-Fabrication Rules**: Specific numbers, filenames, function names MUST carry source labels. No fabrication of file existence or code modules not in SYSTEM_MAP.
+- **AutoRAG Integration**: When `retrieval_grade = 'irrelevant'` or `'ambiguous'`, Kuro explicitly notifies the user before responding from parametric knowledge.
+- **Post-Generation Enforcement**: `epistemic_filter.py` validates LLM output after generation — complements existing pre-generation prompt directives.
+- **Epistemic Audit Trail**: `epistemic_log` table in `kuro_intelligence.db` records all labeled claims per session.
+- **Domain-Aware Relaxation**: General technical/compliance knowledge (ISO, NIST, legal) is allowed from model as `[INFERRED]` — avoids over-restricting Kuro's existing broad knowledge authority.
+
+### Architecture
+- `kuro_backend/epistemic_filter.py`: New module — post-generation claim labeling, hard-rule enforcement, disclaimer injection.
+- `kuro_backend/personas.py`: Added 5 epistemic constants (`_EPISTEMIC_ACCOUNTABILITY_LAYER`, `_CLAIM_LABELING_RULES`, `_HARD_RULES_ANTI_HALLUCINATION`, `_AUTORAG_NOTIFICATION_RULE`, `_EPISTEMIC_TAIL`) + `build_autorag_notification_block()`. Modified `build_system_instruction()` to inject epistemic layer into all persona prompts.
+- `kuro_backend/langgraph_core.py`: 4 nodes modified — `retrieval_grader_node` (returns `_autorag_notification`), `executive_monitor_node` (labels simulations `[SPECULATIVE]`), `reflective_response_node` (epistemic disclaimer), `response_node` (epistemic pre-filter + post-filter).
+- `kuro_backend/intelligence_db.py`: Added `epistemic_log` table with indexes for audit trail.
+
+### Conflict Resolutions
+- **General knowledge clause**: Domain classifier uses relaxed `[INFERRED]` for technical/compliance knowledge, strict `[VERIFIED]`/`[UNKNOWN]` for operational facts — aligns with existing `_CORE_COMMON_TAIL` line 129.
+- **Metacognitive deduplication**: Pre-filter checks if metacognitive already warned before injecting duplicate notification.
+- **Real-time grounding compatibility**: Labels add transparency, never restrict answers — compatible with `_REALTIME_GROUNDING_DIRECTIVE`.
+
+---
+
 ## [V1.0.0 Beta 1] — "Sovereign Cat" — 2026-05-02
 ### New Features
 - **Hybrid Market Sentinel (Triangulation Engine):** 
   - Split analysis into Quantitative Anchor (`price_ticker_worker.py`) and Qualitative Triangulation (`market_sentinel.py`).
   - High-frequency price updates via `yfinance` (.JK for IDX).
-  - Sentinel Hub V3: Filter bar, pinning system (max 3), and ROI projections.
+  - Sentinel Hub: Filter bar, pinning system (max 3), and ROI projections.
 - **Role-Gated Access Control:**
   - Implemented RBAC gate for "System Status" menu. Non-Administrator users are fully blocked with a red "Access Denied" modal.
 - **Per-User File Isolation:**

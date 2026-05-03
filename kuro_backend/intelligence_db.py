@@ -90,6 +90,29 @@ def init_db():
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_briefing_user_date ON intelligence_briefings(username, date DESC)
         """)
+
+        # Anti-Halusinasi: epistemic audit trail table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS epistemic_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL DEFAULT 'Pantronux',
+                session_id TEXT NOT NULL DEFAULT '',
+                claim_text TEXT NOT NULL,
+                claim_label TEXT NOT NULL,
+                source_ref TEXT DEFAULT '',
+                retrieval_grade_at_time TEXT DEFAULT '',
+                persona_mode TEXT DEFAULT '',
+                timestamp TEXT NOT NULL DEFAULT (datetime('now')),
+                response_snippet TEXT DEFAULT ''
+            )
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_epistemic_log_user ON epistemic_log(username)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_epistemic_log_label ON epistemic_log(claim_label)
+        """)
+
         conn.commit()
         logger.info(f"Intelligence briefings database initialized at {DB_PATH}")
     except Exception as e:

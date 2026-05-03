@@ -1,4 +1,4 @@
-# Kuro AI V1.0.0 Beta 1 "Sovereign Cat" — SYSTEM_MAP
+# Kuro AI V1.0.0 Beta 2 "Sovereign Cat" — SYSTEM_MAP
 
 > Authoritative navigation map for the repository. Traced function-by-function
 > from the true entrypoint (`main.py`) outward. Only source code under version
@@ -109,6 +109,19 @@ Kuro AI is your **Intelligent Personal Sovereign**—a sophisticated digital com
     - **Memory Persistence**: Intisari file disimpan ke Mem0 dan `research_ledger` (`archived_file_memory` kind), allowing Kuro to "remember" the contents of deleted files.
     - **Archive Metadata**: Sidecar JSON files are persisted in `.archive/{username}/` as permanent records.
 
+### V1.0.0 Beta 2 Architecture Notes ("Anti-Halusinasi Layer")
+
+- **Epistemic Accountability Layer**: 3-tier verification injected into all agency persona system prompts.
+    - **Tier-1 Source Audit**: Classifies every factual claim by source (Mem0/ChromaDB, Serper, inference, parametric).
+    - **Tier-2 Claim Density Control**: Max 3 specific factual claims per paragraph without labeled source.
+    - **Tier-3 Disclaimer Injection**: Auto-appends `⚠️ Epistemic Notice` block for [SPECULATIVE]/[INFERRED] claims.
+- **Mandatory Claim Labeling Grammar**: `[VERIFIED: memory]` `[VERIFIED: search]` `[INFERRED]` `[SPECULATIVE]` `[UNKNOWN]`.
+- **Hard Anti-Fabrication Rules**: Specific numbers, filenames, function names MUST carry source labels. No fabrication of file existence or code modules not in SYSTEM_MAP.
+- **AutoRAG Integration**: When `retrieval_grade = 'irrelevant'` or `'ambiguous'`, Kuro must explicitly notify user before responding from parametric knowledge.
+- **Post-Generation Enforcement**: `epistemic_filter.py` validates LLM output after generation — complements existing pre-generation prompt directives.
+- **Epistemic Audit Trail**: `epistemic_log` table in `kuro_intelligence.db` records all labeled claims per session.
+- **Domain-Aware Relaxation**: General technical/compliance knowledge (ISO, NIST, legal) is allowed from model as `[INFERRED]` — avoids over-restricting Kuro's existing broad knowledge authority.
+
 ## Core Logic Flow (Function-Level Flowchart)
 
 ```mermaid
@@ -132,8 +145,17 @@ flowchart TD
     subgraph Brain[Reasoning core]
         B1[langgraph_core.process_chat_with_graph_stream]
         B2[langgraph_core.build_kuro_graph]
-        B3["reflection → supervisor → memory_retrieval\n→ retrieval_grader ↺ query_transform\n→ attention_filter → executive_monitor\n→ metacognitive_review → reflective_response | tool | response\n→ memory_extraction"]
+        B3["reflection → supervisor → memory_retrieval\n→ retrieval_grader ↺ query_transform\n→ attention_filter → executive_monitor\n→ metacognitive_review → reflective_response | tool | response"]
         B4[personas.build_system_instruction]
+    end
+
+    subgraph Epistemic[Anti-Halusinasi Epistemic Layer]
+        direction LR
+        E1["epistemic pre-filter\n(inject AutoRAG notification\n+ epistemic caution\ninto system prompt)"]
+        E2["Gemini API call\n(response generation)"]
+        E3["epistemic post-filter\n(label_claims_in_response\n+ check_hard_rules\n+ inject_disclaimer_if_needed)"]
+        E4["epistemic_log\n(audit trail)"]
+        E1 --> E2 --> E3 --> E4
     end
 
     subgraph Mem[3-Layer Memory]
@@ -182,6 +204,17 @@ flowchart TD
     B3 --> O3
     R4 --> O2
     O2 --> F1
+
+    %% Epistemic layer integration
+    B3 -->|"response path"| E1
+    E4 -->|"labeled response"| O3
+    E4 -->|"labeled response"| F1
+
+    style Epistemic fill:#0066cc,color:#fff
+    style E1 fill:#004499,color:#fff
+    style E2 fill:#003366,color:#fff
+    style E3 fill:#004499,color:#fff
+    style E4 fill:#002244,color:#fff
 ```
 
 Side-branches not drawn on the trunk but reachable from the same
@@ -209,7 +242,7 @@ artefacts are excluded — see **Exclusions** at the bottom of this section.
 ├── kuro_backend/
 │   ├── version.py               # V1.0.0 "Sovereign Cat" single source of truth
 │   ├── config.py                # env keys -> typed Settings
-│   ├── personas.py              # butler/consultant/advisor/chill/tactical/chancellor
+│   ├── personas.py              # persona prompts + Anti-Halusinasi epistemic layer
 │   ├── core.py                  # non-graph Gemini fallback
 │   ├── langgraph_core.py        # graph nodes, streaming, tool dispatch
 │   ├── memory_coordinator.py    # orchestrates 3-layer memory + evaluate_alignment
@@ -227,6 +260,7 @@ artefacts are excluded — see **Exclusions** at the bottom of this section.
 │   ├── proactive_greeting.py
 │   ├── file_retention_worker.py  # 180-day retention & AI archival (V1.0)
 │   ├── price_ticker_worker.py   # Quantitative market anchor (V1.0)
+│   ├── epistemic_filter.py      # Anti-Halusinasi claim labeling & hard-rule enforcement (V1.0)
 │   ├── reminder_service.py      # [PURGED in V7.1]
 │   ├── habit_service.py         # [PURGED in V7.1]
 │   ├── fitness_service.py
