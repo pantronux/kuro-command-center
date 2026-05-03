@@ -1,8 +1,4 @@
-## 2025-03-01 - [Path Traversal in system_tools.py]
-**Vulnerability:** A critical path traversal vulnerability was present in the `manage_files`, `generate_excel_report`, and `generate_report_template` tools in `kuro_backend/tools/system_tools.py`. They constructed paths via `os.path.join` without checking if the resolved path was inside the target `EXPORTS_DIR` directory.
-**Learning:** Constructing absolute paths without using `os.path.abspath` and validating against the base directory (`EXPORTS_DIR`) + `os.sep` allows attackers to bypass security checks and access/modify arbitrary system files with simple payload like `../../../etc/passwd`.
-**Prevention:** Use `os.path.abspath` to resolve paths and ensure that the constructed absolute file path starts with the absolute base directory path plus an `os.sep` separator to avoid edge case bypasses (e.g. `exports_secret`).
-## 2026-05-02 - [Security Fix] Missing Authentication and Path Traversal in /api/read-file
-**Vulnerability:** The `/api/read-file` endpoint allowed unauthenticated access and lacked input validation on the `file_path` parameter, enabling Path Traversal (LFI) to read arbitrary files.
-**Learning:** Security gaps can exist in seemingly minor utility endpoints if authentication middleware is not applied universally, and accepting direct file paths from users without bounds checking allows escaping intended directories.
-**Prevention:** Ensure all non-public API endpoints require authentication checks (e.g., `validate_token`). Always resolve and validate user-supplied file paths against an allowed base directory using `os.path.abspath` and `.startswith()`.
+## 2026-05-03 - [CRITICAL] Fix API Endpoint Authentication Bypass Vulnerability
+**Vulnerability:** Multiple API endpoints in `main.py` defaulted the active user to `ADMIN_USERNAME` or `"Pantronux"` if the JWT token validation failed (`user` was `None`).
+**Learning:** This pattern allowed any unauthenticated user to interact with the API with full administrative privileges, leading to severe authorization bypasses. The logic explicitly checked `if user else ADMIN_USERNAME` instead of enforcing validation failures.
+**Prevention:** Always explicitly raise an `HTTPException(status_code=401, detail="Unauthorized")` when `validate_token` fails. Never provide a default fallback to an administrative account.
