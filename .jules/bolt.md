@@ -19,3 +19,7 @@
 ## 2024-05-04 - SQLite bindings check and iteration speed
 **Learning:** For pure Python list traversal, `zip(a, b)` is faster than `range(len(a))` indexing. Additionally, when using `executemany` with SQLite, the number of placeholders in the `VALUES` clause must strictly match the tuple length, otherwise `Incorrect number of bindings supplied` is raised. `.copy()` is generally faster than initializing a new dict or `dict()` from a template.
 **Action:** Always verify SQL parameter counts against the schema and prefer `.copy()` for shallow dictionary initialization in tight loops.
+
+## 2024-05-18 - Generator Overhead in sum() and Database Caching
+**Learning:** Python's `sum(1 for ...)` or generator expressions evaluated inside `sum()` are slower than standard `for` loop iteration and arithmetic accumulation in pure Python due to function call overhead and generator instantiation per loop. Additionally, redundant DDL initialization calls like `init_db()` running `CREATE TABLE IF NOT EXISTS` across modules should be cached in process memory using a readiness flag (`_SCHEMA_READY_FOR`) because SQLite still evaluates and locks the database, which slows down process startup or loop events.
+**Action:** Replace `sum(generator_expression)` with standard `for` loop block sums when operating on sequences in performance critical paths. Implement `_SCHEMA_READY_FOR` pattern caching for any repetitive SQLite init or DDL tasks.

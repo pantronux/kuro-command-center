@@ -18,6 +18,7 @@ import sqlite3
 import json
 import logging
 import os
+import threading
 from datetime import datetime
 from typing import List, Dict, Optional
 from kuro_backend.config import settings
@@ -25,6 +26,14 @@ from kuro_backend import memory_manager
 
 logger = logging.getLogger(__name__)
 logger.propagate = False  # Prevent double-reporting to root logger
+
+_SCHEMA_READY_FOR: Optional[str] = None
+_SCHEMA_LOCK = threading.Lock()
+
+def _reset_schema_ready_for_tests():
+    global _SCHEMA_READY_FOR
+    with _SCHEMA_LOCK:
+        _SCHEMA_READY_FOR = None
 
 DB_PATH = os.path.join(settings.WORKING_DIR, "kuro_chat_history.db")
 
@@ -37,6 +46,17 @@ def _get_connection():
 
 def init_db():
     """Initialize the database schema."""
+    global _SCHEMA_READY_FOR
+    current_path = DB_PATH
+    if _SCHEMA_READY_FOR == current_path:
+        return
+    with _SCHEMA_LOCK:
+        if _SCHEMA_READY_FOR == current_path:
+            return
+        _init_db_locked()
+        _SCHEMA_READY_FOR = current_path
+
+def _init_db_locked():
     conn = None
     try:
         conn = _get_connection()
