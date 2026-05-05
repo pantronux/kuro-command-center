@@ -51,6 +51,7 @@ def test_smart_read_context_unresolved(monkeypatch):
 def test_smart_read_context_resolves_last_file(tmp_path, monkeypatch):
     sample = tmp_path / "runtime.log"
     sample.write_text("alpha\nbeta", encoding="utf-8")
+    monkeypatch.setattr(base_tools, "WHITELIST_PATHS", [str(tmp_path)])
 
     monkeypatch.setattr(memory_manager, "get_runtime_context_value", lambda key, default="": str(sample))
     captured = {}
@@ -66,6 +67,7 @@ def test_smart_read_context_resolves_last_file(tmp_path, monkeypatch):
 def test_smart_read_docx_route_uses_docx_engine(tmp_path, monkeypatch):
     sample = tmp_path / "report.docx"
     sample.write_text("placeholder", encoding="utf-8")
+    monkeypatch.setattr(base_tools, "WHITELIST_PATHS", [str(tmp_path)])
 
     monkeypatch.setattr(memory_manager, "set_runtime_context_value", lambda key, value: None)
     monkeypatch.setattr(base_tools, "read_docx_content", lambda file_path, max_chars=15000: {"content": "isi docx"})
@@ -81,6 +83,7 @@ def test_smart_read_docx_route_uses_docx_engine(tmp_path, monkeypatch):
 def test_smart_read_image_route_uses_ocr_engine(tmp_path, monkeypatch):
     sample = tmp_path / "evidence.png"
     sample.write_bytes(b"fake-image")
+    monkeypatch.setattr(base_tools, "WHITELIST_PATHS", [str(tmp_path)])
 
     monkeypatch.setattr(memory_manager, "set_runtime_context_value", lambda key, value: None)
     monkeypatch.setattr(
@@ -105,4 +108,4 @@ def test_smart_read_not_found_returns_deterministic_error(monkeypatch):
     result = base_tools.smart_read(file_ref="not-exists-xyz-123.docx")
     assert result["success"] is False
     assert result["resolved_by"] == "not_found"
-    assert "File not found" in result["error"]
+    assert "tidak ditemukan" in result["error"]

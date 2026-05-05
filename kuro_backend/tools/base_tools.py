@@ -346,6 +346,22 @@ def universal_read(file_path: str, max_chars: int = 5000) -> Dict:
     """
     result = {"path": file_path, "content": "", "format": "unknown", "size": 0, "error": None}
     
+    # Security: Verify whitelist to prevent Path Traversal and symlinks
+    abs_path = os.path.realpath(file_path)
+    is_whitelisted = False
+    for wp in WHITELIST_PATHS:
+        abs_wp = os.path.realpath(wp)
+        try:
+            if os.path.commonpath([abs_path, abs_wp]) == abs_wp:
+                is_whitelisted = True
+                break
+        except ValueError:
+            pass
+
+    if not is_whitelisted:
+        result["error"] = "Akses ditolak: File berada di luar direktori yang diizinkan."
+        return result
+
     try:
         if not os.path.exists(file_path):
             result["error"] = f"File not found: {file_path}"
@@ -510,6 +526,10 @@ def _resolve_smart_read_path(file_ref: str) -> Dict:
 
     requested = (file_ref or "").strip()
     normalized = requested.lower()
+
+    resolved_path = None
+    resolved_by = None
+
     if not requested or normalized in CONTEXTUAL_FILE_REFERENCES:
         last_accessed = memory_manager.get_runtime_context_value("last_accessed_file", "")
         if not last_accessed:
@@ -518,30 +538,58 @@ def _resolve_smart_read_path(file_ref: str) -> Dict:
                 "error": "Context unresolved: sebutkan nama/path file dulu agar saya bisa melanjutkan.",
                 "resolved_by": "context_missing",
             }
-        return {"ok": True, "path": last_accessed, "resolved_by": "context"}
+        resolved_path = last_accessed
+        resolved_by = "context"
 
-    explicit_path = os.path.abspath(requested)
-    if os.path.exists(explicit_path):
-        return {"ok": True, "path": explicit_path, "resolved_by": "explicit"}
+    if not resolved_path:
+        explicit_path = os.path.abspath(requested)
+        if os.path.exists(explicit_path):
+            resolved_path = explicit_path
+            resolved_by = "explicit"
 
-    upload_candidate = os.path.join(UPLOAD_DIR, requested)
-    if os.path.exists(upload_candidate):
-        return {"ok": True, "path": upload_candidate, "resolved_by": "search"}
+    if not resolved_path:
+        upload_candidate = os.path.join(UPLOAD_DIR, requested)
+        if os.path.exists(upload_candidate):
+            resolved_path = upload_candidate
+            resolved_by = "search"
 
-    for root, _, files in os.walk(UPLOAD_DIR):
-        for filename in files:
-            if requested.lower() in filename.lower():
-                return {
-                    "ok": True,
-                    "path": os.path.join(root, filename),
-                    "resolved_by": "search",
-                }
+    if not resolved_path:
+        for root, _, files in os.walk(UPLOAD_DIR):
+            for filename in files:
+                if requested.lower() in filename.lower():
+                    resolved_path = os.path.join(root, filename)
+                    resolved_by = "search"
+                    break
+            if resolved_path:
+                break
 
-    return {
-        "ok": False,
-        "error": f"File not found: {requested}",
-        "resolved_by": "not_found",
-    }
+    if not resolved_path:
+        return {
+            "ok": False,
+            "error": f"File '{requested}' tidak ditemukan.",
+            "resolved_by": "not_found",
+        }
+
+    # Security: Verify whitelist using commonpath and realpath to prevent bypass/symlinks
+    abs_path = os.path.realpath(resolved_path)
+    is_whitelisted = False
+    for wp in WHITELIST_PATHS:
+        abs_wp = os.path.realpath(wp)
+        try:
+            if os.path.commonpath([abs_path, abs_wp]) == abs_wp:
+                is_whitelisted = True
+                break
+        except ValueError:
+            pass # Paths on different drives
+
+    if not is_whitelisted:
+        return {
+            "ok": False,
+            "error": "Akses ditolak: File berada di luar direktori yang diizinkan.",
+            "resolved_by": "security_blocked"
+        }
+
+    return {"ok": True, "path": resolved_path, "resolved_by": resolved_by}
 
 
 def smart_read(file_ref: str = "", instruction: str = "rangkum dokumen ini", max_chars: int = 15000) -> Dict:
