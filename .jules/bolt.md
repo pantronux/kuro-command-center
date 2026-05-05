@@ -16,3 +16,6 @@
 ## 2024-05-01 - Adding schema readiness flags
 **Learning:** `core_service.py` frequently runs `get_data_revision()` and `bump_data_revision()` which include `CREATE TABLE IF NOT EXISTS`. Also, `memory_manager.py` had `init_short_term_db()` which ran similar DDL commands on every call without caching its readiness state, unlike `finance_db.py`.
 **Action:** Implemented an in-memory `_SCHEMA_READY` boolean flag in `core_service.py` for sync metadata DDL parsing, and similarly in `memory_manager.py` for short term database schema bootstrap. This pattern matches the performance win documented in `finance_db.py` header, avoiding re-evaluating DDL queries unnecessarily.
+## 2024-05-04 - SQLite bindings check and iteration speed
+**Learning:** For pure Python list traversal, `zip(a, b)` is faster than `range(len(a))` indexing. Additionally, when using `executemany` with SQLite, the number of placeholders in the `VALUES` clause must strictly match the tuple length, otherwise `Incorrect number of bindings supplied` is raised. `.copy()` is generally faster than initializing a new dict or `dict()` from a template.
+**Action:** Always verify SQL parameter counts against the schema and prefer `.copy()` for shallow dictionary initialization in tight loops.
