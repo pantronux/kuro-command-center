@@ -1653,7 +1653,10 @@ async def index_path(path: str = Form("/home/kuro/projects/")):
     """Index a system path recursively."""
     # Security: only allow whitelisted paths, prevent path traversal
     path = os.path.abspath(path)
-    is_whitelisted = any(path.startswith(wp) for wp in tools.WHITELIST_PATHS)
+    is_whitelisted = any(
+        os.path.commonpath([os.path.realpath(path), os.path.realpath(wp)]) == os.path.realpath(wp)
+        for wp in tools.WHITELIST_PATHS
+    )
     if not is_whitelisted:
         return {"status": "error", "message": "Path not in whitelist"}
 
@@ -1912,7 +1915,7 @@ async def read_file(request: Request, file_path: str = Form("")):
     # Security: Prevent path traversal
     abs_upload_dir = os.path.abspath(tools.UPLOAD_DIR)
     abs_file_path = os.path.abspath(file_path)
-    if not abs_file_path.startswith(abs_upload_dir + os.sep):
+    if os.path.commonpath([os.path.realpath(abs_file_path), os.path.realpath(abs_upload_dir)]) != os.path.realpath(abs_upload_dir):
         return {
             "status": "error",
             "message": "Invalid file path: Path traversal is not allowed",

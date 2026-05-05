@@ -615,7 +615,7 @@ def smart_read(file_ref: str = "", instruction: str = "rangkum dokumen ini", max
 
     try:
         if ext in PDF_EXTENSIONS:
-            if os.path.abspath(file_path).startswith(os.path.abspath(UPLOAD_DIR)):
+            if os.path.commonpath([os.path.realpath(file_path), os.path.realpath(UPLOAD_DIR)]) == os.path.realpath(UPLOAD_DIR):
                 result = summarize_pdf(os.path.basename(file_path), instruction=instruction)
                 engine_used = "summarize_pdf"
             else:

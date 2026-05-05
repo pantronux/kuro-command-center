@@ -56,7 +56,7 @@ def generate_excel_report(data: Optional[Dict] = None, filename: str = "report.x
         # Security: Prevent path traversal
         abs_exports_dir = os.path.abspath(EXPORTS_DIR)
         filepath = os.path.abspath(os.path.join(abs_exports_dir, filename if filename.endswith('.xlsx') else f"{filename}.xlsx"))
-        if not filepath.startswith(abs_exports_dir + os.sep):
+        if os.path.commonpath([os.path.realpath(filepath), os.path.realpath(abs_exports_dir)]) != os.path.realpath(abs_exports_dir):
             return {"status": "error", "message": "Invalid filename: Path traversal is not allowed"}
 
         wb.save(filepath)
@@ -80,7 +80,7 @@ def manage_files(action: str, filename: str = None, content: str = None) -> Dict
         # Security: Prevent path traversal
         abs_exports_dir = os.path.abspath(EXPORTS_DIR)
         filepath = os.path.abspath(os.path.join(abs_exports_dir, filename))
-        if not filepath.startswith(abs_exports_dir + os.sep):
+        if os.path.commonpath([os.path.realpath(filepath), os.path.realpath(abs_exports_dir)]) != os.path.realpath(abs_exports_dir):
             return {"status": "error", "message": "Invalid filename: Path traversal is not allowed"}
 
         if action == "read":
@@ -185,7 +185,7 @@ def generate_report_template(template_type: str, filename: str, data: Optional[D
         # Security: Prevent path traversal
         abs_exports_dir = os.path.abspath(EXPORTS_DIR)
         filepath = os.path.abspath(os.path.join(abs_exports_dir, filename if filename.endswith(ext) else f"{filename}{ext}"))
-        if not filepath.startswith(abs_exports_dir + os.sep):
+        if os.path.commonpath([os.path.realpath(filepath), os.path.realpath(abs_exports_dir)]) != os.path.realpath(abs_exports_dir):
             return {"status": "error", "message": "Invalid filename: Path traversal is not allowed"}
 
         with open(filepath, 'w') as f:
