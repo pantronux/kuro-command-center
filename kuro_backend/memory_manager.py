@@ -636,8 +636,8 @@ def append_research_ledger_batch(
         cursor = conn.cursor()
         cursor.executemany(
             "INSERT INTO research_ledger "
-            "(persona_scope, kind, content, source_entry_id, schema_v) "
-            "VALUES (?, ?, ?, ?, ?)",
+            "(username, persona_scope, kind, content, source_entry_id, schema_v) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
             rows,
         )
         conn.commit()
