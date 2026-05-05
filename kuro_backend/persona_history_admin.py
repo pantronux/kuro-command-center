@@ -128,13 +128,18 @@ def preview_reclassify(limit_turns: int = 30) -> Dict:
         summaries = _build_turn_summaries(turns)
 
         updates: List[Tuple[str, int]] = []
+        advisor_count = 0
+        consultant_count = 0
         for summary, turn in zip(summaries, turns):
             for row in turn:
                 if row["persona"] != summary.target:
                     updates.append((summary.target, int(row["id"])))
+                    if summary.target == "advisor":
+                        advisor_count += 1
+                    elif summary.target == "consultant":
+                        consultant_count += 1
 
-        advisor_count = sum(1 for target, _ in updates if target == "advisor")
-        consultant_count = sum(1 for target, _ in updates if target == "consultant")
+
         sample = [
             {
                 "row_ids": summary.row_ids,
@@ -172,17 +177,23 @@ def run_reclassify(apply_changes: bool = False) -> Dict:
         summaries = _build_turn_summaries(turns)
 
         updates: List[Tuple[str, int]] = []
+        advisor_count = 0
+        consultant_count = 0
         for summary, turn in zip(summaries, turns):
             for row in turn:
                 if row["persona"] != summary.target:
                     updates.append((summary.target, int(row["id"])))
+                    if summary.target == "advisor":
+                        advisor_count += 1
+                    elif summary.target == "consultant":
+                        consultant_count += 1
 
         result = {
             "rows_scanned": len(rows),
             "turns_scanned": len(turns),
             "updates_total": len(updates),
-            "updates_to_advisor": sum(1 for target, _ in updates if target == "advisor"),
-            "updates_to_consultant": sum(1 for target, _ in updates if target == "consultant"),
+            "updates_to_advisor": advisor_count,
+            "updates_to_consultant": consultant_count,
             "applied": False,
         }
         if not apply_changes:

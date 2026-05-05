@@ -198,7 +198,9 @@ def enforce_global_ceiling(
     """
     parts: list[tuple[str, str]] = [(n, t) for n, t in ordered_parts if t]
     cap = getattr(budget, "total_tokens", None) or MAX_CONTEXT_TOKENS
-    total = sum(approx_tokens(t) for _, t in parts)
+    total = 0
+    for _, t in parts:
+        total += approx_tokens(t)
     if total <= cap:
         return parts
 
