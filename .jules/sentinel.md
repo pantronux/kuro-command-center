@@ -1,4 +1,4 @@
-## 2026-05-04 - [CRITICAL] Fix Path Traversal in Smart Read and Universal Read
-**Vulnerability:** The internal tools `_resolve_smart_read_path` and `universal_read` allowed path traversal. `universal_read` used an insecure `.startswith()` check, while `_resolve_smart_read_path` only checked the whitelist if the explicit path existed, allowing attackers to use relative paths (e.g., `../file`) that resolved against `UPLOAD_DIR` without being whitelisted.
-**Learning:** Checking path boundaries using `.startswith()` is vulnerable to prefix bypasses (CWE-22) (e.g., `/app/uploads_fake` starting with `/app/uploads`). Furthermore, security checks must be enforced at the very end of the resolution pipeline on the *final* resolved path, not just on the first explicit path attempt.
-**Prevention:** Always use `os.path.commonpath([abs_path, abs_wp]) == abs_wp` (combined with `os.path.realpath` to mitigate symlink attacks) to cryptographically ensure a path strictly resides within an intended boundary. Apply this check to the final resolved path before file operations.
+## 2024-05-18 - Path Traversal bypass with startswith()
+**Vulnerability:** Path validation using `path.startswith(base_dir)` is vulnerable to prefix bypasses. For example, if `base_dir` is `/data`, then `/data_backup/file.txt` will bypass the check because it starts with `/data`.
+**Learning:** `os.path.commonpath` must be used along with `os.path.realpath` to properly enforce directory boundaries.
+**Prevention:** Always use `os.path.commonpath([abs_path, abs_base]) == abs_base` and resolve symlinks with `os.path.realpath`.
