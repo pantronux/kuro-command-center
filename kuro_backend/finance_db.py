@@ -1125,8 +1125,8 @@ def get_all_sentinel_stocks(sort_by="latest", category=None, username="Pantronux
     conn = None
     try:
         conn = _conn()
-        query = "SELECT * FROM market_sentinel_stocks WHERE 1=1"
-        params = []
+        query = "SELECT * FROM market_sentinel_stocks WHERE username = ?"
+        params = [username]
         
         if category:
             query += " AND price_category = ?"

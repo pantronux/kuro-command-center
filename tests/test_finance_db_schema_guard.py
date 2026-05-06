@@ -88,9 +88,9 @@ def test_recurring_and_watched_hot_indexes_exist(isolated_finance_db):
     finally:
         conn.close()
 
-    assert "idx_recurring_active" in recurring_idx, (
-        "Expected idx_recurring_active(active, label) for the active list hot path"
+    assert "idx_recurring_active_user" in recurring_idx, (
+        "Expected idx_recurring_active_user(active, username, label) for the active list hot path"
     )
-    assert "idx_watched_active" in watched_idx, (
-        "Expected idx_watched_active(active, symbol) for the dreaming sentinel hot path"
+    assert "idx_watched_active_user" in watched_idx, (
+        "Expected idx_watched_active_user(active, username, symbol) for the dreaming sentinel hot path"
     )
