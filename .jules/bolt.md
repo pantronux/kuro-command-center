@@ -23,3 +23,7 @@
 ## 2024-05-18 - Generator Overhead in sum() and Database Caching
 **Learning:** Python's `sum(1 for ...)` or generator expressions evaluated inside `sum()` are slower than standard `for` loop iteration and arithmetic accumulation in pure Python due to function call overhead and generator instantiation per loop. Additionally, redundant DDL initialization calls like `init_db()` running `CREATE TABLE IF NOT EXISTS` across modules should be cached in process memory using a readiness flag (`_SCHEMA_READY_FOR`) because SQLite still evaluates and locks the database, which slows down process startup or loop events.
 **Action:** Replace `sum(generator_expression)` with standard `for` loop block sums when operating on sequences in performance critical paths. Implement `_SCHEMA_READY_FOR` pattern caching for any repetitive SQLite init or DDL tasks.
+
+## 2024-05-19 - Dictionary Initialization Overhead
+**Learning:** Directly initializing a dictionary with evaluated properties (e.g. `{"a": func(a), "b": func(b)}`) is significantly faster (~35%) than initializing it with dummy data (e.g. `{"a": 0, "b": 0}`) and subsequently overwriting those keys. This is because it completely avoids allocating intermediate values, updating existing keys, and the associated dictionary modification overhead during execution.
+**Action:** Always prefer direct dictionary initialization when all keys and values are known at creation time, rather than establishing a zero-state template and modifying it.
