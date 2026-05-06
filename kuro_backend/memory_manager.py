@@ -313,6 +313,12 @@ def _init_short_term_db_locked():
         cursor.execute("ALTER TABLE short_term ADD COLUMN persona_scope TEXT NOT NULL DEFAULT 'consultant'")
     if "username" not in columns:
         cursor.execute("ALTER TABLE short_term ADD COLUMN username TEXT NOT NULL DEFAULT 'Pantronux'")
+    if "chat_id" not in columns:
+        cursor.execute("ALTER TABLE short_term ADD COLUMN chat_id TEXT DEFAULT NULL")
+        logger.info("short_term migration: added chat_id column")
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_short_term_chat_id ON short_term(chat_id, persona_scope, username)"
+    )
 
     # Sliding-window summary cache (P2.1) — keyed by (username, persona_scope). Keeps the
     # compressed summary of older turns keyed by the highest short_term.id
@@ -424,7 +430,7 @@ def _init_short_term_db_locked():
     logger.info("Short-term memory database initialized.")
 
 
-def get_short_term_with_ids(persona_scope: str = None, username: str = "Pantronux") -> List[Dict]:
+def get_short_term_with_ids(persona_scope: str = None, username: str = "Pantronux", chat_id: Optional[str] = None) -> List[Dict]:
     """Same as :func:`get_short_term` but includes the SQLite row id per entry.
 
     Needed for the sliding-window summary cache so we can key summaries by the
@@ -433,11 +439,18 @@ def get_short_term_with_ids(persona_scope: str = None, username: str = "Pantronu
     scope = normalize_persona(persona_scope or get_active_persona(username))
     conn = _get_short_term_conn()
     cursor = conn.cursor()
-    cursor.execute(
-        "SELECT id, role, content, persona_scope, timestamp FROM short_term "
-        "WHERE persona_scope = ? AND username = ? ORDER BY id DESC LIMIT ?",
-        (scope, username, SHORT_TERM_LIMIT),
-    )
+    if chat_id is not None:
+        cursor.execute(
+            "SELECT id, role, content, persona_scope, timestamp FROM short_term "
+            "WHERE persona_scope = ? AND username = ? AND chat_id = ? ORDER BY id DESC LIMIT ?",
+            (scope, username, chat_id, SHORT_TERM_LIMIT),
+        )
+    else:
+        cursor.execute(
+            "SELECT id, role, content, persona_scope, timestamp FROM short_term "
+            "WHERE persona_scope = ? AND username = ? AND chat_id IS NULL ORDER BY id DESC LIMIT ?",
+            (scope, username, SHORT_TERM_LIMIT),
+        )
     rows = cursor.fetchall()
     conn.close()
     return [
@@ -956,40 +969,48 @@ def mark_dream_notification(
     finally:
         conn.close()
 
-def add_short_term(role: str, content: str, persona_scope: str = None, username: str = "Pantronux"):
-    """Add interaction to short-term buffer."""
+def add_short_term(role: str, content: str, persona_scope: str = None, username: str = "Pantronux", chat_id: Optional[str] = None):
+    """Add interaction to short-term buffer, keyed by (persona_scope, username, chat_id)."""
     scope = normalize_persona(persona_scope or get_active_persona(username))
     conn = _get_short_term_conn()
     cursor = conn.cursor()
     cursor.execute(
-        "INSERT INTO short_term (role, content, persona_scope, username) VALUES (?, ?, ?, ?)",
-        (role, content, scope, username),
+        "INSERT INTO short_term (role, content, persona_scope, username, chat_id) VALUES (?, ?, ?, ?, ?)",
+        (role, content, scope, username, chat_id),
     )
     
-    # Enforce limit - delete oldest if over limit
+    # Enforce limit - delete oldest if over limit, per (persona_scope, username, chat_id)
     cursor.execute(
         """
         DELETE FROM short_term
-        WHERE persona_scope = ? AND username = ?
+        WHERE persona_scope = ? AND username = ? AND (chat_id = ? OR (chat_id IS NULL AND ? IS NULL))
           AND id NOT IN (
-              SELECT id FROM short_term WHERE persona_scope = ? AND username = ? ORDER BY id DESC LIMIT ?
+              SELECT id FROM short_term
+              WHERE persona_scope = ? AND username = ? AND (chat_id = ? OR (chat_id IS NULL AND ? IS NULL))
+              ORDER BY id DESC LIMIT ?
           )
         """,
-        (scope, username, scope, username, SHORT_TERM_LIMIT),
+        (scope, username, chat_id, chat_id, scope, username, chat_id, chat_id, SHORT_TERM_LIMIT),
     )
     
     conn.commit()
     conn.close()
 
-def get_short_term(persona_scope: str = None, username: str = "Pantronux") -> List[Dict]:
-    """Get recent short-term memory."""
+def get_short_term(persona_scope: str = None, username: str = "Pantronux", chat_id: Optional[str] = None) -> List[Dict]:
+    """Get recent short-term memory, optionally filtered by chat_id."""
     scope = normalize_persona(persona_scope or get_active_persona(username))
     conn = _get_short_term_conn()
     cursor = conn.cursor()
-    cursor.execute(
-        "SELECT * FROM short_term WHERE persona_scope = ? AND username = ? ORDER BY id DESC LIMIT ?",
-        (scope, username, SHORT_TERM_LIMIT),
-    )
+    if chat_id is not None:
+        cursor.execute(
+            "SELECT * FROM short_term WHERE persona_scope = ? AND username = ? AND chat_id = ? ORDER BY id DESC LIMIT ?",
+            (scope, username, chat_id, SHORT_TERM_LIMIT),
+        )
+    else:
+        cursor.execute(
+            "SELECT * FROM short_term WHERE persona_scope = ? AND username = ? AND chat_id IS NULL ORDER BY id DESC LIMIT ?",
+            (scope, username, SHORT_TERM_LIMIT),
+        )
     rows = cursor.fetchall()
     conn.close()
     return [

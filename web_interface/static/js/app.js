@@ -55,30 +55,19 @@ function logout() {
         .catch(() => { window.location.href = '/login'; });
 }
 
-function getChatSessionId() {
-    const key = 'kuro_chat_session_id';
-    let sessionId = localStorage.getItem(key);
-    if (sessionId) return sessionId;
-    if (window.crypto && typeof window.crypto.randomUUID === 'function') {
-        sessionId = window.crypto.randomUUID();
-    } else {
-        sessionId = `sess_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
-    }
-    localStorage.setItem(key, sessionId);
-    return sessionId;
-}
+// DEPRECATED: getChatSessionId() removed in V1.0.0 Chat Isolation.
+// Use currentChatId state variable instead, managed per-chat by SSE meta events.
 
 async function authFetch(url, options = {}) {
     options.credentials = options.credentials || 'include';
     options.headers = options.headers || {};
-    options.headers['X-Chat-Session'] = getChatSessionId();
     const response = await fetch(url, options);
-    
+
     if (response.status === 401) {
         window.location.href = '/login';
         throw new Error('Authentication required');
     }
-    
+
     return response;
 }
 
@@ -209,9 +198,9 @@ const elements = {
 // ============================================
 document.addEventListener('DOMContentLoaded', () => {
     lucide.createIcons();
-    
+
     marked.setOptions({
-        highlight: function(code, lang) {
+        highlight: function (code, lang) {
             if (lang && hljs.getLanguage(lang)) {
                 return hljs.highlight(code, { language: lang }).value;
             }
@@ -220,7 +209,7 @@ document.addEventListener('DOMContentLoaded', () => {
         breaks: true,
         gfm: true,
     });
-    
+
     loadTheme();
     setupEventListeners();
     setupAutoResize();
@@ -254,31 +243,31 @@ function setupEventListeners() {
         });
         elements.welcomeUploadBtn.addEventListener('click', () => elements.fileInput.click());
         // Auto resize welcome input
-        elements.welcomeInput.addEventListener('input', function() {
+        elements.welcomeInput.addEventListener('input', function () {
             this.style.height = 'auto';
             this.style.height = Math.min(this.scrollHeight, 200) + 'px';
         });
     }
-    
+
     if (elements.backToSidebarBtn) {
         elements.backToSidebarBtn.addEventListener('click', () => toggleChatDrawer(false));
     }
-    
+
     elements.uploadBtn.addEventListener('click', () => elements.fileInput.click());
     elements.fileInput.addEventListener('change', handleFileSelect);
-    
+
     // Ctrl+V paste support for images and files
     elements.messageInput.addEventListener('paste', handlePaste);
-    
+
     setupDragAndDrop();
     elements.darkModeToggle.addEventListener('click', toggleDarkMode);
-    
+
     elements.openSidebar.addEventListener('click', () => {
         elements.sidebar.classList.remove('-translate-x-full');
         document.body.style.overflow = 'hidden';
     });
     elements.closeSidebar.addEventListener('click', closeSidebar);
-    
+
     // Minimize sidebar toggle (desktop only)
     if (elements.minimizeSidebar) {
         elements.minimizeSidebar.addEventListener('click', toggleSidebarCollapse);
@@ -288,15 +277,15 @@ function setupEventListeners() {
             applySidebarCollapse(true);
         }
     }
-    
+
     document.addEventListener('click', (e) => {
-        if (window.innerWidth < 1024 && 
-            !elements.sidebar.contains(e.target) && 
+        if (window.innerWidth < 1024 &&
+            !elements.sidebar.contains(e.target) &&
             !elements.openSidebar.contains(e.target)) {
             closeSidebar();
         }
     });
-    
+
     // System Status Modal
     elements.navSystemStatus.addEventListener('click', (e) => {
         e.preventDefault();
@@ -309,7 +298,7 @@ function setupEventListeners() {
     });
     elements.closeSystemStatus.addEventListener('click', closeSystemStatus);
     elements.systemStatusBackdrop.addEventListener('click', closeSystemStatus);
-    
+
     // Files Modal
     if (elements.navFiles) {
         elements.navFiles.addEventListener('click', (e) => {
@@ -317,7 +306,7 @@ function setupEventListeners() {
             openFilesModal();
         });
     }
-    
+
     // Settings Modal
     elements.navSettings.addEventListener('click', (e) => {
         e.preventDefault();
@@ -325,18 +314,18 @@ function setupEventListeners() {
     });
     elements.closeSettings.addEventListener('click', closeSettings);
     elements.settingsBackdrop.addEventListener('click', closeSettings);
-    
+
     elements.temperatureSlider.addEventListener('input', (e) => {
         elements.temperatureValue.textContent = e.target.value;
     });
-    
+
     // clearHistoryBtn and clearPersonaHistoryBtn removed in V1.0.0
     setupPersonaAdminControls();
-    
+
     // Persona Accordion & Sessions
     if (elements.personaAccordionBtn) {
         elements.personaAccordionBtn.addEventListener('click', togglePersonaAccordion);
-        
+
         document.querySelectorAll('.persona-option-v2').forEach(option => {
             option.addEventListener('click', () => {
                 const newPersona = option.dataset.persona;
@@ -470,7 +459,7 @@ function closeSidebar() {
 // ============================================
 function togglePersonaAccordion(force) {
     const isExpanded = typeof force === 'boolean' ? !force : elements.personaAccordionContent.classList.contains('opacity-100');
-    
+
     if (isExpanded) {
         // Collapse
         elements.personaAccordionContent.style.maxHeight = '0px';
@@ -488,7 +477,7 @@ function togglePersonaAccordion(force) {
 
 function updatePersonaUI() {
     let personaName = selectedPersona.charAt(0).toUpperCase() + selectedPersona.slice(1);
-    
+
     document.querySelectorAll('.persona-option-v2').forEach(opt => {
         if (opt.dataset.persona === selectedPersona) {
             opt.classList.add('active');
@@ -498,17 +487,17 @@ function updatePersonaUI() {
             opt.classList.remove('active');
         }
     });
-    
+
     if (elements.activePersonaName) elements.activePersonaName.textContent = personaName;
 }
 
 function toggleChatDrawer(force) {
     const isOpen = typeof force === 'boolean' ? !force : elements.chatDrawer.classList.contains('active');
-    
+
     if (isOpen) {
         elements.chatDrawer.classList.remove('active', 'translate-x-0');
         elements.chatDrawer.classList.add('-translate-x-full');
-        
+
         elements.sidebar.classList.remove('lg:-translate-x-full');
         elements.sidebar.classList.add('lg:translate-x-0');
         if (window.innerWidth >= 1024) {
@@ -518,10 +507,10 @@ function toggleChatDrawer(force) {
     } else {
         elements.chatDrawer.classList.add('active', 'translate-x-0');
         elements.chatDrawer.classList.remove('-translate-x-full');
-        
+
         elements.sidebar.classList.remove('lg:translate-x-0');
         elements.sidebar.classList.add('-translate-x-full', 'lg:-translate-x-full');
-        
+
         elements.mainContent.classList.add('drawer-open');
         loadChatSessions();
     }
@@ -542,7 +531,7 @@ async function loadChatSessions() {
 
 function renderChatSessions() {
     if (!elements.chatSessionsList) return;
-    
+
     if (chatSessions.length === 0) {
         elements.chatSessionsList.innerHTML = `
             <div class="flex flex-col items-center justify-center h-full text-gray-400 space-y-2 opacity-50">
@@ -553,7 +542,7 @@ function renderChatSessions() {
         lucide.createIcons();
         return;
     }
-    
+
     elements.chatSessionsList.innerHTML = chatSessions.map(session => `
         <div class="session-item group relative flex items-center gap-3 px-3 py-2.5 rounded-xl cursor-pointer ${currentChatId === session.chat_id ? 'active' : 'text-gray-600 dark:text-gray-400'}" 
              onclick="selectChatSession('${session.chat_id}')" data-chat-id="${session.chat_id}">
@@ -578,7 +567,7 @@ function startNewChat() {
     chatOffset = 0;
     hasMoreMessages = true;
     elements.chatContainer.innerHTML = '';
-    
+
     elements.chatContainer.classList.add('hidden');
     if (elements.mainInputArea) elements.mainInputArea.classList.add('hidden');
     if (elements.welcomeScreen) {
@@ -586,7 +575,7 @@ function startNewChat() {
         elements.welcomeInput.value = '';
         setTimeout(() => elements.welcomeInput.focus(), 100);
     }
-    
+
     renderChatSessions();
     lucide.createIcons();
 }
@@ -597,20 +586,20 @@ async function selectChatSession(chatId) {
     chatOffset = 0;
     hasMoreMessages = true;
     chatHistory = [];
-    
+
     if (elements.welcomeScreen) elements.welcomeScreen.classList.add('hidden');
     elements.chatContainer.classList.remove('hidden');
     if (elements.mainInputArea) elements.mainInputArea.classList.remove('hidden');
-    
+
     elements.chatContainer.innerHTML = '<div class="flex justify-center p-8"><div class="spinner border-emerald-500"></div></div>';
-    
+
     renderChatSessions();
     await kuroLoadHistory(true);
 }
 
 async function deleteChatSession(chatId) {
     if (!confirm('Are you sure you want to delete this chat session?')) return;
-    
+
     try {
         const response = await authFetch(`${CONFIG.API_BASE}/chats/${chatId}`, { method: 'DELETE' });
         if (response.ok) {
@@ -626,7 +615,7 @@ async function renameChatSession(chatId) {
     const session = chatSessions.find(s => s.chat_id === chatId);
     const newTitle = prompt('Enter new title:', session?.title || '');
     if (!newTitle || newTitle === session?.title) return;
-    
+
     try {
         const response = await authFetch(`${CONFIG.API_BASE}/chats/${chatId}`, {
             method: 'PUT',
@@ -654,7 +643,7 @@ function applySidebarCollapse(collapsed) {
     elements.mainContent.classList.toggle('sidebar-collapsed', collapsed);
     elements.minimizeSidebar.classList.toggle('collapsed', collapsed);
     localStorage.setItem('kuro-sidebar-collapsed', collapsed);
-    
+
     // Update icon
     const icon = elements.minimizeSidebar.querySelector('i');
     if (icon) {
@@ -667,7 +656,7 @@ function applySidebarCollapse(collapsed) {
 // Auto-resize Textarea
 // ============================================
 function setupAutoResize() {
-    elements.messageInput.addEventListener('input', function() {
+    elements.messageInput.addEventListener('input', function () {
         this.style.height = 'auto';
         this.style.height = Math.min(this.scrollHeight, 150) + 'px';
     });
@@ -682,7 +671,7 @@ function setupInfiniteScroll() {
 
 function handleScroll() {
     if (isLoadingMore || !hasMoreMessages) return;
-    
+
     // Check if scrolled to top (with small threshold)
     if (elements.chatContainer.scrollTop < 50) {
         loadMoreMessages();
@@ -707,20 +696,20 @@ async function kuroLoadHistory(isInitial = false) {
         elements.chatContainer.innerHTML = '';
     }
     if (!hasMoreMessages) return;
-    
+
     isLoadingMore = true;
     elements.scrollLoader.classList.add('visible');
-    
+
     const previousScrollHeight = elements.chatContainer.scrollHeight;
     const previousScrollTop = elements.chatContainer.scrollTop;
-    
+
     try {
         let url = `${CONFIG.API_BASE}/history?limit=${CONFIG.CHAT_PAGE_SIZE}&offset=${chatOffset}&platform=web&persona=${encodeURIComponent(selectedPersona)}`;
         if (currentChatId) url += `&chat_id=${currentChatId}`;
-        
+
         const response = await authFetch(url);
         const data = await response.json();
-        
+
         if (data.status === 'success' && data.history.length > 0) {
             const messages = [...data.history].reverse();
             messages.forEach(msg => {
@@ -728,10 +717,10 @@ async function kuroLoadHistory(isInitial = false) {
                 const attachments = Array.isArray(msg.attachments) ? msg.attachments : (typeof msg.attachments === 'string' ? JSON.parse(msg.attachments) : []);
                 prependMessageToChat(role, msg.content, attachments, msg.id);
             });
-            
+
             chatOffset += data.history.length;
             hasMoreMessages = data.has_more;
-            
+
             if (isInitial) {
                 scrollToBottom();
             } else {
@@ -781,7 +770,7 @@ function toggleDarkMode() {
 const KURO_UI_MODES = ['HUD_MODE', 'RESEARCH_MODE', 'CINEMA_MODE', 'NORMAL_MODE'];
 const KURO_THEME_CLASSES = ['theme-hud', 'theme-research', 'theme-cinema'];
 const KURO_SENTINEL_IDLE_MS = 30000; // Client-side watchdog: revert to IDLE
-                                     // if backend stops updating.
+// if backend stops updating.
 let _kuroDashboardWS = null;
 let _kuroDashboardWSBackoff = 1000;
 let _kuroCurrentMode = 'NORMAL_MODE';
@@ -796,7 +785,7 @@ function kuroApplyUIMode(command, payload) {
     else if (command === 'RESEARCH_MODE') root.classList.add('theme-research');
     else if (command === 'CINEMA_MODE') root.classList.add('theme-cinema');
     _kuroCurrentMode = command;
-    try { localStorage.setItem('kuro-ui-mode', command); } catch (_) {}
+    try { localStorage.setItem('kuro-ui-mode', command); } catch (_) { }
     if (payload && payload.server_status) {
         _kuroLastStatusSnapshot = payload.server_status;
         kuroRenderStatusTicker(payload.server_status);
@@ -907,15 +896,15 @@ function kuroConnectDashboardWS() {
                 } else if (cmd === 'GREETING') {
                     kuroHandleGreeting(payload);
                 }
-            } catch (_) {}
+            } catch (_) { }
         });
         ws.addEventListener('close', () => {
             _kuroDashboardWS = null;
             setTimeout(kuroConnectDashboardWS, _kuroDashboardWSBackoff);
             _kuroDashboardWSBackoff = Math.min(_kuroDashboardWSBackoff * 2, 30000);
         });
-        ws.addEventListener('error', () => { try { ws.close(); } catch (_) {} });
-    } catch (_) {}
+        ws.addEventListener('error', () => { try { ws.close(); } catch (_) { } });
+    } catch (_) { }
 }
 
 function kuroHandleGreeting(payload) {
@@ -926,7 +915,7 @@ function kuroHandleGreeting(payload) {
         if (typeof addMessageToChat === 'function') {
             addMessageToChat('ai', text);
         }
-    } catch (_) {}
+    } catch (_) { }
 }
 
 function kuroRestoreUIMode() {
@@ -935,7 +924,7 @@ function kuroRestoreUIMode() {
         if (saved && KURO_UI_MODES.includes(saved) && saved !== 'NORMAL_MODE') {
             kuroApplyUIMode(saved, {});
         }
-    } catch (_) {}
+    } catch (_) { }
 }
 
 window.kuroApplyUIMode = kuroApplyUIMode;
@@ -949,13 +938,13 @@ window.kuroRestoreUIMode = kuroRestoreUIMode;
 // ============================================
 function setupDragAndDrop() {
     let dragCounter = 0;
-    
+
     document.addEventListener('dragenter', (e) => {
         e.preventDefault();
         dragCounter++;
         elements.dropOverlay.classList.remove('hidden');
     });
-    
+
     document.addEventListener('dragleave', (e) => {
         e.preventDefault();
         dragCounter--;
@@ -963,16 +952,16 @@ function setupDragAndDrop() {
             elements.dropOverlay.classList.add('hidden');
         }
     });
-    
+
     document.addEventListener('dragover', (e) => {
         e.preventDefault();
     });
-    
+
     document.addEventListener('drop', (e) => {
         e.preventDefault();
         dragCounter = 0;
         elements.dropOverlay.classList.add('hidden');
-        
+
         const files = Array.from(e.dataTransfer.files);
         handleFiles(files);
     });
@@ -992,9 +981,9 @@ function handleFileSelect(e) {
 function handlePaste(e) {
     const items = e.clipboardData?.items;
     if (!items) return;
-    
+
     const filesToHandle = [];
-    
+
     for (const item of items) {
         // Handle image files (screenshots, copied images)
         if (item.kind === 'file' && item.type.startsWith('image/')) {
@@ -1013,7 +1002,7 @@ function handlePaste(e) {
             }
         }
     }
-    
+
     if (filesToHandle.length > 0) {
         handleFiles(filesToHandle);
         showNotification(`${filesToHandle.length} file(s) pasted from clipboard`, 'success');
@@ -1025,7 +1014,7 @@ function handleFiles(files) {
         showNotification(`Maximum ${CONFIG.MAX_FILES} files allowed`, 'error');
         return;
     }
-    
+
     files.forEach(file => {
         if (isValidFileType(file)) {
             selectedFiles.push(file);
@@ -1033,7 +1022,7 @@ function handleFiles(files) {
             showNotification(`File type not allowed: ${file.name}`, 'error');
         }
     });
-    
+
     updateFilePreview();
 }
 
@@ -1048,11 +1037,11 @@ function isValidFileType(file) {
 function updateFilePreview() {
     elements.filePreview.innerHTML = '';
     elements.filePreview.classList.toggle('hidden', selectedFiles.length === 0);
-    
+
     selectedFiles.forEach((file, index) => {
         const card = document.createElement('div');
         card.className = 'file-preview-card';
-        
+
         const icon = getFileIcon(file.type);
         card.innerHTML = `
             <i data-lucide="${icon}" class="w-4 h-4 text-emerald-500"></i>
@@ -1061,10 +1050,10 @@ function updateFilePreview() {
                 <i data-lucide="x" class="w-3 h-3"></i>
             </button>
         `;
-        
+
         elements.filePreview.appendChild(card);
     });
-    
+
     lucide.createIcons();
 }
 
@@ -1085,7 +1074,7 @@ function showWelcomeScreen() {
     if (elements.welcomeScreen) elements.welcomeScreen.classList.remove('hidden');
     elements.chatContainer.classList.add('hidden');
     if (elements.mainInputArea) elements.mainInputArea.classList.add('hidden');
-    
+
     // Close sidebar on mobile when starting new chat
     if (window.innerWidth < 1024) {
         closeSidebar();
@@ -1098,32 +1087,32 @@ async function sendMessage(isFromWelcome = false) {
     const inputElement = isFromWelcome ? elements.welcomeInput : elements.messageInput;
     const sendBtnElement = isFromWelcome ? elements.welcomeSendBtn : elements.sendBtn;
     const message = inputElement.value.trim();
-    
+
     if (!message && selectedFiles.length === 0) return;
     if (isProcessing) return;
-    
+
     isProcessing = true;
     if (elements.sendBtn) elements.sendBtn.disabled = true;
     if (elements.welcomeSendBtn) elements.welcomeSendBtn.disabled = true;
-    
+
     if (isFromWelcome) {
         if (elements.welcomeScreen) elements.welcomeScreen.classList.add('hidden');
         elements.chatContainer.classList.remove('hidden');
         if (elements.mainInputArea) elements.mainInputArea.classList.remove('hidden');
     }
-    
+
     // Add user message to chat
     addMessageToChat('user', message, selectedFiles);
-    
+
     // Clear input
     inputElement.value = '';
     inputElement.style.height = 'auto';
-    
+
     // Prepare files for upload
     const filesToSend = [...selectedFiles];
     selectedFiles = [];
     updateFilePreview();
-    
+
     // STEP 1: Create ONE empty chat bubble for Kuro and insert into DOM
     const aiMessageDiv = document.createElement('div');
     aiMessageDiv.className = 'flex items-start gap-3 message-enter';
@@ -1141,7 +1130,7 @@ async function sendMessage(isFromWelcome = false) {
     `;
     elements.chatContainer.appendChild(aiMessageDiv);
     lucide.createIcons();
-    
+
     // Get reference to the content div inside the bubble
     const streamingContent = aiMessageDiv.querySelector('.streaming-content');
     let botMessage = '';
@@ -1162,29 +1151,29 @@ async function sendMessage(isFromWelcome = false) {
             scrollToBottom();
         }
     };
-    
+
     try {
         const formData = new FormData();
         formData.append('message', message);
         formData.append('persona', selectedPersona);
         if (currentChatId) formData.append('chat_id', currentChatId);
         filesToSend.forEach(file => formData.append('files', file));
-        
+
         // STEP 2: Fetch the streaming endpoint
         const response = await authFetch(`${CONFIG.API_BASE}/chat/stream`, {
             method: 'POST',
             body: formData,
             credentials: 'include',
         });
-        
+
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
-        
+
         // STEP 3: Get reader and decoder
         const reader = response.body.getReader();
         const decoder = new TextDecoder('utf-8');
-        
+
         // STEP 4: Start the loop with BUFFER pattern
         // FIX: Properly handle multi-line SSE events (event: chunk\ndata: {...}\n\n)
         // CRITICAL: Only 'chunk' events update the active bubble.
@@ -1192,18 +1181,18 @@ async function sendMessage(isFromWelcome = false) {
         while (true) {
             const { done, value } = await reader.read();
             if (done) break;
-            
+
             buffer += decoder.decode(value, { stream: true });
             buffer = buffer.replace(/\r\n/g, '\n');
             const events = buffer.split('\n\n');
             buffer = events.pop(); // Save incomplete event to buffer
-            
+
             for (const event of events) {
                 // Parse SSE event: extract event: and data: lines
                 const lines = event.split('\n');
                 let eventType = 'chunk'; // Default event type
                 const dataParts = [];
-                
+
                 for (const line of lines) {
                     if (line.startsWith('event: ')) {
                         eventType = line.substring(7).trim();
@@ -1212,14 +1201,14 @@ async function sendMessage(isFromWelcome = false) {
                     }
                 }
                 const dataStr = dataParts.join('\n').trim();
-                
+
                 if (!dataStr) continue;
                 if (dataStr === '[DONE]') continue;
-                
+
                 try {
                     const data = JSON.parse(dataStr);
                     const piece = data.text != null && data.text !== '' ? data.text : data.chunk;
-                    
+
                     if (eventType === 'chunk' && piece != null && piece !== '') {
                         if (!streamStarted) {
                             streamStarted = true;
@@ -1282,13 +1271,13 @@ async function sendMessage(isFromWelcome = false) {
                 }
             }
         }
-        
+
         if (renderTimer) {
             clearTimeout(renderTimer);
             renderTimer = null;
         }
         flushStreamingRender();
-        
+
         // Final render (fallback if complete event wasn't received)
         if (botMessage && !streamHadError) {
             streamingContent.innerHTML = marked.parse(botMessage);
@@ -1297,7 +1286,7 @@ async function sendMessage(isFromWelcome = false) {
         if (wasPinnedToBottom) {
             scrollToBottom();
         }
-        
+
         // V1.0.0: After completion, if this was the first message, refresh sessions to show the new title
         if (!currentChatId || chatHistory.length <= 2) {
             setTimeout(loadChatSessions, 1500); // Wait for background title gen
@@ -1305,7 +1294,7 @@ async function sendMessage(isFromWelcome = false) {
 
         // Save AI message to internal history
         chatHistory.push({ role: 'assistant', content: botMessage });
-        
+
     } catch (error) {
         console.error('Chat error:', error);
         if (streamingContent) {
@@ -1355,14 +1344,14 @@ function addMessageToChat(role, content, files = [], messageId = null) {
     if (messageId) {
         messageDiv.setAttribute('data-message-id', messageId);
     }
-    
+
     // Avatar
     const avatar = role === 'user'
         ? `<div class="w-8 h-8 rounded-full bg-gradient-to-br from-purple-400 to-pink-500 flex items-center justify-center flex-shrink-0 text-white font-bold text-sm">P</div>`
         : `<div class="w-8 h-8 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center flex-shrink-0"><i class="fa-solid fa-shield-cat text-white text-sm"></i></div>`;
-    
+
     let contentHtml = '';
-    
+
     if (files.length > 0) {
         files.forEach(file => {
             if (file.type.startsWith('image/')) {
@@ -1384,7 +1373,7 @@ function addMessageToChat(role, content, files = [], messageId = null) {
             }
         });
     }
-    
+
     if (content) {
         if (role === 'ai') {
             // Parse markdown and add copy buttons for code blocks and tables
@@ -1394,9 +1383,9 @@ function addMessageToChat(role, content, files = [], messageId = null) {
             contentHtml += `<p class="whitespace-pre-wrap">${escapeHtml(content)}</p>`;
         }
     }
-    
+
     const bubbleClass = role === 'user' ? 'chat-bubble-user' : 'chat-bubble-ai';
-    
+
     // Add copy button for AI messages
     const copyButton = role === 'ai' ? `
         <button class="copy-message-btn absolute top-2 right-2 p-1.5 rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors opacity-0 group-hover:opacity-100"
@@ -1416,16 +1405,16 @@ function addMessageToChat(role, content, files = [], messageId = null) {
             <span class="text-xs text-gray-400 mt-1 block ${role === 'user' ? 'text-right' : ''}">${getCurrentTime()}</span>
         </div>
     `;
-    
+
     elements.chatContainer.appendChild(messageDiv);
     lucide.createIcons();
-    
+
     // Add copy buttons to code blocks and tables
     if (role === 'ai') {
         addCodeBlockCopyButtons(messageDiv);
         addTableCopyButtons(messageDiv);
     }
-    
+
     elements.chatContainer.scrollTop = elements.chatContainer.scrollHeight;
 }
 
@@ -1435,20 +1424,20 @@ function prependMessageToChat(role, content, attachments = [], messageId = null)
     if (messageId) {
         messageDiv.setAttribute('data-message-id', messageId);
     }
-    
-    const avatar = role === 'user' 
+
+    const avatar = role === 'user'
         ? `<div class="w-8 h-8 rounded-full bg-gradient-to-br from-purple-400 to-pink-500 flex items-center justify-center flex-shrink-0 text-white font-bold text-sm">P</div>`
         : `<div class="w-8 h-8 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center flex-shrink-0"><i class="fa-solid fa-shield-cat text-white text-sm"></i></div>`;
-    
+
     let contentHtml = '';
-    
+
     // Handle persistent attachments from history
     if (attachments && attachments.length > 0) {
         attachments.forEach(att => {
             const filename = typeof att === 'string' ? att : (att.stored_filename || att.filename);
             const url = `/uploads/${filename}`;
             const ext = filename.split('.').pop().toLowerCase();
-            
+
             if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)) {
                 contentHtml += `<img src="${url}" alt="${filename}" class="chat-image" onclick="window.open(this.src)">`;
             } else {
@@ -1477,9 +1466,9 @@ function prependMessageToChat(role, content, attachments = [], messageId = null)
             contentHtml += `<p class="whitespace-pre-wrap">${escapeHtml(content)}</p>`;
         }
     }
-    
+
     const bubbleClass = role === 'user' ? 'chat-bubble-user' : 'chat-bubble-ai';
-    
+
     messageDiv.innerHTML = `
         ${avatar}
         <div class="max-w-[85%] lg:max-w-[70%]">
@@ -1489,14 +1478,14 @@ function prependMessageToChat(role, content, attachments = [], messageId = null)
             <span class="text-xs text-gray-400 mt-1 block ${role === 'user' ? 'text-right' : ''}">${getCurrentTime()}</span>
         </div>
     `;
-    
+
     // Insert after the scroll loader
     if (elements.scrollLoader && elements.scrollLoader.nextSibling) {
         elements.chatContainer.insertBefore(messageDiv, elements.scrollLoader.nextSibling);
     } else {
         elements.chatContainer.insertBefore(messageDiv, elements.chatContainer.firstChild);
     }
-    
+
     lucide.createIcons();
 }
 
@@ -1513,12 +1502,12 @@ function getIconForExt(ext) {
 function previewFile(filename) {
     const ext = filename.split('.').pop().toLowerCase();
     const url = `/uploads/${filename}`;
-    
+
     elements.filePreviewTitle.textContent = filename;
     elements.filePreviewModal.classList.remove('hidden');
     elements.filePreviewBody.innerHTML = '';
     elements.filePreviewLoader.classList.remove('hidden');
-    
+
     if (ext === 'pdf') {
         const iframe = document.createElement('iframe');
         iframe.src = url;
@@ -1556,14 +1545,14 @@ function previewFile(filename) {
 function previewFileLocal(btn) {
     const messageDiv = btn.closest('.flex');
     const filename = btn.closest('.rounded-xl').querySelector('span').textContent;
-    
+
     // Find the file in selectedFiles if it was just added, 
     // or if it's already in the chat, we might need a different approach.
     // Actually, for simplicity, if it's a local file, we can't easily find it again 
     // unless we store the Blobs. 
     // Let's just alert that preview is available after sending/refreshing for now, 
     // OR better: handle it if we have the blob.
-    
+
     // For now, let's just make it work for images (already works) 
     // and for other files, we'll just say "Please wait for upload to complete".
     showNotification("Preview will be available after the message is processed.", "info");
@@ -1600,13 +1589,13 @@ async function handleSearch() {
         elements.searchResults.innerHTML = '';
         return;
     }
-    
+
     elements.searchResults.innerHTML = '<div class="flex justify-center py-8"><div class="spinner border-emerald-500 border-t-transparent"></div></div>';
-    
+
     try {
         const response = await authFetch(`${CONFIG.API_BASE}/chat/search?q=${encodeURIComponent(query)}&persona=${selectedPersona}`);
         const data = await response.json();
-        
+
         if (data.status === 'success' && data.data.results.length > 0) {
             renderSearchResults(data.data.results);
         } else {
@@ -1630,10 +1619,10 @@ function renderSearchResults(results) {
         const card = document.createElement('div');
         card.className = 'p-4 bg-gray-50 dark:bg-gray-900/40 border border-gray-100 dark:border-gray-700 rounded-2xl hover:border-emerald-500/50 hover:bg-emerald-500/5 transition-all cursor-pointer group';
         card.onclick = () => jumpToMessage(res.id);
-        
+
         const date = new Date(res.timestamp).toLocaleString();
         const personaLabel = res.persona ? res.persona.charAt(0).toUpperCase() + res.persona.slice(1) : 'Unknown';
-        
+
         card.innerHTML = `
             <div class="flex items-center justify-between mb-2">
                 <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600">${personaLabel}</span>
@@ -1651,7 +1640,7 @@ function renderSearchResults(results) {
 function jumpToMessage(messageId) {
     // 1. Close modal
     closeSearchModal();
-    
+
     // 2. Try to find the message in the current DOM
     const target = document.querySelector(`[data-message-id="${messageId}"]`);
     if (target) {
@@ -1713,14 +1702,14 @@ async function loadChatHistory() {
         chatOffset = 0;
         hasMoreMessages = true;
         isLoadingMore = false;
-        
+
         console.log('[CHAT_HISTORY] Fetching history from backend...');
         const response = await authFetch(
             `${CONFIG.API_BASE}/history?limit=${CONFIG.CHAT_PAGE_SIZE}&offset=0&platform=web&persona=${encodeURIComponent(selectedPersona)}`
         );
         const data = await response.json();
         console.log('[CHAT_HISTORY] Backend response:', data);
-        
+
         // Clear container but keep scroll loader
         elements.chatContainer.innerHTML = `
             <div class="scroll-loader" id="scrollLoader">
@@ -1728,25 +1717,25 @@ async function loadChatHistory() {
             </div>
         `;
         elements.scrollLoader = document.getElementById('scrollLoader');
-        
+
         if (data.status === 'success' && data.history && data.history.length > 0) {
             console.log(`[CHAT_HISTORY] Loaded ${data.history.length} messages from backend`);
-            
+
             // FIX: Backend already returns data in chronological order (oldest first)
             // via list(reversed(history)) in chat_history.py line 102.
             // DO NOT reverse again - this was causing the double-reverse anomaly.
             const messages = data.history;
-            
+
             // Render messages in chronological order (oldest at top, newest at bottom)
             messages.forEach(msg => {
                 const role = msg.role === 'user' ? 'user' : 'ai';
                 const attachments = Array.isArray(msg.attachments) ? msg.attachments : (typeof msg.attachments === 'string' ? JSON.parse(msg.attachments) : []);
                 addMessageToChat(role, msg.content, attachments, msg.id);
             });
-            
+
             chatOffset = data.history.length;
             hasMoreMessages = data.has_more;
-            
+
             // FIX: Auto-scroll to bottom after loading history
             // Use setTimeout to ensure all DOM elements are fully rendered
             setTimeout(() => {
@@ -1811,22 +1800,22 @@ async function openSystemStatus() {
     elements.systemStatusModal.classList.remove('hidden');
     elements.systemStatusModal.classList.add('flex');
     elements.systemStatusContent.innerHTML = '<div class="flex items-center justify-center py-8"><div class="spinner"></div></div>';
-    
+
     try {
         const [sysResponse, logResponse] = await Promise.all([
             authFetch(`${CONFIG.API_BASE}/system-status`),
             authFetch(`${CONFIG.API_BASE}/log-storage`)
         ]);
-        
+
         const sysData = await sysResponse.json();
         const logData = await logResponse.json();
-        
+
         if (sysData.status === 'success') {
             let logStorageHtml = '';
             if (logData.status === 'success' && logData.data) {
                 const logInfo = logData.data;
                 let breakdownHtml = '';
-                
+
                 if (logInfo.breakdown) {
                     breakdownHtml = '<div class="mt-3 space-y-1">';
                     Object.entries(logInfo.breakdown).forEach(([name, size]) => {
@@ -1864,7 +1853,7 @@ async function openSystemStatus() {
                     </div>
                 `;
             }
-            
+
             elements.systemStatusContent.innerHTML = `
                 <div class="space-y-4">
                     <div class="bg-gray-50 dark:bg-gray-700 rounded-xl p-4 font-mono text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">${sysData.data}</div>
@@ -2081,21 +2070,21 @@ async function openFilesModal() {
         document.body.insertAdjacentHTML('beforeend', modalHtml);
         elements.filesModal = document.getElementById('filesModal');
         elements.filesContent = document.getElementById('filesContent');
-        
+
         document.getElementById('closeFiles').addEventListener('click', closeFilesModal);
         document.getElementById('filesBackdrop').addEventListener('click', closeFilesModal);
     }
-    
+
     elements.filesModal.classList.remove('hidden');
     elements.filesContent.innerHTML = '<div class="flex items-center justify-center py-8"><div class="spinner"></div></div>';
-    
+
     try {
         const response = await authFetch(`${CONFIG.API_BASE}/list-files`);
         const data = await response.json();
-        
+
         if (data.status === 'success' && Array.isArray(data.data)) {
             const files = data.data;
-            
+
             if (files.length === 0) {
                 elements.filesContent.innerHTML = `
                     <div class="text-center py-8 text-gray-500">
@@ -2116,7 +2105,7 @@ async function openFilesModal() {
     } catch (error) {
         elements.filesContent.innerHTML = `<p class="text-red-500 text-center py-8">Error: ${error.message}</p>`;
     }
-    
+
     lucide.createIcons();
 }
 
@@ -2127,10 +2116,10 @@ function renderFileCard(file) {
     if (['pdf'].includes(ext)) colorClass = 'text-red-400';
     else if (['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext)) colorClass = 'text-blue-400';
     else if (['py', 'js', 'json'].includes(ext)) colorClass = 'text-yellow-400';
-    
+
     const size = formatBytes(file.size_bytes);
     const date = new Date(file.uploaded_at).toLocaleString();
-    
+
     // Check for expiry
     let expiryBadge = '';
     if (file.expires_at) {
@@ -2266,7 +2255,7 @@ function updatePersonaLabel() {
     if (elements.currentPersonaLabel) {
         elements.currentPersonaLabel.textContent = personaLabels[selectedPersona] || 'Consultant';
     }
-    
+
     // Add "System Status: Auditing" ticker in HUD when auditor is active
     if (selectedPersona === 'auditor') {
         if (window.auditorInterval) clearInterval(window.auditorInterval);
@@ -2294,9 +2283,9 @@ async function applyPersona() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ persona: selectedPersona })
         });
-        
+
         const data = await response.json();
-        
+
         if (data.status === 'success') {
             elements.personaDropdown.classList.add('hidden');
             showNotification(`Persona changed to ${personaLabels[selectedPersona]}`, 'success');
@@ -2315,7 +2304,7 @@ async function loadPersona() {
     const restricted = window.KURO_USER_CONTEXT?.restrictedPersona;
     const urlPersona = getPersonaFromUrl();
     const savedPersona = localStorage.getItem('kuro-persona');
-    
+
     if (restricted) {
         selectedPersona = restricted;
         // Disable other options in UI
@@ -2330,11 +2319,11 @@ async function loadPersona() {
     } else {
         selectedPersona = normalizePersona(urlPersona || savedPersona || 'consultant');
     }
-    
+
     localStorage.setItem('kuro-persona', selectedPersona);
     localStorage.setItem('kuro_persona', selectedPersona); // consistency
     setPersonaInUrl(selectedPersona, false);
-    
+
     // Use the new UI updater for the sidebar accordion
     updatePersonaUI();
     await loadChatHistory();
@@ -2348,7 +2337,7 @@ function updateUserInfo() {
     if (elements.userInfo && username) {
         elements.userInfo.textContent = username;
     }
-    
+
     // Update sidebar if exists (for dynamic branding)
     const sidebarDisplayName = document.getElementById('sidebarDisplayName');
     const sidebarRole = document.getElementById('sidebarRole');
@@ -2358,7 +2347,7 @@ function updateUserInfo() {
     if (sidebarRole && window.KURO_USER_CONTEXT?.role) {
         sidebarRole.textContent = window.KURO_USER_CONTEXT.role;
     }
-    
+
     if (elements.logoutBtn) {
         elements.logoutBtn.addEventListener('click', logout);
     }
@@ -2370,18 +2359,18 @@ function updateUserInfo() {
 function copyMessageContent(button) {
     const messageBubble = button.closest('.chat-bubble-ai');
     const markdownContent = messageBubble.querySelector('.markdown-content');
-    
+
     if (!markdownContent) return;
-    
+
     // Get the raw text content (strip HTML for clean copy)
     const textContent = markdownContent.innerText || markdownContent.textContent;
-    
+
     navigator.clipboard.writeText(textContent).then(() => {
         // Visual feedback
         const originalIcon = button.innerHTML;
         button.innerHTML = '<i data-lucide="check" class="w-3.5 h-3.5 text-emerald-500"></i>';
         lucide.createIcons();
-        
+
         setTimeout(() => {
             button.innerHTML = originalIcon;
             lucide.createIcons();
@@ -2398,13 +2387,13 @@ function copyCodeBlock(button) {
     const pre = button.closest('pre');
     const code = pre.querySelector('code');
     const text = code.textContent || code.innerText;
-    
+
     navigator.clipboard.writeText(text).then(() => {
         const originalIcon = button.innerHTML;
         button.innerHTML = '<i data-lucide="check" class="w-3.5 h-3.5 text-emerald-500"></i>';
         button.querySelector('span').textContent = 'Copied!';
         lucide.createIcons();
-        
+
         setTimeout(() => {
             button.innerHTML = originalIcon;
             lucide.createIcons();
@@ -2419,11 +2408,11 @@ function copyCodeBlock(button) {
 // ============================================
 function copyTable(button) {
     const table = button.closest('.table-wrapper').querySelector('table');
-    
+
     // Convert table to CSV-like format
     const rows = table.querySelectorAll('tr');
     let csv = [];
-    
+
     rows.forEach(row => {
         const cells = row.querySelectorAll('th, td');
         const rowData = [];
@@ -2437,13 +2426,13 @@ function copyTable(button) {
         });
         csv.push(rowData.join(','));
     });
-    
+
     navigator.clipboard.writeText(csv.join('\n')).then(() => {
         const originalIcon = button.innerHTML;
         button.innerHTML = '<i data-lucide="check" class="w-3.5 h-3.5 text-emerald-500"></i>';
         button.querySelector('span').textContent = 'Copied!';
         lucide.createIcons();
-        
+
         setTimeout(() => {
             button.innerHTML = originalIcon;
             lucide.createIcons();
@@ -2464,11 +2453,11 @@ function addCodeBlockCopyButtons(container) {
         wrapper.className = 'relative group/code';
         pre.parentNode.insertBefore(wrapper, pre);
         wrapper.appendChild(pre);
-        
+
         // Add copy button
         const copyBtn = document.createElement('button');
         copyBtn.className = 'absolute top-2 right-2 p-1.5 rounded-lg bg-gray-700 hover:bg-gray-600 text-white opacity-0 group-hover/code:opacity-100 transition-opacity flex items-center gap-1 text-xs';
-        copyBtn.onclick = function() { copyCodeBlock(this); };
+        copyBtn.onclick = function () { copyCodeBlock(this); };
         copyBtn.innerHTML = '<i data-lucide="copy" class="w-3.5 h-3.5"></i><span>Copy</span>';
         wrapper.appendChild(copyBtn);
     });
@@ -2486,11 +2475,11 @@ function addTableCopyButtons(container) {
         wrapper.className = 'table-wrapper relative group/table overflow-x-auto';
         table.parentNode.insertBefore(wrapper, table);
         wrapper.appendChild(table);
-        
+
         // Add copy button
         const copyBtn = document.createElement('button');
         copyBtn.className = 'absolute top-2 right-2 p-1.5 rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 opacity-0 group-hover/table:opacity-100 transition-opacity flex items-center gap-1 text-xs';
-        copyBtn.onclick = function() { copyTable(this); };
+        copyBtn.onclick = function () { copyTable(this); };
         copyBtn.innerHTML = '<i data-lucide="copy" class="w-3.5 h-3.5 text-gray-500 dark:text-gray-400"></i><span class="text-gray-600 dark:text-gray-300">Copy</span>';
         wrapper.appendChild(copyBtn);
     });
@@ -2524,7 +2513,7 @@ async function handlePasswordChange(e) {
             method: 'POST',
             body: formData
         });
-        
+
         const result = await response.json();
         if (result.success) {
             showNotification('Password changed successfully!', 'success');
@@ -2558,7 +2547,7 @@ async function handlePersonaUpdate(e) {
             method: 'POST',
             body: formData
         });
-        
+
         const result = await response.json();
         if (result.success) {
             showNotification('Global persona updated!', 'success');

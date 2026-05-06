@@ -2,6 +2,39 @@
 
 > All entries prior to V1.0.0 Beta 1 are classified as **Legacy (Alpha Version)** entries.
 
+## [V1.0.0 Beta 2] — "Chat Isolation & chat_id Hardening" — 2026-05-06
+
+### New Features
+- **Chat Session Isolation (Bug Fix):** Messages from Chat A no longer bleed into Chat B. `get_history()`, `add_short_term()`, `get_short_term()`, and `build_referent_grounding_block()` now filter by `chat_id` for strict per-session isolation.
+- **`chat_context` Auto-Generation:** Every 10 user+assistant pairs (20 rows), a compressed context summary is auto-generated using Gemini 3 Flash and stored in `chat_sessions.context_summary`. Injected as `[CHAT_CONTEXT]` block in LLM prompts.
+- **Default Chat Migration:** Legacy rows with `chat_id IS NULL` or `legacy_*` are migrated to a "Default Chat" session per `(username, persona)` pair.
+
+### Architecture
+- `kuro_backend/chat_history.py`: Added `context_summary`, `context_message_count`, `context_updated_at` columns to `chat_sessions`. Added `chat_id` column to `uploaded_file_integrity`. New functions: `update_session_context()`, `get_session_context()`, `get_session_message_count()`, `update_session_message_count()`, `get_default_chat_id()`. Legacy migration in `init_db()`.
+- `kuro_backend/memory_manager.py`: Added `chat_id` column + index to `short_term` table. Modified `add_short_term()`, `get_short_term()`, `get_short_term_with_ids()` to filter by `chat_id`.
+- `kuro_backend/memory_coordinator.py`: Added `generate_chat_context()` and `maybe_trigger_chat_context()`. Modified `build_context_for_llm()`, `build_context_for_llm_async()`, `build_referent_grounding_block()`, `build_compressed_short_term_text()` to propagate `chat_id`.
+- `kuro_backend/langgraph_core.py`: Added `chat_id: Optional[str]` to `KuroState`. Modified `_persist_short_term_and_enqueue_writes()`, `response_node()`, `process_chat_with_graph_stream()`, `process_chat_with_graph()` to pass `chat_id`.
+- `kuro_backend/llm_utils.py`: Added `generate_chat_context_summary()` helper.
+- `main.py`: Pass `chat_id=session_scope` to `process_chat_with_graph()`, `process_chat_with_graph_stream()`, `record_uploaded_file_integrity()`. Added `chat_id` query param to `GET /api/history`. Inject `context_summary` into `GET /api/chats`.
+- `web_interface/static/js/app.js`: Removed `getChatSessionId()` and `X-Chat-Session` header (replaced by `currentChatId` state managed via SSE meta events).
+- `scripts/migrate_chat_id.py`: New one-shot migration script for legacy `chat_id` rows (supports `--dry-run`).
+
+### Database Migrations
+- `chat_sessions`: `context_summary TEXT DEFAULT ''`, `context_message_count INTEGER DEFAULT 0`, `context_updated_at DATETIME`
+- `uploaded_file_integrity`: `chat_id TEXT`, index `idx_uploaded_file_chat_id`
+- `short_term` (kuro_short_term.db): `chat_id TEXT DEFAULT NULL`, index `idx_short_term_chat_id`
+- Legacy rows: `chat_id IS NULL OR chat_id LIKE 'legacy_%'` → `default_{username}_{persona}`
+
+### Bug Fixes
+- **Bug 1 — History Bleed on New Chat:** Fixed by ensuring `currentChatId` is set from SSE meta event before any history load. `kuroLoadHistory()` now always includes `chat_id` in URL query.
+- **Bug 2 — Chat Cross-Contamination:** Fixed by adding `chat_id` to `short_term` table and filtering all short-term reads/writes by `chat_id`.
+- **Bug 2b — Referent Grounding Bleed:** Fixed by passing `chat_id` to `build_referent_grounding_block()` so deictic grounding only reads attachments from the current chat session.
+
+### Verification
+- `tests/test_chat_isolation.py`: 8 automated tests covering chat history isolation, short-term isolation, session context functions, message count, default chat ID, upload integrity, and referent grounding. All 8 passed.
+
+---
+
 ## [V1.0.0 Beta 2] — "Anti-Halusinasi" — 2026-05-03
 ### New Features
 - **Epistemic Accountability Layer (3-Tier Verification):**

@@ -1,4 +1,4 @@
-# Kuro AI V1.0.0 Beta 2 "Sovereign Cat" — SYSTEM_MAP
+# Kuro AI V1.0.0 Beta 2 "Chat Isolation" — SYSTEM_MAP
 
 > Authoritative navigation map for the repository. Traced function-by-function
 > from the true entrypoint (`main.py`) outward. Only source code under version
@@ -109,7 +109,7 @@ Kuro AI is your **Intelligent Personal Sovereign**—a sophisticated digital com
     - **Memory Persistence**: Intisari file disimpan ke Mem0 dan `research_ledger` (`archived_file_memory` kind), allowing Kuro to "remember" the contents of deleted files.
     - **Archive Metadata**: Sidecar JSON files are persisted in `.archive/{username}/` as permanent records.
 
-### V1.0.0 Beta 2 Architecture Notes ("Anti-Halusinasi Layer")
+### V1.0.0 Beta 2 Architecture Notes ("Chat Isolation & Anti-Halusinasi")
 
 - **Epistemic Accountability Layer**: 3-tier verification injected into all agency persona system prompts.
     - **Tier-1 Source Audit**: Classifies every factual claim by source (Mem0/ChromaDB, Serper, inference, parametric).
@@ -380,11 +380,16 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
 
 ### Reasoning Core
 - [`kuro_backend/langgraph_core.py`](kuro_backend/langgraph_core.py) —
-  *public*: `KuroState`, `build_kuro_graph`, `process_chat_with_graph_stream`,
+  *public*: `KuroState` (now includes `chat_id: Optional[str]`), `build_kuro_graph`,
+  `process_chat_with_graph_stream` (now accepts `chat_id`),
+  `process_chat_with_graph` (now accepts `chat_id`),
   `supervisor_node`, `memory_retrieval_node`, `retrieval_grader_node` (Auto-RAG),
   `query_transform_node` (Auto-RAG), `attention_filter_node` (T1),
   `executive_monitor_node` (T1), `metacognitive_review_node` (T2),
-  `response_node`, `tool_node`, `memory_extraction_node`.
+  `response_node` (now passes `chat_id` to `build_context_for_llm`),
+  `tool_node`, `memory_extraction_node`.
+  **Beta 2**: `_persist_short_term_and_enqueue_writes()` now passes `chat_id`.
+  `chat_context` auto-trigger via `maybe_trigger_chat_context()` in post-response tasks.
   Orchestrates the Tomasello-inspired 3-tier control system and self-correcting retrieval loop.
 - [`kuro_backend/personas.py`](kuro_backend/personas.py) — *public*:
   `build_system_instruction`, `get_persona_instruction`. English prompts
@@ -402,19 +407,25 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
 ### Memory & SSoT
 - [`kuro_backend/memory_coordinator.py`](kuro_backend/memory_coordinator.py)
   — *public*: `build_context_for_llm` (adds `finance_block` for
-  `chancellor`), `build_context_for_llm_async`,
-  `build_gemini_contents_parts`, `build_referent_grounding_block`,
-  `apply_path_tokens_to_runtime`, `render_summary_for_prompt`,
-  `build_compressed_short_term_text`, `prefetch_mem0`, `take_prefetched_mem0`,
+  `chancellor`; now filters by `chat_id`), `build_context_for_llm_async`,
+  `build_gemini_contents_parts`, `build_referent_grounding_block` (now filters
+  by `chat_id`), `apply_path_tokens_to_runtime`, `render_summary_for_prompt`,
+  `build_compressed_short_term_text` (now filters by `chat_id`),
+  `prefetch_mem0`, `take_prefetched_mem0`,
   `safe_mem0_retrieve`, `execute_memory_write_task`,
   `execute_mem0_extract_task`,
   `record_mutation`, `apply_openclaw_execution_result`.
+  **Beta 2 additions**: `generate_chat_context(chat_id, persona_scope, username)`
+  — generates compressed context summary using Gemini 3 Flash;
+  `maybe_trigger_chat_context()` — checks threshold and triggers regeneration.
+  Constants: `CHAT_CONTEXT_REFRESH_THRESHOLD`, `CHAT_CONTEXT_MODEL`.
 - [`kuro_backend/memory_manager.py`](kuro_backend/memory_manager.py) —
   *public*: `load_master_profile`, `save_master_profile`,
   `get_master_profile_formatted`, `update_master_profile`,
   `get_active_persona`, `set_active_persona`, `normalize_persona`,
   `get_runtime_context_value`, `set_runtime_context_value`,
-  `init_short_term_db`, `get_short_term_with_ids`,
+  `init_short_term_db`, `get_short_term_with_ids` (now filters by `chat_id`),
+  `get_short_term` (now filters by `chat_id`),
   `get_short_term_summary` (+ `_json`, `upsert_*`),
   `append_research_ledger` (+ `_batch`), `query_research_ledger` (+
   `_since`), `query_short_term_summaries_recent`,
@@ -422,6 +433,15 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
   `release_dreaming_lease`, `insert_dreaming_cycle`,
   `update_dreaming_cycle`, `dream_notification_seen`,
   `mark_dream_notification`.
+  **Beta 2**: `short_term` table now has `chat_id` column + index.
+  `add_short_term()`, `get_short_term()`, `get_short_term_with_ids()` now
+  accept and filter by `chat_id`.
+- [`kuro_backend/llm_utils.py`](kuro_backend/llm_utils.py) —
+  *public*: `generate_chat_title`, `generate_chat_context_summary`.
+  **Beta 2**: `generate_chat_context_summary()` — generates compact chat context
+  summary using Gemini (model from `KURO_CHAT_CONTEXT_MODEL` env, default
+  `gemini-3-flash-preview`). Returns JSON with topic, decisions, entities,
+  open_questions, technical_specs.
 - [`kuro_backend/perpetual_memory.py`](kuro_backend/perpetual_memory.py) —
   *public*: `PerpetualMemory`, `get_memory_client`,
   `coerce_mem0_search_results`, `extract_json_from_text`. Wraps Mem0 +
@@ -544,8 +564,15 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
 - [`kuro_backend/chat_history.py`](kuro_backend/chat_history.py) —
   *public*: `init_db`, `add_message`, `get_history`, `get_total_count`,
   `clear_history`, `record_uploaded_file_integrity`,
-  `get_uploaded_file_integrity`. **Tables**: `chat_history`,
-  `uploaded_file_integrity` (→ `kuro_chat_history.db`).
+  `get_uploaded_file_integrity`, `update_session_context`,
+  `get_session_context`, `get_session_message_count`,
+  `update_session_message_count`, `get_default_chat_id`,
+  `create_session`, `get_sessions`, `update_session_title`,
+  `delete_session`. **Tables**: `chat_history`, `uploaded_file_integrity`,
+  `chat_sessions` (→ `kuro_chat_history.db`).
+  **New columns (Beta 2)**: `chat_sessions.context_summary`,
+  `chat_sessions.context_message_count`, `chat_sessions.context_updated_at`,
+  `uploaded_file_integrity.chat_id`.
 - [`kuro_backend/compliance_db.py`](kuro_backend/compliance_db.py) —
   *public*: `init_db`, `add_evidence`, `update_evidence_status`,
   `get_evidence_matrix`, `add_audit_trail`, `get_audit_trail`,
@@ -600,13 +627,14 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
   `clean_duplicate_chat_history.py`, `rebuild_compliance_base.py`.
 - [`scripts/`](scripts/) — one-shot migrations & smokes:
   `migrate_persona_consultant_advisor.py`, `purge_mem0_junk.py`,
-  `smoke_mem0_store.py`, `smoke_test_openclaw.py`.
-  `smoke_test_openclaw.py`.
+  `smoke_mem0_store.py`, `smoke_test_openclaw.py`,
+  `migrate_chat_id.py` (**Beta 2** — migrates legacy `chat_id` rows to
+  Default Chat per `(username, persona)`; supports `--dry-run`).
 - [`tests/`](tests/) — pytest suite covering contracts (SSE, referent
   grounding, sync revisions), branding/HTML, English personas, UI router,
   dreaming worker, CVE sentinel, fiscal shortcuts, finance_db,
   proactive events/greeting, upload hashing, version,
-  persona budget.
+  persona budget, **chat isolation (Beta 2)**).
 
 ## Data & Config
 

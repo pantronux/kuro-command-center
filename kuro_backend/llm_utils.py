@@ -36,3 +36,49 @@ Ketentuan:
     except Exception as e:
         logger.error(f"Failed to generate chat title: {e}")
         return "New Chat"
+
+
+def generate_chat_context_summary(conversation_text: str) -> str:
+    """
+    Generate a compact chat context summary using Gemini.
+    Used by memory_coordinator.generate_chat_context() as the LLM call helper.
+
+    Args:
+        conversation_text: Formatted conversation history text (max ~15k chars)
+
+    Returns:
+        A structured JSON string with topic, decisions, entities, open_questions, technical_specs.
+    """
+    import os
+    try:
+        # Use KURO_CHAT_CONTEXT_MODEL env if set, otherwise gemini-3-flash-preview
+        model_name = os.getenv("KURO_CHAT_CONTEXT_MODEL", "gemini-3-flash-preview")
+        prompt = (
+            "Anda adalah summarizer percakapan. Rangkum percakapan berikut "
+            "dalam Bahasa Indonesia dengan format JSON berikut:\n"
+            "{\n"
+            '  "topic": "topik utama percakapan",\n'
+            '  "decisions": ["keputusan yang diambil"],\n'
+            '  "entities": ["entitas/istilah penting yang disebut"],\n'
+            '  "open_questions": ["pertanyaan yang belum terjawab"],\n'
+            '  "technical_specs": ["spesifikasi teknis jika ada"]\n'
+            "}\n\n"
+            "DILARANG menambah fakta yang tidak ada dalam percakapan.\n"
+            f"Percakapan:\n{conversation_text}"
+        )
+        response = genai_client.models.generate_content(
+            model=model_name,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                temperature=0.0,
+                top_p=0.1,
+                top_k=1,
+                max_output_tokens=384,
+                response_mime_type="application/json",
+            ),
+        )
+        raw = getattr(response, "text", "") or "{}"
+        return raw.strip()
+    except Exception as e:
+        logger.error(f"Failed to generate chat context summary: {e}")
+        return "{}"

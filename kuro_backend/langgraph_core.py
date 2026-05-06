@@ -326,9 +326,9 @@ def get_post_response_queue_depth() -> int:
     return _post_response_queue.qsize()
 
 
-def _persist_short_term_and_enqueue_writes(user_input: str, response_text: str, persona_mode: str, username: str = "Pantronux") -> None:
-    memory_manager.add_short_term("user", user_input, persona_scope=persona_mode, username=username)
-    memory_manager.add_short_term("assistant", response_text, persona_scope=persona_mode, username=username)
+def _persist_short_term_and_enqueue_writes(user_input: str, response_text: str, persona_mode: str, username: str = "Pantronux", chat_id: Optional[str] = None) -> None:
+    memory_manager.add_short_term("user", user_input, persona_scope=persona_mode, username=username, chat_id=chat_id)
+    memory_manager.add_short_term("assistant", response_text, persona_scope=persona_mode, username=username, chat_id=chat_id)
 
 
 async def _stream_direct_llm_chunks(
@@ -403,6 +403,7 @@ class KuroState(TypedDict):
     - mem0_retrieved_memories: Memories retrieved from Mem0 for context
     - tool_execution_result: Result from tool execution (ToolNode output)
     - requires_approval: Flag for HITL interrupt (file operations need approval)
+    - chat_id: Active chat session ID for isolation
 
     T1 Executive / Intentional Agent:
     - inhibited: True if prepotent response was withheld
@@ -431,6 +432,7 @@ class KuroState(TypedDict):
     _approval_scope: str
     _trace_id: str
     _intent: str
+    chat_id: Optional[str]  # Active chat session ID for isolation
     # --- Natural Agency fields (V1.0.0) ---
     _intent_category: str
     inhibited: bool
@@ -1325,6 +1327,7 @@ def response_node(state: KuroState) -> Dict[str, Any]:
     mem0_memories = state.get("mem0_retrieved_memories", [])
     tool_result = state.get("tool_execution_result", {})
     session_id = state.get("_session_id", "unknown")
+    chat_id = state.get("chat_id")
     
     # Observability tracing
     trace_attrs = observability.create_session_context(session_id=session_id)
@@ -1339,6 +1342,7 @@ def response_node(state: KuroState) -> Dict[str, Any]:
             mem0_retrieved_memories=mem0_memories or None,
             session_id=session_id,
             username=username,
+            chat_id=chat_id,
         )
         memory_injection = ctx["memory_injection"]
         mem0_context_block = ctx.get("mem0_context_block")
@@ -1614,7 +1618,8 @@ def response_node(state: KuroState) -> Dict[str, Any]:
         # memory_extraction_node still runs as a dedupe/guardian, but mem0 fingerprint dedupe
         # in memory_coordinator prevents double-store.
         username = state.get("username", "Pantronux")
-        _persist_short_term_and_enqueue_writes(user_input, response_text, persona_mode, username)
+        chat_id = state.get("chat_id")
+        _persist_short_term_and_enqueue_writes(user_input, response_text, persona_mode, username, chat_id=chat_id)
 
         logger.info("[RESPONSE] Generated response (%s chars)", len(response_text))
         
@@ -2096,6 +2101,7 @@ async def process_chat_with_graph_stream(
     session_id: Optional[str] = None,
     master_name: str = "Pantronux",
     username: str = "Pantronux",
+    chat_id: Optional[str] = None,
 ) -> AsyncGenerator[str, None]:
     """
     V5.5 STREAMING: Graph runs in asyncio.to_thread (sync stream) so the event loop can serve SSE.
@@ -2142,7 +2148,7 @@ async def process_chat_with_graph_stream(
                     stream_metrics["stream_mode"] = "semantic_cache"
                 yield cached_response
                 try:
-                    _persist_short_term_and_enqueue_writes(message, cached_response, persona_mode, username)
+                    _persist_short_term_and_enqueue_writes(message, cached_response, persona_mode, username, chat_id=chat_id)
                 except Exception as exc:
                     logger.warning("[SEMANTIC_CACHE] persist failed: %s", exc)
                 return
@@ -2164,6 +2170,7 @@ async def process_chat_with_graph_stream(
                 mem0_retrieved_memories=None,
                 session_id=session_id,
                 username=username,
+                chat_id=chat_id,
             )
             if stream_metrics is not None:
                 stream_metrics["memory_query_ms"] = round((time.perf_counter() - memory_started) * 1000, 2)
@@ -2228,7 +2235,14 @@ async def process_chat_with_graph_stream(
                 response_text = "Maaf, Pantronux. Respons model kosong setelah streaming."
                 yield response_text
                 emitted += 1
-            _persist_short_term_and_enqueue_writes(message, response_text, persona_mode, username)
+            _persist_short_term_and_enqueue_writes(message, response_text, persona_mode, username, chat_id=chat_id)
+
+            # chat_context trigger: check if context should be regenerated
+            if chat_id:
+                try:
+                    memory_coordinator.maybe_trigger_chat_context(chat_id, persona_mode, username)
+                except Exception as _ctx_exc:
+                    logger.debug("[CHAT_CONTEXT] trigger skipped: %s", _ctx_exc)
 
             # V1.0.0 Mem0 Check inside streaming fast-path
             if intent != "edit":
@@ -2274,6 +2288,7 @@ async def process_chat_with_graph_stream(
             "master_name": master_name,
             "username": username,
             "custom_persona": custom_persona,
+            "chat_id": chat_id,
             "_session_id": session_id,
             "_approval_scope": approval_scope,
             "_trace_id": trace_id,
@@ -2470,6 +2485,7 @@ def process_chat_with_graph(
     session_id: Optional[str] = None,
     master_name: str = "Pantronux",
     username: str = "Pantronux",
+    chat_id: Optional[str] = None,
 ) -> str:
     """
     Process chat message using LangGraph state machine.
@@ -2504,7 +2520,7 @@ def process_chat_with_graph(
             cached_response = semantic_cache.lookup(message, persona_mode)
             if cached_response is not None:
                 try:
-                    _persist_short_term_and_enqueue_writes(message, cached_response, persona_mode, username)
+                    _persist_short_term_and_enqueue_writes(message, cached_response, persona_mode, username, chat_id=chat_id)
                 except Exception as exc:
                     logger.warning("[SEMANTIC_CACHE] persist failed: %s", exc)
                 return cached_response
@@ -2529,6 +2545,7 @@ def process_chat_with_graph(
             "master_name": master_name,
             "username": username,
             "custom_persona": custom_persona,
+            "chat_id": chat_id,
             "_approval_scope": approval_scope,
             "_trace_id": trace_id,
             # Natural Agency defaults (V1.0.0)

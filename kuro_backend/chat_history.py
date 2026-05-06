@@ -178,6 +178,27 @@ def _init_db_locked():
         """)
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_chat_sessions_user_persona ON chat_sessions(username, persona)")
 
+        # Migration: Add context_summary, context_message_count, context_updated_at to chat_sessions
+        cursor.execute("PRAGMA table_info(chat_sessions)")
+        session_cols = {row[1] for row in cursor.fetchall()}
+        if "context_summary" not in session_cols:
+            cursor.execute("ALTER TABLE chat_sessions ADD COLUMN context_summary TEXT DEFAULT ''")
+            logger.info("chat_sessions migration: added context_summary column")
+        if "context_message_count" not in session_cols:
+            cursor.execute("ALTER TABLE chat_sessions ADD COLUMN context_message_count INTEGER DEFAULT 0")
+            logger.info("chat_sessions migration: added context_message_count column")
+        if "context_updated_at" not in session_cols:
+            cursor.execute("ALTER TABLE chat_sessions ADD COLUMN context_updated_at DATETIME")
+            logger.info("chat_sessions migration: added context_updated_at column")
+
+        # Migration: Add chat_id to uploaded_file_integrity
+        cursor.execute("PRAGMA table_info(uploaded_file_integrity)")
+        upload_cols = {row[1] for row in cursor.fetchall()}
+        if "chat_id" not in upload_cols:
+            cursor.execute("ALTER TABLE uploaded_file_integrity ADD COLUMN chat_id TEXT")
+            logger.info("uploaded_file_integrity migration: added chat_id column")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_uploaded_file_chat_id ON uploaded_file_integrity(chat_id)")
+
         # Migration: Add chat_id to chat_history
         cursor.execute("PRAGMA table_info(chat_history)")
         columns = {row[1] for row in cursor.fetchall()}
@@ -188,6 +209,25 @@ def _init_db_locked():
             cursor.execute("UPDATE chat_history SET chat_id = 'legacy_' || username || '_' || persona WHERE chat_id IS NULL")
         
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_chat_history_chat_id ON chat_history(chat_id)")
+
+        # Migration: Create "Default Chat" for each (username, persona) that has legacy rows
+        cursor.execute("""
+            INSERT OR IGNORE INTO chat_sessions (chat_id, username, persona, title)
+            SELECT
+                'default_' || username || '_' || persona,
+                username,
+                persona,
+                'Default Chat'
+            FROM chat_history
+            WHERE chat_id IS NULL OR chat_id LIKE 'legacy_%'
+            GROUP BY username, persona
+        """)
+        cursor.execute("""
+            UPDATE chat_history
+            SET chat_id = 'default_' || username || '_' || persona
+            WHERE chat_id IS NULL OR chat_id LIKE 'legacy_%'
+        """)
+        logger.info("chat_history migration: legacy rows migrated to Default Chat per (username, persona)")
 
         conn.commit()
         logger.info(f"Chat history database initialized at {DB_PATH}")
@@ -369,6 +409,7 @@ def record_uploaded_file_integrity(
     size_bytes: int,
     sha256: str,
     username: str = "Pantronux",
+    chat_id: Optional[str] = None,
 ) -> None:
     """Persist immutable upload integrity metadata for chain-of-custody checks."""
     conn = None
@@ -385,9 +426,9 @@ def record_uploaded_file_integrity(
             """
             INSERT INTO uploaded_file_integrity (
                 request_id, platform, persona, original_filename, stored_filename,
-                stored_path, content_type, size_bytes, sha256, username, expires_at
+                stored_path, content_type, size_bytes, sha256, username, expires_at, chat_id
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 request_id,
@@ -400,7 +441,8 @@ def record_uploaded_file_integrity(
                 int(size_bytes or 0),
                 sha256,
                 username,
-                expires_at
+                expires_at,
+                chat_id,
             ),
         )
         conn.commit()
@@ -631,6 +673,116 @@ def clear_all_history(username: str) -> bool:
     finally:
         if conn:
             conn.close()
+
+# --- chat_context & session context management ---
+
+def update_session_context(chat_id: str, context_summary: str) -> bool:
+    """Upsert the context summary for a chat session."""
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE chat_sessions SET context_summary = ?, context_updated_at = CURRENT_TIMESTAMP WHERE chat_id = ?",
+            (context_summary or "", chat_id)
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    except Exception as e:
+        logger.error(f"Failed to update session context: {e}")
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+
+def get_session_context(chat_id: str) -> Optional[str]:
+    """Retrieve the context summary for a chat session."""
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT context_summary FROM chat_sessions WHERE chat_id = ?",
+            (chat_id,)
+        )
+        row = cursor.fetchone()
+        if row:
+            return row["context_summary"] or None
+        return None
+    except Exception as e:
+        logger.error(f"Failed to get session context: {e}")
+        return None
+    finally:
+        if conn:
+            conn.close()
+
+
+def get_session_message_count(chat_id: str) -> int:
+    """Count total messages (user + assistant) for a chat session."""
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT COUNT(*) as cnt FROM chat_history WHERE chat_id = ?",
+            (chat_id,)
+        )
+        row = cursor.fetchone()
+        return int(row["cnt"]) if row else 0
+    except Exception as e:
+        logger.error(f"Failed to get session message count: {e}")
+        return 0
+    finally:
+        if conn:
+            conn.close()
+
+
+def update_session_message_count(chat_id: str, count: int) -> bool:
+    """Update the message count tracker for a chat session."""
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE chat_sessions SET context_message_count = ? WHERE chat_id = ?",
+            (int(count), chat_id)
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    except Exception as e:
+        logger.error(f"Failed to update session message count: {e}")
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+
+def get_default_chat_id(username: str, persona: str) -> str:
+    """Get or create the 'Default Chat' for a (username, persona) pair."""
+    default_id = f"default_{username}_{persona}"
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT chat_id FROM chat_sessions WHERE chat_id = ?",
+            (default_id,)
+        )
+        if not cursor.fetchone():
+            cursor.execute(
+                "INSERT INTO chat_sessions (chat_id, username, persona, title) VALUES (?, ?, ?, ?)",
+                (default_id, username, persona, "Default Chat")
+            )
+            conn.commit()
+        return default_id
+    except Exception as e:
+        logger.error(f"Failed to get default chat id: {e}")
+        return default_id
+    finally:
+        if conn:
+            conn.close()
+
 
 # Initialize on import
 init_db()

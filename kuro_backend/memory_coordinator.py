@@ -44,6 +44,10 @@ _CONTEXT_FANOUT_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
 )
 _CONTEXT_FETCH_TIMEOUT_SEC = float(os.getenv("KURO_CONTEXT_FETCH_TIMEOUT_SEC", "1.5"))
 
+# chat_context auto-generation constants
+CHAT_CONTEXT_REFRESH_THRESHOLD = int(os.getenv("KURO_CHAT_CONTEXT_THRESHOLD", "10"))
+CHAT_CONTEXT_MODEL = os.getenv("KURO_CHAT_CONTEXT_MODEL", "gemini-3-flash-preview")
+
 
 def _parallel_gather_sync(
     tasks: Dict[str, Any],
@@ -202,6 +206,7 @@ def build_referent_grounding_block(
     chat_platform: Optional[str] = None,
     history_limit: int = 16,
     username: str = "Pantronux",
+    chat_id: Optional[str] = None,
 ) -> Optional[str]:
     from kuro_backend import chat_history
     from kuro_backend import memory_manager
@@ -213,6 +218,7 @@ def build_referent_grounding_block(
         platform=chat_platform,
         persona=persona_mode,
         username=username,
+        chat_id=chat_id,
     )
     has_att = _history_has_user_attachments(history)
 
@@ -718,6 +724,7 @@ def build_compressed_short_term_text(
     max_chars: int = _SLIDING_WINDOW_MAX_CHARS,
     layer1_threshold_tokens: Optional[int] = None,
     force_refresh_if_stale: bool = False,
+    chat_id: Optional[str] = None,
 ) -> str:
     """Return a compressed short-term block suitable for prompt injection.
 
@@ -731,7 +738,7 @@ def build_compressed_short_term_text(
     """
     from kuro_backend import memory_manager
 
-    entries = memory_manager.get_short_term_with_ids(persona_scope=persona_scope)
+    entries = memory_manager.get_short_term_with_ids(persona_scope=persona_scope, chat_id=chat_id)
     if not entries:
         return ""
 
@@ -812,6 +819,138 @@ def refresh_short_term_summary_background(persona_scope: str) -> None:
                        persona_scope, exc)
 
 
+# ---------------------------------------------------------------------------
+# chat_context Auto-Generation
+# ---------------------------------------------------------------------------
+
+def generate_chat_context(chat_id: str, persona_scope: str, username: str) -> Optional[str]:
+    """
+    Generate a compressed context summary for a chat session using Gemini.
+
+    Triggered every CHAT_CONTEXT_REFRESH_THRESHOLD messages (default: 10 pairs = 20 rows).
+    Uses the last 30 messages (raw history) as input.
+    Stores result in chat_sessions.context_summary.
+
+    Returns the generated context string or None on failure.
+    """
+    from kuro_backend import chat_history
+    from kuro_backend import memory_manager as _mm
+    from google import genai as _genai
+    from google.genai import types as _genai_types
+
+    try:
+        # Fetch raw history for this chat (last 30 messages)
+        raw_history = chat_history.get_history(
+            limit=30,
+            username=username,
+            chat_id=chat_id,
+        )
+
+        if not raw_history:
+            logger.debug("[CHAT_CONTEXT] No history for chat_id=%s", chat_id)
+            return None
+
+        # Format history as conversation text
+        convo_lines = []
+        for msg in raw_history:
+            role_label = "User" if msg.get("role") == "user" else "Kuro"
+            content = str(msg.get("content") or "")[:500]
+            convo_lines.append(f"{role_label}: {content}")
+
+        convo_blob = "\n".join(convo_lines)
+
+        # Build the summarization prompt
+        prompt = (
+            "Anda adalah summarizer percakapan. Rangkum percakapan berikut "
+            "dalam Bahasa Indonesia dengan format JSON berikut:\n"
+            "{\n"
+            '  "topic": "topik utama percakapan",\n'
+            '  "decisions": ["keputusan yang diambil"],\n'
+            '  "entities": ["entitas/istilah penting yang disebut"],\n'
+            '  "open_questions": ["pertanyaan yang belum terjawab"],\n'
+            '  "technical_specs": ["spesifikasi teknis jika ada"]\n'
+            "}\n\n"
+            "DILARANG menambah fakta yang tidak ada dalam percakapan.\n"
+            f"Percakapan:\n{convo_blob}"
+        )
+
+        client = _genai.Client(api_key=settings.GEMINI_API_KEY)
+        response = client.models.generate_content(
+            model=CHAT_CONTEXT_MODEL,
+            contents=prompt,
+            config=_genai_types.GenerateContentConfig(
+                temperature=0.0,
+                top_p=0.1,
+                top_k=1,
+                max_output_tokens=384,
+                response_mime_type="application/json",
+            ),
+        )
+
+        raw_text = getattr(response, "text", "") or ""
+        parsed = {}
+        try:
+            parsed = json.loads(raw_text) if raw_text.strip() else {}
+        except json.JSONDecodeError:
+            parsed = {}
+
+        # Format the context block
+        topic = parsed.get("topic", "") or "Percakapan umum"
+        decisions = parsed.get("decisions", []) or []
+        entities = parsed.get("entities", []) or []
+        open_qs = parsed.get("open_questions", []) or []
+        tech_specs = parsed.get("technical_specs", []) or []
+
+        context_block = "[CHAT_CONTEXT - Generated by Gemini]\n"
+        context_block += f"Topik: {topic}\n"
+        if decisions:
+            context_block += f"Keputusan: {'; '.join(decisions)}\n"
+        if entities:
+            context_block += f"Entitas: {'; '.join(entities)}\n"
+        if open_qs:
+            context_block += f"Pertanyaan terbuka: {'; '.join(open_qs)}\n"
+        if tech_specs:
+            context_block += f"Konteks teknis: {'; '.join(tech_specs)}\n"
+        context_block += f"Terakhir diperbarui: {datetime.now().isoformat()}"
+
+        # Persist to chat_sessions
+        chat_history.update_session_context(chat_id, context_block)
+
+        logger.info(
+            "[CHAT_CONTEXT] Generated for chat_id=%s topic=%s",
+            chat_id,
+            topic[:60],
+        )
+        return context_block
+
+    except Exception as exc:
+        logger.warning("[CHAT_CONTEXT] Generation failed for chat_id=%s: %s", chat_id, exc)
+        return None
+
+
+def maybe_trigger_chat_context(chat_id: str, persona_scope: str, username: str) -> None:
+    """
+    Check if chat_context should be regenerated for this chat session.
+    Called from langgraph_core post-response tasks.
+    """
+    from kuro_backend import chat_history
+
+    try:
+        msg_count = chat_history.get_session_message_count(chat_id)
+
+        # Trigger every CHAT_CONTEXT_REFRESH_THRESHOLD pairs (2 messages per pair)
+        pair_count = msg_count // 2
+        if pair_count > 0 and pair_count % CHAT_CONTEXT_REFRESH_THRESHOLD == 0:
+            logger.info(
+                "[CHAT_CONTEXT] Triggering generation for chat_id=%s (pair_count=%d)",
+                chat_id, pair_count,
+            )
+            # Run synchronously in post-response worker thread (non-blocking)
+            generate_chat_context(chat_id, persona_scope, username)
+    except Exception as exc:
+        logger.debug("[CHAT_CONTEXT] maybe_trigger failed: %s", exc)
+
+
 def build_context_for_llm(
     user_input: str,
     persona_mode: str,
@@ -822,6 +961,7 @@ def build_context_for_llm(
     context_budget: Any = None,
     session_id: Optional[str] = None,
     username: str = "Pantronux",
+    chat_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Single read path: raw short-term + optional Mem0 block (same inputs as response_node / stream).
@@ -850,7 +990,7 @@ def build_context_for_llm(
     # Parallelize independent I/O. Short-term retrieval and referent grounding
     # are independent from Mem0 context formatting.
     parallel_tasks: Dict[str, Any] = {
-        "short_term": lambda: memory_manager.get_short_term(persona_scope=persona_mode, username=username),
+        "short_term": lambda: memory_manager.get_short_term(persona_scope=persona_mode, username=username, chat_id=chat_id),
         "session_files": lambda: memory_manager.get_session_files(session_id) if session_id else [],
     }
     if include_referent_grounding:
@@ -859,6 +999,7 @@ def build_context_for_llm(
             persona_mode,
             chat_platform=chat_platform,
             username=username,
+            chat_id=chat_id,
         )
     if mem0_retrieved_memories:
         parallel_tasks["mem0_fmt"] = lambda: perpetual_memory.perpetual_memory.format_memories_for_context(
@@ -929,6 +1070,7 @@ async def build_context_for_llm_async(
     context_budget: Any = None,
     session_id: Optional[str] = None,
     username: str = "Pantronux",
+    chat_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Async variant of :func:`build_context_for_llm`.
 
@@ -948,6 +1090,7 @@ async def build_context_for_llm_async(
         context_budget=context_budget,
         session_id=session_id,
         username=username,
+        chat_id=chat_id,
     )
 
 

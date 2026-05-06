@@ -792,6 +792,7 @@ async def get_chat_history(
     offset: int = 0,
     platform: str = None,
     persona: str = None,
+    chat_id: str = None,
 ):
     """Get chat history from database with pagination for infinite scroll.
 
@@ -800,6 +801,7 @@ async def get_chat_history(
         offset: Pagination offset
         platform: Filter by platform ('web', 'telegram', or None for all)
         persona: Filter by persona mode (defaults to active persona)
+        chat_id: Filter by chat session ID
     """
     token = get_token_from_cookie(request)
     user = validate_token(token)
@@ -823,6 +825,7 @@ async def get_chat_history(
         platform=platform,
         persona=resolved_persona,
         username=username,
+        chat_id=chat_id if chat_id else None,
     )
     total = chat_history.get_total_count(
         platform=platform, persona=resolved_persona, username=username
@@ -1029,6 +1032,7 @@ async def chat_endpoint(
                     size_bytes=saved_file["size_bytes"],
                     sha256=saved_file["sha256"],
                     username=username,
+                    chat_id=session_scope,
                 )
 
                 # Check if it's an image for vision processing
@@ -1148,6 +1152,7 @@ async def chat_endpoint(
             session_id=session_scope,
             master_name=master_name,
             username=username,
+            chat_id=session_scope,
         )
 
         # Save AI response to chat history
@@ -1305,6 +1310,7 @@ async def chat_stream_endpoint(
                         size_bytes=saved_file["size_bytes"],
                         sha256=saved_file["sha256"],
                         username=username,
+                        chat_id=session_scope,
                     )
 
                     if file.content_type and file.content_type.startswith("image/"):
@@ -1427,6 +1433,7 @@ async def chat_stream_endpoint(
                 session_id=session_scope,
                 master_name=master_name,
                 username=username,
+                chat_id=session_scope,
             ):
                 full_response.append(chunk)
                 if first_chunk_ms is None:
@@ -1788,6 +1795,11 @@ async def get_chats(request: Request, persona: str = None):
         persona = memory_manager.get_active_persona()
 
     sessions = chat_history.get_sessions(username, persona)
+    # Inject context_summary into each session
+    for session in sessions:
+        context = chat_history.get_session_context(session.get("chat_id", ""))
+        if context:
+            session["context_summary"] = context
     return api_success(data=sessions)
 
 
