@@ -81,6 +81,19 @@ def run_price_update(username: str = "Pantronux") -> dict:
                 price = float(price)
                 volume = int(volume)
                 
+                try:
+                    import pandas as pd
+                    latest_date = latest.name
+                    if isinstance(latest_date, pd.Timestamp):
+                        now = pd.Timestamp.now(tz=latest_date.tz)
+                        if (now - latest_date).total_seconds() > 86400: # > 24 hours
+                            logger.warning("[TICKER] Stale data for %s (timestamp: %s) -> ignoring to prevent overwrite", ticker_symbol, latest_date)
+                            results["failed"] += 1
+                            continue
+                except Exception as e:
+                    pass
+
+
                 # Calculate YTD approx (this is simplified)
                 ytd = 0.0 
                 
