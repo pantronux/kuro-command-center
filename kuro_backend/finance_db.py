@@ -585,6 +585,7 @@ def apply_watched_price(symbol: str, new_price: float, username: str = "Pantronu
     conn = _conn()
     try:
         c = conn.cursor()
+        c.execute("BEGIN IMMEDIATE")
         c.execute("SELECT * FROM watched_symbols WHERE symbol = ? AND username = ?", (sym, username))
         row = c.fetchone()
         if not row:

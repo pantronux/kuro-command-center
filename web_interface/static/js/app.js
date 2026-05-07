@@ -900,7 +900,10 @@ function kuroConnectDashboardWS() {
         });
         ws.addEventListener('close', () => {
             _kuroDashboardWS = null;
-            setTimeout(kuroConnectDashboardWS, _kuroDashboardWSBackoff);
+            setTimeout(() => {
+                kuroConnectDashboardWS();
+                // Send an auth ping immediately after reconnect if possible
+            }, _kuroDashboardWSBackoff);
             _kuroDashboardWSBackoff = Math.min(_kuroDashboardWSBackoff * 2, 30000);
         });
         ws.addEventListener('error', () => { try { ws.close(); } catch (_) { } });
@@ -1152,6 +1155,17 @@ async function sendMessage(isFromWelcome = false) {
         }
     };
 
+    // Setup Stop Generating
+    const stopBtn = document.getElementById('stopGeneratingBtn');
+    const abortController = new AbortController();
+    if (stopBtn) {
+        stopBtn.classList.remove('hidden');
+        stopBtn.onclick = () => {
+            abortController.abort();
+            stopBtn.classList.add('hidden');
+        };
+    }
+
     try {
         const formData = new FormData();
         formData.append('message', message);
@@ -1164,6 +1178,7 @@ async function sendMessage(isFromWelcome = false) {
             method: 'POST',
             body: formData,
             credentials: 'include',
+            signal: abortController.signal
         });
 
         if (!response.ok) {
@@ -1308,6 +1323,7 @@ async function sendMessage(isFromWelcome = false) {
             addMessageToChat('ai', '<span style="color:red">Connection lost. Please try again.</span>');
         }
     } finally {
+        if (stopBtn) stopBtn.classList.add('hidden');
         isProcessing = false;
         if (elements.sendBtn) elements.sendBtn.disabled = false;
         if (elements.welcomeSendBtn) elements.welcomeSendBtn.disabled = false;
@@ -2277,6 +2293,11 @@ function updatePersonaLabel() {
 }
 
 async function applyPersona() {
+    // Show loading state
+    elements.messageInput.disabled = true;
+    if(elements.sendBtn) elements.sendBtn.disabled = true;
+    showNotification('Swapping persona, please wait...', 'info');
+
     try {
         const response = await authFetch(`${CONFIG.API_BASE}/persona`, {
             method: 'POST',
@@ -2297,6 +2318,9 @@ async function applyPersona() {
         }
     } catch (error) {
         showNotification('Error changing persona: ' + error.message, 'error');
+    } finally {
+        elements.messageInput.disabled = false;
+        if(elements.sendBtn) elements.sendBtn.disabled = false;
     }
 }
 
@@ -2503,6 +2527,17 @@ async function handlePasswordChange(e) {
     submitBtn.disabled = true;
     spinner.classList.remove('hidden');
 
+    // Setup Stop Generating
+    const stopBtn = document.getElementById('stopGeneratingBtn');
+    const abortController = new AbortController();
+    if (stopBtn) {
+        stopBtn.classList.remove('hidden');
+        stopBtn.onclick = () => {
+            abortController.abort();
+            stopBtn.classList.add('hidden');
+        };
+    }
+
     try {
         const formData = new FormData();
         formData.append('old_password', oldPassword);
@@ -2539,6 +2574,17 @@ async function handlePersonaUpdate(e) {
     submitBtn.disabled = true;
     spinner.classList.remove('hidden');
 
+    // Setup Stop Generating
+    const stopBtn = document.getElementById('stopGeneratingBtn');
+    const abortController = new AbortController();
+    if (stopBtn) {
+        stopBtn.classList.remove('hidden');
+        stopBtn.onclick = () => {
+            abortController.abort();
+            stopBtn.classList.add('hidden');
+        };
+    }
+
     try {
         const formData = new FormData();
         formData.append('custom_persona', customPersona);
@@ -2566,3 +2612,42 @@ async function handlePersonaUpdate(e) {
         spinner.classList.add('hidden');
     }
 }
+
+
+let marketHudInterval = null;
+const KURO_MARKET_HUD_POLL_INTERVAL_MS = window.KURO_MARKET_HUD_POLL_INTERVAL_MS || 30000;
+
+async function kuroStartMarketHudPoll() {
+    if (marketHudInterval) clearInterval(marketHudInterval);
+
+    const fetchHud = async () => {
+        if (_kuroCurrentMode !== 'HUD_MODE') return;
+        try {
+            const response = await authFetch(`${CONFIG.API_BASE}/market/hud`);
+            if (response.ok) {
+                const data = await response.json();
+                if (data.success && data.data && typeof kuroRenderSentinelTicker === 'function') {
+                    // Inject into ticker if we have market chips
+                    kuroRenderSentinelTicker({
+                        status: 'ALERT',
+                        source: 'MARKET',
+                        market_chips: data.data.hud_items
+                    });
+                }
+            }
+        } catch (e) {
+            console.error('Market HUD poll failed:', e);
+        }
+    };
+
+    marketHudInterval = setInterval(fetchHud, KURO_MARKET_HUD_POLL_INTERVAL_MS);
+    // Initial fetch
+    fetchHud();
+}
+
+// Call on startup
+document.addEventListener('DOMContentLoaded', () => {
+    if (typeof kuroStartMarketHudPoll === 'function') {
+        setTimeout(kuroStartMarketHudPoll, 2000);
+    }
+});

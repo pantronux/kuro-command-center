@@ -32,9 +32,12 @@ _PHOENIX_DB_PATH = os.getenv(
 os.makedirs(os.path.dirname(_PHOENIX_DB_PATH), exist_ok=True)
 
 # Set environment variables for Phoenix (must be before import)
+# VM configuration note: phoenix_data/ must be on a persistent volume in the VM (not tmpfs/RAM disk).
+_PHOENIX_WORKING_DIR = os.path.dirname(_PHOENIX_DB_PATH)
+os.environ["PHOENIX_WORKING_DIR"] = str(_PHOENIX_WORKING_DIR)
 os.environ["PHOENIX_SQL_DATABASE_URL"] = f"sqlite:///{_PHOENIX_DB_PATH}"
 os.environ["PHOENIX_ENABLE_AUTH"] = "false"  # Disable auth for local private network
-os.environ["PHOENIX_PROJECT_NAME"] = "Kuro-AI-Audit"  # Force project identity
+os.environ["PHOENIX_PROJECT_NAME"] = "kuro-ai"  # Force project identity
 
 # OpenTelemetry imports
 from opentelemetry import trace, context
@@ -92,7 +95,7 @@ def start_phoenix_server() -> Optional[str]:
             return f"http://localhost:{PHOENIX_PORT}"
         
         logger.info(f"[OBSERVABILITY] Starting Phoenix server on port {PHOENIX_PORT}...")
-        logger.info(f"[OBSERVABILITY] Database path: {PHOENIX_DB_PATH}")
+        logger.info(f"Phoenix persistence: {PHOENIX_DB_PATH}")
         
         # Launch Phoenix with OTLP receiver enabled for trace ingestion
         # PHOENIX_SQL_DATABASE_URL is already set at module level
@@ -153,8 +156,10 @@ def setup_opentelemetry() -> Optional[trace.Tracer]:
         set_global_textmap(TraceContextTextMapPropagator())
         
         # Create resource with service info - SPECIFIC PROJECT NAME for Phoenix
+        from openinference.semconv.resource import ResourceAttributes
         resource = Resource.create({
             "service.name": "Kuro-AI-Audit",
+            ResourceAttributes.PROJECT_NAME: "kuro-ai",
             "service.version": "5.5",
             "deployment.environment": "production",
         })
@@ -234,11 +239,22 @@ def trace_node(node_name: str, attributes: Dict[str, str] = None):
         yield None
         return
     
+    # Fetch timeout
+    from kuro_backend.config import settings
+    timeout_s = float(os.getenv("KURO_TRACE_SPAN_TIMEOUT_S", "120.0"))
+
     with tracer.start_as_current_span(f"kuro.{node_name}") as span:
         # Add default attributes
         if attributes:
             for key, value in attributes.items():
                 span.set_attribute(key, str(value))
+            # Automatically extract commonly used keys if passed as attributes
+            if "persona" in attributes:
+                span.set_attribute("kuro.persona", attributes["persona"])
+            if "username" in attributes:
+                span.set_attribute("kuro.username", attributes["username"])
+            if "chat_id" in attributes:
+                span.set_attribute("kuro.chat_id", attributes["chat_id"])
         
         # Record start time
         start_time = time.time()

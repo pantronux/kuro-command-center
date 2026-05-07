@@ -143,8 +143,16 @@ def run_triangulation_scan(username: str = "Pantronux") -> bool:
     analysis = triangulate_analysis(stocks, macro, sentiment)
     
     if not analysis:
-        logger.error("[SENTINEL] Triangulation failed to produce results.")
-        return False
+        logger.error("[SENTINEL] Triangulation failed. Falling back to raw quant data.")
+        analysis = []
+        for stock in stocks:
+            analysis.append({
+                "stock_code": stock["stock_code"],
+                "projected_roi_1m": stock.get("ytd_performance", 0.0), # Fallback estimate
+                "projected_roi_1y": stock.get("ytd_performance", 0.0),
+                "triangulation_summary": "OpenClaw skill market_analysis failed. Menampilkan data kuantitatif raw.",
+                "conclusion": "HOLD"
+            })
         
     # 4. Update DB & Send notifications
     for a in analysis:

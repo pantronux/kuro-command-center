@@ -86,7 +86,7 @@ def test_openclaw_happy_path_persists_and_notifies(
     persisted = []
     monkeypatch.setattr(
         dreaming_worker, "_persist_cve_alert",
-        lambda cve, *, cycle_id: persisted.append(cve["id"]) or True,
+        lambda cve, *, cycle_id, username='Pantronux': persisted.append(cve["id"]) or True,
     )
     telegrams = []
     from kuro_backend import telegram_notifier
@@ -129,7 +129,7 @@ def test_openclaw_failure_falls_back_to_direct_nvd(
     monkeypatch.setattr(dreaming_worker, "_cve_scan_via_nvd_direct", fake_nvd)
     monkeypatch.setattr(
         dreaming_worker, "_persist_cve_alert",
-        lambda cve, *, cycle_id: True,
+        lambda cve, *, cycle_id, username='Pantronux': True,
     )
     sent = []
     from kuro_backend import telegram_notifier
@@ -163,7 +163,7 @@ def test_max_alerts_per_cycle_cap_honoured(
     persisted = []
     monkeypatch.setattr(
         dreaming_worker, "_persist_cve_alert",
-        lambda cve, *, cycle_id: persisted.append(cve["id"]) or True,
+        lambda cve, *, cycle_id, username='Pantronux': persisted.append(cve["id"]) or True,
     )
     from kuro_backend import telegram_notifier
     monkeypatch.setattr(

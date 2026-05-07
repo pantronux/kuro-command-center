@@ -27,6 +27,12 @@ PRIMARY_MODEL = "gemini-3-flash-preview"
 CLASSIFIER_MODEL = "gemini-2.5-flash"  # For fact classification and internal routing tasks
 
 class Settings:
+    # -----------------------------------------------------------------
+    # Chat Context Configuration
+    # -----------------------------------------------------------------
+    KURO_CHAT_CONTEXT_REFRESH_THRESHOLD: int = int(os.getenv("KURO_CHAT_CONTEXT_REFRESH_THRESHOLD", "20"))
+    KURO_CHAT_CONTEXT_MODEL: str = os.getenv("KURO_CHAT_CONTEXT_MODEL", CLASSIFIER_MODEL)
+
     """
     Loads environment variables from the .env file.
     """

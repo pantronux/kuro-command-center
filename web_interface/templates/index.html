@@ -514,7 +514,7 @@
                         <i data-lucide="search" class="w-5 h-5 text-gray-600 dark:text-gray-300"></i>
                     </button>
                     <!-- Dark Mode Toggle -->
-                    <button id="darkModeToggle"
+                    <button id="darkModeToggle" aria-label="Toggle dark mode"
                         class="p-2 rounded-xl bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-all duration-300">
                         <i data-lucide="sun" class="w-5 h-5 text-gray-600 dark:hidden"></i>
                         <i data-lucide="moon" class="w-5 h-5 text-gray-300 hidden dark:block"></i>
@@ -640,7 +640,7 @@
                     <div class="relative">
                         <input type="file" id="fileInput" class="hidden" multiple
                             accept="image/*,video/*,.pdf,.txt,.md,.py,.csv,.log,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.json,.yaml,.yml">
-                        <button id="uploadBtn"
+                        <button id="uploadBtn" aria-label="Upload file"
                             class="p-3 rounded-xl bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-all duration-300 hover:scale-105">
                             <i data-lucide="paperclip" class="w-5 h-5 text-gray-600 dark:text-gray-300"></i>
                         </button>
@@ -657,9 +657,14 @@
                             class="w-full px-4 py-3 pr-12 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl text-gray-800 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent resize-none transition-all"></textarea>
                     </div>
 
+                    <!-- Stop Generating Button -->
+                    <button id="stopGeneratingBtn" aria-label="Stop generating"
+                        class="hidden p-3 rounded-xl bg-red-500 hover:bg-red-600 text-white shadow-lg transition-all duration-300 hover:scale-105" title="Stop generating">
+                        <i data-lucide="square" class="w-5 h-5"></i>
+                    </button>
                     <!-- Send Button -->
-                    <button id="sendBtn"
-                        class="p-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100">
+                    <button id="sendBtn" aria-label="Send message"
+                        class="p-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100" title="Send message">
                         <i data-lucide="send" class="w-5 h-5"></i>
                     </button>
                 </div>

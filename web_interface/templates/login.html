@@ -473,6 +473,10 @@
                 if (response.ok && data.success) {
                     successMessage.style.display = 'block';
                     setTimeout(() => window.location.href = '/', 1000);
+                } else if (response.status === 423) {
+                    const mins = data.remaining_minutes || Math.ceil((new Date(data.lockout_expires) - new Date()) / 60000) || "several";
+                    showError(`Account temporarily locked. Try again in ${mins} minutes.`);
+                    setLoading(false);
                 } else {
                     showError(data.error || 'Login failed');
                     setLoading(false);

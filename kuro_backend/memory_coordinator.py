@@ -45,7 +45,8 @@ _CONTEXT_FANOUT_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
 _CONTEXT_FETCH_TIMEOUT_SEC = float(os.getenv("KURO_CONTEXT_FETCH_TIMEOUT_SEC", "1.5"))
 
 # chat_context auto-generation constants
-CHAT_CONTEXT_REFRESH_THRESHOLD = int(os.getenv("KURO_CHAT_CONTEXT_THRESHOLD", "10"))
+from kuro_backend.config import settings
+CHAT_CONTEXT_REFRESH_THRESHOLD = getattr(settings, "KURO_CHAT_CONTEXT_REFRESH_THRESHOLD", int(os.getenv("KURO_CHAT_CONTEXT_REFRESH_THRESHOLD", "20")))
 CHAT_CONTEXT_MODEL = os.getenv("KURO_CHAT_CONTEXT_MODEL", "gemini-3-flash-preview")
 
 
@@ -738,6 +739,8 @@ def build_compressed_short_term_text(
     """
     from kuro_backend import memory_manager
 
+    if chat_id is None:
+        logger.warning("[MEMORY_COORD] chat_id is None in format_same_turn_attachment_index. Session isolation may collapse.")
     entries = memory_manager.get_short_term_with_ids(persona_scope=persona_scope, chat_id=chat_id)
     if not entries:
         return ""
@@ -990,7 +993,7 @@ def build_context_for_llm(
     # Parallelize independent I/O. Short-term retrieval and referent grounding
     # are independent from Mem0 context formatting.
     parallel_tasks: Dict[str, Any] = {
-        "short_term": lambda: memory_manager.get_short_term(persona_scope=persona_mode, username=username, chat_id=chat_id),
+        "short_term": lambda: (logger.warning("[MEMORY_COORD] chat_id is None in build_context_for_llm") if chat_id is None else None) or memory_manager.get_short_term(persona_scope=persona_mode, username=username, chat_id=chat_id),
         "session_files": lambda: memory_manager.get_session_files(session_id) if session_id else [],
     }
     if include_referent_grounding:
@@ -1104,7 +1107,8 @@ async def build_context_for_llm_async(
 # concurrent users don't collide.
 
 _MEM0_PREFETCH_CACHE: Dict[str, concurrent.futures.Future] = {}
-_MEM0_PREFETCH_LOCK = threading.Lock()
+import asyncio
+_MEM0_PREFETCH_LOCK = threading.Lock() # Note: kept as threading.Lock because this is accessed synchronously from graph nodes, not awaited.
 _MEM0_PREFETCH_TTL_S = 30.0
 _MEM0_PREFETCH_TIMESTAMPS: Dict[str, float] = {}
 
@@ -1220,7 +1224,9 @@ def execute_memory_write_task(
 
 def execute_mem0_extract_task(user_input: str, final_response: str, username: str = "Pantronux") -> None:
     """Mem0 extract+store with dedupe (graph + fast path may enqueue similar payloads)."""
-    from kuro_backend import perpetual_memory
+    from kuro_backend import perpetual_memory, memory_manager
+    import time
+    import json
 
     fp = _mem0_fingerprint(user_input, final_response)
     if _mem0_should_skip_duplicate(fp):
@@ -1231,16 +1237,41 @@ def execute_mem0_extract_task(user_input: str, final_response: str, username: st
         "execute_mem0_extract_task",
         {"fp": fp[:16], "chars_in": len(user_input or ""), "chars_out": len(final_response or "")},
     )
-    memories_to_store = perpetual_memory.perpetual_memory.extract_personal_info(
-        user_input,
-        final_response,
-        username,
-    )
-    if memories_to_store and isinstance(memories_to_store, list):
-        perpetual_memory.perpetual_memory.store_memories(memories_to_store, username)
-        logger.info("[MEMORY_COORD] mem0_extract stored n=%s for user %s", len(memories_to_store), username)
-    else:
-        logger.debug("[MEMORY_COORD] mem0_extract nothing to store")
+
+    max_attempts = 3
+    attempt = 0
+    while attempt < max_attempts:
+        try:
+            memories_to_store = perpetual_memory.perpetual_memory.extract_personal_info(
+                user_input,
+                final_response,
+                username,
+            )
+            if memories_to_store and isinstance(memories_to_store, list):
+                perpetual_memory.perpetual_memory.store_memories(memories_to_store, username)
+                logger.info("[MEMORY_COORD] mem0_extract stored n=%s for user %s", len(memories_to_store), username)
+
+                # Invalidate semantic cache on write
+                try:
+                    from kuro_backend import semantic_cache
+                    semantic_cache.invalidate_tag(username)
+                except Exception as sc_err:
+                    logger.warning("[MEMORY_COORD] Failed to invalidate semantic cache: %s", sc_err)
+            else:
+                logger.debug("[MEMORY_COORD] mem0_extract nothing to store")
+            return
+        except Exception as e:
+            attempt += 1
+            logger.warning("[MEMORY_COORD] mem0_extract attempt %d failed: %s", attempt, e)
+            if attempt < max_attempts:
+                time.sleep(2 ** (attempt - 1)) # Exponential backoff: 1s, 2s
+            else:
+                logger.error("[MEMORY_COORD] mem0_extract failed permanently. Writing to mem0_write_failures.")
+                try:
+                    payload = json.dumps({"user_input": user_input, "final_response": final_response})
+                    memory_manager.record_mem0_write_failure(username, payload)
+                except Exception as db_err:
+                    logger.error("[MEMORY_COORD] Failed to record mem0_write_failure: %s", db_err)
 
 
 

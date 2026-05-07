@@ -1,4 +1,4 @@
-# Kuro AI V1.0.0 Beta 2 "Chat Isolation" — SYSTEM_MAP
+# Kuro AI V1.0.0 Beta 3 "Chat Isolation" — SYSTEM_MAP
 
 > Authoritative navigation map for the repository. Traced function-by-function
 > from the true entrypoint (`main.py`) outward. Only source code under version
@@ -6,6 +6,9 @@
 > artefacts are intentionally excluded.
 
 ## Executive Summary (User-Friendly Overview)
+
+**Note on Telegram**: Kuro AI uses Telegram strictly for *outbound* proactive notifications (e.g. Sentinel alerts, Dreaming cycle updates). There is currently no inbound polling loop for two-way chat commands.
+
 
 Kuro AI is your **Intelligent Personal Sovereign**—a sophisticated digital companion designed to orchestrate your dissertation research, system security, and daily workflows into one seamless experience.
 
@@ -109,7 +112,7 @@ Kuro AI is your **Intelligent Personal Sovereign**—a sophisticated digital com
     - **Memory Persistence**: Intisari file disimpan ke Mem0 dan `research_ledger` (`archived_file_memory` kind), allowing Kuro to "remember" the contents of deleted files.
     - **Archive Metadata**: Sidecar JSON files are persisted in `.archive/{username}/` as permanent records.
 
-### V1.0.0 Beta 2 Architecture Notes ("Chat Isolation & Anti-Halusinasi")
+### V1.0.0 Beta 3 Architecture Notes ("Chat Isolation & Anti-Halusinasi")
 
 - **Epistemic Accountability Layer**: 3-tier verification injected into all agency persona system prompts.
     - **Tier-1 Source Audit**: Classifies every factual claim by source (Mem0/ChromaDB, Serper, inference, parametric).

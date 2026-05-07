@@ -240,6 +240,38 @@ async def _register_dashboard_sync_loop():
     """Enable cross-thread revision bumps to schedule WebSocket REFRESH_NOW."""
     core_data.register_main_event_loop(asyncio.get_running_loop())
 
+    # Clear stale dreaming leases
+    try:
+        from kuro_backend import memory_manager
+        conn = memory_manager._get_short_term_conn()
+        c = conn.cursor()
+        c.execute("DELETE FROM dreaming_locks WHERE lease_expires_at < datetime('now')")
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.error(f"Failed to clear stale dreaming leases: {e}")
+
+    # Drain mem0_write_failures
+    try:
+        from kuro_backend import memory_manager, memory_coordinator
+        import json
+        failures = memory_manager.get_pending_mem0_write_failures()
+        if failures:
+            logger.info(f"Replaying {len(failures)} pending Mem0 writes from mem0_write_failures...")
+            for failure in failures:
+                try:
+                    payload = json.loads(failure["payload"])
+                    # Use execute_mem0_extract_task again (it will retry 3 times and save back if fails)
+                    memory_coordinator.execute_mem0_extract_task(
+                        user_input=payload.get("user_input", ""),
+                        final_response=payload.get("final_response", ""),
+                        username=failure["username"]
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to replay mem0 write failure: {e}")
+    except Exception as e:
+        logger.error(f"Error during mem0_write_failures replay: {e}")
+
 
 def _ws_token_from_cookie(ws: WebSocket) -> Optional[str]:
     raw = ws.cookies.get(COOKIE_NAME)
@@ -1495,10 +1527,12 @@ async def chat_stream_endpoint(
                 },
             )
             yield f"event: complete\ndata: {json.dumps(complete_payload, ensure_ascii=False)}\n\n"
+            yield "data: [DONE]\n\n"
 
         except Exception as e:
             logger.exception(f"Error in streaming endpoint: {e}")
             yield f"event: error\ndata: {json.dumps(api_error(f'Maaf, {master_name} — ' + str(e), trace_id=trace_id), ensure_ascii=False)}\n\n"
+            yield "data: [DONE]\n\n"
 
     return StreamingResponse(
         event_generator(),
@@ -1511,8 +1545,22 @@ async def chat_stream_endpoint(
     )
 
 
+
+@app.delete("/api/chat/stream/{request_id}")
+async def cancel_chat_stream(request: Request, request_id: str):
+    """Cancel an active chat stream."""
+    # Because Gemini streaming via grpc is hard to explicitly kill without sharing the stream generator globally,
+    # and since HTTP disconnection kills the FastApi StreamingResponse automatically,
+    # the client just aborting the fetch handles it. This endpoint just acknowledges the client's intent to stop.
+    logger.info(f"Stream {request_id} cancelled by client.")
+    return {"status": "success", "message": "Stream cancelled"}
+
 @app.get("/api/system-status")
-async def system_status():
+async def system_status(request: Request):
+    token = get_token_from_cookie(request)
+    user = validate_token(token)
+    if not user or user.get("username") != os.getenv("ADMIN_USERNAME", "Pantronux"):
+        raise HTTPException(status_code=403, detail="Forbidden")
     """Get real-time system status."""
     return api_success(data=tools.get_system_status())
 
@@ -1525,7 +1573,11 @@ async def log_storage():
 
 
 @app.get("/api/proxmox-status")
-async def proxmox_status():
+async def proxmox_status(request: Request):
+    token = get_token_from_cookie(request)
+    user = validate_token(token)
+    if not user or user.get("username") != os.getenv("ADMIN_USERNAME", "Pantronux"):
+        raise HTTPException(status_code=403, detail="Forbidden")
     """Get Proxmox infrastructure status."""
     return api_success(data=tools.check_proxmox_infrastructure())
 
@@ -1539,7 +1591,11 @@ async def health_check():
 
 
 @app.get("/api/observability/status")
-async def observability_status():
+async def observability_status(request: Request):
+    token = get_token_from_cookie(request)
+    user = validate_token(token)
+    if not user or user.get("username") != os.getenv("ADMIN_USERNAME", "Pantronux"):
+        raise HTTPException(status_code=403, detail="Forbidden")
     """Get observability status including Phoenix and OpenTelemetry."""
     return {
         "status": "success",
@@ -1586,6 +1642,22 @@ async def latency_metrics():
         "data": observability.get_latency_metrics_snapshot(),
     }
 
+
+@app.get("/api/evaluation/summary")
+async def evaluation_summary(days: int = 7):
+    return {
+        "period_days": days,
+        "total_evaluated": 0,
+        "mean_composite": 0.0,
+        "mean_groundedness": 0.0,
+        "mean_goal_alignment": 0.0,
+        "mean_epistemic": 0.0,
+        "low_score_count": 0,
+        "low_score_threshold": 0.6
+    }
+
+def run_observability_cleanup():
+    observability.cleanup_old_sessions()
 
 @app.get("/api/observability/cleanup")
 async def cleanup_observability():
@@ -1783,7 +1855,7 @@ async def compliance_search(query: str):
 
 # --- Chat Session Management ---
 @app.get("/api/chats")
-async def get_chats(request: Request, persona: str = None):
+async def get_chats(request: Request, persona: str = None, limit: int = 50, offset: int = 0):
     """Get all chat sessions for the current user and persona."""
     token = get_token_from_cookie(request)
     user = validate_token(token)
@@ -1794,7 +1866,7 @@ async def get_chats(request: Request, persona: str = None):
     if not persona:
         persona = memory_manager.get_active_persona()
 
-    sessions = chat_history.get_sessions(username, persona)
+    sessions = chat_history.get_sessions(username, persona, limit=limit, offset=offset)
     # Inject context_summary into each session
     for session in sessions:
         context = chat_history.get_session_context(session.get("chat_id", ""))
@@ -2691,8 +2763,14 @@ def start_reminder_scheduler():
     """Start the background scheduler for automated intelligence cycles."""
     global _reminder_scheduler
     from apscheduler.schedulers.background import BackgroundScheduler
+    from kuro_backend.evaluation.evaluation_scheduler import run_evaluation_batch_job
 
     _reminder_scheduler = BackgroundScheduler(daemon=True)
+    _reminder_scheduler.add_job(
+        run_evaluation_batch_job,
+        "cron", hour=2, minute=30,
+        id="nightly_eval", replace_existing=True
+    )
 
     # Daily intelligence briefing at 08:00 AM
     _reminder_scheduler.add_job(
@@ -2793,7 +2871,7 @@ def start_reminder_scheduler():
             _reminder_scheduler.add_job(
                 fitness_service.run_fitness_sentinel,
                 "interval",
-                minutes=max(5, fitness_interval),
+                minutes=max(5, fitness_interval, replace_existing=True),
                 id="kuro_fitness_sentinel",
                 replace_existing=True,
                 max_instances=1,

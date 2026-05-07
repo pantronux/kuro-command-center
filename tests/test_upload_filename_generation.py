@@ -103,7 +103,7 @@ def test_chat_history_records_unique_filenames(monkeypatch, tmp_path):
     captured = []
     integrity_rows = []
 
-    def _capture_add_message(platform, role, content, attachments=None, persona=None, request_id=None, username=None):
+    def _capture_add_message(platform, role, content, attachments=None, persona=None, request_id=None, username=None, chat_id=None, **kwargs):
         captured.append(
             {
                 "platform": platform,

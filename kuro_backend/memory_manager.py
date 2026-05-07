@@ -155,10 +155,18 @@ def load_master_profile() -> Dict:
 
 def save_master_profile(profile: Dict):
     """Save updates to master profile."""
+    import tempfile
     with _lock:
-        with open(MASTER_PROFILE_PATH, 'w', encoding='utf-8') as f:
-            json.dump(profile, f, ensure_ascii=False, indent=4)
-        logger.info("Master profile updated.")
+        try:
+            fd, temp_path = tempfile.mkstemp(dir=os.path.dirname(MASTER_PROFILE_PATH), prefix="master_profile_", suffix=".json")
+            with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                json.dump(profile, f, ensure_ascii=False, indent=4)
+            os.replace(temp_path, MASTER_PROFILE_PATH)
+            logger.info("Master profile updated atomically.")
+        except Exception as e:
+            logger.error(f"Failed to atomically save master profile: {e}")
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
 
 def get_master_profile_formatted(username: str = "Pantronux") -> str:
     """Get formatted master profile for prompt injection."""
