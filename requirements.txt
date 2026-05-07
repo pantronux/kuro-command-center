@@ -26,3 +26,9 @@ opentelemetry-sdk
 opentelemetry-exporter-otlp
 opentelemetry-instrumentation-langchain
 yfinance>=0.2.54
+
+google-genai==1.75.0
+langchain-core==0.3.40
+chromadb==1.5.9
+mem0ai==2.0.1
+yfinance==0.2.54

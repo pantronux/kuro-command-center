@@ -24,7 +24,7 @@ def test_fiscal_sentinel_publishes_when_over_threshold(monkeypatch):
     monkeypatch.setenv("KURO_FISCAL_DAILY_USD_THRESHOLD", "0.50")
     published = []
 
-    def fake_get(_date: str) -> float:
+    def fake_get(_date: str, username: str = 'test') -> float:
         return 0.99
 
     def fake_publish(event, *, dry_run: bool = False):
@@ -56,7 +56,7 @@ def test_fiscal_sentinel_silent_below_threshold(monkeypatch):
 
     monkeypatch.setenv("KURO_FISCAL_DAILY_USD_THRESHOLD", "5.00")
 
-    def fake_get(_date: str) -> float:
+    def fake_get(_date: str, username: str = 'test') -> float:
         return 0.10
 
     monkeypatch.setattr(

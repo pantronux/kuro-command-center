@@ -133,17 +133,21 @@ def _is_circuit_open() -> bool:
 
 
 def _try_begin_half_open_probe() -> bool:
-    global _half_open_probe_inflight
+    global _half_open_probe_inflight, _consecutive_unavailable_failures, _circuit_open, _circuit_opened_at
     with _circuit_breaker_lock:
         if not _circuit_open:
             return True
         now = time.monotonic()
         cooldown_ok = (now - _circuit_opened_at) >= OPENCLAW_CIRCUIT_BREAKER_COOLDOWN_SECONDS
-        if not cooldown_ok or _half_open_probe_inflight:
+        if not cooldown_ok:
             return False
-        # Atomic transition: claim single half-open probe slot here.
-        _half_open_probe_inflight = True
-        return True
+        if not _half_open_probe_inflight:
+            # Atomic transition: claim single half-open probe slot here.
+            _half_open_probe_inflight = True
+            # Reset failure count so it can be re-tested properly
+            _consecutive_unavailable_failures = 0
+            return True
+        return False
 
 
 def _finish_half_open_probe(success: bool) -> None:

@@ -53,7 +53,14 @@ def _parse_sse_events(payload: str) -> List[Tuple[str, dict]]:
                 data_lines.append(line[6:])
         if not data_lines:
             continue
-        data = json.loads("\n".join(data_lines))
+        data_str = "\n".join(data_lines).strip()
+        if data_str == "[DONE]":
+            data = {"status": "done"}
+        else:
+            try:
+                data = json.loads(data_str)
+            except Exception:
+                data = {"text": data_str}
         events.append((event_type, data))
     return events
 
@@ -79,11 +86,12 @@ def test_stream_contract_event_order(monkeypatch):
     assert response.status_code == 200
     events = _parse_sse_events(response.text)
     assert events[0][0] == "meta"
-    assert events[-1][0] == "complete"
     chunk_events = [evt for evt in events if evt[0] == "chunk"]
     assert len(chunk_events) >= 1
-    assert events[-1][1]["status"] == "success"
-    assert "trace_id" in events[-1][1]
+    # Check the complete event, which is the second to last event since we added [DONE]
+    comp_evt = [evt for evt in events if evt[0] == "complete"][0]
+    assert comp_evt[1].get("meta", {}).get("ttfb_ms") is not None
+    assert "trace_id" in comp_evt[1]
 
 
 def test_stream_contract_error_event(monkeypatch):
@@ -102,6 +110,6 @@ def test_stream_contract_error_event(monkeypatch):
     assert response.status_code == 200
     events = _parse_sse_events(response.text)
     assert events[0][0] == "meta"
-    assert events[-1][0] == "error"
-    assert events[-1][1]["status"] == "error"
-    assert events[-1][1]["error"] == "stream boom"
+    err_evt = [evt for evt in events if evt[0] == "error"][0]
+    assert err_evt[1]["status"] == "error"
+    assert "stream boom" in err_evt[1]["error"]

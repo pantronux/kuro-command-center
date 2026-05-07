@@ -327,6 +327,8 @@ def get_post_response_queue_depth() -> int:
 
 
 def _persist_short_term_and_enqueue_writes(user_input: str, response_text: str, persona_mode: str, username: str = "Pantronux", chat_id: Optional[str] = None) -> None:
+    if chat_id is None:
+        logger.warning("[LANGGRAPH] chat_id is None in _persist_short_term_and_enqueue_writes. Session isolation collapsed.")
     memory_manager.add_short_term("user", user_input, persona_scope=persona_mode, username=username, chat_id=chat_id)
     memory_manager.add_short_term("assistant", response_text, persona_scope=persona_mode, username=username, chat_id=chat_id)
 
@@ -644,7 +646,7 @@ def memory_retrieval_node(state: KuroState) -> Dict[str, Any]:
     # Auto-RAG: use rewritten query on retry passes
     effective_query = state.get("rewritten_query") or user_input
 
-    with observability.trace_node("memory_retrieval_node") as span:
+    with observability.trace_node("memory_retrieval_node", {"persona": state.get("persona_mode", "unknown"), "username": state.get("username", "unknown"), "chat_id": state.get("chat_id", "")}) as span:
         try:
             # P1.2 — consume supervisor's prefetch if present; otherwise fall
             # back to a live retrieval using effective_query (may be rewritten).
@@ -737,7 +739,7 @@ Status:"""
             logger.warning(f"[MEM0_EXTRACTION] Semantic task check failed: {e}")
 
     if task_success:
-        with observability.trace_node("memory_extraction_node"):
+        with observability.trace_node("memory_extraction_node", {"persona": state.get("persona_mode", "unknown"), "username": state.get("username", "unknown"), "chat_id": state.get("chat_id", "")}):
             username = state.get("username", "Pantronux")
             _enqueue_post_response_task(
                 {
@@ -759,7 +761,7 @@ Status:"""
 #             Adaptive-RAG (Jeong et al. 2024)
 # ============================================
 
-_RAG_MAX_RETRIES: int = 2  # hard ceiling — prevents token-burn loops
+_RAG_MAX_RETRIES: int = 3  # hard ceiling — prevents token-burn loops
 
 
 def retrieval_grader_node(state: KuroState) -> Dict[str, Any]:
@@ -865,10 +867,12 @@ def query_transform_node(state: KuroState) -> Dict[str, Any]:
 
     # ── Serper failover at max retries ────────────────────────────────────────
     if retry_count >= _RAG_MAX_RETRIES:
-        logger.info(
-            "[RAG_TRANSFORM] Max retries reached (%d) — Serper failover for: %s",
+        logger.warning(
+            "[RAG_TRANSFORM] Max retries reached (%d) — Hard cap triggered for: %s",
             retry_count, rewritten[:80],
         )
+        return {"retrieval_retry_count": retry_count + 1} # Will trigger route_after_transform -> END
+
         serper_memories: List[Dict] = []
         try:
             from kuro_backend.serper_tool import serper_search
@@ -1333,6 +1337,7 @@ def response_node(state: KuroState) -> Dict[str, Any]:
     trace_attrs = observability.create_session_context(session_id=session_id)
     trace_attrs = observability.add_client_label(trace_attrs, user_input)
     
+    trace_attrs.update({"persona": state.get("persona_mode", "unknown"), "username": state.get("username", "unknown"), "chat_id": state.get("chat_id", "")})
     with observability.trace_node("response_node", trace_attrs) as span:
         memory_coordinator.apply_path_tokens_to_runtime(user_input, persona_mode)
         username = state.get("username", "Pantronux")
@@ -1692,6 +1697,7 @@ def tool_node(state: KuroState) -> Dict[str, Any]:
     session_id = state.get("_session_id", "unknown")
     trace_attrs = observability.create_session_context(session_id=session_id)
 
+    trace_attrs.update({"persona": state.get("persona_mode", "unknown"), "username": state.get("username", "unknown"), "chat_id": state.get("chat_id", "")})
     with observability.trace_node("tool_node", trace_attrs) as span:
         try:
             genai_client = _get_genai_client()
@@ -1917,6 +1923,15 @@ def route_after_metacognitive(state: KuroState) -> str:
 # GRAPH CONSTRUCTION
 # ============================================
 
+
+def route_after_transform(state: KuroState) -> str:
+    """Route after transform to bound the loop."""
+    from langgraph.graph import END
+    retry_count = state.get("retrieval_retry_count", 0)
+    if retry_count >= _RAG_MAX_RETRIES:
+        return "__end__"
+    return "memory_retrieval_node"
+
 def build_kuro_graph() -> StateGraph:
     """
     Build the Kuro LangGraph state machine.
@@ -1981,7 +1996,14 @@ def build_kuro_graph() -> StateGraph:
     # query_transform loops back to retrieval (uses rewritten_query)
     # The loop terminates via Serper failover inside query_transform_node
     # which forces retrieval_grade='relevant' → next grader pass exits to attention_filter
-    graph_builder.add_edge("query_transform_node", "memory_retrieval_node")
+    graph_builder.add_conditional_edges(
+        "query_transform_node",
+        route_after_transform,
+        {
+            "memory_retrieval_node": "memory_retrieval_node",
+            "__end__": END,
+        },
+    )
 
     # ── Natural Agency pipeline ───────────────────────────────────────────────
     graph_builder.add_edge("attention_filter_node", "executive_monitor_node")

@@ -41,7 +41,8 @@ def _get_connection():
     """Get a database connection with row factory."""
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")  # Better concurrency
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")  # Better concurrency
     return conn
 
 def init_db():
@@ -90,6 +91,41 @@ def _init_db_locked():
             logger.info("chat_history migration: added username column with Pantronux default")
         
         # uploaded_file_integrity migration
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS uploaded_file_integrity (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                request_id TEXT,
+                platform TEXT,
+                persona TEXT,
+                original_filename TEXT,
+                stored_filename TEXT,
+                stored_path TEXT,
+                content_type TEXT,
+                size_bytes INTEGER,
+                sha256 TEXT,
+                uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                username TEXT DEFAULT 'Pantronux',
+                expires_at DATETIME,
+                chat_id TEXT,
+                archived_at DATETIME,
+                archive_path TEXT
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS chat_sessions (
+                chat_id TEXT PRIMARY KEY,
+                username TEXT NOT NULL,
+                persona TEXT NOT NULL,
+                title TEXT DEFAULT 'New Chat',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                context_summary TEXT,
+                context_message_count INTEGER DEFAULT 0,
+                context_updated_at DATETIME
+            )
+        ''')
+
         cursor.execute("PRAGMA table_info(uploaded_file_integrity)")
         upload_cols = {row[1] for row in cursor.fetchall()}
         if "username" not in upload_cols:
@@ -98,6 +134,21 @@ def _init_db_locked():
         if "expires_at" not in upload_cols:
             cursor.execute("ALTER TABLE uploaded_file_integrity ADD COLUMN expires_at DATETIME")
             logger.info("uploaded_file_integrity migration: added expires_at column")
+        if "chat_id" not in upload_cols:
+            cursor.execute("ALTER TABLE uploaded_file_integrity ADD COLUMN chat_id TEXT")
+            logger.info("uploaded_file_integrity migration: added chat_id column")
+
+        # chat_sessions migration
+        cursor.execute("PRAGMA table_info(chat_sessions)")
+        session_cols = {row[1] for row in cursor.fetchall()}
+        if session_cols:
+            if "context_summary" not in session_cols:
+                cursor.execute("ALTER TABLE chat_sessions ADD COLUMN context_summary TEXT")
+            if "context_message_count" not in session_cols:
+                cursor.execute("ALTER TABLE chat_sessions ADD COLUMN context_message_count INTEGER DEFAULT 0")
+            if "context_updated_at" not in session_cols:
+                cursor.execute("ALTER TABLE chat_sessions ADD COLUMN context_updated_at DATETIME")
+
         if "archived_at" not in upload_cols:
             cursor.execute("ALTER TABLE uploaded_file_integrity ADD COLUMN archived_at DATETIME")
             logger.info("uploaded_file_integrity migration: added archived_at column")
@@ -192,6 +243,41 @@ def _init_db_locked():
             logger.info("chat_sessions migration: added context_updated_at column")
 
         # Migration: Add chat_id to uploaded_file_integrity
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS uploaded_file_integrity (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                request_id TEXT,
+                platform TEXT,
+                persona TEXT,
+                original_filename TEXT,
+                stored_filename TEXT,
+                stored_path TEXT,
+                content_type TEXT,
+                size_bytes INTEGER,
+                sha256 TEXT,
+                uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                username TEXT DEFAULT 'Pantronux',
+                expires_at DATETIME,
+                chat_id TEXT,
+                archived_at DATETIME,
+                archive_path TEXT
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS chat_sessions (
+                chat_id TEXT PRIMARY KEY,
+                username TEXT NOT NULL,
+                persona TEXT NOT NULL,
+                title TEXT DEFAULT 'New Chat',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                context_summary TEXT,
+                context_message_count INTEGER DEFAULT 0,
+                context_updated_at DATETIME
+            )
+        ''')
+
         cursor.execute("PRAGMA table_info(uploaded_file_integrity)")
         upload_cols = {row[1] for row in cursor.fetchall()}
         if "chat_id" not in upload_cols:
@@ -600,15 +686,15 @@ def create_session(chat_id: str, username: str, persona: str, title: str = "New 
         if conn:
             conn.close()
 
-def get_sessions(username: str, persona: str) -> List[Dict]:
+def get_sessions(username: str, persona: str, limit: int = 50, offset: int = 0) -> List[Dict]:
     """Get all chat sessions for a user and persona."""
     conn = None
     try:
         conn = _get_connection()
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT * FROM chat_sessions WHERE username = ? AND persona = ? ORDER BY updated_at DESC",
-            (username, persona)
+            "SELECT * FROM chat_sessions WHERE username = ? AND persona = ? ORDER BY updated_at DESC LIMIT ? OFFSET ?",
+            (username, persona, limit, offset)
         )
         rows = cursor.fetchall()
         return [dict(r) for r in rows]
@@ -640,15 +726,27 @@ def update_session_title(chat_id: str, title: str) -> bool:
 
 def delete_session(chat_id: str) -> bool:
     """Delete a chat session and its history."""
+    from kuro_backend import memory_manager
     conn = None
     try:
         conn = _get_connection()
         cursor = conn.cursor()
         # Delete history first
         cursor.execute("DELETE FROM chat_history WHERE chat_id = ?", (chat_id,))
+
+        # Cascade delete uploaded_file_integrity
+        cursor.execute("DELETE FROM uploaded_file_integrity WHERE chat_id = ?", (chat_id,))
+
         # Delete session
         cursor.execute("DELETE FROM chat_sessions WHERE chat_id = ?", (chat_id,))
         conn.commit()
+
+        # Cascade delete short_term buffer
+        try:
+            memory_manager.delete_short_term_by_chat_id(chat_id)
+        except Exception as mm_err:
+            logger.error(f"Failed to cascade delete short_term for {chat_id}: {mm_err}")
+
         return True
     except Exception as e:
         logger.error(f"Failed to delete chat session: {e}")

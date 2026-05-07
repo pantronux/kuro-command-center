@@ -19,6 +19,9 @@ import os
 import re
 import json
 import time
+import threading
+
+_kuro_memory_lock = threading.Lock()
 from typing import List, Dict, Optional, Any
 from datetime import datetime
 from mem0 import Memory

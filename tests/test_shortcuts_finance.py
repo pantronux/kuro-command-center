@@ -29,7 +29,9 @@ def isolated_finance_db(tmp_path, monkeypatch):
 def test_budget_shortcut(isolated_finance_db):
     from kuro_backend import ssot_shortcuts
 
-    isolated_finance_db.add_budget("2026-04", 250.0, "")
+    now = __import__("datetime").datetime.now()
+    month_str = now.strftime("%Y-%m")
+    isolated_finance_db.add_budget(month_str, 250.0, "")
     r = ssot_shortcuts.try_shortcut("What is my budget this month?", "consultant")
     assert r is not None
     assert r.source == "finances_budget"

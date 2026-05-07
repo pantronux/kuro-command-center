@@ -61,7 +61,8 @@ def _resolve_credentials() -> tuple[Optional[str], Optional[str]]:
 def _truncate(text: str) -> str:
     if not text:
         return ""
-    return text if len(text) <= _MAX_TEXT_CHARS else text[: _MAX_TEXT_CHARS - 3] + "..."
+    # Ensure it's under Telegram's hard limit
+    return text if len(text) <= 4000 else text[:3990] + "...[truncated]"
 
 
 def send_message(
@@ -86,8 +87,8 @@ def send_message(
         logger.info("[TELEGRAM] disabled via KURO_DREAMING_TELEGRAM_ENABLED")
         return False
 
-    token, chat_id = _resolve_credentials()
-    if not token or not chat_id:
+    token, chat_ids = _resolve_credentials()
+    if not token or not chat_ids:
         logger.warning("[TELEGRAM] missing TELEGRAM_TOKEN / TELEGRAM_CHAT_ID")
         return False
 
@@ -97,34 +98,52 @@ def send_message(
         logger.error("[TELEGRAM] requests library not installed")
         return False
 
-    payload: dict = {
-        "chat_id": chat_id,
-        "text": _truncate(text),
-        "disable_notification": bool(disable_notification),
-    }
-    if parse_mode:
-        payload["parse_mode"] = parse_mode
-
+    all_success = True
     url = f"{_TELEGRAM_API_BASE}/bot{token}/sendMessage"
-    for attempt in (1, 2):
-        try:
-            resp = requests.post(url, json=payload, timeout=timeout_s)
-        except Exception as exc:
-            logger.warning("[TELEGRAM] attempt=%d network error: %s", attempt, exc)
-            if attempt == 1:
+
+    for cid in chat_ids:
+        payload: dict = {
+            "chat_id": cid,
+            "text": _truncate(text),
+            "disable_notification": bool(disable_notification),
+        }
+        if parse_mode:
+            payload["parse_mode"] = parse_mode
+
+        success_for_cid = False
+        for attempt in (1, 2, 3):
+            try:
+                resp = requests.post(url, json=payload, timeout=timeout_s)
+            except Exception as exc:
+                logger.warning("[TELEGRAM] attempt=%d network error: %s", attempt, exc)
+                if attempt < 3:
+                    time.sleep(0.5 * attempt)
+                    continue
+                break
+
+            status = resp.status_code
+            if 200 <= status < 300:
+                success_for_cid = True
+                break
+
+            if status == 429:
+                retry_after = int(resp.headers.get("retry-after", 5))
+                logger.warning("[TELEGRAM] 429 Too Many Requests, sleeping %d s", retry_after)
+                time.sleep(retry_after)
+                continue
+
+            if 500 <= status < 600 and attempt < 3:
+                logger.warning("[TELEGRAM] attempt=%d 5xx (%d), retrying once", attempt, status)
                 time.sleep(0.5)
                 continue
-            return False
-        status = resp.status_code
-        if 200 <= status < 300:
-            return True
-        if 500 <= status < 600 and attempt == 1:
-            logger.warning("[TELEGRAM] attempt=%d 5xx (%d), retrying once", attempt, status)
-            time.sleep(0.5)
-            continue
-        logger.warning("[TELEGRAM] failed status=%d body=%.200s", status, resp.text)
-        return False
-    return False
+
+            logger.warning("[TELEGRAM] failed status=%d body=%.200s", status, resp.text)
+            break
+
+        if not success_for_cid:
+            all_success = False
+
+    return all_success
 
 
 def send_dream_inconsistency(
@@ -145,7 +164,11 @@ def send_dream_inconsistency(
         logger.info("[TELEGRAM] skip inconsistency alert: empty description")
         return False
     message = _INCONSISTENCY_TEMPLATE.format(persona=persona_label, desc=desc)
-    sent = send_message(message, dry_run=dry_run)
+    try:
+        sent = send_message(message, dry_run=dry_run)
+    except Exception as e:
+        logger.warning("[TELEGRAM] send_dream_inconsistency failed: %s", e)
+        sent = False
     logger.info(
         "[TELEGRAM] dream_inconsistency persona=%s finding=%s sent=%s",
         persona_label, finding_id or "-", sent,

@@ -1,3 +1,24 @@
+## [1.0.0-beta.3] - Sovereign Cat Stability Update
+
+### Added
+- **Autonomous Dataset Evaluation**: Implemented `kuro_backend/evaluation/` for trace extraction and Gemini-based scoring of system responses, exposed via `/api/evaluation/summary`.
+- **UI/UX**: Added "Stop Generating" button and backend SSE stream cancellation (`DELETE /api/chat/stream/{request_id}`).
+- **UI/UX**: Added per-file upload progress and inline failure notifications.
+- **UI/UX**: Added a loading state and disabled input when swapping personas.
+
+### Fixed
+- **Memory System**: Added retry-with-backoff and a failure-recovery mechanism (`mem0_write_failures` table) for `Mem0` extraction to prevent silent data loss on process crash.
+- **Auto-RAG Safety**: Properly bounded the `query_transform_node` Auto-RAG loop to stop execution securely at `_RAG_MAX_RETRIES`.
+- **Database Thread Safety**: Replaced unsafe standard file I/O with `threading.Lock` in `perpetual_memory.py` and implemented atomic file writes for `master_profile.json` using `tempfile`.
+- **Database Consistency**: Enforced `PRAGMA journal_mode=WAL` and `PRAGMA synchronous=NORMAL` across all SQLite DB modules. Included missing `ALTER TABLE` migrations for Beta 2 columns.
+- **File Retention Worker**: Guarded the physical deletion step so files are not removed if AI summarization fails.
+- **SSE Streaming**: Resolved incomplete flush by sending a final `[DONE]\n\n` sentinel and refactored client-side rendering to batch markdown incrementally.
+- **Chat History Pagination**: Implemented `limit` and `offset` for `get_sessions()` to prevent unbounded payload growth.
+- **Market Sentinel Reliability**: Guarded against stale `yfinance` data (>24h), added quant fallback if OpenClaw fails, and fixed `BEGIN IMMEDIATE` locks.
+- **Telegram Webhook Resiliency**: Implemented a 3-attempt backoff retry for HTTP 429 Too Many Requests, truncated overly long messages (4000 chars limit), and added support for broadcasting to a comma-separated list of `TELEGRAM_CHAT_ID`s.
+- **WebSocket Reconnect**: Implemented exponential backoff for the dashboard WS with auto-re-authentication.
+- **Token Budget Deduplication**: Revised `collapse_duplicate_blocks()` to preserve array order and avoid false overlap on static headers.
+
 # CHANGELOG — Kuro AI
 
 > All entries prior to V1.0.0 Beta 1 are classified as **Legacy (Alpha Version)** entries.

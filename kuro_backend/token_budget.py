@@ -282,30 +282,28 @@ def _rolling_hashes(text: str, *, window: int = _DUP_WINDOW_CHARS) -> set[str]:
 
 
 def collapse_duplicate_blocks(parts: Iterable[tuple[str, str]]) -> list[tuple[str, str]]:
-    """Drop later parts that overlap heavily with earlier ones in the sequence.
-
-    Returns a new list preserving order. Useful to avoid injecting the same
-    recent_messages content twice (once as short-term summary and once as a
-    verbatim block).
-    """
+    """Drop later parts that overlap heavily with earlier ones in the sequence."""
     seen: set[str] = set()
     out: list[tuple[str, str]] = []
-    for name, text in parts:
+    for name, text in reversed(list(parts)):
         if not text:
             continue
-        h = _rolling_hashes(text)
+        lines = text.split("\n")
+        body_text = "\n".join(lines[1:]) if len(lines) > 1 and lines[0].startswith("[") and lines[0].endswith("]") else text
+        body_text = body_text.strip()
+        h = _rolling_hashes(body_text)
         if not h:
-            out.append((name, text))
-            continue
-        overlap = len(h & seen) / max(1, len(h))
+            if len(body_text) > 0:
+                h = {body_text}
+            else:
+                out.insert(0, (name, text))
+                continue
+        overlap = len(h & seen) / max(1, len(h)) if len(h) > 0 else 0
         if overlap >= _DUP_OVERLAP_THRESHOLD and seen:
-            logger.debug(
-                "[TOKEN_BUDGET] collapsing duplicate section=%s overlap=%.2f",
-                name, overlap,
-            )
+            logger.info("[TOKEN_BUDGET] collapsing duplicate section=%s overlap=%.2f", name, overlap)
             continue
         seen |= h
-        out.append((name, text))
+        out.insert(0, (name, text))
     return out
 
 

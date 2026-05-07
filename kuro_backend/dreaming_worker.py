@@ -1062,6 +1062,26 @@ def _persist_market_insight(note: str, *, cycle_id: int, username: str = "Pantro
 
 
 def _run_prediction_scan_nightly(*, dry_run: bool, username: str = "Pantronux") -> int:
+    import os
+    if os.getenv("KURO_PREDICTION_MARKET_DEMO") == "1":
+        from kuro_backend import finance_db
+        import random
+        # Seed deterministic random
+        random.seed(42)
+        demo_markets = [
+            {"topic_id": "ai-regulation-2026", "probability": 0.75 + random.uniform(-0.05, 0.05)},
+            {"topic_id": "agi-by-2027", "probability": 0.42 + random.uniform(-0.05, 0.05)},
+            {"topic_id": "fed-rate-cut-q3", "probability": 0.88 + random.uniform(-0.05, 0.05)}
+        ]
+        if dry_run:
+            return len(demo_markets)
+        n = 0
+        for m in demo_markets:
+            finance_db.upsert_prediction_watch(m["topic_id"], username=username)
+            finance_db.record_prediction_snapshot(m["topic_id"], m["probability"], source="demo_seed", username=username)
+            n += 1
+        return n
+
     if not _env_bool("KURO_PREDICTION_SCAN_ENABLED", True):
         return 0
     try:
@@ -1364,12 +1384,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         logging.getLogger().setLevel(logging.DEBUG)
 
         fc = _run_fiscal_sentinel(cycle_id=0, dry_run=args.dry_run)
-        print(json.dumps({"fiscal": fc}, ensure_ascii=False, indent=2, default=str))
+        logger.info(json.dumps({"fiscal": fc}, ensure_ascii=False, indent=2, default=str))
         return 0
 
     if getattr(args, "run_market", False):
         mc = _run_market_sentinel(cycle_id=0, dry_run=args.dry_run)
-        print(json.dumps({"market": mc}, ensure_ascii=False, indent=2, default=str))
+        logger.info(json.dumps({"market": mc}, ensure_ascii=False, indent=2, default=str))
         return 0
 
     audit = run_dreaming_cycle(
@@ -1377,7 +1397,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         dry_run=args.dry_run,
         force=args.force,
     )
-    print(json.dumps(audit, ensure_ascii=False, indent=2, default=str))
+    logger.info(json.dumps(audit, ensure_ascii=False, indent=2, default=str))
     return 0 if audit.get("status") in ("ok", "skipped", "disabled") else 1
 
 
