@@ -2871,7 +2871,7 @@ def start_reminder_scheduler():
             _reminder_scheduler.add_job(
                 fitness_service.run_fitness_sentinel,
                 "interval",
-                minutes=max(5, fitness_interval, replace_existing=True),
+                minutes=max(5, fitness_interval),
                 id="kuro_fitness_sentinel",
                 replace_existing=True,
                 max_instances=1,

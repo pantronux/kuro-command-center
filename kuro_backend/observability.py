@@ -243,6 +243,20 @@ def trace_node(node_name: str, attributes: Dict[str, str] = None):
     from kuro_backend.config import settings
     timeout_s = float(os.getenv("KURO_TRACE_SPAN_TIMEOUT_S", "120.0"))
 
+    import threading
+    timer = None
+    if timeout_s > 0:
+        def force_close():
+            try:
+                span.set_status(Status(StatusCode.ERROR, "Span Timeout"))
+                span.set_attribute("kuro.timeout", True)
+                span.end()
+                logger.warning(f"[OBSERVABILITY] Span {node_name} forcibly closed due to timeout ({timeout_s}s)")
+            except Exception:
+                pass
+        timer = threading.Timer(timeout_s, force_close)
+        timer.start()
+
     with tracer.start_as_current_span(f"kuro.{node_name}") as span:
         # Add default attributes
         if attributes:
@@ -269,6 +283,8 @@ def trace_node(node_name: str, attributes: Dict[str, str] = None):
             span.record_exception(e)
             raise
         finally:
+            if timer:
+                timer.cancel()
             # Record duration
             duration = time.time() - start_time
             span.set_attribute(f"{node_name}.duration_ms", round(duration * 1000, 2))
