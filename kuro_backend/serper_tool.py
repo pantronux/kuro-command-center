@@ -66,13 +66,19 @@ def serper_search(query: str, search_type: str = "search", num_results: int = 10
         # Extract organic results
         results = []
         for item in data.get("organic", []):
-            results.append({
+            res = {
                 "title": item.get("title", ""),
                 "link": item.get("link", ""),
                 "snippet": item.get("snippet", ""),
                 "date": item.get("date", ""),
                 "source": item.get("source", ""),
-            })
+            }
+            # Scholar-specific fields
+            if search_type == "scholar":
+                res["year"] = item.get("year")
+                res["cited_by"] = item.get("citedBy") or item.get("cited_by", 0)
+            
+            results.append(res)
         
         # Extract knowledge graph if available
         knowledge_graph = data.get("knowledgeGraph", {})
@@ -80,7 +86,7 @@ def serper_search(query: str, search_type: str = "search", num_results: int = 10
         # Extract "People Also Ask" for additional context
         people_also_ask = data.get("peopleAlsoAsk", [])
         
-        logger.info(f"[SERPER] Search '{query}' returned {len(results)} results")
+        logger.info(f"[SERPER] {search_type} search '{query}' returned {len(results)} results")
         
         return {
             "query": query,
@@ -93,20 +99,25 @@ def serper_search(query: str, search_type: str = "search", num_results: int = 10
         
     except requests.exceptions.RequestException as e:
         logger.error(f"[SERPER] Search failed for '{query}': {e}")
-        return {"error": str(e), "query": query, "results": []}
+        return {"error": str(e), "query": query, "organic_results": []}
     except Exception as e:
         logger.error(f"[SERPER] Unexpected error for '{query}': {e}")
-        return {"error": str(e), "query": query, "results": []}
+        return {"error": str(e), "query": query, "organic_results": []}
 
 
-def serper_news(query: str, num_results: int = 10) -> Dict[str, Any]:
+def serper_news(query: str, num_results: int = 10) -> List[Dict]:
     """Search for news articles using Serper.dev."""
-    return serper_search(query, search_type="news", num_results=num_results)
+    res = serper_search(query, search_type="news", num_results=num_results)
+    return res.get("organic_results", [])
 
 
-def serper_scholar(query: str, num_results: int = 10) -> Dict[str, Any]:
-    """Search for academic papers using Serper.dev Scholar."""
-    return serper_search(query, search_type="scholar", num_results=num_results)
+def serper_scholar(query: str, num_results: int = 10) -> List[Dict]:
+    """
+    Search Google Scholar for academic papers, theses, and peer-reviewed research.
+    Returns title, link, snippet, year, and citation count for each result.
+    """
+    res = serper_search(query, search_type="scholar", num_results=num_results)
+    return res.get("organic_results", [])
 
 
 # Research pillars for daily intelligence briefing

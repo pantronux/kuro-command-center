@@ -13,12 +13,13 @@ Side Effects: Spins up Phoenix OTel collector threads, writes to phoenix sqlite,
 """
 import logging
 import os
-import uuid
-import threading
 import time
-from typing import Optional, Dict, Any
-from datetime import date, datetime
+import threading
+import json
+import uuid
+from datetime import datetime, date
 from contextlib import contextmanager
+from typing import Any, Dict, Optional, Generator
 
 # ============================================
 # PHOENIX PERSISTENT DATABASE CONFIGURATION
@@ -33,19 +34,23 @@ os.makedirs(os.path.dirname(_PHOENIX_DB_PATH), exist_ok=True)
 
 # Set environment variables for Phoenix (must be before import)
 # VM configuration note: phoenix_data/ must be on a persistent volume in the VM (not tmpfs/RAM disk).
-_PHOENIX_WORKING_DIR = os.path.dirname(_PHOENIX_DB_PATH)
-os.environ["PHOENIX_WORKING_DIR"] = str(_PHOENIX_WORKING_DIR)
-os.environ["PHOENIX_SQL_DATABASE_URL"] = f"sqlite:///{_PHOENIX_DB_PATH}"
-os.environ["PHOENIX_ENABLE_AUTH"] = "false"  # Disable auth for local private network
-os.environ["PHOENIX_PROJECT_NAME"] = "kuro-ai"  # Force project identity
-
 # OpenTelemetry imports
 from opentelemetry import trace, context
 from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.trace import Status, StatusCode
+
+# App Configuration
+from kuro_backend.config import settings
+from kuro_backend import finance_db
+
+# Ensure Phoenix persistence directories and environment are primed before launch
+_PHOENIX_DIR = os.path.abspath(settings.PHOENIX_WORKING_DIR)
+os.environ["PHOENIX_WORKING_DIR"] = _PHOENIX_DIR
+if settings.PHOENIX_SQL_DATABASE_URL:
+    os.environ["PHOENIX_SQL_DATABASE_URL"] = settings.PHOENIX_SQL_DATABASE_URL
 
 # Phoenix imports (after PHOENIX_SQL_DATABASE_URL is set)
 import phoenix as px
@@ -59,22 +64,30 @@ logger.propagate = False  # Prevent double-reporting to root logger
 
 PHOENIX_PORT = 6006
 PHOENIX_HOST = "0.0.0.0"
-PHOENIX_ENABLE_AUTH = False  # Auth disabled for local private network
-
-# Phoenix OTLP HTTP endpoint (Phoenix UI port 6006 also serves OTLP on /v1/traces)
-OTLP_ENDPOINT = os.getenv("OTLP_ENDPOINT", "http://127.0.0.1:6006/v1/traces")
-
-# Expose DB path for logging
-PHOENIX_DB_PATH = _PHOENIX_DB_PATH
-
-MASTER_USER_ID = "master_irfan"
-TOKEN_ALERT_THRESHOLD = 999999999  # Disabled - no alerting in production
 
 # Global state
-_phoenix_session = None
 _tracer = None
 _token_tracker = {}
 _phoenix_app = None
+
+MASTER_USER_ID = "Pantronux"
+
+def create_session_context(user_id: str = MASTER_USER_ID, session_id: str = None) -> Dict[str, Any]:
+    """
+    Create a trace context with user_id, session_id, and thread_id.
+    Returns context attributes for enrichment.
+    """
+    if session_id is None:
+        session_id = str(uuid.uuid4())
+    
+    thread_id = str(threading.current_thread().ident)
+    
+    return {
+        "kuro.username": user_id,
+        "kuro.session_id": session_id,
+        "kuro.thread_id": thread_id,
+        "kuro.timestamp": datetime.now().isoformat(),
+    }
 _latency_metrics: Dict[str, Dict[str, float]] = {}
 
 # ============================================
@@ -95,28 +108,26 @@ def start_phoenix_server() -> Optional[str]:
             return f"http://localhost:{PHOENIX_PORT}"
         
         logger.info(f"[OBSERVABILITY] Starting Phoenix server on port {PHOENIX_PORT}...")
-        logger.info(f"Phoenix persistence: {PHOENIX_DB_PATH}")
         
         # Launch Phoenix with OTLP receiver enabled for trace ingestion
-        # PHOENIX_SQL_DATABASE_URL is already set at module level
-        # use_temp_dir=False ensures Phoenix uses the configured database path
-        _phoenix_app = px.launch_app(
+        px_session = px.launch_app(
             port=PHOENIX_PORT,
             host=PHOENIX_HOST,
             run_in_thread=True,
             use_temp_dir=False,
         )
+        _phoenix_app = px_session
         
         # Wait for server to be ready
-        import time
         time.sleep(2)
         
-        dashboard_url = f"http://localhost:{PHOENIX_PORT}"
-        logger.info(f"[OBSERVABILITY] Phoenix dashboard available at: {dashboard_url}")
-        logger.info(f"[OBSERVABILITY] Auth: DISABLED (local private network)")
-        logger.info(f"[OBSERVABILITY] Project name: Kuro-AI-Audit")
+        logger.info(f"Arize Phoenix dashboard: {px_session.url}")
+        if settings.PHOENIX_SQL_DATABASE_URL:
+            logger.info(f"Phoenix Persist Mode: SQL ({settings.PHOENIX_SQL_DATABASE_URL})")
+        else:
+            logger.info(f"Phoenix Persist Mode: LOCAL ({_PHOENIX_DIR})")
         
-        return dashboard_url
+        return px_session.url
         
     except Exception as e:
         logger.error(f"[OBSERVABILITY] Failed to start Phoenix server: {e}")
@@ -140,57 +151,32 @@ def stop_phoenix_server():
 # OPENTELEMETRY SETUP
 # ============================================
 
-def setup_opentelemetry() -> Optional[trace.Tracer]:
-    """
-    Setup OpenTelemetry with Phoenix as the OTLP endpoint.
-    Returns the tracer instance.
-    """
+def setup_opentelemetry():
+    """Bootstrap OpenTelemetry with Phoenix-compatible resource attributes."""
     global _tracer
-    
     try:
-        # Import propagators for proper trace context propagation
-        from opentelemetry.propagate import set_global_textmap
-        from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
-        
-        # Set global propagator for trace context (W3C standard)
-        set_global_textmap(TraceContextTextMapPropagator())
-        
-        # Create resource with service info - SPECIFIC PROJECT NAME for Phoenix
-        from openinference.semconv.resource import ResourceAttributes
-        resource = Resource.create({
-            "service.name": "Kuro-AI-Audit",
-            ResourceAttributes.PROJECT_NAME: "kuro-ai",
-            "service.version": "5.5",
-            "deployment.environment": "production",
-        })
-        
-        # Create tracer provider
-        tracer_provider = TracerProvider(resource=resource)
-        
-        # Add OTLP exporter (points to Phoenix HTTP endpoint)
-        otlp_exporter = OTLPSpanExporter(
-            endpoint=OTLP_ENDPOINT,
-            timeout=10,  # 10 second timeout
+        # Use semantic conventions for project naming
+        resource = Resource(
+            attributes={
+                "project_name": "kuro-ai",
+                "service.name": "kuro-backend",
+            }
         )
-        span_processor = BatchSpanProcessor(
-            otlp_exporter,
-            schedule_delay_millis=1000,  # Export every second
-            max_export_batch_size=10,
-        )
-        tracer_provider.add_span_processor(span_processor)
         
-        # Set as global provider
-        trace.set_tracer_provider(tracer_provider)
+        provider = TracerProvider(resource=resource)
         
-        # Get tracer
+        # Phoenix local OTLP collector endpoint (default)
+        exporter = OTLPSpanExporter(endpoint="http://localhost:6006/v1/traces")
+        
+        processor = BatchSpanProcessor(exporter)
+        provider.add_span_processor(processor)
+        trace.set_tracer_provider(provider)
+        
         _tracer = trace.get_tracer("kuro-ai")
-        
-        logger.info("[OBSERVABILITY] OpenTelemetry initialized with Phoenix exporter")
-        logger.info("[OBSERVABILITY] Global propagator: TraceContextTextMapPropagator (W3C)")
+        logger.info("OpenTelemetry bootstrap complete (Project: kuro-ai)")
         return _tracer
-        
     except Exception as e:
-        logger.error(f"[OBSERVABILITY] Failed to setup OpenTelemetry: {e}")
+        logger.error(f"Failed to setup OpenTelemetry: {e}")
         return None
 
 
@@ -203,94 +189,54 @@ def get_tracer() -> Optional[trace.Tracer]:
 # TRACE CONTEXT MANAGEMENT
 # ============================================
 
-def create_session_context(user_id: str = MASTER_USER_ID, session_id: str = None) -> Dict[str, str]:
-    """
-    Create a trace context with user_id, session_id, and thread_id.
-    Returns context attributes for enrichment.
-    """
-    if session_id is None:
-        session_id = str(uuid.uuid4())
-    
-    thread_id = str(threading.current_thread().ident)
-    
-    return {
-        "user_id": user_id,
-        "session_id": session_id,
-        "thread_id": thread_id,
-        "timestamp": datetime.now().isoformat(),
-    }
-
-
 @contextmanager
-def trace_node(node_name: str, attributes: Dict[str, str] = None):
+def trace_node(node_name: str, attributes: Optional[Dict[str, Any]] = None) -> Generator[trace.Span, None, None]:
     """
-    Context manager for tracing LangGraph node execution.
-    Records duration, input/output, and status.
-    
-    Usage:
-        with trace_node("supervisor_node", {"user_id": "master_irfan"}) as span:
-            # node logic
-            span.set_attribute("output.next_step", "compliance_node")
+    Context manager for tracing a reasoning node with a safety timeout.
+    Ensures spans are closed and exceptions are recorded correctly.
     """
     tracer = get_tracer()
-    
     if tracer is None:
-        # No tracer, just yield empty context
         yield None
         return
+
+    attrs = attributes or {}
     
-    # Fetch timeout
-    from kuro_backend.config import settings
-    timeout_s = float(os.getenv("KURO_TRACE_SPAN_TIMEOUT_S", "120.0"))
+    # Standardize Kuro attributes for Phoenix filtering
+    span_attrs = {
+        "kuro.node_name": node_name,
+        "kuro.persona": attrs.get("persona", attrs.get("kuro.persona", "unknown")),
+        "kuro.username": attrs.get("username", attrs.get("kuro.username", "unknown")),
+        "kuro.chat_id": attrs.get("chat_id", attrs.get("kuro.chat_id", "")),
+    }
+    # Include all other attributes
+    for k, v in attrs.items():
+        if k not in span_attrs:
+            span_attrs[k] = str(v)
 
-    import threading
-    timer = None
-    if timeout_s > 0:
-        def force_close():
-            try:
-                span.set_status(Status(StatusCode.ERROR, "Span Timeout"))
-                span.set_attribute("kuro.timeout", True)
-                span.end()
-                logger.warning(f"[OBSERVABILITY] Span {node_name} forcibly closed due to timeout ({timeout_s}s)")
-            except Exception:
-                pass
-        timer = threading.Timer(timeout_s, force_close)
-        timer.start()
-
-    with tracer.start_as_current_span(f"kuro.{node_name}") as span:
-        # Add default attributes
-        if attributes:
-            for key, value in attributes.items():
-                span.set_attribute(key, str(value))
-            # Automatically extract commonly used keys if passed as attributes
-            if "persona" in attributes:
-                span.set_attribute("kuro.persona", attributes["persona"])
-            if "username" in attributes:
-                span.set_attribute("kuro.username", attributes["username"])
-            if "chat_id" in attributes:
-                span.set_attribute("kuro.chat_id", attributes["chat_id"])
-        
-        # Record start time
+    with tracer.start_as_current_span(node_name, attributes=span_attrs) as span:
         start_time = time.time()
+        
+        # SAFETY: Set a timer to ensure the span is closed if the logic hangs indefinitely.
+        timeout_s = settings.KURO_TRACE_SPAN_TIMEOUT_S
+        timer = threading.Timer(timeout_s, lambda: span.end() if span.is_recording() else None)
+        timer.start()
         
         try:
             yield span
-            # FIX: Set OK status explicitly so Phoenix shows green
-            span.set_status(Status(StatusCode.OK, f"Node {node_name} completed successfully"))
         except Exception as e:
-            # FIX: Set ERROR status so Phoenix shows red
+            # FIX: Set ERROR status so Phoenix shows red immediately
             span.set_status(Status(StatusCode.ERROR, str(e)))
             span.record_exception(e)
+            logger.error(f"Error in traced node {node_name}: {e}")
             raise
         finally:
-            if timer:
-                timer.cancel()
-            # Record duration
-            duration = time.time() - start_time
-            span.set_attribute(f"{node_name}.duration_ms", round(duration * 1000, 2))
+            timer.cancel()
+            latency = (time.time() - start_time) * 1000
+            span.set_attribute("latency_ms", latency)
+            record_latency_metric(node_name, latency)
 
 
-# V5.5: Guardrails tracking removed. Environment is trusted (Local + VPN + Auth).
 # ============================================
 # TOKEN USAGE MONITORING
 # ============================================

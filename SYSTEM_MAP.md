@@ -1,4 +1,4 @@
-# Kuro AI V1.0.0 Beta 3 "Chat Isolation" — SYSTEM_MAP
+# Kuro AI V1.0.0 Beta 5 "Sovereign Chat" — SYSTEM_MAP
 
 > Authoritative navigation map for the repository. Traced function-by-function
 > from the true entrypoint (`main.py`) outward. Only source code under version
@@ -36,6 +36,7 @@ Kuro AI is your **Intelligent Personal Sovereign**—a sophisticated digital com
   system (recent chat → short-term summary → long-term semantic + SSoT),
   and proactive sentinels (CVE, fitness) into one cohesive assistant accessible
   from a web dashboard and Telegram.
+- **V1.0.0 Beta 5 Focus**: Sovereign Chat upgrade featuring persistent session management, message-level control (Edit, Regenerate, Bookmark), background auto-titling, and in-session search.
 - **Tech stack**:
   - Backend: FastAPI, LangGraph, `google-genai` (Gemini),
     APScheduler, SQLite, ChromaDB, Mem0 (via `perpetual_memory.py`),
@@ -125,6 +126,41 @@ Kuro AI is your **Intelligent Personal Sovereign**—a sophisticated digital com
 - **Epistemic Audit Trail**: `epistemic_log` table in `kuro_intelligence.db` records all labeled claims per session.
 - **Domain-Aware Relaxation**: General technical/compliance knowledge (ISO, NIST, legal) is allowed from model as `[INFERRED]` — avoids over-restricting Kuro's existing broad knowledge authority.
 
+### V1.0.0 Beta 3 Patch Run ("Observability & Semantic Cache Fix")
+
+- **Phoenix Persistence (Item 1)**: Configures `PHOENIX_WORKING_DIR` and `PHOENIX_SQL_DATABASE_URL` in `config.py` to ensure OTLP traces survive process restarts.
+- **Named Project Tracing (Item 2)**: Standardized `kuro-ai` project identity for all OpenTelemetry spans, moving away from default project clutter.
+- **Robust Span Management (Item 3)**:
+    - `trace_node` context manager updated with mandatory `record_exception` and `StatusCode.ERROR` for failed reasoning nodes.
+    - `KURO_TRACE_SPAN_TIMEOUT_S` (default: 120s) enforces hard closure of spans to prevent pathologically high latency metrics.
+- **Autonomous Evaluator (Item 5)**: 
+    - `kuro_backend/evaluation/`: Automated reasoning quality scoring (groundedness, alignment).
+    - `/api/evaluation/summary`: Administrator-only summary endpoint providing aggregated performance metrics.
+- **Semantic Cache Invalidation (Item 6)**: Mandatory `invalidate_tag(username)` trigger added to `memory_coordinator.py` successful write paths to prevent stale data retrieval after memory updates.
+
+### V1.0.0 Beta 5 Architecture Notes ("Sovereign Chat")
+
+- **Sovereign Control Toolbar**: Injected dynamic toolbars into chat bubbles for message-level interaction (Copy, Edit, Regenerate, Bookmark).
+- **Persistent Message Versioning**: `message_edits` table tracks the lineage of edits and regenerations, ensuring no data loss when branching history.
+- **Session Pinning & Protection**: Added `is_pinned` status to `chat_sessions`. Pinned sessions are prioritized in the UI and protected from accidental deletion (`403 Forbidden`).
+- **Background Auto-Titling**: Integrated asynchronous task generation in `langgraph_core.py` using a classifier model to generate concise session titles upon the first message.
+- **In-Session Keyword Search**: Client-side search modal with backend keyword filtering (`search_messages_in_session`).
+- **Markdown/Text Export**: Clean history formatting for archival purposes via `/api/chats/{chat_id}/export`.
+- **Draft Preservation**: Persistent `sessionDrafts` object in `app.js` ensures unsent messages survive session switching.
+
+### V1.0.0 Beta 4 Architecture Notes ("Sovereign Intelligence")
+
+- **Cognitive Agent Model**: Transitions personas from shallow declarations to deep cognitive agents with reasoning protocols.
+- **Autonomous Dissertation Research**:
+    - `advisor_research_node`: Implements proactive research grounding for the `advisor` persona.
+    - Automatically fires `serper_scholar` and `serper_news` based on extracted research claims without user instruction.
+    - Controlled by `KURO_ADVISOR_AUTO_SEARCH` and `KURO_ADVISOR_MAX_SERPER_CALLS`.
+- **Source Provenance Tracking**:
+    - `research_sources` table in `kuro_intelligence.db`: Tracks title, link, snippet, and academic metadata (year, citations) for all auto-retrieved materials.
+    - Evidence trail persisted in `research_ledger.source_provenance` as JSON metadata.
+- **Enhanced Serper Integration**: `serper_scholar` and `serper_news` registered as Gemini-callable tools with normalized academic metadata.
+- **Cognitive Effort "Research" Tier**: New effort level that triggers extended CoT reasoning and autonomous retrieval for dissertation-grade queries.
+
 ## Core Logic Flow (Function-Level Flowchart)
 
 ```mermaid
@@ -148,7 +184,7 @@ flowchart TD
     subgraph Brain[Reasoning core]
         B1[langgraph_core.process_chat_with_graph_stream]
         B2[langgraph_core.build_kuro_graph]
-        B3["reflection → supervisor → memory_retrieval\n→ retrieval_grader ↺ query_transform\n→ attention_filter → executive_monitor\n→ metacognitive_review → reflective_response | tool | response"]
+        B3["reflection → supervisor → memory_retrieval\n→ retrieval_grader ↺ query_transform\n→ attention_filter → advisor_research → executive_monitor\n→ metacognitive_review → reflective_response | tool | response"]
         B4[personas.build_system_instruction]
     end
 
@@ -374,11 +410,12 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
 ### Entrypoint
 - [`main.py`](main.py) — *public*: `app` (FastAPI), `verify_password`,
   `create_access_token`, `validate_token`, `save_upload_file`,
-  `api_success`, `api_error`, and 65 `@app.*` route handlers spanning
+  `api_success`, `api_error`, and 82 `@app.*` route handlers spanning
   `/api/login`, `/api/chat`, `/api/chat/stream`,
   `/ws/dashboard`, `/api/compliance*`,
   `/api/intelligence*`, `/api/finances/*`, `/api/persona*`, `/api/observability/*`,
-  `/api/system-status`, `/api/health`. Also wires two APScheduler
+  `/api/evaluation/summary` (**Beta 3** — Admin-only aggregated quality metrics),
+  `/api/system-status`, `/api/health`. Also wires three APScheduler
   `BackgroundScheduler` instances (`_hardware_sentinel_scheduler`) and the Uvicorn boot thread.
 
 ### Reasoning Core
@@ -388,6 +425,7 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
   `process_chat_with_graph` (now accepts `chat_id`),
   `supervisor_node`, `memory_retrieval_node`, `retrieval_grader_node` (Auto-RAG),
   `query_transform_node` (Auto-RAG), `attention_filter_node` (T1),
+  `advisor_research_node` (Beta 4 — Autonomous Grounding),
   `executive_monitor_node` (T1), `metacognitive_review_node` (T2),
   `response_node` (now passes `chat_id` to `build_context_for_llm`),
   `tool_node`, `memory_extraction_node`.
@@ -499,6 +537,14 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
   — *public*: `generate_daily_queries`, `execute_research`,
   `synthesize_intelligence`, `format_telegram_message`,
   `run_daily_research`.
+- [`kuro_backend/evaluation/`](kuro_backend/evaluation/) — *module*:
+  Reasoning quality monitoring.
+  - [`autonomous_evaluator.py`](kuro_backend/evaluation/autonomous_evaluator.py):
+    `run_evaluation_batch`, `get_evaluation_summary`.
+  - [`dataset_builder.py`](kuro_backend/evaluation/dataset_builder.py):
+    `build_dataset`, `EvalRecord`.
+  - [`evaluation_scheduler.py`](kuro_backend/evaluation/evaluation_scheduler.py):
+    Automated background evaluator loop.
 
 - [`kuro_backend/persona_history_admin.py`](kuro_backend/persona_history_admin.py)
   — *public*: `get_persona_counts`, `list_backups`, `preview_reclassify`,
@@ -537,6 +583,7 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
   — *public*: `execute_openclaw_skill_sync`.
 - [`kuro_backend/serper_tool.py`](kuro_backend/serper_tool.py) — *public*:
   `serper_search`, `serper_news`, `serper_scholar`.
+  **Beta 4**: Normalized academic metadata support (year, citations).
 
 ### Real-time & UI
 - [`kuro_backend/dashboard_broadcast.py`](kuro_backend/dashboard_broadcast.py)
@@ -571,11 +618,13 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
   `get_session_context`, `get_session_message_count`,
   `update_session_message_count`, `get_default_chat_id`,
   `create_session`, `get_sessions`, `update_session_title`,
-  `delete_session`. **Tables**: `chat_history`, `uploaded_file_integrity`,
-  `chat_sessions` (→ `kuro_chat_history.db`).
-  **New columns (Beta 2)**: `chat_sessions.context_summary`,
-  `chat_sessions.context_message_count`, `chat_sessions.context_updated_at`,
-  `uploaded_file_integrity.chat_id`.
+  `delete_session`, `pin_session`, `unpin_session`, `toggle_bookmark`,
+  `delete_messages_after`, `update_message_content`, `save_message_edit`,
+  `search_messages_in_session`. **Tables**: `chat_history`, `uploaded_file_integrity`,
+  `chat_sessions`, `message_edits` (→ `kuro_chat_history.db`).
+  **New columns (Beta 5)**: `chat_sessions.is_pinned`, `chat_sessions.pinned_at`,
+  `chat_history.is_edited`, `chat_history.is_bookmarked`, `chat_history.is_regenerated`,
+  `chat_history.edit_group_id`.
 - [`kuro_backend/compliance_db.py`](kuro_backend/compliance_db.py) —
   *public*: `init_db`, `add_evidence`, `update_evidence_status`,
   `get_evidence_matrix`, `add_audit_trail`, `get_audit_trail`,
@@ -589,8 +638,9 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
   (→ `kuro_habits.db`).
 - [`kuro_backend/intelligence_db.py`](kuro_backend/intelligence_db.py) —
   *public*: `init_db`, `save_briefing`, `get_briefings`,
-  `get_briefing_by_date`, `search_briefings`, `get_total_count`.
-  **Table**: `intelligence_briefings` (→ `kuro_intelligence.db`).
+  `get_briefing_by_date`, `search_briefings`, `get_total_count`,
+  `save_research_sources`, `get_research_sources`.
+  **Tables**: `intelligence_briefings`, `research_sources` (→ `kuro_intelligence.db`).
 - [`kuro_backend/reminder_db.py`](kuro_backend/reminder_db.py) —
   *public*: `init_reminder_db`. Schema for `reminders` lives in
   `services/core_service.py` (→ `kuro_reminders.db`).
@@ -609,7 +659,7 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
 ### Frontend
 - [`web_interface/templates/index.html`](web_interface/templates/index.html)
   — dashboard shell: avatar (`/profile/kuro_avatar.png`), WebSocket status ticker, chat pane,
-  favicon links, `V7.2.1` sidebar badge, Chancellor persona option, market chips bar.
+  favicon links, `V1.0.0 Beta 5` sidebar badge, Chancellor persona option, market chips bar.
 - [`web_interface/templates/intelligence.html`](web_interface/templates/intelligence.html),
   [`market.html`](web_interface/templates/market.html),
   [`compliance.html`](web_interface/templates/compliance.html),
@@ -646,6 +696,9 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
   but never committed. Public env keys (values redacted):
   - Gemini / runtime: `GEMINI_API_KEY`, `MODEL_NAME`, `TIMEZONE`,
     `WORKING_DIR`, `GEMINI_CACHED_CONTENT`.
+  - Phoenix: `PHOENIX_WORKING_DIR` (default `./phoenix_data`),
+    `PHOENIX_SQL_DATABASE_URL` (optional; auto-derived from PHOENIX_WORKING_DIR if unset),
+    `KURO_TRACE_SPAN_TIMEOUT_S` (default `120`).
   - Proxmox: `PVE_HOST`, `PVE_PORT`, `PVE_TOKEN_ID`, `PVE_TOKEN_SECRET`.
   - Telegram: `TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID`.
   - CVE sentinel: `KURO_CVE_SENTINEL_ENABLED`, `KURO_CVE_MIN_CVSS`,

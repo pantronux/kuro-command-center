@@ -24,7 +24,7 @@ from __future__ import annotations
 import re
 from typing import Literal
 
-EffortLevel = Literal["low", "medium", "high"]
+EffortLevel = Literal["low", "medium", "high", "research"]
 
 # ── High-effort signals (dissertation novelty / methodology) ─────────────────
 _HIGH_EFFORT_PATTERNS = re.compile(
@@ -67,20 +67,22 @@ _LOW_EFFORT_CATEGORIES = {
 }
 
 
-def compute(intent_category: str, user_input: str) -> EffortLevel:
+def compute(intent_category: str, user_input: str, persona: str = "consultant") -> EffortLevel:
     """
     Compute the cognitive effort level for a given input.
-
-    Args:
-        intent_category: String tag from attention_filter_node.
-                         e.g. "dissertation", "research", "off_track", "administrative"
-        user_input:      Raw user message text.
-
-    Returns:
-        "low" | "medium" | "high"
     """
     if intent_category in _LOW_EFFORT_CATEGORIES:
         return "low"
+
+    # Research tier for advisor (Beta 4)
+    if persona == "advisor":
+        research_intents = {
+            "research", "dissertation", "methodology", 
+            "literature", "hypothesis", "claim_validation",
+            "framework_analysis"
+        }
+        if intent_category in research_intents:
+            return "research"
 
     text = user_input or ""
     if _HIGH_EFFORT_PATTERNS.search(text):
@@ -113,9 +115,13 @@ _EFFORT_COT_INJECTIONS: dict[EffortLevel, str] = {
         "4. If there are relevant joint commitments, reference them explicitly.\n"
         "5. Only then provide a structured and verified answer."
     ),
+    "research": "ADVISOR_COT_PLACEHOLDER",  # Resolved in get_cot_injection
 }
 
 
 def get_cot_injection(effort: EffortLevel) -> str:
     """Return the CoT prompt injection string for this effort level."""
+    if effort == "research":
+        from kuro_backend.personas import _ADVISOR_COT
+        return _ADVISOR_COT
     return _EFFORT_COT_INJECTIONS.get(effort, "")

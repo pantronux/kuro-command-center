@@ -86,6 +86,7 @@ let chatOffset = 0;
 let isLoadingMore = false;
 let hasMoreMessages = true;
 let scrollAnchorPosition = null;
+let sessionDrafts = {}; // Beta 5: Save unsent drafts per session
 const VALID_PERSONAS = ['consultant', 'advisor', 'chill', 'tactical', 'chancellor', 'auditor'];
 
 // ============================================
@@ -398,6 +399,26 @@ function setupEventListeners() {
         });
     }
 
+    // Beta 5: Search Modal Listeners
+    if (elements.openSearchBtn) elements.openSearchBtn.addEventListener('click', openSearchModal);
+    if (elements.closeSearchModal) elements.closeSearchModal.addEventListener('click', closeSearchModal);
+    if (elements.searchBackdrop) elements.searchBackdrop.addEventListener('click', closeSearchModal);
+    if (elements.searchInput) {
+        elements.searchInput.addEventListener('input', debounce(handleSearch, 300));
+        elements.searchInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeSearchModal();
+        });
+    }
+
+    // Beta 5: Scroll to Bottom Button
+    if (elements.scrollToBottomBtn) {
+        elements.scrollToBottomBtn.addEventListener('click', scrollToBottom);
+        elements.chatContainer.addEventListener('scroll', () => {
+            const isNearBottom = elements.chatContainer.scrollHeight - elements.chatContainer.scrollTop - elements.chatContainer.clientHeight < 200;
+            elements.scrollToBottomBtn.classList.toggle('hidden', isNearBottom);
+        });
+    }
+
     document.querySelectorAll('.close-modal').forEach(btn => {
         btn.addEventListener('click', () => {
             elements.changePasswordModal?.classList.add('hidden');
@@ -546,13 +567,19 @@ function renderChatSessions() {
     elements.chatSessionsList.innerHTML = chatSessions.map(session => `
         <div class="session-item group relative flex items-center gap-3 px-3 py-2.5 rounded-xl cursor-pointer ${currentChatId === session.chat_id ? 'active' : 'text-gray-600 dark:text-gray-400'}" 
              onclick="selectChatSession('${session.chat_id}')" data-chat-id="${session.chat_id}">
-            <i data-lucide="message-circle" class="w-4 h-4 flex-shrink-0"></i>
+            <i data-lucide="${session.is_pinned ? 'pin' : 'message-circle'}" class="w-4 h-4 flex-shrink-0 ${session.is_pinned ? 'text-emerald-500 fill-emerald-500/20' : ''}"></i>
             <span class="text-sm font-medium truncate flex-1">${session.title || 'New Chat'}</span>
-            <div class="flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
-                <button onclick="event.stopPropagation(); renameChatSession('${session.chat_id}')" class="p-1 hover:text-emerald-500">
+            <div class="flex items-center opacity-0 group-hover:opacity-100 transition-opacity bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-lg px-1 shadow-sm">
+                <button onclick="event.stopPropagation(); togglePinChatSession('${session.chat_id}', ${!!session.is_pinned})" class="p-1.5 hover:text-emerald-500 transition-colors" title="${session.is_pinned ? 'Unpin' : 'Pin'}">
+                    <i data-lucide="${session.is_pinned ? 'pin-off' : 'pin'}" class="w-3 h-3"></i>
+                </button>
+                <button onclick="event.stopPropagation(); renameChatSession('${session.chat_id}')" class="p-1.5 hover:text-blue-500 transition-colors" title="Rename">
                     <i data-lucide="pencil" class="w-3 h-3"></i>
                 </button>
-                <button onclick="event.stopPropagation(); deleteChatSession('${session.chat_id}')" class="p-1 hover:text-red-500">
+                <button onclick="event.stopPropagation(); exportChatSession('${session.chat_id}')" class="p-1.5 hover:text-amber-500 transition-colors" title="Export">
+                    <i data-lucide="download" class="w-3 h-3"></i>
+                </button>
+                <button onclick="event.stopPropagation(); deleteChatSession('${session.chat_id}')" class="p-1.5 hover:text-red-500 transition-colors" title="Delete">
                     <i data-lucide="trash-2" class="w-3 h-3"></i>
                 </button>
             </div>
@@ -562,11 +589,15 @@ function renderChatSessions() {
 }
 
 function startNewChat() {
+    if (currentChatId) {
+        sessionDrafts[currentChatId] = elements.messageInput.value;
+    }
     currentChatId = null;
     chatHistory = [];
     chatOffset = 0;
     hasMoreMessages = true;
     elements.chatContainer.innerHTML = '';
+    elements.messageInput.value = '';
 
     elements.chatContainer.classList.add('hidden');
     if (elements.mainInputArea) elements.mainInputArea.classList.add('hidden');
@@ -582,7 +613,17 @@ function startNewChat() {
 
 async function selectChatSession(chatId) {
     if (currentChatId === chatId) return;
+
+    // Save current draft before switching
+    if (currentChatId) {
+        sessionDrafts[currentChatId] = elements.messageInput.value;
+    }
     currentChatId = chatId;
+    // Restore draft if any
+    if (elements.messageInput) {
+        elements.messageInput.value = sessionDrafts[chatId] || '';
+        elements.messageInput.dispatchEvent(new Event('input'));
+    }
     chatOffset = 0;
     hasMoreMessages = true;
     chatHistory = [];
@@ -605,6 +646,8 @@ async function deleteChatSession(chatId) {
         if (response.ok) {
             if (currentChatId === chatId) startNewChat();
             loadChatSessions();
+        } else if (response.status === 403) {
+            showNotification('Cannot delete a pinned session. Unpin it first.', 'error');
         }
     } catch (error) {
         console.error('Delete failed:', error);
@@ -712,14 +755,18 @@ async function kuroLoadHistory(isInitial = false) {
 
         if (data.status === 'success' && data.history.length > 0) {
             const messages = [...data.history].reverse();
-            messages.forEach(msg => {
-                const role = msg.role === 'user' ? 'user' : 'ai';
-                const attachments = Array.isArray(msg.attachments) ? msg.attachments : (typeof msg.attachments === 'string' ? JSON.parse(msg.attachments) : []);
-                prependMessageToChat(role, msg.content, attachments, msg.id);
-            });
-
             chatOffset += data.history.length;
             hasMoreMessages = data.has_more;
+
+            data.history.forEach(msg => {
+                const role = msg.role === 'user' ? 'user' : 'ai';
+                const attachments = Array.isArray(msg.attachments) ? msg.attachments : (typeof msg.attachments === 'string' ? JSON.parse(msg.attachments) : []);
+                prependMessageToChat(role, msg.content, attachments, msg.id, {
+                    is_edited: msg.is_edited,
+                    is_bookmarked: msg.is_bookmarked,
+                    is_regenerated: msg.is_regenerated
+                });
+            });
 
             if (isInitial) {
                 scrollToBottom();
@@ -895,6 +942,13 @@ function kuroConnectDashboardWS() {
                     kuroRenderSentinelTicker(payload);
                 } else if (cmd === 'GREETING') {
                     kuroHandleGreeting(payload);
+                } else if (cmd === 'chat_title_updated') {
+                    const { chat_id, title } = payload;
+                    const session = chatSessions.find(s => s.chat_id === chat_id);
+                    if (session) {
+                        session.title = title;
+                        renderChatSessions();
+                    }
                 }
             } catch (_) { }
         });
@@ -1107,9 +1161,10 @@ async function sendMessage(isFromWelcome = false) {
     // Add user message to chat
     addMessageToChat('user', message, selectedFiles);
 
-    // Clear input
+    // Clear input and draft
     inputElement.value = '';
     inputElement.style.height = 'auto';
+    if (currentChatId) delete sessionDrafts[currentChatId];
 
     // Prepare files for upload
     const filesToSend = [...selectedFiles];
@@ -1120,15 +1175,17 @@ async function sendMessage(isFromWelcome = false) {
     const aiMessageDiv = document.createElement('div');
     aiMessageDiv.className = 'flex items-start gap-3 message-enter';
     aiMessageDiv.innerHTML = `
-        <div class="w-8 h-8 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center flex-shrink-0"><i class="fa-solid fa-shield-cat text-white text-sm"></i></div>
-        <div class="max-w-[85%] lg:max-w-[70%]">
-            <div class="chat-bubble-ai px-4 py-3 shadow-sm">
+        <div class="w-8 h-8 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center flex-shrink-0 shadow-lg shadow-emerald-500/10"><i class="fa-solid fa-shield-cat text-white text-sm"></i></div>
+        <div class="max-w-[85%] lg:max-w-[70%] relative group">
+            <div class="chat-bubble-ai px-4 py-3 shadow-sm relative border border-emerald-500/5">
                 <div class="typing-indicator" id="thinkingIndicator">
                     <span></span><span></span><span></span>
                 </div>
                 <div class="markdown-content streaming-content"></div>
             </div>
-            <span class="text-xs text-gray-400 mt-1 block">${getCurrentTime()}</span>
+            <div class="flex items-center justify-between mt-1 px-1">
+                <span class="text-[10px] text-gray-400 font-mono tracking-tighter">${getCurrentTime()}</span>
+            </div>
         </div>
     `;
     elements.chatContainer.appendChild(aiMessageDiv);
@@ -1354,7 +1411,7 @@ function highlightInContainer(container) {
     });
 }
 
-function addMessageToChat(role, content, files = [], messageId = null) {
+function addMessageToChat(role, content, files = [], messageId = null, extra = {}) {
     const messageDiv = document.createElement('div');
     messageDiv.className = `flex items-start gap-3 message-enter ${role === 'user' ? 'flex-row-reverse' : ''}`;
     if (messageId) {
@@ -1363,8 +1420,8 @@ function addMessageToChat(role, content, files = [], messageId = null) {
 
     // Avatar
     const avatar = role === 'user'
-        ? `<div class="w-8 h-8 rounded-full bg-gradient-to-br from-purple-400 to-pink-500 flex items-center justify-center flex-shrink-0 text-white font-bold text-sm">P</div>`
-        : `<div class="w-8 h-8 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center flex-shrink-0"><i class="fa-solid fa-shield-cat text-white text-sm"></i></div>`;
+        ? `<div class="w-8 h-8 rounded-full bg-gradient-to-br from-purple-400 to-pink-500 flex items-center justify-center flex-shrink-0 text-white font-bold text-sm shadow-lg shadow-purple-500/10">P</div>`
+        : `<div class="w-8 h-8 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center flex-shrink-0 shadow-lg shadow-emerald-500/10"><i class="fa-solid fa-shield-cat text-white text-sm"></i></div>`;
 
     let contentHtml = '';
 
@@ -1402,23 +1459,40 @@ function addMessageToChat(role, content, files = [], messageId = null) {
 
     const bubbleClass = role === 'user' ? 'chat-bubble-user' : 'chat-bubble-ai';
 
-    // Add copy button for AI messages
-    const copyButton = role === 'ai' ? `
-        <button class="copy-message-btn absolute top-2 right-2 p-1.5 rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors opacity-0 group-hover:opacity-100"
-                onclick="copyMessageContent(this)" title="Copy message">
-            <i data-lucide="copy" class="w-3.5 h-3.5 text-gray-500 dark:text-gray-400"></i>
-        </button>
-    ` : '';
-
+    // Beta 5: Dynamic Toolbar
+    const isBookmarked = !!extra.is_bookmarked;
+    const toolbar = `
+        <div class="message-toolbar absolute ${role === 'user' ? 'right-full mr-2' : 'left-full ml-2'} top-0 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all duration-300">
+            <button onclick="copyMessageText(this)" class="p-1.5 rounded-lg bg-white/50 dark:bg-gray-800/50 hover:bg-emerald-500/10 text-gray-400 hover:text-emerald-500 border border-gray-100 dark:border-gray-700 backdrop-blur-sm transition-all" title="Copy">
+                <i data-lucide="copy" class="w-3.5 h-3.5"></i>
+            </button>
+            ${role === 'user' ? `
+                <button onclick="editMessage('${messageId}')" class="p-1.5 rounded-lg bg-white/50 dark:bg-gray-800/50 hover:bg-emerald-500/10 text-gray-400 hover:text-emerald-500 border border-gray-100 dark:border-gray-700 backdrop-blur-sm transition-all" title="Edit">
+                    <i data-lucide="pencil" class="w-3.5 h-3.5"></i>
+                </button>
+            ` : `
+                <button onclick="regenerateMessage('${messageId}')" class="p-1.5 rounded-lg bg-white/50 dark:bg-gray-800/50 hover:bg-emerald-500/10 text-gray-400 hover:text-emerald-500 border border-gray-100 dark:border-gray-700 backdrop-blur-sm transition-all" title="Regenerate">
+                    <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+                </button>
+                <button onclick="toggleMessageBookmark('${messageId}', this)" class="p-1.5 rounded-lg bg-white/50 dark:bg-gray-800/50 hover:bg-amber-500/10 ${isBookmarked ? 'text-amber-500' : 'text-gray-400 hover:text-amber-500'} border border-gray-100 dark:border-gray-700 backdrop-blur-sm transition-all" title="Bookmark">
+                    <i data-lucide="star" class="w-3.5 h-3.5 ${isBookmarked ? 'fill-amber-500' : ''}"></i>
+                </button>
+            `}
+        </div>
+    `;
 
     messageDiv.innerHTML = `
         ${avatar}
         <div class="max-w-[85%] lg:max-w-[70%] relative group">
-            <div class="${bubbleClass} px-4 py-3 shadow-sm relative">
-                ${copyButton}
+            <div class="${bubbleClass} px-4 py-3 shadow-sm relative border ${role === 'ai' ? 'border-emerald-500/5' : 'border-purple-500/5'}">
                 ${contentHtml}
             </div>
-            <span class="text-xs text-gray-400 mt-1 block ${role === 'user' ? 'text-right' : ''}">${getCurrentTime()}</span>
+            ${toolbar}
+            <div class="flex items-center ${role === 'user' ? 'justify-end' : 'justify-start'} mt-1 px-1 gap-2">
+                ${extra.is_edited ? '<span class="text-[9px] text-gray-400 italic">edited</span>' : ''}
+                ${extra.is_regenerated ? '<span class="text-[9px] text-gray-400 italic">regenerated</span>' : ''}
+                <span class="text-[10px] text-gray-400 font-mono tracking-tighter">${getCurrentTime()}</span>
+            </div>
         </div>
     `;
 
@@ -1431,45 +1505,29 @@ function addMessageToChat(role, content, files = [], messageId = null) {
         addTableCopyButtons(messageDiv);
     }
 
-    elements.chatContainer.scrollTop = elements.chatContainer.scrollHeight;
+    if (!isLoadingMore) scrollToBottom();
 }
 
-function prependMessageToChat(role, content, attachments = [], messageId = null) {
+function prependMessageToChat(role, content, attachments = [], messageId = null, extra = {}) {
     const messageDiv = document.createElement('div');
-    messageDiv.className = `flex items-start gap-3 mb-6 message-prepend ${role === 'user' ? 'flex-row-reverse' : ''}`;
-    if (messageId) {
-        messageDiv.setAttribute('data-message-id', messageId);
-    }
+    messageDiv.className = `flex items-start gap-3 mb-6 ${role === 'user' ? 'flex-row-reverse' : ''} group`;
+    if (messageId) messageDiv.setAttribute('data-message-id', messageId);
 
     const avatar = role === 'user'
-        ? `<div class="w-8 h-8 rounded-full bg-gradient-to-br from-purple-400 to-pink-500 flex items-center justify-center flex-shrink-0 text-white font-bold text-sm">P</div>`
-        : `<div class="w-8 h-8 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center flex-shrink-0"><i class="fa-solid fa-shield-cat text-white text-sm"></i></div>`;
+        ? `<div class="w-8 h-8 rounded-full bg-gradient-to-br from-purple-400 to-pink-500 flex items-center justify-center flex-shrink-0 text-white font-bold text-sm shadow-lg shadow-purple-500/10">P</div>`
+        : `<div class="w-8 h-8 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center flex-shrink-0 shadow-lg shadow-emerald-500/10"><i class="fa-solid fa-shield-cat text-white text-sm"></i></div>`;
 
     let contentHtml = '';
 
     // Handle persistent attachments from history
     if (attachments && attachments.length > 0) {
-        attachments.forEach(att => {
-            const filename = typeof att === 'string' ? att : (att.stored_filename || att.filename);
-            const url = `/uploads/${filename}`;
-            const ext = filename.split('.').pop().toLowerCase();
-
-            if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)) {
-                contentHtml += `<img src="${url}" alt="${filename}" class="chat-image" onclick="window.open(this.src)">`;
+        attachments.forEach(file => {
+            if (file.content_type?.startsWith('image/')) {
+                contentHtml += `<img src="${file.stored_path}" alt="${file.original_filename}" class="chat-image rounded-xl mb-2 max-w-sm" onclick="window.open(this.src)">`;
             } else {
-                contentHtml += `<div class="flex items-center justify-between gap-3 mt-2 p-3 bg-black/5 dark:bg-white/5 border border-gray-200 dark:border-gray-700 rounded-xl">
-                    <div class="flex items-center gap-2 overflow-hidden">
-                        <i data-lucide="${getIconForExt(ext)}" class="w-4 h-4 text-emerald-500"></i>
-                        <span class="text-xs font-medium truncate">${filename}</span>
-                    </div>
-                    <div class="flex gap-1">
-                        <button onclick="previewFile('${filename}')" class="p-1.5 rounded-lg hover:bg-emerald-500/10 text-emerald-600 transition-colors" title="Preview">
-                            <i data-lucide="eye" class="w-3.5 h-3.5"></i>
-                        </button>
-                        <a href="${url}" download class="p-1.5 rounded-lg hover:bg-emerald-500/10 text-emerald-600 transition-colors" title="Download">
-                            <i data-lucide="download" class="w-3.5 h-3.5"></i>
-                        </a>
-                    </div>
+                contentHtml += `<div class="flex items-center gap-3 p-3 bg-black/5 dark:bg-white/5 border border-gray-200 dark:border-gray-700 rounded-xl mb-2">
+                    <i data-lucide="file" class="w-4 h-4 text-emerald-500"></i>
+                    <span class="text-xs font-medium truncate">${file.original_filename}</span>
                 </div>`;
             }
         });
@@ -1484,14 +1542,39 @@ function prependMessageToChat(role, content, attachments = [], messageId = null)
     }
 
     const bubbleClass = role === 'user' ? 'chat-bubble-user' : 'chat-bubble-ai';
+    const isBookmarked = !!extra.is_bookmarked;
+    const toolbar = `
+        <div class="message-toolbar absolute ${role === 'user' ? 'right-full mr-2' : 'left-full ml-2'} top-0 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all duration-300">
+            <button onclick="copyMessageText(this)" class="p-1.5 rounded-lg bg-white/50 dark:bg-gray-800/50 hover:bg-emerald-500/10 text-gray-400 hover:text-emerald-500 border border-gray-100 dark:border-gray-700 backdrop-blur-sm transition-all" title="Copy">
+                <i data-lucide="copy" class="w-3.5 h-3.5"></i>
+            </button>
+            ${role === 'user' ? `
+                <button onclick="editMessage('${messageId}')" class="p-1.5 rounded-lg bg-white/50 dark:bg-gray-800/50 hover:bg-emerald-500/10 text-gray-400 hover:text-emerald-500 border border-gray-100 dark:border-gray-700 backdrop-blur-sm transition-all" title="Edit">
+                    <i data-lucide="pencil" class="w-3.5 h-3.5"></i>
+                </button>
+            ` : `
+                <button onclick="regenerateMessage('${messageId}')" class="p-1.5 rounded-lg bg-white/50 dark:bg-gray-800/50 hover:bg-emerald-500/10 text-gray-400 hover:text-emerald-500 border border-gray-100 dark:border-gray-700 backdrop-blur-sm transition-all" title="Regenerate">
+                    <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+                </button>
+                <button onclick="toggleMessageBookmark('${messageId}', this)" class="p-1.5 rounded-lg bg-white/50 dark:bg-gray-800/50 hover:bg-amber-500/10 ${isBookmarked ? 'text-amber-500' : 'text-gray-400 hover:text-amber-500'} border border-gray-100 dark:border-gray-700 backdrop-blur-sm transition-all" title="Bookmark">
+                    <i data-lucide="star" class="w-3.5 h-3.5 ${isBookmarked ? 'fill-amber-500' : ''}"></i>
+                </button>
+            `}
+        </div>
+    `;
 
     messageDiv.innerHTML = `
         ${avatar}
-        <div class="max-w-[85%] lg:max-w-[70%]">
-            <div class="${bubbleClass} px-4 py-3 shadow-sm">
+        <div class="max-w-[85%] lg:max-w-[70%] relative group">
+            <div class="${bubbleClass} px-4 py-3 shadow-sm relative border ${role === 'ai' ? 'border-emerald-500/5' : 'border-purple-500/5'}">
                 ${contentHtml}
             </div>
-            <span class="text-xs text-gray-400 mt-1 block ${role === 'user' ? 'text-right' : ''}">${getCurrentTime()}</span>
+            ${toolbar}
+            <div class="flex items-center ${role === 'user' ? 'justify-end' : 'justify-start'} mt-1 px-1 gap-2">
+                ${extra.is_edited ? '<span class="text-[9px] text-gray-400 italic">edited</span>' : ''}
+                ${extra.is_regenerated ? '<span class="text-[9px] text-gray-400 italic">regenerated</span>' : ''}
+                <span class="text-[10px] text-gray-400 font-mono tracking-tighter">${getCurrentTime()}</span>
+            </div>
         </div>
     `;
 
@@ -2651,3 +2734,243 @@ document.addEventListener('DOMContentLoaded', () => {
         setTimeout(kuroStartMarketHudPoll, 2000);
     }
 });
+
+
+// ============================================
+// Beta 5 Sovereign Chat Functions
+// ============================================
+
+async function togglePinChatSession(chatId, currentlyPinned) {
+    const endpoint = currentlyPinned ? 'unpin' : 'pin';
+    try {
+        const response = await authFetch(`${CONFIG.API_BASE}/chats/${chatId}/${endpoint}`, { method: 'POST' });
+        if (response.ok) {
+            const session = chatSessions.find(s => s.chat_id === chatId);
+            if (session) session.is_pinned = !currentlyPinned;
+            loadChatSessions();
+            showNotification(currentlyPinned ? 'Chat unpinned' : 'Chat pinned', 'success');
+        }
+    } catch (error) {
+        console.error('Pin toggle failed:', error);
+    }
+}
+
+async function editMessage(messageId) {
+    const messageDiv = document.querySelector(`[data-message-id="${messageId}"]`);
+    if (!messageDiv) return;
+
+    const contentP = messageDiv.querySelector('p');
+    if (!contentP) return;
+
+    const originalContent = contentP.textContent;
+    const newContent = prompt('Edit your message:', originalContent);
+    
+    if (newContent === null || newContent === originalContent) return;
+
+    try {
+        const response = await authFetch(`${CONFIG.API_BASE}/chats/${currentChatId}/messages/${messageId}/edit`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ new_content: newContent })
+        });
+
+        if (response.ok) {
+            // Success! Reload the chat history to reflect changes and truncation
+            await selectChatSession(currentChatId);
+            showNotification('Message updated. Subsequent history truncated.', 'success');
+        }
+    } catch (error) {
+        console.error('Edit failed:', error);
+        showNotification('Failed to edit message', 'error');
+    }
+}
+
+async function regenerateMessage(messageId) {
+    if (!confirm('Regenerate this response? Subsequent messages will be deleted.')) return;
+
+    try {
+        const response = await authFetch(`${CONFIG.API_BASE}/chats/${currentChatId}/messages/${messageId}/regenerate`, {
+            method: 'POST'
+        });
+
+        if (response.ok) {
+            const result = await response.json();
+            const precedingMsg = result.data.preceding_user_message;
+            
+            // Re-trigger sendMessage with the preceding user content
+            // but first, clean up the UI
+            await selectChatSession(currentChatId);
+            
+            // Now "re-send" the last message
+            elements.messageInput.value = precedingMsg.content;
+            sendMessage(false);
+            showNotification('Regenerating response...', 'success');
+        }
+    } catch (error) {
+        console.error('Regeneration failed:', error);
+        showNotification('Failed to regenerate message', 'error');
+    }
+}
+
+async function toggleMessageBookmark(messageId, btn) {
+    try {
+        const response = await authFetch(`${CONFIG.API_BASE}/chats/${currentChatId}/messages/${messageId}/bookmark`, {
+            method: 'POST'
+        });
+
+        if (response.ok) {
+            const result = await response.json();
+            const isBookmarked = result.data.is_bookmarked;
+            
+            const icon = btn.querySelector('i');
+            if (isBookmarked) {
+                btn.classList.add('text-amber-500');
+                btn.classList.remove('text-gray-400');
+                icon.classList.add('fill-amber-500');
+            } else {
+                btn.classList.remove('text-amber-500');
+                btn.classList.add('text-gray-400');
+                icon.classList.remove('fill-amber-500');
+            }
+            lucide.createIcons();
+        }
+    } catch (error) {
+        console.error('Bookmark toggle failed:', error);
+    }
+}
+
+async function handleSearch() {
+    const query = elements.searchInput.value.trim();
+    if (query.length < 2) {
+        elements.searchResults.innerHTML = `
+            <div class="flex flex-col items-center justify-center py-12 text-gray-400">
+                <i data-lucide="message-square" class="w-12 h-12 mb-3 opacity-20"></i>
+                <p class="text-sm">Type at least 2 characters to search</p>
+            </div>
+        `;
+        lucide.createIcons();
+        return;
+    }
+
+    elements.searchResults.innerHTML = '<div class="flex justify-center p-8"><div class="spinner border-emerald-500"></div></div>';
+
+    try {
+        const response = await authFetch(`${CONFIG.API_BASE}/chats/${currentChatId}/search?q=${encodeURIComponent(query)}`);
+        const result = await response.json();
+        
+        if (result.status === 'success') {
+            const results = result.data;
+            if (results.length === 0) {
+                elements.searchResults.innerHTML = '<p class="text-center py-8 text-gray-500">No results found in this session.</p>';
+            } else {
+                elements.searchResults.innerHTML = results.map(msg => `
+                    <div class="p-3 rounded-xl border border-gray-100 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-900/20 hover:border-emerald-500/30 transition-colors cursor-pointer"
+                         onclick="jumpToMessage(${msg.id})">
+                        <div class="flex items-center gap-2 mb-1">
+                            <span class="text-[10px] font-bold uppercase tracking-wider ${msg.role === 'user' ? 'text-purple-500' : 'text-emerald-500'}">${msg.role}</span>
+                            <span class="text-[9px] text-gray-400">${msg.timestamp}</span>
+                        </div>
+                        <p class="text-sm text-gray-600 dark:text-gray-300 line-clamp-2">${escapeHtml(msg.content)}</p>
+                    </div>
+                `).join('');
+            }
+            lucide.createIcons();
+        }
+    } catch (error) {
+        console.error('Search failed:', error);
+    }
+}
+
+function jumpToMessage(messageId) {
+    closeSearchModal();
+    const msgEl = document.querySelector(`[data-message-id="${messageId}"]`);
+    if (msgEl) {
+        msgEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        msgEl.classList.add('highlight-pulse');
+        setTimeout(() => msgEl.classList.remove('highlight-pulse'), 3000);
+    } else {
+        showNotification('Message not currently loaded in view.', 'info');
+    }
+}
+
+function openSearchModal() {
+    elements.searchModal.classList.remove('hidden');
+    elements.searchInput.focus();
+}
+
+function closeSearchModal() {
+    elements.searchModal.classList.add('hidden');
+}
+
+async function exportChatSession(chatId) {
+    const format = prompt('Export format: "md" for Markdown, "txt" for Plain Text', 'md');
+    if (!format || (format !== 'md' && format !== 'txt')) return;
+
+    const url = `${CONFIG.API_BASE}/chats/${chatId}/export?format=${format}`;
+    window.location.href = url;
+}
+
+function copyMessageText(btn) {
+    const group = btn.closest('.group');
+    const bubble = group.querySelector('.chat-bubble-user, .chat-bubble-ai');
+    
+    // For AI bubbles, prefer the markdown source if available, or just the text
+    const markdownContent = bubble.querySelector('.markdown-content');
+    const text = markdownContent ? markdownContent.textContent : bubble.innerText;
+    
+    navigator.clipboard.writeText(text.trim()).then(() => {
+        const icon = btn.querySelector('i');
+        const originalIcon = icon.getAttribute('data-lucide');
+        icon.setAttribute('data-lucide', 'check');
+        lucide.createIcons();
+        showNotification('Copied to clipboard', 'success');
+        setTimeout(() => {
+            icon.setAttribute('data-lucide', originalIcon);
+            lucide.createIcons();
+        }, 2000);
+    });
+}
+
+function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
+
+function showNotification(message, type = 'success') {
+    // Check if toast container exists
+    let container = document.getElementById('toastContainer');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'toastContainer';
+        container.className = 'fixed top-6 right-6 z-[100] flex flex-col gap-3 pointer-events-none';
+        document.body.appendChild(container);
+    }
+
+    const toast = document.createElement('div');
+    toast.className = `px-6 py-3 rounded-2xl shadow-2xl backdrop-blur-xl border flex items-center gap-3 animate-slide-in pointer-events-auto
+        ${type === 'success' ? 'bg-emerald-500/90 text-white border-emerald-400/20' : 
+          type === 'error' ? 'bg-red-500/90 text-white border-red-400/20' : 
+          'bg-gray-800/90 text-white border-gray-700/20'}`;
+    
+    const icon = type === 'success' ? 'check-circle' : type === 'error' ? 'alert-circle' : 'info';
+    
+    toast.innerHTML = `
+        <i data-lucide="${icon}" class="w-5 h-5"></i>
+        <span class="text-sm font-medium">${message}</span>
+    `;
+    
+    container.appendChild(toast);
+    lucide.createIcons();
+    
+    setTimeout(() => {
+        toast.classList.add('animate-fade-out');
+        setTimeout(() => toast.remove(), 500);
+    }, 4000);
+}

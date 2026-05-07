@@ -1,5 +1,5 @@
 """
-Kuro AI V1.0.0 Beta 2 "Sovereign Cat" - Config [2026-05-03]
+Kuro AI V1.0.0 Beta 4 "Sovereign Intelligence" - Config [2026-05-07]
 ================================================================================
 Centralized configuration for Kuro AI System.
 
@@ -48,6 +48,19 @@ class Settings:
     TIMEZONE: str = os.getenv("TIMEZONE", "Asia/Jakarta")
     # Optional Gemini cached content resource (e.g. cachedContents/abc123) for repeated static prompts
     GEMINI_CACHED_CONTENT: str = os.getenv("GEMINI_CACHED_CONTENT", "").strip()
+
+    # -----------------------------------------------------------------
+    # Phoenix Observability Configuration
+    # -----------------------------------------------------------------
+    PHOENIX_WORKING_DIR: str = os.getenv("PHOENIX_WORKING_DIR", "./phoenix_data")
+    PHOENIX_SQL_DATABASE_URL: str = os.getenv("PHOENIX_SQL_DATABASE_URL", "")
+    KURO_TRACE_SPAN_TIMEOUT_S: int = int(os.getenv("KURO_TRACE_SPAN_TIMEOUT_S", "120"))
+
+    # -----------------------------------------------------------------
+    # Evaluation Configuration
+    # -----------------------------------------------------------------
+    KURO_EVAL_BATCH_RPM: int = int(os.getenv("KURO_EVAL_BATCH_RPM", "5"))
+    KURO_EVAL_ALERT_THRESHOLD: float = float(os.getenv("KURO_EVAL_ALERT_THRESHOLD", "0.6"))
 
     # -----------------------------------------------------------------
     # Kuro V6.0 "Sovereign" — Sentinel, HUD, Voice, Sebastian toggles.
@@ -108,6 +121,16 @@ class Settings:
     KURO_PREDICTION_SCAN_ENABLED: bool = os.getenv(
         "KURO_PREDICTION_SCAN_ENABLED", "true",
     ).strip().lower() in ("1", "true", "yes", "on")
+
+    # -----------------------------------------------------------------
+    # Advisor Research (Beta 4 Sovereign Intelligence)
+    # -----------------------------------------------------------------
+    KURO_ADVISOR_AUTO_SEARCH: bool = os.getenv(
+        "KURO_ADVISOR_AUTO_SEARCH", "true"
+    ).strip().lower() in ("1", "true", "yes", "on")
+    KURO_ADVISOR_MAX_SERPER_CALLS: int = int(os.getenv("KURO_ADVISOR_MAX_SERPER_CALLS", "3"))
+    KURO_RESEARCH_EXTRACT_MODEL: str = os.getenv("KURO_RESEARCH_EXTRACT_MODEL", "gemini-2.5-flash")
+    KURO_ADVISOR_SCHOLAR_NUM_RESULTS: int = int(os.getenv("KURO_ADVISOR_SCHOLAR_NUM_RESULTS", "5"))
 
     @property
     def tz(self):

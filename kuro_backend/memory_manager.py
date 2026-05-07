@@ -374,6 +374,7 @@ def _init_short_term_db_locked():
             kind TEXT NOT NULL,
             content TEXT NOT NULL,
             source_entry_id INTEGER,
+            source_provenance TEXT DEFAULT NULL, -- [NEW Beta 4]
             schema_v INTEGER NOT NULL DEFAULT 1,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
@@ -382,6 +383,8 @@ def _init_short_term_db_locked():
     ledger_cols = [row["name"] for row in cursor.fetchall()]
     if "username" not in ledger_cols:
         cursor.execute("ALTER TABLE research_ledger ADD COLUMN username TEXT NOT NULL DEFAULT 'Pantronux'")
+    if "source_provenance" not in ledger_cols:
+        cursor.execute("ALTER TABLE research_ledger ADD COLUMN source_provenance TEXT DEFAULT NULL")
 
     cursor.execute(
         "CREATE INDEX IF NOT EXISTS idx_research_ledger_user_persona_kind "
@@ -432,6 +435,16 @@ def _init_short_term_db_locked():
         "CREATE INDEX IF NOT EXISTS idx_session_file_store_session "
         "ON session_file_store (session_id)"
     )
+
+    # Mem0 Write Failures Recovery Table (V1.0.0 Beta 4)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS mem0_write_failures (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL DEFAULT 'Pantronux',
+            payload TEXT NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
 
     conn.commit()
     conn.close()
@@ -598,6 +611,7 @@ def append_research_ledger(
     content: str,
     *,
     source_entry_id: Optional[int] = None,
+    source_provenance: Optional[List[str]] = None,
     schema_v: int = 1,
     username: str = "Pantronux",
 ) -> Optional[int]:
@@ -609,6 +623,11 @@ def append_research_ledger(
     content = (content or "").strip()
     if not content:
         return None
+    
+    provenance_json = None
+    if source_provenance:
+        provenance_json = json.dumps(source_provenance, ensure_ascii=False)
+
     if kind not in _LEDGER_KINDS:
         logger.debug("[LEDGER] unknown kind=%s persona=%s", kind, persona_scope)
     conn = _get_short_term_conn()
@@ -616,9 +635,9 @@ def append_research_ledger(
         cursor = conn.cursor()
         cursor.execute(
             "INSERT INTO research_ledger "
-            "(username, persona_scope, kind, content, source_entry_id, schema_v) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (username, persona_scope, kind, content, source_entry_id, int(schema_v)),
+            "(username, persona_scope, kind, content, source_entry_id, source_provenance, schema_v) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (username, persona_scope, kind, content, source_entry_id, provenance_json, int(schema_v)),
         )
         conn.commit()
         return int(cursor.lastrowid)
@@ -652,13 +671,16 @@ def append_research_ledger_batch(
                      rec.get("source_entry_id") or source_entry_id, 1))
     if not rows:
         return 0
+    
+    # Batch doesn't support provenance yet in the same way, but we keep the same signature
+    # for consistency if needed. For now, we just insert NULL for provenance in batch.
     conn = _get_short_term_conn()
     try:
         cursor = conn.cursor()
         cursor.executemany(
             "INSERT INTO research_ledger "
-            "(username, persona_scope, kind, content, source_entry_id, schema_v) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
+            "(username, persona_scope, kind, content, source_entry_id, source_provenance, schema_v) "
+            "VALUES (?, ?, ?, ?, ?, NULL, ?)",
             rows,
         )
         conn.commit()
@@ -1267,6 +1289,51 @@ Example:
     except Exception as e:
         logger.error(f"Query expansion failed: {e}")
         return query  # Fallback to original query
+
+
+# ============================================
+# TIER 2 Recovery: Mem0 Write Failures
+# ============================================
+def record_mem0_write_failure(username: str, payload: str):
+    """Save a failed Mem0 write for later retry. Payload should be JSON string."""
+    try:
+        conn = _get_short_term_conn()
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO mem0_write_failures (username, payload) VALUES (?, ?)",
+            (username, payload)
+        )
+        conn.commit()
+        conn.close()
+        logger.info(f"Recorded Mem0 write failure for user: {username}")
+    except Exception as e:
+        logger.error(f"Failed to record Mem0 write failure: {e}")
+
+def get_pending_mem0_write_failures() -> List[Dict]:
+    """Retrieve all pending Mem0 write failures and clear the table."""
+    try:
+        conn = _get_short_term_conn()
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, username, payload FROM mem0_write_failures ORDER BY id ASC")
+        rows = cursor.fetchall()
+        
+        failures = []
+        for row in rows:
+            failures.append({
+                "id": row["id"],
+                "username": row["username"],
+                "payload": row["payload"]
+            })
+            
+        if failures:
+            cursor.execute("DELETE FROM mem0_write_failures")
+            conn.commit()
+            
+        conn.close()
+        return failures
+    except Exception as e:
+        logger.error(f"Failed to retrieve Mem0 write failures: {e}")
+        return []
 
 
 

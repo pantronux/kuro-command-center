@@ -313,7 +313,50 @@ def _init_db_locked():
             SET chat_id = 'default_' || username || '_' || persona
             WHERE chat_id IS NULL OR chat_id LIKE 'legacy_%'
         """)
+        # chat_history migration: legacy rows migrated to Default Chat per (username, persona)
         logger.info("chat_history migration: legacy rows migrated to Default Chat per (username, persona)")
+
+        # Beta 5 migrations: Sovereign Chat features
+        cursor.execute("PRAGMA table_info(chat_sessions)")
+        session_cols = {row[1] for row in cursor.fetchall()}
+        if "is_pinned" not in session_cols:
+            cursor.execute("ALTER TABLE chat_sessions ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0")
+            logger.info("chat_sessions migration: added is_pinned column")
+        if "pinned_at" not in session_cols:
+            cursor.execute("ALTER TABLE chat_sessions ADD COLUMN pinned_at DATETIME DEFAULT NULL")
+            logger.info("chat_sessions migration: added pinned_at column")
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_chat_sessions_pinned
+            ON chat_sessions(username, persona, is_pinned, updated_at DESC)
+        """)
+
+        cursor.execute("PRAGMA table_info(chat_history)")
+        history_cols = {row[1] for row in cursor.fetchall()}
+        for col, ddl in [
+            ("is_edited",      "INTEGER NOT NULL DEFAULT 0"),
+            ("is_bookmarked",  "INTEGER NOT NULL DEFAULT 0"),
+            ("is_regenerated", "INTEGER NOT NULL DEFAULT 0"),
+            ("edit_group_id",  "TEXT DEFAULT NULL"),
+        ]:
+            if col not in history_cols:
+                cursor.execute(f"ALTER TABLE chat_history ADD COLUMN {col} {ddl}")
+                logger.info(f"chat_history migration: added {col} column")
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS message_edits (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                original_msg_id INTEGER NOT NULL,
+                chat_id         TEXT NOT NULL,
+                username        TEXT NOT NULL,
+                role            TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
+                content         TEXT NOT NULL,
+                edit_type       TEXT NOT NULL CHECK(edit_type IN ('edit', 'regeneration')),
+                edited_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
+                edit_group_id   TEXT NOT NULL
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_message_edits_original ON message_edits(original_msg_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_message_edits_chat ON message_edits(chat_id, edited_at DESC)")
 
         conn.commit()
         logger.info(f"Chat history database initialized at {DB_PATH}")
@@ -423,7 +466,11 @@ def get_history(
                 "role": row["role"],
                 "content": processed_content,
                 "attachments": attachments,
-                "timestamp": row["timestamp"]
+                "timestamp": row["timestamp"],
+                "is_edited": row["is_edited"] if "is_edited" in row.keys() else 0,
+                "is_bookmarked": row["is_bookmarked"] if "is_bookmarked" in row.keys() else 0,
+                "is_regenerated": row["is_regenerated"] if "is_regenerated" in row.keys() else 0,
+                "edit_group_id": row["edit_group_id"] if "edit_group_id" in row.keys() else None
             })
         
         return list(reversed(history))
@@ -693,7 +740,7 @@ def get_sessions(username: str, persona: str, limit: int = 50, offset: int = 0) 
         conn = _get_connection()
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT * FROM chat_sessions WHERE username = ? AND persona = ? ORDER BY updated_at DESC LIMIT ? OFFSET ?",
+            "SELECT * FROM chat_sessions WHERE username = ? AND persona = ? ORDER BY is_pinned DESC, pinned_at DESC, updated_at DESC LIMIT ? OFFSET ?",
             (username, persona, limit, offset)
         )
         rows = cursor.fetchall()
@@ -881,6 +928,237 @@ def get_default_chat_id(username: str, persona: str) -> str:
         if conn:
             conn.close()
 
+
+
+# --- Beta 5 Sovereign Chat Features ---
+
+def get_session(chat_id: str) -> Optional[Dict]:
+    """Retrieve a single chat session by ID."""
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM chat_sessions WHERE chat_id = ?", (chat_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    except Exception as e:
+        logger.error(f"Failed to get chat session: {e}")
+        return None
+    finally:
+        if conn:
+            conn.close()
+
+def pin_session(chat_id: str) -> bool:
+    """Pin a chat session."""
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE chat_sessions SET is_pinned = 1, pinned_at = CURRENT_TIMESTAMP WHERE chat_id = ?",
+            (chat_id,)
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    except Exception as e:
+        logger.error(f"Failed to pin session: {e}")
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+def unpin_session(chat_id: str) -> bool:
+    """Unpin a chat session."""
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE chat_sessions SET is_pinned = 0, pinned_at = NULL WHERE chat_id = ?",
+            (chat_id,)
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    except Exception as e:
+        logger.error(f"Failed to unpin session: {e}")
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+def get_pinned_sessions(username: str, persona: str) -> List[Dict]:
+    """Get only pinned sessions for a user and persona."""
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM chat_sessions WHERE username = ? AND persona = ? AND is_pinned = 1 ORDER BY pinned_at DESC",
+            (username, persona)
+        )
+        rows = cursor.fetchall()
+        return [dict(r) for r in rows]
+    except Exception as e:
+        logger.error(f"Failed to get pinned sessions: {e}")
+        return []
+    finally:
+        if conn:
+            conn.close()
+
+def get_message_by_id(message_id: int) -> Optional[Dict]:
+    """Retrieve a single message by ID."""
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM chat_history WHERE id = ?", (message_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    except Exception as e:
+        logger.error(f"Failed to get message by id: {e}")
+        return None
+    finally:
+        if conn:
+            conn.close()
+
+def get_preceding_user_message(assistant_msg_id: int, chat_id: str) -> Optional[Dict]:
+    """Find the user message that immediately preceded this assistant message."""
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM chat_history WHERE chat_id = ? AND role = 'user' AND id < ? ORDER BY id DESC LIMIT 1",
+            (chat_id, assistant_msg_id)
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    except Exception as e:
+        logger.error(f"Failed to get preceding user message: {e}")
+        return None
+    finally:
+        if conn:
+            conn.close()
+
+def delete_messages_after(message_id: int, chat_id: str) -> int:
+    """Delete all messages after a specific message ID in a chat session."""
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "DELETE FROM chat_history WHERE chat_id = ? AND id > ?",
+            (chat_id, message_id)
+        )
+        deleted_count = cursor.rowcount
+        conn.commit()
+        return deleted_count
+    except Exception as e:
+        logger.error(f"Failed to delete messages after {message_id}: {e}")
+        return 0
+    finally:
+        if conn:
+            conn.close()
+
+def update_message_content(message_id: int, new_content: str) -> bool:
+    """Update a message's content and mark as edited."""
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE chat_history SET content = ?, is_edited = 1 WHERE id = ?",
+            (new_content, message_id)
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    except Exception as e:
+        logger.error(f"Failed to update message content: {e}")
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+def save_message_edit(original_msg_id: int, chat_id: str, username: str,
+                      role: str, content: str, edit_type: str, edit_group_id: str) -> bool:
+    """Save an original version of a message to the edits history table."""
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """INSERT INTO message_edits (original_msg_id, chat_id, username, role, content, edit_type, edit_group_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (original_msg_id, chat_id, username, role, content, edit_type, edit_group_id)
+        )
+        conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Failed to save message edit: {e}")
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+def toggle_bookmark(message_id: int) -> Optional[int]:
+    """Toggle the bookmark state of a message."""
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT is_bookmarked FROM chat_history WHERE id = ?", (message_id,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        
+        new_state = 1 if row["is_bookmarked"] == 0 else 0
+        cursor.execute("UPDATE chat_history SET is_bookmarked = ? WHERE id = ?", (new_state, message_id))
+        conn.commit()
+        return new_state
+    except Exception as e:
+        logger.error(f"Failed to toggle bookmark: {e}")
+        return None
+    finally:
+        if conn:
+            conn.close()
+
+def get_bookmarked_messages(chat_id: str) -> List[Dict]:
+    """Get all bookmarked messages for a chat session."""
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM chat_history WHERE chat_id = ? AND is_bookmarked = 1 ORDER BY id ASC",
+            (chat_id,)
+        )
+        rows = cursor.fetchall()
+        return [dict(r) for r in rows]
+    except Exception as e:
+        logger.error(f"Failed to get bookmarked messages: {e}")
+        return []
+    finally:
+        if conn:
+            conn.close()
+
+def search_messages_in_session(chat_id: str, query: str, limit: int = 20) -> List[Dict]:
+    """Search for messages within a specific chat session."""
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM chat_history WHERE chat_id = ? AND content LIKE ? ORDER BY timestamp DESC LIMIT ?",
+            (chat_id, f"%{query}%", limit)
+        )
+        rows = cursor.fetchall()
+        return [dict(r) for r in rows]
+    except Exception as e:
+        logger.error(f"Failed to search messages in session: {e}")
+        return []
+    finally:
+        if conn:
+            conn.close()
 
 # Initialize on import
 init_db()

@@ -17,8 +17,9 @@ import time
 import uuid
 import re
 import psutil
+from enum import Enum
 import uvicorn
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 from datetime import date, datetime, timedelta
 from fastapi import (
     FastAPI,
@@ -31,6 +32,7 @@ from fastapi import (
     status,
     WebSocket,
     WebSocketDisconnect,
+    Query,
 )
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -144,6 +146,15 @@ _CHAT_SESSION_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{8,128}$")
 
 class ChatSessionUpdate(BaseModel):
     title: str
+
+
+class MessageEditRequest(BaseModel):
+    new_content: str = Field(..., min_length=1, max_length=32000)
+
+
+class ExportFormat(str, Enum):
+    markdown = "md"
+    text = "txt"
 
 
 class NewChatSession(BaseModel):
@@ -1644,17 +1655,21 @@ async def latency_metrics():
 
 
 @app.get("/api/evaluation/summary")
-async def evaluation_summary(days: int = 7):
-    return {
-        "period_days": days,
-        "total_evaluated": 0,
-        "mean_composite": 0.0,
-        "mean_groundedness": 0.0,
-        "mean_goal_alignment": 0.0,
-        "mean_epistemic": 0.0,
-        "low_score_count": 0,
-        "low_score_threshold": 0.6
-    }
+async def evaluation_summary(username: str = "Pantronux"):
+    """
+    Beta 3: Admin-only evaluation summary endpoint.
+    Returns aggregated reasoning quality metrics.
+    """
+    if username != os.getenv("ADMIN_USERNAME", "Pantronux"):
+        raise HTTPException(status_code=403, detail="Forbidden: Admin access required.")
+        
+    from kuro_backend.evaluation import autonomous_evaluator
+    summary = autonomous_evaluator.get_evaluation_summary()
+    
+    if summary.get("status") == "error":
+        raise HTTPException(status_code=500, detail=summary.get("message"))
+        
+    return summary
 
 def run_observability_cleanup():
     observability.cleanup_old_sessions()
@@ -1919,11 +1934,221 @@ async def delete_chat(request: Request, chat_id: str):
     if not validate_token(token):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
+    # Beta 5: Block deletion of pinned sessions
+    session = chat_history.get_session(chat_id)
+    if session and session.get("is_pinned"):
+        raise HTTPException(
+            status_code=403,
+            detail="Cannot delete a pinned session. Unpin it first."
+        )
+
     success = chat_history.delete_session(chat_id)
     if success:
         return api_success(message="Sesi chat dihapus.")
     else:
         return api_error("Gagal menghapus sesi chat.")
+
+
+@app.post("/api/chats/{chat_id}/pin")
+async def pin_chat(request: Request, chat_id: str):
+    """Pin a chat session."""
+    token = get_token_from_cookie(request)
+    if not validate_token(token):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    if chat_history.pin_session(chat_id):
+        return api_success(message="Chat dipin.")
+    return api_error("Gagal mengepin chat.")
+
+
+@app.post("/api/chats/{chat_id}/unpin")
+async def unpin_chat(request: Request, chat_id: str):
+    """Unpin a chat session."""
+    token = get_token_from_cookie(request)
+    if not validate_token(token):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    if chat_history.unpin_session(chat_id):
+        return api_success(message="Chat unpin.")
+    return api_error("Gagal unpin chat.")
+
+
+@app.put("/api/chats/{chat_id}/messages/{msg_id}/edit")
+async def edit_message(request: Request, chat_id: str, msg_id: int, edit: MessageEditRequest):
+    """Edit a user message and truncate history after it."""
+    token = get_token_from_cookie(request)
+    user = validate_token(token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    username = user["username"]
+    msg = chat_history.get_message_by_id(msg_id)
+    if not msg:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    if msg["username"] != username:
+        raise HTTPException(status_code=403, detail="You do not own this message")
+
+    if msg["role"] != "user":
+        raise HTTPException(status_code=400, detail="Only user messages can be edited")
+
+    if msg["chat_id"] != chat_id:
+        raise HTTPException(status_code=400, detail="Message does not belong to this chat")
+
+    edit_group_id = msg.get("edit_group_id") or uuid.uuid4().hex
+
+    # Save current content to edits table before updating
+    chat_history.save_message_edit(
+        original_msg_id=msg_id,
+        chat_id=chat_id,
+        username=username,
+        role="user",
+        content=msg["content"],
+        edit_type="edit",
+        edit_group_id=edit_group_id
+    )
+
+    # Update message content and mark as edited
+    chat_history.update_message_content(msg_id, edit.new_content)
+    # Truncate all subsequent messages
+    deleted_count = chat_history.delete_messages_after(msg_id, chat_id)
+
+    return api_success(data={
+        "chat_id": chat_id,
+        "message_id": msg_id,
+        "edit_group_id": edit_group_id,
+        "deleted_after_count": deleted_count
+    })
+
+
+@app.post("/api/chats/{chat_id}/messages/{msg_id}/regenerate")
+async def regenerate_message(request: Request, chat_id: str, msg_id: int):
+    """Prepare to regenerate an assistant response."""
+    token = get_token_from_cookie(request)
+    user = validate_token(token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    username = user["username"]
+    msg = chat_history.get_message_by_id(msg_id)
+    if not msg:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    if msg["username"] != username:
+        raise HTTPException(status_code=403, detail="You do not own this message")
+
+    if msg["role"] != "assistant":
+        raise HTTPException(status_code=400, detail="Only assistant messages can be regenerated")
+
+    preceding_user_msg = chat_history.get_preceding_user_message(msg_id, chat_id)
+    if not preceding_user_msg:
+        raise HTTPException(status_code=400, detail="Cannot find preceding user message to regenerate from")
+
+    edit_group_id = msg.get("edit_group_id") or uuid.uuid4().hex
+
+    # Save assistant response to edits table
+    chat_history.save_message_edit(
+        original_msg_id=msg_id,
+        chat_id=chat_id,
+        username=username,
+        role="assistant",
+        content=msg["content"],
+        edit_type="regeneration",
+        edit_group_id=edit_group_id
+    )
+
+    # Delete the assistant message and everything after
+    chat_history.delete_messages_after(msg_id - 1, chat_id)
+
+    return api_success(data={
+        "preceding_user_message": preceding_user_msg,
+        "deleted_msg_id": msg_id
+    })
+
+
+@app.post("/api/chats/{chat_id}/messages/{msg_id}/bookmark")
+async def toggle_message_bookmark(request: Request, chat_id: str, msg_id: int):
+    """Toggle the bookmark state of a message."""
+    token = get_token_from_cookie(request)
+    if not validate_token(token):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    new_state = chat_history.toggle_bookmark(msg_id)
+    if new_state is not None:
+        return api_success(data={"is_bookmarked": bool(new_state)})
+    return api_error("Gagal mengubah bookmark.")
+
+
+@app.get("/api/chats/{chat_id}/bookmarks")
+async def get_bookmarks(request: Request, chat_id: str):
+    """Get all bookmarked messages for a chat session."""
+    token = get_token_from_cookie(request)
+    if not validate_token(token):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    bookmarks = chat_history.get_bookmarked_messages(chat_id)
+    return api_success(data=bookmarks)
+
+
+@app.get("/api/chats/{chat_id}/search")
+async def search_in_chat(request: Request, chat_id: str, q: str = Query(...)):
+    """Search for messages within a specific chat session."""
+    token = get_token_from_cookie(request)
+    if not validate_token(token):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    results = chat_history.search_messages_in_session(chat_id, q)
+    return api_success(data=results)
+
+
+@app.get("/api/chats/{chat_id}/export")
+async def export_chat(request: Request, chat_id: str, format: ExportFormat = ExportFormat.markdown):
+    """Export a chat session as a file download."""
+    token = get_token_from_cookie(request)
+    user = validate_token(token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    session = chat_history.get_session(chat_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Chat session not found")
+
+    messages = chat_history.get_history(chat_id=chat_id, limit=9999, username=user["username"])
+
+    title = session.get("title", "New Chat")
+    persona = session.get("persona", "consultant")
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    if format == ExportFormat.markdown:
+        content = f"# {title}\n"
+        content += f"**Exported**: {timestamp}\n"
+        content += f"**Persona**: {persona}\n"
+        content += "---\n\n"
+
+        for msg in messages:
+            role_label = "User" if msg["role"] == "user" else f"Kuro ({persona})"
+            content += f"**[{msg['timestamp']}] {role_label}**:\n{msg['content']}\n\n"
+
+        return StreamingResponse(
+            iter([content]),
+            media_type="text/markdown",
+            headers={"Content-Disposition": f'attachment; filename="kuro_chat_{chat_id[:8]}.md"'}
+        )
+    else:
+        content = f"Chat: {title}\n"
+        content += f"Exported: {timestamp}\n"
+        content += f"Persona: {persona}\n"
+        content += "="*40 + "\n\n"
+
+        for msg in messages:
+            role_label = "User" if msg["role"] == "user" else "Kuro"
+            content += f"[{msg['timestamp']}] {role_label}: {msg['content']}\n\n"
+
+        return StreamingResponse(
+            iter([content]),
+            media_type="text/plain",
+            headers={"Content-Disposition": f'attachment; filename="kuro_chat_{chat_id[:8]}.txt"'}
+        )
 
 
 # --- Intelligence Hub Routes ---
@@ -2757,20 +2982,30 @@ def hardware_sentinel_check():
 
 # --- Background Scheduler ---
 _reminder_scheduler = None
+_evaluation_scheduler = None
+
+
+def start_evaluation_scheduler():
+    """Dedicated scheduler for autonomous evaluation metrics (Beta 3)."""
+    global _evaluation_scheduler
+    from apscheduler.schedulers.background import BackgroundScheduler
+    from kuro_backend.evaluation.evaluation_scheduler import run_evaluation_batch_job
+
+    _evaluation_scheduler = BackgroundScheduler(daemon=True)
+    _evaluation_scheduler.add_job(
+        run_evaluation_batch_job,
+        "cron", hour=2, minute=30,
+        id="nightly_eval", replace_existing=True
+    )
+    _evaluation_scheduler.start()
+    logger.info("Evaluation Scheduler started.")
 
 
 def start_reminder_scheduler():
     """Start the background scheduler for automated intelligence cycles."""
     global _reminder_scheduler
     from apscheduler.schedulers.background import BackgroundScheduler
-    from kuro_backend.evaluation.evaluation_scheduler import run_evaluation_batch_job
-
     _reminder_scheduler = BackgroundScheduler(daemon=True)
-    _reminder_scheduler.add_job(
-        run_evaluation_batch_job,
-        "cron", hour=2, minute=30,
-        id="nightly_eval", replace_existing=True
-    )
 
     # Daily intelligence briefing at 08:00 AM
     _reminder_scheduler.add_job(
@@ -3266,8 +3501,11 @@ def run_bot_with_recovery():
             logger.info("Received shutdown signal. Stopping bot gracefully...")
             break
 
-        except Exception as e:
-            logger.exception(f"Unexpected error in bot polling: {e}")
+        except BaseException as e:
+            if isinstance(e, KeyboardInterrupt):
+                logger.info("Received KeyboardInterrupt. Stopping bot...")
+                break
+            logger.exception(f"CRITICAL: Bot polling exited with {type(e).__name__}: {e}")
             if attempt < max_retries - 1:
                 logger.info(f"Retrying in {retry_delay} seconds...")
                 time.sleep(retry_delay)
@@ -3336,6 +3574,8 @@ if __name__ == "__main__":
         logger.info("Received interrupt signal. Shutting down gracefully...")
         if _reminder_scheduler:
             _reminder_scheduler.shutdown()
+        if _evaluation_scheduler:
+            _evaluation_scheduler.shutdown()
         if _hardware_sentinel_scheduler:
             _hardware_sentinel_scheduler.shutdown()
         # Shutdown observability
@@ -3347,6 +3587,9 @@ if __name__ == "__main__":
 
     # Start reminder scheduler
     start_reminder_scheduler()
+
+    # Start evaluation scheduler
+    start_evaluation_scheduler()
 
     # Start hardware sentinel scheduler
     start_hardware_sentinel()

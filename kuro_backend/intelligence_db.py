@@ -92,32 +92,101 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_briefing_user_date ON intelligence_briefings(username, date DESC)
         """)
 
-        # Anti-Halusinasi: epistemic audit trail table
+        # Autonomous Research: source provenance table (V1.0.0 Beta 4)
         cursor.execute("""
-            CREATE TABLE IF NOT EXISTS epistemic_log (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT NOT NULL DEFAULT 'Pantronux',
-                session_id TEXT NOT NULL DEFAULT '',
-                claim_text TEXT NOT NULL,
-                claim_label TEXT NOT NULL,
-                source_ref TEXT DEFAULT '',
-                retrieval_grade_at_time TEXT DEFAULT '',
-                persona_mode TEXT DEFAULT '',
-                timestamp TEXT NOT NULL DEFAULT (datetime('now')),
-                response_snippet TEXT DEFAULT ''
+            CREATE TABLE IF NOT EXISTS research_sources (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id  TEXT NOT NULL,
+                username    TEXT NOT NULL,
+                chat_id     TEXT,
+                query       TEXT NOT NULL,
+                source_type TEXT NOT NULL CHECK(source_type IN ('scholar', 'news', 'openclaw')),
+                title       TEXT,
+                link        TEXT,
+                snippet     TEXT,
+                year        INTEGER,
+                cited_by    INTEGER,
+                retrieved_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
         cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_epistemic_log_user ON epistemic_log(username)
+            CREATE INDEX IF NOT EXISTS idx_research_sources_session ON research_sources(session_id)
         """)
         cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_epistemic_log_label ON epistemic_log(claim_label)
+            CREATE INDEX IF NOT EXISTS idx_research_sources_username ON research_sources(username, retrieved_at DESC)
         """)
 
         conn.commit()
         logger.info(f"Intelligence briefings database initialized at {DB_PATH}")
     except Exception as e:
         logger.error(f"Failed to initialize intelligence briefings DB: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+
+def save_research_sources(session_id: str, username: str, chat_id: Optional[str], sources: List[Dict]) -> None:
+    """Save auto-retrieved research sources for provenance tracking."""
+    if not sources:
+        return
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        data = []
+        for s in sources:
+            data.append((
+                session_id, username, chat_id,
+                s.get("query", ""), s.get("source_type", "scholar"),
+                s.get("title"), s.get("link"), s.get("snippet"),
+                s.get("year"), s.get("cited_by")
+            ))
+        cursor.executemany(
+            """INSERT INTO research_sources 
+               (session_id, username, chat_id, query, source_type, title, link, snippet, year, cited_by) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            data
+        )
+        conn.commit()
+        logger.info(f"[INTELLIGENCE] {len(sources)} research sources saved for {username} in session {session_id}")
+    except Exception as e:
+        logger.error(f"Failed to save research sources: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+def get_research_sources(username: str, since_hours: int = 24) -> List[Dict]:
+    """Get research sources retrieved in the last N hours."""
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM research_sources WHERE username = ? AND retrieved_at >= datetime('now', '-' || ? || ' hours') ORDER BY retrieved_at DESC",
+            (username, since_hours)
+        )
+        return [dict(row) for row in cursor.fetchall()]
+    except Exception as e:
+        logger.error(f"Failed to get research sources: {e}")
+        return []
+    finally:
+        if conn:
+            conn.close()
+
+def search_sources_by_query(username: str, query_fragment: str) -> List[Dict]:
+    """Search research sources by query fragment."""
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM research_sources WHERE username = ? AND (query LIKE ? OR title LIKE ? OR snippet LIKE ?) ORDER BY retrieved_at DESC",
+            (username, f"%{query_fragment}%", f"%{query_fragment}%", f"%{query_fragment}%")
+        )
+        return [dict(row) for row in cursor.fetchall()]
+    except Exception as e:
+        logger.error(f"Failed to search research sources: {e}")
+        return []
     finally:
         if conn:
             conn.close()

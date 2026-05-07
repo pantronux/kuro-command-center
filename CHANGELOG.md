@@ -1,13 +1,55 @@
+## [V1.0.0 Beta 5] — "Sovereign Chat" — 2026-05-07
+
+### New Features
+- **Sovereign Control Toolbar**: Added a dynamic toolbar to every chat bubble (Copy, Edit, Regenerate, Bookmark).
+- **Persistent Message Versioning**: Implemented `message_edits` table to track message history and allow for "Regenerate" functionality with proper branching.
+- **Session Pinning**: Allows users to pin important chat sessions to the top of the sidebar. Pinned sessions are protected from accidental deletion.
+- **Background Auto-Titling**: New chat sessions automatically generate concise, relevant titles after the first message using a background task.
+- **In-Session Keyword Search**: New search modal allowing users to find specific messages within the current chat session.
+- **Session Export**: Export chat history to Markdown (.md) or Plain Text (.txt) files directly from the sidebar.
+- **Draft Preservation**: Automatically saves unsent message drafts when switching between chat sessions.
+- **WebSocket Title Sync**: Real-time updates for session titles across all open dashboard tabs.
+
+### Architecture & Backend
+- `kuro_backend/chat_history.py`: Added `is_pinned`, `pinned_at` to `chat_sessions`; added `is_edited`, `is_bookmarked`, `is_regenerated`, `edit_group_id` to `chat_history`. Implemented `message_edits` table.
+- `main.py`: 7 new API routes for pinning, editing, regenerating, bookmarking, searching, and exporting sessions.
+- `kuro_backend/langgraph_core.py`: Integrated `msg_count_before` state tracking and background title generation logic.
+- `web_interface/static/js/app.js`: Major UI upgrade for the chat sidebar and message bubbles. Implemented search modal and draft preservation logic.
+
+### Database Migrations
+- `chat_sessions`: `is_pinned INTEGER DEFAULT 0`, `pinned_at DATETIME`
+- `chat_history`: `is_edited INTEGER DEFAULT 0`, `is_bookmarked INTEGER DEFAULT 0`, `is_regenerated INTEGER DEFAULT 0`, `edit_group_id TEXT`
+- `message_edits`: New table for tracking content history and edit groups.
+
+---
+
+## [1.0.0-beta.4] - Sovereign Intelligence
+- **Cognitive Agent Model**: Transitions personas from shallow declarations to deep cognitive agents with reasoning protocols.
+- **Autonomous Dissertation Research**:
+    - `advisor_research_node`: Implements proactive research grounding for the `advisor` persona.
+    - Automatically fires `serper_scholar` and `serper_news` based on extracted research claims without user instruction.
+    - Controlled by `KURO_ADVISOR_AUTO_SEARCH` and `KURO_ADVISOR_MAX_SERPER_CALLS`.
+- **Source Provenance Tracking**:
+    - `research_sources` table in `kuro_intelligence.db`: Tracks title, link, snippet, and academic metadata (year, citations) for all auto-retrieved materials.
+    - Evidence trail persisted in `research_ledger.source_provenance` as JSON metadata.
+- **Enhanced Serper Integration**: `serper_scholar` and `serper_news` registered as Gemini-callable tools with normalized academic metadata.
+- **Cognitive Effort "Research" Tier**: New effort level that triggers extended CoT reasoning and autonomous retrieval for dissertation-grade queries.
+
 ## [1.0.0-beta.3] - Sovereign Cat Stability Update
 
 ### Added
-- **Autonomous Dataset Evaluation**: Implemented `kuro_backend/evaluation/` for trace extraction and Gemini-based scoring of system responses, exposed via `/api/evaluation/summary`.
+- **Autonomous Dataset Evaluation**: Implemented `kuro_backend/evaluation/` for automated reasoning quality scoring (groundedness, alignment).
+- **Admin Evaluation API**: New `/api/evaluation/summary` endpoint with RBAC (Administrator-only) for viewing aggregated system performance metrics.
+- **Phoenix Persistence**: Added `PHOENIX_WORKING_DIR` and `PHOENIX_SQL_DATABASE_URL` support for durable OTLP trace storage.
+- **Named Project Tracing**: Standardized `kuro-ai` project identity across all OpenTelemetry spans.
 - **UI/UX**: Added "Stop Generating" button and backend SSE stream cancellation (`DELETE /api/chat/stream/{request_id}`).
 - **UI/UX**: Added per-file upload progress and inline failure notifications.
 - **UI/UX**: Added a loading state and disabled input when swapping personas.
 
 ### Fixed
 - **Memory System**: Added retry-with-backoff and a failure-recovery mechanism (`mem0_write_failures` table) for `Mem0` extraction to prevent silent data loss on process crash.
+- **Semantic Cache Invalidation**: Enforced `semantic_cache.invalidate_tag(username)` on successful memory writes to prevent stale context usage.
+- **Robust Span Management**: Implemented `trace_node` context manager with mandatory exception recording and `KURO_TRACE_SPAN_TIMEOUT_S` safety circuit breaker.
 - **Auto-RAG Safety**: Properly bounded the `query_transform_node` Auto-RAG loop to stop execution securely at `_RAG_MAX_RETRIES`.
 - **Database Thread Safety**: Replaced unsafe standard file I/O with `threading.Lock` in `perpetual_memory.py` and implemented atomic file writes for `master_profile.json` using `tempfile`.
 - **Database Consistency**: Enforced `PRAGMA journal_mode=WAL` and `PRAGMA synchronous=NORMAL` across all SQLite DB modules. Included missing `ALTER TABLE` migrations for Beta 2 columns.

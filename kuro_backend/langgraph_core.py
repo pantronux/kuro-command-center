@@ -2,16 +2,14 @@
 Kuro AI V6.0 Sovereign - LangGraph Core (Guardrails Removed) [2026-04-17]
 ================================================================================
 AI Core with LangGraph Stateful Architecture for Agentik Long-Term Reasoning
-SDK: google-genai v3 Protocol with LangGraph State Machine
-V5.5: Guardrails REMOVED for maximum performance. Local + VPN + Auth environment.
-      Latency optimized: direct path from memory retrieval to response generation.
+Implements the multi-agent reasoning loop (T1-T3) for Sovereign persona.
 
 --- Header Doc ---
-Purpose: Primary stateful reasoning pipeline (supervisor -> tool_node -> response_node) backing /api/chat.
-Caller: main.py chat routes, stream fastpath, services/core_service orchestration.
+Purpose: Orchestrates the core reasoning graph and node execution.
+Caller: main.py (process_chat_with_graph_stream).
 Dependencies: google-genai, langgraph, personas, memory_coordinator, token_budget, tools.base_tools, observability, semantic_cache.
-Main Functions: build_graph(), run_turn(), stream_turn(), supervisor_node, tool_node, response_node.
-Side Effects: LLM API calls (Gemini), SQLite reads via memory/finance/intelligence, Mem0 reads, token-usage metrics, semantic-cache writes, threading primitives for fastpath.
+Main Functions: build_kuro_graph(), process_chat_with_graph_stream(), supervisor_node().
+Side Effects: Executes LLM calls; triggers memory writes; manages state persistence.
 """
 import asyncio
 import functools
@@ -30,6 +28,7 @@ from typing import Annotated, Any, AsyncGenerator, Dict, Iterator, List, Optiona
 
 from google import genai
 from google.genai import types as genai_types
+from opentelemetry.trace import Status, StatusCode
 
 # LangGraph imports
 from langgraph.checkpoint.memory import MemorySaver
@@ -326,11 +325,57 @@ def get_post_response_queue_depth() -> int:
     return _post_response_queue.qsize()
 
 
-def _persist_short_term_and_enqueue_writes(user_input: str, response_text: str, persona_mode: str, username: str = "Pantronux", chat_id: Optional[str] = None) -> None:
+def _persist_short_term_and_enqueue_writes(user_input: str, response_text: str, persona_mode: str, username: str = "Pantronux", chat_id: Optional[str] = None, message_count_before: int = 0) -> None:
     if chat_id is None:
         logger.warning("[LANGGRAPH] chat_id is None in _persist_short_term_and_enqueue_writes. Session isolation collapsed.")
     memory_manager.add_short_term("user", user_input, persona_scope=persona_mode, username=username, chat_id=chat_id)
     memory_manager.add_short_term("assistant", response_text, persona_scope=persona_mode, username=username, chat_id=chat_id)
+
+    # Beta 5: Trigger background title generation if this is the first message in the session
+    if chat_id and message_count_before == 0:
+        logger.info(f"[TITLE_GEN] Triggering title generation for new session {chat_id}")
+        asyncio.create_task(_background_generate_chat_title(chat_id, user_input))
+
+
+async def _background_generate_chat_title(chat_id: str, first_message: str):
+    """Background task to generate a concise chat title based on the first message."""
+    try:
+        # Use a timeout to ensure background task doesn't hang
+        await asyncio.wait_for(_run_title_generation(chat_id, first_message), timeout=8.0)
+    except asyncio.TimeoutError:
+        logger.warning(f"[TITLE_GEN] Timeout generating title for {chat_id}")
+    except Exception as e:
+        logger.error(f"[TITLE_GEN] Failed to generate title for {chat_id}: {e}")
+
+
+async def _run_title_generation(chat_id: str, first_message: str):
+    from kuro_backend.config import CLASSIFIER_MODEL
+    genai_client = _get_genai_client()
+
+    prompt = f"""
+Create a very concise, punchy title (MAX 4 WORDS) for a chat session starting with this message:
+"{first_message}"
+
+The title should be in the same language as the message.
+DO NOT use quotes or a period at the end.
+
+Title:"""
+
+    response = await asyncio.to_thread(
+        genai_client.models.generate_content,
+        model=CLASSIFIER_MODEL,
+        contents=prompt,
+        config=genai_types.GenerateContentConfig(
+            temperature=0.7,
+            max_output_tokens=20,
+        )
+    )
+
+    if response and response.text:
+        new_title = response.text.strip().strip('"').strip("'")
+        if new_title:
+            chat_history.update_session_title(chat_id, new_title)
+            logger.info(f"[TITLE_GEN] Generated title for {chat_id}: {new_title}")
 
 
 async def _stream_direct_llm_chunks(
@@ -455,6 +500,11 @@ class KuroState(TypedDict):
     # --- Anti-Halusinasi epistemic fields (V1.0.0) ---
     _autorag_notification: str    # Pre-formatted notification if retrieval was poor
     epistemic_labels: Dict[str, List[str]]  # claim_text -> [label, source_ref]
+    # --- Advisor Research fields (V1.0.0 Beta 4) ---
+    research_sources_block: str          # [RESEARCH_SOURCES] formatted block, empty string if not populated
+    research_intent_detected: bool       # True if advisor_research_node was triggered
+    # --- Sovereign Chat features (V1.0.0 Beta 5) ---
+    message_count_before: int            # Session message count before the current turn
 
 
 # ============================================
@@ -556,6 +606,10 @@ def supervisor_node(state: KuroState) -> Dict[str, Any]:
     - If query is general conversation -> route directly to response_node
     """
     user_input = state.get("user_input", "").lower()
+    chat_id = state.get("chat_id")
+    msg_count_before = 0
+    if chat_id:
+        msg_count_before = chat_history.get_session_message_count(chat_id)
     
     # Observability tracing
     session_id = state.get("_session_id", "unknown")
@@ -629,7 +683,7 @@ def supervisor_node(state: KuroState) -> Dict[str, Any]:
         logger.info("[SUPERVISOR] Routing to response_node (general query)")
         if span:
             span.set_attribute("supervisor_node.decision", "response_node")
-        return {"next_step": "response_node"}
+        return {"next_step": "response_node", "message_count_before": msg_count_before}
 
 
 # ============================================
@@ -637,43 +691,31 @@ def supervisor_node(state: KuroState) -> Dict[str, Any]:
 # ============================================
 
 def memory_retrieval_node(state: KuroState) -> Dict[str, Any]:
-    if not isinstance(state, dict):
-        logger.error("[MEM0] Invalid state type: %s", type(state))
-        return {"mem0_retrieved_memories": []}
-
+    session_id = state.get("_session_id", "unknown")
+    username = state.get("username", "Pantronux")
     user_input = state.get("user_input", "")
-    session_id = state.get("_session_id", "")
-    # Auto-RAG: use rewritten query on retry passes
-    effective_query = state.get("rewritten_query") or user_input
-
-    with observability.trace_node("memory_retrieval_node", {"persona": state.get("persona_mode", "unknown"), "username": state.get("username", "unknown"), "chat_id": state.get("chat_id", "")}) as span:
+    trace_attrs = {"persona": state.get("persona_mode", "unknown"), "username": username, "chat_id": state.get("chat_id", "")}
+    
+    with observability.trace_node("memory_retrieval_node", trace_attrs) as span:
         try:
-            # P1.2 — consume supervisor's prefetch if present; otherwise fall
-            # back to a live retrieval using effective_query (may be rewritten).
+            # Check for prefetched memories first (optimization)
             raw_memories = memory_coordinator.take_prefetched_mem0(session_id)
-            username = state.get("username", "Pantronux")
-            if raw_memories is None:
+            if not raw_memories:
+                effective_query = state.get("search_query", user_input)
                 raw_memories = memory_coordinator.safe_mem0_retrieve(effective_query, limit=5, username=username)
-
-            if not isinstance(raw_memories, list):
-                logger.warning("[MEM0] Unexpected output format: %s", type(raw_memories))
-                processed_memories: List[Dict[str, Any]] = []
-            else:
-                processed_memories = [m for m in raw_memories if isinstance(m, dict)]
-
-            if span is not None:
-                span.set_attribute("mem0.ok", True)
-                span.set_attribute("mem0.result_count", len(processed_memories))
-            return {"mem0_retrieved_memories": processed_memories}
-
+            
+            memories = []
+            if raw_memories:
+                for m in raw_memories:
+                    memories.append(m.get("text", m.get("content", "")))
+            
+            logger.info(f"[MEMORY] Retrieved {len(memories)} memories")
+            return {"mem0_retrieved_memories": memories}
         except Exception as e:
-            logger.error("[MEM0_RETRIEVAL] Critical Failure: %s", e)
-            if span is not None:
-                span.set_attribute("mem0.ok", False)
-                try:
-                    span.record_exception(e)
-                except Exception:
-                    pass
+            logger.error(f"[MEMORY] Error: {e}")
+            if span:
+                span.record_exception(e)
+                span.set_status(Status(StatusCode.ERROR, str(e)))
             return {"mem0_retrieved_memories": []}
 
 
@@ -700,6 +742,11 @@ def memory_extraction_node(state: KuroState) -> Dict[str, Any]:
     # V1.0.0 Guard Clause: Skip extraction during edit/revision loops
     if intent == "edit":
         logger.info("[MEM0_EXTRACTION] Skipped: Currently in 'edit' intent cycle.")
+        return {}
+
+    # Beta 4: Skip if research intent was detected (wait for user confirmation)
+    if state.get("research_intent_detected"):
+        logger.info("[MEM0_EXTRACTION] Skipped: Research intent detected. Waiting for user confirmation in next turn.")
         return {}
 
     task_success = False
@@ -787,53 +834,58 @@ def retrieval_grader_node(state: KuroState) -> Dict[str, Any]:
     user_input = state.get("user_input", "")
     memories: List[Dict] = state.get("mem0_retrieved_memories") or []
     retry_count: int = state.get("retrieval_retry_count", 0)
+    trace_attrs = {"persona": state.get("persona_mode", "unknown"), "username": state.get("username", "unknown"), "chat_id": state.get("chat_id", "")}
 
-    # ── Fast path: nothing retrieved ─────────────────────────────────────────
-    if not memories:
-        logger.info("[RAG_GRADER] No memories retrieved — grade=irrelevant")
-        notification = personas.build_autorag_notification_block("irrelevant", retry_count)
-        return {"retrieval_grade": "irrelevant", "_autorag_notification": notification}
+    with observability.trace_node("retrieval_grader_node", trace_attrs) as span:
+        # ── Fast path: nothing retrieved ─────────────────────────────────────────
+        if not memories:
+            logger.info("[RAG_GRADER] No memories retrieved — grade=irrelevant")
+            notification = personas.build_autorag_notification_block("irrelevant", retry_count)
+            return {"retrieval_grade": "irrelevant", "_autorag_notification": notification}
 
-    # Summarise retrieved context for the grader prompt (cap at 1200 chars)
-    context_preview = "\n".join(
-        f"- {m.get('memory', m.get('content', str(m)))}" for m in memories[:6]
-    )[:1200]
+        # Summarise retrieved context for the grader prompt (cap at 1200 chars)
+        context_preview = "\n".join(
+            f"- {m.get('memory', m.get('content', str(m)))}" for m in memories[:6]
+        )[:1200]
 
-    try:
-        from kuro_backend.config import CLASSIFIER_MODEL
-        client = _get_genai_client()
+        try:
+            from kuro_backend.config import CLASSIFIER_MODEL
+            client = _get_genai_client()
 
-        prompt = (
-            "You are a strict retrieval quality judge.\n\n"
-            f"User Query:\n{user_input}\n\n"
-            f"Retrieved Context:\n{context_preview}\n\n"
-            "Grade whether the retrieved context is useful for answering the query.\n"
-            "Reply with ONLY one of these words: relevant | ambiguous | irrelevant\n"
-            "- relevant:   context directly addresses the query.\n"
-            "- ambiguous:  context is partially related or vague.\n"
-            "- irrelevant: context does not address the query at all.\n\n"
-            "Grade:"
+            prompt = (
+                "You are a strict retrieval quality judge.\n\n"
+                f"User Query:\n{user_input}\n\n"
+                f"Retrieved Context:\n{context_preview}\n\n"
+                "Grade whether the retrieved context is useful for answering the query.\n"
+                "Reply with ONLY one of these words: relevant | ambiguous | irrelevant\n"
+                "- relevant:   context directly addresses the query.\n"
+                "- ambiguous:  context is partially related or vague.\n"
+                "- irrelevant: context does not address the query at all.\n\n"
+                "Grade:"
+            )
+            resp = client.models.generate_content(
+                model=CLASSIFIER_MODEL,
+                contents=prompt,
+                config=genai_types.GenerateContentConfig(
+                    temperature=0.0,
+                    max_output_tokens=5,
+                ),
+            )
+            raw = (resp.text or "").strip().lower().split()[0] if resp.text else ""
+            grade = raw if raw in ("relevant", "ambiguous", "irrelevant") else "ambiguous"
+        except Exception as exc:
+            logger.warning("[RAG_GRADER] Grading failed (%s) — defaulting to relevant", exc)
+            if span:
+                span.record_exception(exc)
+                span.set_status(Status(StatusCode.ERROR, str(exc)))
+            grade = "relevant"
+
+        logger.info(
+            "[RAG_GRADER] retry=%d grade=%s memories=%d",
+            retry_count, grade, len(memories),
         )
-        resp = client.models.generate_content(
-            model=CLASSIFIER_MODEL,
-            contents=prompt,
-            config=genai_types.GenerateContentConfig(
-                temperature=0.0,
-                max_output_tokens=5,
-            ),
-        )
-        raw = (resp.text or "").strip().lower().split()[0] if resp.text else ""
-        grade = raw if raw in ("relevant", "ambiguous", "irrelevant") else "ambiguous"
-    except Exception as exc:
-        logger.warning("[RAG_GRADER] Grading failed (%s) — defaulting to relevant", exc)
-        grade = "relevant"
-
-    logger.info(
-        "[RAG_GRADER] retry=%d grade=%s memories=%d",
-        retry_count, grade, len(memories),
-    )
-    notification = personas.build_autorag_notification_block(grade, retry_count)
-    return {"retrieval_grade": grade, "_autorag_notification": notification}
+        notification = personas.build_autorag_notification_block(grade, retry_count)
+        return {"retrieval_grade": grade, "_autorag_notification": notification}
 
 
 def query_transform_node(state: KuroState) -> Dict[str, Any]:
@@ -864,72 +916,54 @@ def query_transform_node(state: KuroState) -> Dict[str, Any]:
     rewritten = state.get("rewritten_query") or user_input
     retry_count: int = state.get("retrieval_retry_count", 0)
     grade = state.get("retrieval_grade", "irrelevant")
+    trace_attrs = {"persona": state.get("persona_mode", "unknown"), "username": state.get("username", "unknown"), "chat_id": state.get("chat_id", "")}
 
-    # ── Serper failover at max retries ────────────────────────────────────────
-    if retry_count >= _RAG_MAX_RETRIES:
-        logger.warning(
-            "[RAG_TRANSFORM] Max retries reached (%d) — Hard cap triggered for: %s",
-            retry_count, rewritten[:80],
-        )
-        return {"retrieval_retry_count": retry_count + 1} # Will trigger route_after_transform -> END
+    with observability.trace_node("query_transform_node", trace_attrs) as span:
+        # ── Serper failover at max retries ────────────────────────────────────────
+        if retry_count >= _RAG_MAX_RETRIES:
+            logger.warning(
+                "[RAG_TRANSFORM] Max retries reached (%d) — Hard cap triggered for: %s",
+                retry_count, rewritten[:80],
+            )
+            return {"retrieval_retry_count": retry_count + 1} # Will trigger route_after_transform -> END
 
-        serper_memories: List[Dict] = []
+        # ── LLM query rewrite ─────────────────────────────────────────────────────
+        new_query = rewritten
         try:
-            from kuro_backend.serper_tool import serper_search
-            results = serper_search(rewritten, search_type="search", num_results=5)
-            organic = results.get("organic", []) or []
-            for r in organic[:5]:
-                snippet = r.get("snippet", "")
-                title = r.get("title", "")
-                if snippet:
-                    serper_memories.append({
-                        "memory": f"[Web] {title}: {snippet}",
-                        "source": "serper",
-                    })
+            from kuro_backend.config import CLASSIFIER_MODEL
+            client = _get_genai_client()
+
+            prompt = (
+                "You are an expert search query optimizer.\n\n"
+                f"Original user question: {user_input}\n"
+                f"Previous retrieval grade: {grade} (retrieval was not useful)\n\n"
+                "Rewrite the question as a precise, specific search query that will "
+                "retrieve better results from a personal AI memory system.\n"
+                "Focus on key entities, topics, and temporal anchors.\n"
+                "Return ONLY the rewritten query, no explanation."
+            )
+            resp = client.models.generate_content(
+                model=CLASSIFIER_MODEL,
+                contents=prompt,
+                config=genai_types.GenerateContentConfig(
+                    temperature=0.2,
+                    max_output_tokens=80,
+                ),
+            )
+            new_query = (resp.text or "").strip() or user_input
         except Exception as exc:
-            logger.warning("[RAG_TRANSFORM] Serper failover failed: %s", exc)
+            logger.warning("[RAG_TRANSFORM] Query rewrite failed: %s", exc)
+            if span:
+                span.record_exception(exc)
+                span.set_status(Status(StatusCode.ERROR, str(exc)))
 
-        # Inject web results and unblock pipeline
+        logger.info(
+            "[RAG_TRANSFORM] retry=%d → rewritten query: %s",
+            retry_count + 1, new_query[:80],
+        )
         return {
-            "mem0_retrieved_memories": serper_memories,
-            "retrieval_grade": "relevant",    # unblock — best-effort web results
+            "rewritten_query": new_query,
             "retrieval_retry_count": retry_count + 1,
-            "rewritten_query": rewritten,
-        }
-
-    # ── LLM query rewrite ─────────────────────────────────────────────────────
-    new_query = rewritten
-    try:
-        from kuro_backend.config import CLASSIFIER_MODEL
-        client = _get_genai_client()
-
-        prompt = (
-            "You are an expert search query optimizer.\n\n"
-            f"Original user question: {user_input}\n"
-            f"Previous retrieval grade: {grade} (retrieval was not useful)\n\n"
-            "Rewrite the question as a precise, specific search query that will "
-            "retrieve better results from a personal AI memory system.\n"
-            "Focus on key entities, topics, and temporal anchors.\n"
-            "Return ONLY the rewritten query, no explanation."
-        )
-        resp = client.models.generate_content(
-            model=CLASSIFIER_MODEL,
-            contents=prompt,
-            config=genai_types.GenerateContentConfig(
-                temperature=0.2,
-                max_output_tokens=80,
-            ),
-        )
-        new_query = (resp.text or "").strip() or user_input
-    except Exception as exc:
-        logger.warning("[RAG_TRANSFORM] Query rewrite failed: %s", exc)
-
-    logger.info(
-        "[RAG_TRANSFORM] retry=%d → rewritten query: %s",
-        retry_count + 1, new_query[:80],
-    )
-    return {
-        "rewritten_query": new_query,
         "retrieval_retry_count": retry_count + 1,
         # Reset grade so next retrieval gets re-evaluated
         "retrieval_grade": "ambiguous",
@@ -978,50 +1012,61 @@ def attention_filter_node(state: KuroState) -> Dict[str, Any]:
       general       → everything else
     """
     persona_mode = state.get("persona_mode", "consultant")
+    trace_attrs = {"persona": persona_mode, "username": state.get("username", "unknown"), "chat_id": state.get("chat_id", "")}
 
-    # Only run for agency personas — fast bypass for others.
-    if persona_mode not in _AGENCY_PERSONAS:
-        return {"_intent_category": "general"}
+    with observability.trace_node("attention_filter_node", trace_attrs) as span:
+        # Only run for agency personas — fast bypass for others.
+        if persona_mode not in _AGENCY_PERSONAS:
+            return {"_intent_category": "general"}
 
-    user_input = (state.get("user_input") or "").lower()
+        user_input = (state.get("user_input") or "").lower()
 
-    import re as _re
-    _DISS = _re.compile(
-        r"\b(novel|kontribusi|disertasi|dissertation|bab\s*\d|chapter\s*\d|"
-        r"hipotesis|hypothesis|metodologi|methodology|forensic|phd|tesis|thesis|"
-        r"eu ai act|uu pdp|nist|iso\s*\d+|research gap|evidence)\b", _re.I
-    )
-    _RESEARCH = _re.compile(
-        r"\b(paper|artikel|article|jurnal|journal|referensi|reference|"
-        r"analisis|analysis|ringkas|summarize|review|literatur|literature)\b", _re.I
-    )
-    _TECH = _re.compile(
-        r"\b(kode|code|debug|error|bug|fix|refactor|deploy|server|"
-        r"script|function|import|install|dependency)\b", _re.I
-    )
-    _ADMIN = _re.compile(
-        r"\b(file|excel|export|budget|finance|jadwal|schedule|reminder)\b", _re.I
-    )
-    _OFF = _re.compile(
-        r"\b(cerita|joke|lelucon|hiburan|entertainment|rehat|istirahat|"
-        r"random|gaming|nonton|film|musik|music)\b", _re.I
-    )
+        import re as _re
+        _DISS = _re.compile(
+            r"\b(novel|kontribusi|disertasi|dissertation|bab\s*\d|chapter\s*\d|"
+            r"hipotesis|hypothesis|metodologi|methodology|forensic|phd|tesis|thesis|"
+            r"eu ai act|uu pdp|nist|iso\s*\d+|research gap|evidence)\b", _re.I
+        )
+        _RESEARCH = _re.compile(
+            r"\b(paper|artikel|article|jurnal|journal|referensi|reference|"
+            r"analisis|analysis|ringkas|summarize|review|literatur|literature)\b", _re.I
+        )
+        _TECH = _re.compile(
+            r"\b(kode|code|debug|error|bug|fix|refactor|deploy|server|"
+            r"script|function|import|install|dependency)\b", _re.I
+        )
+        _ADMIN = _re.compile(
+            r"\b(file|excel|export|budget|finance|jadwal|schedule|reminder)\b", _re.I
+        )
+        _OFF = _re.compile(
+            r"\b(cerita|joke|lelucon|hiburan|entertainment|rehat|istirahat|"
+            r"random|gaming|nonton|film|musik|music)\b", _re.I
+        )
 
-    if _DISS.search(user_input):
-        category = "dissertation"
-    elif _RESEARCH.search(user_input):
-        category = "research"
-    elif _TECH.search(user_input):
-        category = "technical"
-    elif _ADMIN.search(user_input):
-        category = "administrative"
-    elif _OFF.search(user_input):
-        category = "off_track"
-    else:
-        category = "general"
+        try:
+            if _DISS.search(user_input):
+                category = "dissertation"
+            elif _RESEARCH.search(user_input):
+                category = "research"
+            elif _TECH.search(user_input):
+                category = "technical"
+            elif _ADMIN.search(user_input):
+                category = "administrative"
+            elif _OFF.search(user_input):
+                category = "off_track"
+            else:
+                category = "general"
+        except Exception as e:
+            logger.error(f"[ATTENTION] Error: {e}")
+            if span:
+                span.record_exception(e)
+                span.set_status(Status(StatusCode.ERROR, str(e)))
+            category = "general"
 
-    logger.info("[ATTENTION_FILTER] persona=%s category=%s", persona_mode, category)
-    return {"_intent_category": category}
+        logger.info("[ATTENTION] Input categorized as: %s", category)
+        if span:
+            span.set_attribute("attention.category", category)
+        return {"_intent_category": category}
 
 
 # ── T1b: Executive Monitor (Inhibit + Simulate) ───────────────────────────────
@@ -1149,10 +1194,14 @@ def executive_monitor_node(state: KuroState) -> Dict[str, Any]:
             )
         except Exception as exc:
             logger.warning("[EXECUTIVE] Simulation failed: %s", exc)
+            if span:
+                span.record_exception(exc)
+                span.set_status(Status(StatusCode.ERROR, str(exc)))
 
     # ── 3. Cognitive effort ──────────────────────────────────────────────────
     from kuro_backend.agency.cognitive_effort import compute as _compute_effort
-    effort = _compute_effort(intent_cat, user_input)
+    persona = state.get("persona_mode") or memory_manager.get_active_persona(state.get("username", "Pantronux"))
+    effort = _compute_effort(intent_cat, user_input, persona=persona)
 
     return {
         "inhibited": False,
@@ -1160,6 +1209,136 @@ def executive_monitor_node(state: KuroState) -> Dict[str, Any]:
         "simulated_outcomes": simulated_outcomes,
         "selected_outcome": selected_outcome,
         "cognitive_effort": effort,
+    }
+
+
+# ── T1.5: Advisor Autonomous Research (Beta 4) ────────────────────────────────
+
+async def advisor_research_node(state: KuroState) -> Dict[str, Any]:
+    """
+    Autonomous research grounding for advisor persona.
+    Fires serper_scholar + serper_news without waiting for user instruction.
+    Injects [RESEARCH_SOURCES] block into state for response_node to consume.
+    """
+    persona = state.get("persona_mode") or "advisor"
+    intent = state.get("_intent_category", "general")
+    
+    research_intents = {
+        "research", "methodology", "literature", "hypothesis", 
+        "claim_validation", "framework_analysis", "dissertation"
+    }
+
+    if persona != "advisor" or intent not in research_intents:
+        return {"research_intent_detected": False, "research_sources_block": ""}
+
+    if os.getenv("KURO_ADVISOR_AUTO_SEARCH", "true").lower() == "false":
+        logger.info("[ADVISOR_RESEARCH] Auto-search disabled via env.")
+        return {"research_intent_detected": False, "research_sources_block": ""}
+
+    logger.info("[ADVISOR_RESEARCH] Research intent detected. Starting autonomous grounding...")
+    
+    user_input = state.get("user_input", "")
+    session_id = state.get("_session_id", "unknown")
+    username = state.get("username", "Pantronux")
+    chat_id = state.get("chat_id")
+
+    # 1. Extract research claims via micro-Gemini call
+    extract_model = getattr(settings, "KURO_RESEARCH_EXTRACT_MODEL", "gemini-2.0-flash")
+    client = _get_genai_client()
+    
+    extract_prompt = (
+        "You are a research claim extractor. Extract 1-3 core research claims or technical concepts "
+        "from the Master's message and generate precise search queries for each. "
+        "Return ONLY a JSON object: {\"claims\": [\"claim1\"], \"search_queries\": [\"q1\"]}"
+        f"\n\nMaster's Message: {user_input}"
+    )
+
+    try:
+        extract_res = client.models.generate_content(
+            model=extract_model,
+            contents=extract_prompt,
+            config=genai_types.GenerateContentConfig(
+                temperature=0.0,
+                max_output_tokens=256,
+                response_mime_type="application/json",
+            )
+        )
+        extraction_data = json.loads(extract_res.text)
+        queries = extraction_data.get("search_queries", [])[:getattr(settings, "KURO_ADVISOR_MAX_SERPER_CALLS", 3)]
+    except Exception as e:
+        logger.warning(f"[ADVISOR_RESEARCH] Claim extraction failed: {e}")
+        return {"research_intent_detected": True, "research_sources_block": ""}
+
+    if not queries:
+        return {"research_intent_detected": True, "research_sources_block": ""}
+
+    # 2. Fire Serper calls in parallel
+    from kuro_backend import serper_tool
+    
+    async def run_searches():
+        tasks = []
+        for q in queries:
+            # Scholar search
+            tasks.append(asyncio.to_thread(
+                serper_tool.serper_scholar, q, 
+                num_results=getattr(settings, "KURO_ADVISOR_SCHOLAR_NUM_RESULTS", 5)
+            ))
+            # News search (only for the first query to avoid quota burn)
+            if q == queries[0]:
+                tasks.append(asyncio.to_thread(serper_tool.serper_news, q, num_results=3))
+        
+        return await asyncio.gather(*tasks, return_exceptions=True)
+
+    results = await run_searches()
+    
+    collected_sources = []
+    source_lines = []
+    
+    for i, res in enumerate(results):
+        if isinstance(res, Exception):
+            logger.warning(f"[ADVISOR_RESEARCH] Serper call failed: {res}")
+            continue
+        
+        # Determine if scholar or news based on task order
+        is_news = (i == 1) if len(queries) > 0 else False
+        source_type = "news" if is_news else "scholar"
+        query_for_this_res = queries[0] if is_news else queries[i // (2 if i > 0 else 1)] # Approximate mapping
+
+        for item in res:
+            source_data = {
+                "query": query_for_this_res,
+                "source_type": source_type,
+                "title": item.get("title"),
+                "link": item.get("link"),
+                "snippet": item.get("snippet"),
+                "year": item.get("year"),
+                "cited_by": item.get("cited_by", 0)
+            }
+            collected_sources.append(source_data)
+            
+            if source_type == "scholar":
+                line = f"Scholar: {item.get('title')} ({item.get('year', 'N/A')}, cited {item.get('cited_by', 0)}x) — {item.get('snippet')} — {item.get('link')}"
+            else:
+                line = f"News: {item.get('title')} ({item.get('date', 'Recent')}) — {item.get('snippet')} — {item.get('link')}"
+            source_lines.append(line)
+
+    if not source_lines:
+        return {"research_intent_detected": True, "research_sources_block": ""}
+
+    # 3. Format block
+    block = "\n\n[RESEARCH_SOURCES — Auto-retrieved by Advisor]\n" + "\n".join(source_lines)
+    
+    # 4. Persistence (Background)
+    from kuro_backend import intelligence_db
+    try:
+        loop = asyncio.get_running_loop()
+        loop.run_in_executor(None, intelligence_db.save_research_sources, chat_id, collected_sources)
+    except Exception as e:
+        logger.warning(f"[ADVISOR_RESEARCH] Source persistence failed: {e}")
+
+    return {
+        "research_intent_detected": True, 
+        "research_sources_block": block
     }
 
 
@@ -1180,87 +1359,92 @@ def metacognitive_review_node(state: KuroState) -> Dict[str, Any]:
        response_node to embed in system prompt (T3 Shared Agency).
     """
     persona_mode = state.get("persona_mode", "consultant")
-
-    if persona_mode not in _AGENCY_PERSONAS:
-        return {
-            "alignment_score": 1.0,
-            "metacognitive_flag": False,
-            "joint_goal_block": "",
-        }
-
-    # If the Executive already inhibited — skip metacognitive check.
-    if state.get("inhibited"):
-        return {
-            "alignment_score": 1.0,
-            "metacognitive_flag": False,
-            "joint_goal_block": "",
-        }
-
-    user_input = state.get("user_input", "")
-
-    # ── 1. Belief Revision ───────────────────────────────────────────────────
-    alignment_result: Dict[str, Any] = {
-        "score": 1.0, "conflicts": [], "supports": [], "recommendation": "",
-    }
     username = state.get("username", "Pantronux")
-    try:
-        alignment_result = memory_coordinator.evaluate_alignment(user_input, persona_mode, username=username)
-    except Exception as exc:
-        logger.warning("[METACOGNITIVE] evaluate_alignment error for %s: %s", username, exc)
+    trace_attrs = {"persona": persona_mode, "username": username, "chat_id": state.get("chat_id", "")}
 
-    score = float(alignment_result.get("score", 1.0))
-    threshold = float(os.getenv("KURO_ALIGNMENT_THRESHOLD", "0.35"))
+    with observability.trace_node("metacognitive_review_node", trace_attrs) as span:
+        if persona_mode not in _AGENCY_PERSONAS:
+            return {
+                "alignment_score": 1.0,
+                "metacognitive_flag": False,
+                "joint_goal_block": "",
+            }
 
-    # ── 2. Evidence Quality (Auto-RAG integration) ───────────────────────────
-    retrieval_grade = state.get("retrieval_grade", "relevant")
-    retry_count = state.get("retrieval_retry_count", 0)
-    evidence_weak = retrieval_grade in ("irrelevant", "ambiguous")
-    evidence_note = ""
-    if evidence_weak:
-        evidence_note = (
-            f"\n\n> ⚠️ **Evidence Note:** Retrieval memory shows `{retrieval_grade}` quality "
-            f"after {retry_count} attempts — response may be less supported by long-term memory evidence."
-        )
+        # If the Executive already inhibited — skip metacognitive check.
+        if state.get("inhibited"):
+            return {
+                "alignment_score": 1.0,
+                "metacognitive_flag": False,
+                "joint_goal_block": "",
+            }
 
-    # ── 3. Contradiction Trigger ─────────────────────────────────────────────
-    if score < threshold:
-        conflicts = alignment_result.get("conflicts", [])
-        conflict_txt = "; ".join(str(c) for c in conflicts[:3]) or "Input diverges from prior BRD goals."
-        rec = alignment_result.get("recommendation", "Realign with dissertation objective.")
-        reflective_msg = (
-            f"⚠️ **[Metacognitive Alignment Check — T2 Rational Agent]**\n\n"
-            f"Master Pantronux, before continuing — I have detected a potential conflict "
-            f"between the current instructions and our mutually agreed-upon dissertation commitments.\n\n"
-            f"**Conflict detected:**\n{conflict_txt}\n\n"
-            f"**Recommendation:** {rec}"
-            f"{evidence_note}\n\n"
-            f"Would you like to proceed with this realignment in mind? "
-            f"Or is there any new context I need to understand before continuing?"
-        )
-        logger.info(
-            "[METACOGNITIVE] Conflict detected score=%.2f retrieval=%s → reflective path",
-            score, retrieval_grade,
-        )
+        user_input = state.get("user_input", "")
+
+        # ── 1. Belief Revision ───────────────────────────────────────────────────
+        alignment_result: Dict[str, Any] = {
+            "score": 1.0, "conflicts": [], "supports": [], "recommendation": "",
+        }
+        try:
+            alignment_result = memory_coordinator.evaluate_alignment(user_input, persona_mode, username=username)
+        except Exception as exc:
+            logger.warning("[METACOGNITIVE] evaluate_alignment error for %s: %s", username, exc)
+            if span:
+                span.record_exception(exc)
+                span.set_status(Status(StatusCode.ERROR, str(exc)))
+
+        score = float(alignment_result.get("score", 1.0))
+        threshold = float(os.getenv("KURO_ALIGNMENT_THRESHOLD", "0.35"))
+
+        # ── 2. Evidence Quality (Auto-RAG integration) ───────────────────────────
+        retrieval_grade = state.get("retrieval_grade", "relevant")
+        retry_count = state.get("retrieval_retry_count", 0)
+        evidence_weak = retrieval_grade in ("irrelevant", "ambiguous")
+        evidence_note = ""
+        if evidence_weak:
+            evidence_note = (
+                f"\n\n> ⚠️ **Evidence Note:** Retrieval memory shows `{retrieval_grade}` quality "
+                f"after {retry_count} attempts — response may be less supported by long-term memory evidence."
+            )
+
+        # ── 3. Contradiction Trigger ─────────────────────────────────────────────
+        if score < threshold:
+            conflicts = alignment_result.get("conflicts", [])
+            conflict_txt = "; ".join(str(c) for c in conflicts[:3]) or "Input diverges from prior BRD goals."
+            rec = alignment_result.get("recommendation", "Realign with dissertation objective.")
+            reflective_msg = (
+                f"⚠️ **[Metacognitive Alignment Check — T2 Rational Agent]**\n\n"
+                f"Master Pantronux, before continuing — I have detected a potential conflict "
+                f"between the current instructions and our mutually agreed-upon dissertation commitments.\n\n"
+                f"**Conflict detected:**\n{conflict_txt}\n\n"
+                f"**Recommendation:** {rec}"
+                f"{evidence_note}\n\n"
+                f"Would you like to proceed with this realignment in mind? "
+                f"Or is there any new context I need to understand before continuing?"
+            )
+            logger.info(
+                "[METACOGNITIVE] Conflict detected score=%.2f retrieval=%s → reflective path",
+                score, retrieval_grade,
+            )
+            return {
+                "alignment_score": score,
+                "metacognitive_flag": True,
+                "final_response": reflective_msg,
+                "joint_goal_block": "",
+            }
+
+        # ── 4. Joint Goal Injection (T3) ─────────────────────────────────────────
+        joint_goal_block = ""
+        try:
+            from kuro_backend.agency.joint_goal_store import format_for_prompt
+            joint_goal_block = format_for_prompt(username=username)
+        except Exception as exc:
+            logger.debug("[METACOGNITIVE] joint_goal_block skipped: %s", exc)
+
         return {
             "alignment_score": score,
-            "metacognitive_flag": True,
-            "final_response": reflective_msg,
-            "joint_goal_block": "",
+            "metacognitive_flag": False,
+            "joint_goal_block": joint_goal_block,
         }
-
-    # ── 4. Joint Goal Injection (T3) ─────────────────────────────────────────
-    joint_goal_block = ""
-    try:
-        from kuro_backend.agency.joint_goal_store import format_for_prompt
-        joint_goal_block = format_for_prompt(username=username)
-    except Exception as exc:
-        logger.debug("[METACOGNITIVE] joint_goal_block skipped: %s", exc)
-
-    return {
-        "alignment_score": score,
-        "metacognitive_flag": False,
-        "joint_goal_block": joint_goal_block,
-    }
 
 
 
@@ -1478,6 +1662,10 @@ def response_node(state: KuroState) -> Dict[str, Any]:
             )
         # tool_status == "no_tool" or None -> proceed normally
 
+        research_sources_block = state.get("research_sources_block")
+        if research_sources_block:
+            sections["research_sources"] = research_sources_block
+
         if context_budget is not None:
             budgeted = token_budget.apply_persona_budget(sections, context_budget)
         else:
@@ -1488,6 +1676,7 @@ def response_node(state: KuroState) -> Dict[str, Any]:
             "memory_injection",
             "finance",
             "market",
+            "research_sources",
             "tool_result",
         )
         ordered_parts: list[tuple[str, str]] = [
@@ -1566,6 +1755,9 @@ def response_node(state: KuroState) -> Dict[str, Any]:
             error_type = type(e).__name__
             error_msg = str(e)
             logger.error(f"[RESPONSE] LLM generation failed ({error_type}): {error_msg}")
+            if span:
+                span.record_exception(e)
+                span.set_status(Status(StatusCode.ERROR, error_msg))
             # Don't expose raw exception to user - use generic error message
             if response_text is None:
                     response_text = "Maaf, Pantronux. Terjadi kesalahan saat menghasilkan respons. Silakan coba lagi."
@@ -1624,7 +1816,8 @@ def response_node(state: KuroState) -> Dict[str, Any]:
         # in memory_coordinator prevents double-store.
         username = state.get("username", "Pantronux")
         chat_id = state.get("chat_id")
-        _persist_short_term_and_enqueue_writes(user_input, response_text, persona_mode, username, chat_id=chat_id)
+        msg_count_before = final_state.get("message_count_before", 0)
+        _persist_short_term_and_enqueue_writes(user_input, response_text, persona_mode, username, chat_id=chat_id, message_count_before=msg_count_before)
 
         logger.info("[RESPONSE] Generated response (%s chars)", len(response_text))
         
@@ -1967,6 +2160,7 @@ def build_kuro_graph() -> StateGraph:
     graph_builder.add_node("tool_node", tool_node)
     graph_builder.add_node("response_node", response_node)
     graph_builder.add_node("memory_extraction_node", memory_extraction_node)
+    graph_builder.add_node("advisor_research_node", advisor_research_node)
 
     # ── Auto-RAG nodes (V1.0.0) ───────────────────────────────────────────────
     graph_builder.add_node("retrieval_grader_node", retrieval_grader_node)
@@ -2006,7 +2200,8 @@ def build_kuro_graph() -> StateGraph:
     )
 
     # ── Natural Agency pipeline ───────────────────────────────────────────────
-    graph_builder.add_edge("attention_filter_node", "executive_monitor_node")
+    graph_builder.add_edge("attention_filter_node", "advisor_research_node")
+    graph_builder.add_edge("advisor_research_node", "executive_monitor_node")
 
     graph_builder.add_conditional_edges(
         "executive_monitor_node",
@@ -2142,6 +2337,11 @@ async def process_chat_with_graph_stream(
     full_response = []
     response_text = ""
 
+    # Capture initial message count for title generation trigger
+    msg_count_before = 0
+    if chat_id:
+        msg_count_before = chat_history.get_session_message_count(chat_id)
+
     try:
         stage_started = time.perf_counter()
         approval_response = _maybe_handle_pending_approval(message, approval_scope)
@@ -2170,7 +2370,7 @@ async def process_chat_with_graph_stream(
                     stream_metrics["stream_mode"] = "semantic_cache"
                 yield cached_response
                 try:
-                    _persist_short_term_and_enqueue_writes(message, cached_response, persona_mode, username, chat_id=chat_id)
+                    _persist_short_term_and_enqueue_writes(message, cached_response, persona_mode, username, chat_id=chat_id, message_count_before=msg_count_before)
                 except Exception as exc:
                     logger.warning("[SEMANTIC_CACHE] persist failed: %s", exc)
                 return
@@ -2257,7 +2457,7 @@ async def process_chat_with_graph_stream(
                 response_text = "Maaf, Pantronux. Respons model kosong setelah streaming."
                 yield response_text
                 emitted += 1
-            _persist_short_term_and_enqueue_writes(message, response_text, persona_mode, username, chat_id=chat_id)
+            _persist_short_term_and_enqueue_writes(message, response_text, persona_mode, username, chat_id=chat_id, message_count_before=msg_count_before)
 
             # chat_context trigger: check if context should be regenerated
             if chat_id:
@@ -2288,7 +2488,7 @@ async def process_chat_with_graph_stream(
                     message,
                     persona_mode,
                     response_text,
-                    tags=semantic_cache.classify_tags(message),
+                    tags=list(semantic_cache.classify_tags(message)) + [username],
                 )
             except Exception as exc:
                 logger.debug("[SEMANTIC_CACHE] store skipped: %s", exc)
@@ -2331,6 +2531,8 @@ async def process_chat_with_graph_stream(
             # Anti-Halusinasi defaults
             "_autorag_notification": "",
             "epistemic_labels": {},
+            "research_sources_block": "",
+            "research_intent_detected": False,
             "username": username,
             "custom_persona": custom_persona,
             "_intent": "new",
@@ -2542,7 +2744,7 @@ def process_chat_with_graph(
             cached_response = semantic_cache.lookup(message, persona_mode)
             if cached_response is not None:
                 try:
-                    _persist_short_term_and_enqueue_writes(message, cached_response, persona_mode, username, chat_id=chat_id)
+                    _persist_short_term_and_enqueue_writes(message, cached_response, persona_mode, username, chat_id=chat_id, message_count_before=msg_count_before)
                 except Exception as exc:
                     logger.warning("[SEMANTIC_CACHE] persist failed: %s", exc)
                 return cached_response
@@ -2612,7 +2814,7 @@ def process_chat_with_graph(
                 message,
                 persona_mode,
                 response,
-                tags=semantic_cache.classify_tags(message),
+                tags=list(semantic_cache.classify_tags(message)) + [username],
             )
         except Exception as exc:
             logger.debug("[SEMANTIC_CACHE] store (sync) skipped: %s", exc)

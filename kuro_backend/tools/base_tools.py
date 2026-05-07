@@ -2009,3 +2009,39 @@ def advanced_execution_tool(
         elif err_out:
             response["error"] = err_out
     return response
+
+
+# ============================================
+# SERPER TOOLS (Gemini Tool Surface)
+# ============================================
+
+def serper_search(query: str, num_results: int = 10) -> List[Dict]:
+    """
+    Search the web for general information, technical documentation, and recent events.
+    Use this tool when the Master's query requires live web grounding or recent data
+    not present in long-term memory.
+    """
+    from kuro_backend.serper_tool import serper_search as _serper_search
+    res = _serper_search(query, num_results=num_results)
+    return res.get("organic_results", [])
+
+
+def serper_news(query: str, num_results: int = 10) -> List[Dict]:
+    """
+    Search for recent news articles and developments.
+    Use this tool to ground responses in current events or recent technical releases
+    from the last 12-24 months.
+    """
+    from kuro_backend.serper_tool import serper_news as _serper_news
+    return _serper_news(query, num_results=num_results)
+
+
+def serper_scholar(query: str, num_results: int = 5) -> List[Dict]:
+    """
+    Search Google Scholar for academic papers, theses, and peer-reviewed research.
+    Use this tool when the Master needs literature review sources, citation verification,
+    or academic evidence for dissertation claims. Returns title, link, snippet, year,
+    and citation count for each result.
+    """
+    from kuro_backend.serper_tool import serper_scholar as _serper_scholar
+    return _serper_scholar(query, num_results=num_results)
