@@ -13,6 +13,7 @@ Side Effects: Writes to kuro_auth.db; logs security events.
 import sqlite3
 import logging
 import os
+import threading
 from datetime import datetime, date, timedelta
 from typing import Dict, Optional
 
@@ -21,6 +22,15 @@ logger.propagate = False  # Prevent double-reporting to root logger
 
 # Database path
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "kuro_auth.db")
+
+_SCHEMA_READY_FOR: Optional[str] = None
+_SCHEMA_LOCK = threading.Lock()
+
+def _reset_schema_ready_for_tests() -> None:
+    global _SCHEMA_READY_FOR
+    with _SCHEMA_LOCK:
+        _SCHEMA_READY_FOR = None
+
 
 # Brute force protection constants
 MAX_FAILED_ATTEMPTS = 3
@@ -38,6 +48,17 @@ def _get_connection():
 
 def init_auth_db():
     """Initialize the authentication database schema."""
+    global _SCHEMA_READY_FOR
+    current_path = DB_PATH
+    if _SCHEMA_READY_FOR == current_path:
+        return
+    with _SCHEMA_LOCK:
+        if _SCHEMA_READY_FOR == current_path:
+            return
+        _init_auth_db_locked()
+        _SCHEMA_READY_FOR = current_path
+
+def _init_auth_db_locked():
     conn = None
     try:
         conn = _get_connection()

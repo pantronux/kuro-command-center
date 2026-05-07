@@ -14,6 +14,7 @@ import sqlite3
 import json
 import logging
 import os
+import threading
 from datetime import datetime
 from typing import List, Dict, Optional
 
@@ -21,6 +22,15 @@ logger = logging.getLogger(__name__)
 logger.propagate = False  # Prevent double-reporting to root logger
 
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "kuro_intelligence.db")
+
+_SCHEMA_READY_FOR: Optional[str] = None
+_SCHEMA_LOCK = threading.Lock()
+
+def _reset_schema_ready_for_tests() -> None:
+    global _SCHEMA_READY_FOR
+    with _SCHEMA_LOCK:
+        _SCHEMA_READY_FOR = None
+
 
 def _get_connection():
     """Get a database connection with row factory."""
@@ -32,6 +42,17 @@ def _get_connection():
 
 def init_db():
     """Initialize the intelligence briefings database schema."""
+    global _SCHEMA_READY_FOR
+    current_path = DB_PATH
+    if _SCHEMA_READY_FOR == current_path:
+        return
+    with _SCHEMA_LOCK:
+        if _SCHEMA_READY_FOR == current_path:
+            return
+        _init_db_locked()
+        _SCHEMA_READY_FOR = current_path
+
+def _init_db_locked():
     conn = None
     try:
         conn = _get_connection()

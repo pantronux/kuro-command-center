@@ -27,3 +27,7 @@
 ## 2024-05-19 - Dictionary Initialization Overhead
 **Learning:** Directly initializing a dictionary with evaluated properties (e.g. `{"a": func(a), "b": func(b)}`) is significantly faster (~35%) than initializing it with dummy data (e.g. `{"a": 0, "b": 0}`) and subsequently overwriting those keys. This is because it completely avoids allocating intermediate values, updating existing keys, and the associated dictionary modification overhead during execution.
 **Action:** Always prefer direct dictionary initialization when all keys and values are known at creation time, rather than establishing a zero-state template and modifying it.
+
+## 2024-05-20 - Caching Database Initialization Calls
+**Learning:** `auth_db.py` and `intelligence_db.py` were missing the `_SCHEMA_READY_FOR` schema readiness caching pattern that avoids re-evaluating `CREATE TABLE IF NOT EXISTS` commands on every call to `init_db`. This creates lock contention and slows down operations.
+**Action:** Applied the `_SCHEMA_READY_FOR` pattern with `threading.Lock()` to `auth_db.py` and `intelligence_db.py` to prevent redundant schema evaluation and improve performance.
