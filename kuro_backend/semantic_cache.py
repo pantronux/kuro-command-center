@@ -27,6 +27,7 @@ Dependencies: kuro_backend.embedding_cache, stdlib (threading, math, dataclasses
 Main Functions: get(), put(), purge_ssot_tagged(), is_enabled().
 Side Effects: In-process dict + lock; no durable writes; logs diagnostic metrics.
 """
+
 from __future__ import annotations
 
 import logging
@@ -42,7 +43,11 @@ from kuro_backend import embedding_cache
 logger = logging.getLogger(__name__)
 
 # V6.0: Semantic Cache enabled by default for significant TTFB improvements on repeated intents
-ENABLED: Final[bool] = os.getenv("KURO_SEMANTIC_CACHE_ENABLED", "true").lower() in ("1", "true", "yes")
+ENABLED: Final[bool] = os.getenv("KURO_SEMANTIC_CACHE_ENABLED", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
 _SIM_THRESHOLD: Final[float] = float(os.getenv("KURO_SEMANTIC_CACHE_SIM", "0.94"))
 _CACHE_TTL_S: Final[float] = float(os.getenv("KURO_SEMANTIC_CACHE_TTL", "900"))
 _CACHE_MAX: Final[int] = int(os.getenv("KURO_SEMANTIC_CACHE_MAX", "256"))
@@ -63,27 +68,32 @@ _entries: list[_Entry] = []
 _lock = threading.RLock()
 
 
-def _cosine(a: Sequence[float], b: Sequence[float]) -> float:
+def _normalize(vec: Sequence[float]) -> tuple[float, ...]:
+    norm_sq = 0.0
+    for x in vec:
+        norm_sq += x * x
+    if norm_sq == 0:
+        return tuple(vec)
+    n = math.sqrt(norm_sq)
+    return tuple(x / n for x in vec)
+
+
+def _dot_product(a: Sequence[float], b: Sequence[float]) -> float:
     if not a or not b or len(a) != len(b):
         return 0.0
 
-    # ⚡ Bolt: Single pass computation avoids 3 generator loops
+    # ⚡ Bolt: Single pass dot product computation is significantly faster
+    # than full cosine similarity when vectors are pre-normalized
     num = 0.0
-    da_sq = 0.0
-    db_sq = 0.0
     for x, y in zip(a, b):
         num += x * y
-        da_sq += x * x
-        db_sq += y * y
-
-    if da_sq == 0 or db_sq == 0:
-        return 0.0
-    return num / math.sqrt(da_sq * db_sq)
+    return num
 
 
 def _current_revision() -> int:
     try:
         from kuro_backend.services import core_service
+
         return int(core_service.get_data_revision())
     except Exception:
         return 0
@@ -105,6 +115,9 @@ def lookup(query: str, persona: str) -> Optional[str]:
     vec = embedding_cache.embed_query(query)
     if vec is None:
         return None
+
+    vec = _normalize(vec)
+
     now = time.monotonic()
     current_rev = _current_revision()
     with _lock:
@@ -113,7 +126,7 @@ def lookup(query: str, persona: str) -> Optional[str]:
         for entry in _entries:
             if entry.persona != persona:
                 continue
-            sim = _cosine(vec, entry.embedding)
+            sim = _dot_product(vec, entry.embedding)
             if sim >= _SIM_THRESHOLD and (best is None or sim > best[0]):
                 best = (sim, entry)
         if best is None:
@@ -130,7 +143,10 @@ def lookup(query: str, persona: str) -> Optional[str]:
         entry.hits += 1
         logger.info(
             "[SEMANTIC_CACHE] HIT persona=%s sim=%.3f tags=%s hits=%d",
-            persona, sim, sorted(entry.tags), entry.hits,
+            persona,
+            sim,
+            sorted(entry.tags),
+            entry.hits,
         )
         return entry.response
 
@@ -145,6 +161,9 @@ def store(query: str, persona: str, response: str, tags: Iterable[str] = ()) -> 
     vec = embedding_cache.embed_query(query)
     if vec is None:
         return
+
+    vec = _normalize(vec)
+
     tag_set = frozenset(tags)
     entry = _Entry(
         persona=persona,
