@@ -107,6 +107,12 @@ def init_db() -> None:
 def _init_db_locked() -> None:
     conn = None
     try:
+        try:
+            from kuro_backend import backup_manager
+
+            backup_manager.snapshot_pre_migration(_db_path(), label="finances")
+        except Exception as snap_exc:
+            logger.warning("Pre-migration snapshot skipped: %s", snap_exc)
         conn = _conn()
         c = conn.cursor()
         c.execute(

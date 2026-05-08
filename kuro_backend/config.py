@@ -132,6 +132,27 @@ class Settings:
     KURO_RESEARCH_EXTRACT_MODEL: str = os.getenv("KURO_RESEARCH_EXTRACT_MODEL", "gemini-2.5-flash")
     KURO_ADVISOR_SCHOLAR_NUM_RESULTS: int = int(os.getenv("KURO_ADVISOR_SCHOLAR_NUM_RESULTS", "5"))
 
+    # -----------------------------------------------------------------
+    # Backup & Safety (Beta 5 Hotfix - Sovereign Shield)
+    # -----------------------------------------------------------------
+    KURO_BACKUP_ENABLED: bool = os.getenv(
+        "KURO_BACKUP_ENABLED", "true"
+    ).strip().lower() in ("1", "true", "yes", "on")
+    KURO_BACKUP_DIR: str = os.getenv("KURO_BACKUP_DIR", "./backups")
+    KURO_BACKUP_RETAIN_DAYS: int = int(os.getenv("KURO_BACKUP_RETAIN_DAYS", "14"))
+    KURO_BACKUP_WEEKLY_RETAIN_WEEKS: int = int(
+        os.getenv("KURO_BACKUP_WEEKLY_RETAIN_WEEKS", "8")
+    )
+    KURO_BACKUP_PRE_MIGRATION_RETAIN_DAYS: int = int(
+        os.getenv("KURO_BACKUP_PRE_MIGRATION_RETAIN_DAYS", "7")
+    )
+    KURO_BACKUP_COMPRESS_LEVEL: int = int(
+        os.getenv("KURO_BACKUP_COMPRESS_LEVEL", "6")
+    )
+    KURO_BACKUP_ALERT_ON_FAILURE: bool = os.getenv(
+        "KURO_BACKUP_ALERT_ON_FAILURE", "true"
+    ).strip().lower() in ("1", "true", "yes", "on")
+
     @property
     def tz(self):
         """Get pytz timezone object for the configured timezone."""

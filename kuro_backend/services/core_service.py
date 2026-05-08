@@ -36,8 +36,12 @@ def _resolve_db_path_with_env(env_var: str, default_filename: str) -> str:
 
 SHORT_TERM_DB_PATH = _resolve_db_path_with_env("KURO_SHORT_TERM_DB_PATH", "kuro_short_term.db")
 
+
+def _current_short_term_db_path() -> str:
+    return os.path.abspath(os.getenv("KURO_SHORT_TERM_DB_PATH", SHORT_TERM_DB_PATH))
+
 def _conn_short_term():
-    conn = sqlite3.connect(SHORT_TERM_DB_PATH, timeout=30.0)
+    conn = sqlite3.connect(_current_short_term_db_path(), timeout=30.0)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -68,7 +72,7 @@ def _reset_schema_ready_for_tests() -> None:
 
 def _ensure_schema(cur: sqlite3.Cursor) -> None:
     global _SCHEMA_READY_FOR
-    current_path = SHORT_TERM_DB_PATH
+    current_path = _current_short_term_db_path()
     if current_path is None:
         cur.execute(
             "CREATE TABLE IF NOT EXISTS app_sync_metadata ("
@@ -135,7 +139,7 @@ def get_data_revision() -> int:
         conn.close()
 
 def init_all_databases() -> None:
-    logger.info("[DB_PATH] Active SQLite files -> short_term=%s", SHORT_TERM_DB_PATH)
+    logger.info("[DB_PATH] Active SQLite files -> short_term=%s", _current_short_term_db_path())
     # Initialize sync table
     get_data_revision()
     

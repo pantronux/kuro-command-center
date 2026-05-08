@@ -1,3 +1,35 @@
+## [V1.0.0 Beta 5 Hotfix 2] — "Telegram Concurrency & Docs" — 2026-05-08
+
+### Critical Fixes
+- **Telegram Concurrency Guard**: Implemented `_acquire_bot_lock` using a PID lock file (`.kuro_telegram.lock`) with `fcntl.flock` to prevent multiple polling instances and resolve `getUpdates` conflicts.
+- **Bot Startup Safety**: Added `atexit` cleanup for the lock file and enforced process exit if another instance is detected.
+
+### Documentation
+- **SYSTEM_MAP Update**: Corrected the Telegram service description to reflect full inbound/outbound support via the LangGraph core.
+
+## [V1.0.0 Beta 5 Hotfix 1] — "Sovereign Shield" — 2026-05-08
+
+### Critical Fixes
+- **Test DB isolation**: `conftest.py` now enforces function-scoped `autouse`
+  isolation for `chat_history`, `auth_db`, `finance_db`, `intelligence_db`,
+  `compliance_db`, `memory_manager.SHORT_TERM_DB`, and
+  `services.core_service.SHORT_TERM_DB_PATH`, redirecting all test writes into
+  `tmp_path` instead of live runtime DB files.
+- **Pre-migration snapshots**: `chat_history.py`, `auth_db.py`,
+  `finance_db.py`, `intelligence_db.py`, and `memory_manager.py` now request a
+  compressed snapshot before schema bootstrap touches an existing DB.
+- **Nightly backup automation**: Added `kuro_backend/backup_manager.py` plus a
+  01:00 WIB scheduler hook in `main.py` for WAL-safe SQLite backups, gzip JSON
+  state archival, manifest generation, and retention pruning under `backups/`.
+- **Backup audit trail**: Added `backup_log` in `kuro_intelligence.db` with
+  helper APIs `log_backup_start`, `log_backup_complete`,
+  `get_backup_history`, and `get_last_backup_status`.
+- **Admin backup APIs**: Added `/api/backup/status`, `/api/backup/run`, and
+  `/api/backup/history`, guarded by JWT cookie auth plus `ADMIN_USERNAME`.
+- **Import-time hardening for tests**: `main.py` now lazily imports
+  `price_ticker_worker` and `market_sentinel` at call sites, so API contract
+  tests can import the app without optional market dependencies installed.
+
 ## [V1.0.0 Beta 5] — "Sovereign Chat" — 2026-05-07
 
 ### New Features

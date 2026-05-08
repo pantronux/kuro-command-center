@@ -21,6 +21,8 @@ from enum import Enum
 import uvicorn
 from typing import Any, Dict, Optional, List
 from datetime import date, datetime, timedelta
+import fcntl
+import atexit
 from fastapi import (
     FastAPI,
     UploadFile,
@@ -93,12 +95,10 @@ from kuro_backend import finance_db
 from kuro_backend import auth_db
 from kuro_backend import observability
 from kuro_backend import intelligence_db
+from kuro_backend import backup_manager
 from kuro_backend import persona_history_admin
 from kuro_backend import version as kuro_version
 from kuro_backend import proactive_greeting
-from kuro_backend import market_sentinel
-from kuro_backend import price_ticker_worker
-
 from kuro_backend.logger_setup import setup_logging
 
 # --- Logging Setup with Centralized Config ---
@@ -205,6 +205,17 @@ def validate_token(token: str) -> Optional[Dict]:
     except JWTError:
         pass
     return None
+
+
+def require_admin_user(request: Request) -> Dict[str, str]:
+    """Resolve current user from cookie and enforce admin access."""
+    token = get_token_from_cookie(request)
+    user = validate_token(token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    if user.get("username") != os.getenv("ADMIN_USERNAME", "Pantronux"):
+        raise HTTPException(status_code=403, detail="Forbidden: Admin access required.")
+    return user
 
 
 def api_success(
@@ -1671,6 +1682,32 @@ async def evaluation_summary(username: str = "Pantronux"):
         
     return summary
 
+
+@app.get("/api/backup/status")
+async def backup_status(request: Request):
+    """Admin-only last backup status endpoint."""
+    require_admin_user(request)
+    return api_success(data=backup_manager.get_backup_status())
+
+
+@app.post("/api/backup/run")
+async def trigger_manual_backup(request: Request):
+    """Admin-only manual backup trigger."""
+    require_admin_user(request)
+    try:
+        result = await asyncio.to_thread(backup_manager.run_manual_backup, "manual")
+        return api_success(data=result)
+    except Exception as exc:
+        logger.error("[BACKUP] Manual backup failed: %s", exc)
+        raise HTTPException(status_code=500, detail="Manual backup failed.")
+
+
+@app.get("/api/backup/history")
+async def backup_history(request: Request):
+    """Admin-only backup history endpoint."""
+    require_admin_user(request)
+    return api_success(data=intelligence_db.get_backup_history(limit=30))
+
 def run_observability_cleanup():
     observability.cleanup_old_sessions()
 
@@ -2651,6 +2688,8 @@ async def api_sentinel_toggle_pin(code: str, request: Request):
 @app.post("/api/sentinel/run")
 async def api_sentinel_manual_run(request: Request):
     """Manually trigger a triangulation scan (restricted to master)."""
+    from kuro_backend import market_sentinel
+
     token = get_token_from_cookie(request)
     user = validate_token(token)
     if not user:
@@ -2672,6 +2711,8 @@ async def api_sentinel_manual_run(request: Request):
 @app.post("/api/sentinel/price-update")
 async def api_sentinel_price_update(request: Request):
     """Manually trigger a price ticker update (restricted to master)."""
+    from kuro_backend import price_ticker_worker
+
     token = get_token_from_cookie(request)
     user = validate_token(token)
     if not user:
@@ -3007,6 +3048,21 @@ def start_reminder_scheduler():
     from apscheduler.schedulers.background import BackgroundScheduler
     _reminder_scheduler = BackgroundScheduler(daemon=True)
 
+    def run_nightly_backup_job():
+        if not settings.KURO_BACKUP_ENABLED:
+            logger.info("[BACKUP] Nightly backup skipped: disabled by config.")
+            return
+        result = backup_manager.run_nightly_backup_sync()
+        if result.get("status") == "failed":
+            logger.error("[BACKUP] Nightly backup FAILED: %s", result.get("errors", []))
+            return
+        logger.info(
+            "[BACKUP] Nightly backup OK - %s files, %.1f MB, %.1fs",
+            result.get("files_backed_up", 0),
+            result.get("total_size_mb", 0.0),
+            result.get("duration_seconds", 0.0),
+        )
+
     # Daily intelligence briefing at 08:00 AM
     _reminder_scheduler.add_job(
         send_daily_intelligence_briefing,
@@ -3019,6 +3075,8 @@ def start_reminder_scheduler():
 
     # Quantitative updates for all users
     def run_all_price_updates():
+        from kuro_backend import price_ticker_worker
+
         all_users = auth_db.get_all_users() or ["Pantronux"]
         for u in all_users:
             try:
@@ -3041,6 +3099,8 @@ def start_reminder_scheduler():
 
     # Market Sentinel autonomous scans for all users
     def run_all_sentinel_scans():
+        from kuro_backend import market_sentinel
+
         all_users = auth_db.get_all_users() or ["Pantronux"]
         for u in all_users:
             try:
@@ -3125,6 +3185,17 @@ def start_reminder_scheduler():
         minute=0,
         id="file_retention_cycle",
         replace_existing=True,
+    )
+
+    _reminder_scheduler.add_job(
+        run_nightly_backup_job,
+        "cron",
+        hour=1,
+        minute=0,
+        id="nightly_backup",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
     )
 
     _reminder_scheduler.start()
@@ -3548,6 +3619,24 @@ def run_uvicorn():
         uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
 
 
+def _acquire_bot_lock() -> bool:
+    """Prevent duplicate Telegram polling instances."""
+    lock_path = os.path.join(settings.WORKING_DIR, ".kuro_telegram.lock")
+    try:
+        lock_file = open(lock_path, "w")
+        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        lock_file.write(str(os.getpid()))
+        lock_file.flush()
+        atexit.register(lambda: os.unlink(lock_path))
+        return True
+    except (BlockingIOError, PermissionError) as e:
+        logger.critical(
+            f"Another Kuro Telegram bot is already running or lock file is inaccessible: {e}. "
+            "Kill the old process first. Exiting."
+        )
+        return False
+
+
 if __name__ == "__main__":
     try:
         import requests
@@ -3621,7 +3710,10 @@ if __name__ == "__main__":
     time.sleep(2)
 
     # Run Telegram bot in main thread (blocking)
-    logger.info("Starting Telegram bot in main thread...")
-    run_bot_with_recovery()
+    if _acquire_bot_lock():
+        logger.info("Starting Telegram bot in main thread...")
+        run_bot_with_recovery()
+    else:
+        sys.exit(1)
 
     logger.info("Kuro AI Reborn has shut down.")

@@ -17,6 +17,30 @@ __pycache__/
 uploaded_files/
 kuro_auth.db
 
+# Runtime databases - never commit
+*.db
+*.db-wal
+*.db-shm
+*.db-backup*
+*.db-recovery*
+*.db-corrupted*
+*.db.from_github
+*.db.pre_migration*
+*.db.gz
+
+# Backup directory
+backups/
+
+# Runtime state
+master_profile.json
+kuro_memory.json
+phoenix_data/
+uploaded_files/
+.archive/
+
+# Vector stores
+kuro_chromadb/
+
 # Compliance Knowledge Base (External - DO NOT COPY TO PROJECT)
 # These are references to /home/kuro/ComplianceDoc
 compliance_cache/

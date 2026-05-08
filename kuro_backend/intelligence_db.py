@@ -55,6 +55,14 @@ def init_db():
 def _init_db_locked():
     conn = None
     try:
+        try:
+            from kuro_backend import backup_manager
+
+            backup_manager.snapshot_pre_migration(
+                DB_PATH, label="intelligence"
+            )
+        except Exception as snap_exc:
+            logger.warning("Pre-migration snapshot skipped: %s", snap_exc)
         conn = _get_connection()
         cursor = conn.cursor()
 
@@ -136,6 +144,37 @@ def _init_db_locked():
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_research_sources_username ON research_sources(username, retrieved_at DESC)
         """)
+
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS backup_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                backup_type TEXT NOT NULL CHECK(backup_type IN
+                    ('nightly', 'weekly', 'pre_migration', 'manual')),
+                status TEXT NOT NULL CHECK(status IN
+                    ('success', 'partial', 'failed')),
+                backup_path TEXT NOT NULL,
+                files_backed_up INTEGER NOT NULL DEFAULT 0,
+                total_size_bytes INTEGER NOT NULL DEFAULT 0,
+                duration_seconds REAL NOT NULL DEFAULT 0.0,
+                error_message TEXT DEFAULT NULL,
+                started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                completed_at DATETIME DEFAULT NULL
+            )
+            """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_backup_log_started
+            ON backup_log(started_at DESC)
+            """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_backup_log_type_status
+            ON backup_log(backup_type, status)
+            """
+        )
 
         conn.commit()
         logger.info(f"Intelligence briefings database initialized at {DB_PATH}")
@@ -340,6 +379,91 @@ def get_total_count(username: str = "Pantronux") -> int:
     finally:
         if conn:
             conn.close()
+
+
+def log_backup_start(backup_type: str, backup_path: str) -> int:
+    """Insert an audit row for the start of a backup run."""
+    init_db()
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO backup_log (
+                backup_type, status, backup_path, files_backed_up,
+                total_size_bytes, duration_seconds, error_message, completed_at
+            ) VALUES (?, 'partial', ?, 0, 0, 0.0, NULL, NULL)
+            """,
+            (backup_type, backup_path),
+        )
+        conn.commit()
+        return int(cursor.lastrowid)
+    finally:
+        if conn:
+            conn.close()
+
+
+def log_backup_complete(
+    log_id: int,
+    status: str,
+    files_count: int,
+    size_bytes: int,
+    duration_s: float,
+    error: str | None = None,
+) -> None:
+    """Finalize a backup audit row."""
+    init_db()
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            UPDATE backup_log
+            SET status = ?, files_backed_up = ?, total_size_bytes = ?,
+                duration_seconds = ?, error_message = ?, completed_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (status, files_count, size_bytes, duration_s, error, log_id),
+        )
+        conn.commit()
+    finally:
+        if conn:
+            conn.close()
+
+
+def get_backup_history(limit: int = 30) -> List[Dict]:
+    """Return recent backup audit rows."""
+    init_db()
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT id, backup_type, status, backup_path, files_backed_up,
+                   total_size_bytes, duration_seconds, error_message,
+                   started_at, completed_at
+            FROM backup_log
+            ORDER BY started_at DESC, id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+    except Exception as e:
+        logger.error(f"Failed to get backup history: {e}")
+        return []
+    finally:
+        if conn:
+            conn.close()
+
+
+def get_last_backup_status() -> Optional[Dict]:
+    """Return the most recent backup audit row."""
+    rows = get_backup_history(limit=1)
+    return rows[0] if rows else None
 
 # Initialize on import
 init_db()

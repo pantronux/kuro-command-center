@@ -60,6 +60,12 @@ def init_db():
 def _init_db_locked():
     conn = None
     try:
+        try:
+            from kuro_backend import backup_manager
+
+            backup_manager.snapshot_pre_migration(DB_PATH, label="chat_history")
+        except Exception as snap_exc:
+            logger.warning("Pre-migration snapshot skipped: %s", snap_exc)
         conn = _get_connection()
         cursor = conn.cursor()
         cursor.execute("""

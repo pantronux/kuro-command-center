@@ -303,6 +303,12 @@ def init_short_term_db():
 
 def _init_short_term_db_locked():
     """Perform the actual database initialization schema work."""
+    try:
+        from kuro_backend import backup_manager
+
+        backup_manager.snapshot_pre_migration(SHORT_TERM_DB, label="short_term")
+    except Exception as snap_exc:
+        logger.warning(f"Pre-migration snapshot skipped: {snap_exc}")
     conn = _get_short_term_conn()
     cursor = conn.cursor()
     cursor.execute("""

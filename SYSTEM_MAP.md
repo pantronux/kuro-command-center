@@ -7,7 +7,7 @@
 
 ## Executive Summary (User-Friendly Overview)
 
-**Note on Telegram**: Kuro AI uses Telegram strictly for *outbound* proactive notifications (e.g. Sentinel alerts, Dreaming cycle updates). There is currently no inbound polling loop for two-way chat commands.
+**Note on Telegram**: Kuro AI uses Telegram for both *outbound* proactive notifications (e.g. Sentinel alerts, Dreaming cycle updates) and *inbound* two-way chat commands. Messages are processed via the same LangGraph reasoning core as the Web Dashboard.
 
 
 Kuro AI is your **Intelligent Personal Sovereign**—a sophisticated digital companion designed to orchestrate your dissertation research, system security, and daily workflows into one seamless experience.
@@ -147,6 +147,26 @@ Kuro AI is your **Intelligent Personal Sovereign**—a sophisticated digital com
 - **In-Session Keyword Search**: Client-side search modal with backend keyword filtering (`search_messages_in_session`).
 - **Markdown/Text Export**: Clean history formatting for archival purposes via `/api/chats/{chat_id}/export`.
 - **Draft Preservation**: Persistent `sessionDrafts` object in `app.js` ensures unsent messages survive session switching.
+
+### V1.0.0 Beta 5 Hotfix Architecture Notes ("Sovereign Shield")
+
+- **Pre-migration snapshot**: `chat_history.py`, `auth_db.py`, `finance_db.py`,
+  `intelligence_db.py`, and `memory_manager.py` now request a compressed
+  pre-migration snapshot via `backup_manager.snapshot_pre_migration()` before
+  live schema bootstrap touches an existing SQLite file.
+- **Nightly automated backup (01:00 WIB)**: `kuro_backend/backup_manager.py`
+  creates WAL-safe SQLite backups via `VACUUM INTO`, gzips runtime JSON state,
+  writes `backup_manifest.json`, and prunes daily / weekly / pre-migration
+  retention windows under `backups/`.
+- **Backup audit trail**: `kuro_backend/intelligence_db.py` now owns the
+  `backup_log` table plus `log_backup_start`, `log_backup_complete`,
+  `get_backup_history`, and `get_last_backup_status`.
+- **Admin backup routes**: `main.py` adds `/api/backup/status`,
+  `/api/backup/run`, and `/api/backup/history`, all guarded by JWT cookie auth
+  plus the `ADMIN_USERNAME` check.
+- **Global test DB isolation**: `conftest.py` now autoredirects all active DB
+  paths and runtime JSON state into `tmp_path`, preventing the test suite from
+  mutating production `*.db` files.
 
 ### V1.0.0 Beta 4 Architecture Notes ("Sovereign Intelligence")
 
@@ -410,11 +430,12 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
 ### Entrypoint
 - [`main.py`](main.py) — *public*: `app` (FastAPI), `verify_password`,
   `create_access_token`, `validate_token`, `save_upload_file`,
-  `api_success`, `api_error`, and 82 `@app.*` route handlers spanning
+  `api_success`, `api_error`, and the FastAPI route handlers spanning
   `/api/login`, `/api/chat`, `/api/chat/stream`,
   `/ws/dashboard`, `/api/compliance*`,
   `/api/intelligence*`, `/api/finances/*`, `/api/persona*`, `/api/observability/*`,
   `/api/evaluation/summary` (**Beta 3** — Admin-only aggregated quality metrics),
+  `/api/backup/status`, `/api/backup/run`, `/api/backup/history`,
   `/api/system-status`, `/api/health`. Also wires three APScheduler
   `BackgroundScheduler` instances (`_hardware_sentinel_scheduler`) and the Uvicorn boot thread.
 
@@ -537,6 +558,12 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
   — *public*: `generate_daily_queries`, `execute_research`,
   `synthesize_intelligence`, `format_telegram_message`,
   `run_daily_research`.
+- [`kuro_backend/backup_manager.py`](kuro_backend/backup_manager.py) —
+  *public*: `get_backup_dir`, `snapshot_pre_migration`,
+  `run_nightly_backup`, `run_nightly_backup_sync`, `run_manual_backup`,
+  `get_backup_status`, `prune_old_backups`.
+  Nightly/manual backup engine for Tier 1 runtime DB/JSON assets plus weekly
+  directory snapshots (`kuro_chromadb/`, `uploaded_files/`).
 - [`kuro_backend/evaluation/`](kuro_backend/evaluation/) — *module*:
   Reasoning quality monitoring.
   - [`autonomous_evaluator.py`](kuro_backend/evaluation/autonomous_evaluator.py):
@@ -639,8 +666,10 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
 - [`kuro_backend/intelligence_db.py`](kuro_backend/intelligence_db.py) —
   *public*: `init_db`, `save_briefing`, `get_briefings`,
   `get_briefing_by_date`, `search_briefings`, `get_total_count`,
-  `save_research_sources`, `get_research_sources`.
-  **Tables**: `intelligence_briefings`, `research_sources` (→ `kuro_intelligence.db`).
+  `save_research_sources`, `get_research_sources`, `log_backup_start`,
+  `log_backup_complete`, `get_backup_history`, `get_last_backup_status`.
+  **Tables**: `intelligence_briefings`, `research_sources`, `backup_log`
+  (→ `kuro_intelligence.db`).
 - [`kuro_backend/reminder_db.py`](kuro_backend/reminder_db.py) —
   *public*: `init_reminder_db`. Schema for `reminders` lives in
   `services/core_service.py` (→ `kuro_reminders.db`).
@@ -713,6 +742,10 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
   - Greeting / UI: `KURO_PROACTIVE_GREETING_ENABLED`,
     `KURO_PROACTIVE_GREETING_COOLDOWN_DAYS`,
     `KURO_PROACTIVE_GREETING_LANG`, `KURO_UI_MODE_DEFAULT`.
+  - Backup & safety: `KURO_BACKUP_ENABLED`, `KURO_BACKUP_DIR`,
+    `KURO_BACKUP_RETAIN_DAYS`, `KURO_BACKUP_WEEKLY_RETAIN_WEEKS`,
+    `KURO_BACKUP_PRE_MIGRATION_RETAIN_DAYS`,
+    `KURO_BACKUP_COMPRESS_LEVEL`, `KURO_BACKUP_ALERT_ON_FAILURE`.
   - Additional runtime keys read inline across modules (e.g. Mem0, OpenAI
     embedding, OpenClaw bridge URL/token, Serper) are documented in the
     respective files' docstrings.
@@ -754,6 +787,7 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
     `standards_kb(id, standard, clause, …)`,
     `gap_analysis(id, document_name, standard, results, …)`
   - `intelligence_briefings(id, date, summary_text, raw_json, signals)`
+  - `backup_log(id, backup_type, status, backup_path, files_backed_up, total_size_bytes, started_at, completed_at, …)`
   - `monthly_budget(id, month, amount_usd, notes, …)`,
     `recurring_expenses(id, label, amount_usd, cadence, next_due, …)`,
     `api_usage_daily(date, model_name, prompt_tokens, completion_tokens, cost_usd, …)`
@@ -866,6 +900,9 @@ semantics, and the presence of both indexes via `PRAGMA index_list`.
 - **Runtime state files** (`kuro_memory.json`, `master_profile.json`, all
   `*.db` files, `kuro_chromadb/`, `phoenix_data/`) are deliberately excluded; they mutate constantly and
   are never part of the source tree.
+- **Backup storage growth**: `backups/` is runtime-only and intentionally
+  excluded from VCS; daily compressed DB snapshots plus weekly directory copies
+  can grow quickly and should be monitored with the configured retention window.
 - **Telegram, Proxmox, and OpenClaw** calls assume the matching sidecar
   services are reachable; failure is absorbed by circuit-breakers but
   downgraded reasoning quality will not be visible in this map.
