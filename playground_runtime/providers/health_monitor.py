@@ -48,4 +48,12 @@ class HealthMonitor:
         st = self._state(provider_id)
         if st.unavailable_until is None:
             return True
-        return datetime.now(timezone.utc) >= st.unavailable_until
+
+        now = datetime.now(timezone.utc)
+        if now >= st.unavailable_until:
+            # Once cooldown has elapsed, clear breaker state so providers
+            # are not immediately re-blocked after a single new failure.
+            st.consecutive_failures = 0
+            st.unavailable_until = None
+            return True
+        return False
