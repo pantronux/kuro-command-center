@@ -176,19 +176,34 @@ def process_chat(
             active_context += f"\n\n[LAST_TOPIC: {last_topic}]"
         
         # === BUILD PROMPT WITH MEMORY INJECTION ===
+        # NOTE:
+        # `query_memory()` payload shape evolved over versions. Legacy core path
+        # must tolerate missing keys to prevent NameError/KeyError at runtime.
+        memory_injection = memory.get("memory_injection", "")
+        override = memory.get("override", {}) or {}
+        confidence = memory.get("confidence", {}) or {}
+        verification = memory.get("verification", {}) or {}
+
         full_message = f"{message}{active_context}{memory_injection}"
-        
+
         # Add override message if Tier 3 is absolute truth
-        if override["override_applied"]:
-            full_message += f"\n\n{override['message']}"
-        
+        if override.get("override_applied"):
+            override_message = override.get("message", "")
+            if override_message:
+                full_message += f"\n\n{override_message}"
+
         # Add confidence-based disclaimer
-        if confidence["disclaimer"]:
-            full_message += f"\n\n{confidence['disclaimer']}"
-        
+        confidence_disclaimer = confidence.get("disclaimer", "")
+        if confidence_disclaimer:
+            full_message += f"\n\n{confidence_disclaimer}"
+
         # Add verification note if info found in multiple tiers
-        if len(verification["found_in_tiers"]) >= 2:
-            full_message += f"\n\n[VERIFIKASI: Informasi ditemukan di {len(verification['found_in_tiers'])} sumber memori - kemungkinan akurat.]"
+        found_in_tiers = verification.get("found_in_tiers", []) or []
+        if len(found_in_tiers) >= 2:
+            full_message += (
+                "\n\n[VERIFIKASI: Informasi ditemukan di "
+                f"{len(found_in_tiers)} sumber memori - kemungkinan akurat.]"
+            )
         
         # === BUILD CONTENTS FOR MULTI-MODAL INPUT ===
         contents_parts = []

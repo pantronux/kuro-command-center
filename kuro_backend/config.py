@@ -100,6 +100,7 @@ class Settings:
     KURO_CANVAS3_MAX_REFLECTION_DEPTH: int = int(os.getenv("KURO_CANVAS3_MAX_REFLECTION_DEPTH", "2"))
     KURO_CANVAS3_MAX_CONSENSUS_ROUNDS: int = int(os.getenv("KURO_CANVAS3_MAX_CONSENSUS_ROUNDS", "3"))
     KURO_CANVAS3_MAX_RETRIEVAL_EXPANSION: int = int(os.getenv("KURO_CANVAS3_MAX_RETRIEVAL_EXPANSION", "5"))
+    KURO_DB_BUSY_TIMEOUT_MS: int = int(os.getenv("KURO_DB_BUSY_TIMEOUT_MS", "30000"))
 
     """
     Loads environment variables from the .env file.

@@ -281,8 +281,20 @@ def _reset_short_term_schema_ready_for_tests():
 
 def _get_short_term_conn():
     """Get SQLite connection for short-term memory."""
-    conn = sqlite3.connect(SHORT_TERM_DB)
+    # Increase busy timeout to reduce transient "database is locked" errors
+    # under concurrent chat + background memory-write workloads.
+    busy_timeout_ms = int(getattr(settings, "KURO_DB_BUSY_TIMEOUT_MS", 30000) or 30000)
+    conn = sqlite3.connect(SHORT_TERM_DB, timeout=max(1.0, busy_timeout_ms / 1000.0))
     conn.row_factory = sqlite3.Row
+    try:
+        # WAL improves read/write concurrency for chat history + memory tasks.
+        conn.execute("PRAGMA journal_mode=WAL")
+        # NORMAL sync gives better write throughput while keeping WAL durability.
+        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute(f"PRAGMA busy_timeout={busy_timeout_ms}")
+    except Exception:
+        # Non-fatal: keep compatibility if pragma cannot be applied.
+        pass
     return conn
 
 def init_short_term_db():
@@ -332,6 +344,10 @@ def _init_short_term_db_locked():
         logger.info("short_term migration: added chat_id column")
     cursor.execute(
         "CREATE INDEX IF NOT EXISTS idx_short_term_chat_id ON short_term(chat_id, persona_scope, username)"
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_short_term_scope_user_chat_id_id "
+        "ON short_term(persona_scope, username, chat_id, id DESC)"
     )
 
     # Sliding-window summary cache (P2.1) — keyed by (username, persona_scope). Keeps the

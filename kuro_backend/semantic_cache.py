@@ -36,6 +36,7 @@ import os
 import threading
 import time
 from dataclasses import dataclass, field
+from contextlib import asynccontextmanager
 from typing import Final, Iterable, Optional, Sequence
 
 from kuro_backend import embedding_cache
@@ -204,6 +205,17 @@ def clear() -> None:
         _entries.clear()
 
 
+@asynccontextmanager
+async def atomic_write_and_invalidate(username: str, query: str, persona: str, response: str, tags: Iterable[str] = ()):
+    """Atomically write cache entry and invalidate tag only on success.
+
+    This helper ensures invalidation is never executed when write fails.
+    """
+    store(query=query, persona=persona, response=response, tags=tags)
+    invalidate_tag(username)
+    yield
+
+
 def classify_tags(query: str) -> frozenset[str]:
     """Cheap heuristic to tag a query for revision-aware invalidation.
 
@@ -223,4 +235,5 @@ __all__ = [
     "invalidate_tag",
     "lookup",
     "store",
+    "atomic_write_and_invalidate",
 ]
