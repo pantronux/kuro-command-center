@@ -128,6 +128,8 @@ _TRUE_TOKEN_STREAMING_ENABLED = (
 )
 _POST_RESPONSE_QUEUE_MAXSIZE = int(os.getenv("KURO_POST_RESPONSE_QUEUE_MAXSIZE", "500"))
 _post_response_queue = queue.Queue(maxsize=_POST_RESPONSE_QUEUE_MAXSIZE)  # type: ignore[assignment]
+_STREAM_CHUNK_QUEUE_MAXSIZE = int(os.getenv("KURO_STREAM_CHUNK_QUEUE_MAXSIZE", "256"))
+_STREAM_IDLE_TIMEOUT_S = float(os.getenv("KURO_STREAM_IDLE_TIMEOUT_S", "20"))
 _EPISTEMIC_V2_ENABLED = os.getenv("KURO_EPISTEMIC_V2_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
 _STREAM_SANITIZER_ENABLED = os.getenv("KURO_STREAM_SANITIZER_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
 _RETRIEVAL_QUALITY_V2_ENABLED = os.getenv("KURO_RETRIEVAL_QUALITY_V2_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
@@ -453,7 +455,7 @@ async def _stream_direct_llm_chunks(
     Real token streaming bridge from blocking Gemini iterator into async generator.
     """
     loop = asyncio.get_running_loop()
-    chunk_queue: asyncio.Queue = asyncio.Queue()
+    chunk_queue: asyncio.Queue = asyncio.Queue(maxsize=max(8, _STREAM_CHUNK_QUEUE_MAXSIZE))
     profile = personas.get_sampling_profile(persona_mode)
 
     def _worker() -> None:
@@ -480,15 +482,23 @@ async def _stream_direct_llm_chunks(
             for event in stream:
                 chunk = getattr(event, "text", None)
                 if chunk:
-                    loop.call_soon_threadsafe(chunk_queue.put_nowait, ("chunk", str(chunk)))
-            loop.call_soon_threadsafe(chunk_queue.put_nowait, ("done", None))
+                    asyncio.run_coroutine_threadsafe(chunk_queue.put(("chunk", str(chunk))), loop).result(timeout=5)
+            asyncio.run_coroutine_threadsafe(chunk_queue.put(("done", None)), loop).result(timeout=5)
         except Exception as exc:
-            loop.call_soon_threadsafe(chunk_queue.put_nowait, ("error", str(exc)))
+            try:
+                asyncio.run_coroutine_threadsafe(chunk_queue.put(("error", str(exc))), loop).result(timeout=5)
+            except Exception:
+                logger.error("[STREAM] Failed to publish stream error to async queue: %s", exc)
 
     threading.Thread(target=_worker, daemon=True).start()
 
     while True:
-        kind, payload = await chunk_queue.get()
+        try:
+            kind, payload = await asyncio.wait_for(chunk_queue.get(), timeout=_STREAM_IDLE_TIMEOUT_S)
+        except asyncio.TimeoutError as exc:
+            raise RuntimeError(
+                f"stream stalled: no chunks for {_STREAM_IDLE_TIMEOUT_S:.1f}s"
+            ) from exc
         if kind == "chunk":
             yield payload
         elif kind == "done":

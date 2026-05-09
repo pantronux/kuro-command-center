@@ -19,6 +19,7 @@ Side Effects: Reads + writes across sqlite + Mem0, Mem0 HTTP calls, SSoT revisio
 from __future__ import annotations
 
 import concurrent.futures
+import collections
 import hashlib
 import json
 import logging
@@ -64,6 +65,18 @@ _INGESTION_BRIDGE_ENABLED = bool(getattr(settings, "KURO_INGESTION_BRIDGE_ENABLE
 _INGESTION_BRIDGE_TOP_K = int(getattr(settings, "KURO_INGESTION_BRIDGE_TOP_K", 5))
 _INGESTION_BRIDGE_MAX_CHARS = int(getattr(settings, "KURO_INGESTION_BRIDGE_MAX_CHARS", 2500))
 _INGESTION_BRIDGE_MIN_SCORE = float(getattr(settings, "KURO_INGESTION_BRIDGE_MIN_SCORE", 0.28))
+_MEM0_USER_LOCKS: Dict[str, threading.Lock] = {}
+_MEM0_QUEUE_DEDUP: set[str] = set()
+_MEM0_PENDING_QUEUE: Dict[str, "collections.deque[tuple[str, str, str]]"] = collections.defaultdict(collections.deque)
+_MEM0_QUEUE_LOCK = threading.Lock()
+
+
+def _get_mem0_user_lock(username: str) -> threading.Lock:
+    lock = _MEM0_USER_LOCKS.get(username)
+    if lock is None:
+        lock = threading.Lock()
+        _MEM0_USER_LOCKS[username] = lock
+    return lock
 
 
 def _parallel_gather_sync(
@@ -954,6 +967,7 @@ def maybe_trigger_chat_context(chat_id: str, persona_scope: str, username: str) 
     """
     from kuro_backend import chat_history
 
+    started = time.perf_counter()
     try:
         msg_count = chat_history.get_session_message_count(chat_id)
 
@@ -966,6 +980,19 @@ def maybe_trigger_chat_context(chat_id: str, persona_scope: str, username: str) 
             )
             # Run synchronously in post-response worker thread (non-blocking)
             generate_chat_context(chat_id, persona_scope, username)
+            latency_ms = (time.perf_counter() - started) * 1000.0
+            try:
+                from kuro_backend import intelligence_db
+
+                intelligence_db.add_audit_trail(
+                    action="chat_context_refresh",
+                    details=(
+                        f"chat_id={chat_id} username={username} "
+                        f"message_count_at_trigger={msg_count} latency_ms={latency_ms:.2f}"
+                    ),
+                )
+            except Exception as audit_exc:
+                logger.debug("[CHAT_CONTEXT] audit trail log skipped: %s", audit_exc)
     except Exception as exc:
         logger.debug("[CHAT_CONTEXT] maybe_trigger failed: %s", exc)
 
@@ -1513,46 +1540,67 @@ def execute_mem0_extract_task(user_input: str, final_response: str, username: st
     if _mem0_should_skip_duplicate(fp):
         logger.info("[MEMORY_COORD] mem0_extract skipped duplicate fp=%s...", fp[:12])
         return
+    dedup_key = f"{username}:{hash((final_response or '')[:64])}"
+    user_lock = _get_mem0_user_lock(username)
+    if not user_lock.acquire(blocking=False):
+        with _MEM0_QUEUE_LOCK:
+            if dedup_key in _MEM0_QUEUE_DEDUP:
+                logger.info("[MEMORY_COORD] mem0_enqueue skipped duplicate key=%s", dedup_key)
+                return
+            _MEM0_QUEUE_DEDUP.add(dedup_key)
+            _MEM0_PENDING_QUEUE[username].append((user_input, final_response, dedup_key))
+        logger.info("[MEMORY_COORD] mem0 task queued for user=%s depth=%d", username, len(_MEM0_PENDING_QUEUE[username]))
+        return
 
-    _trace_coordinator_span(
-        "execute_mem0_extract_task",
-        {"fp": fp[:16], "chars_in": len(user_input or ""), "chars_out": len(final_response or "")},
-    )
+    try:
+        _trace_coordinator_span(
+            "execute_mem0_extract_task",
+            {"fp": fp[:16], "chars_in": len(user_input or ""), "chars_out": len(final_response or "")},
+        )
 
-    max_attempts = 3
-    attempt = 0
-    while attempt < max_attempts:
-        try:
-            memories_to_store = perpetual_memory.perpetual_memory.extract_personal_info(
-                user_input,
-                final_response,
-                username,
-            )
-            if memories_to_store and isinstance(memories_to_store, list):
-                perpetual_memory.perpetual_memory.store_memories(memories_to_store, username)
-                logger.info("[MEMORY_COORD] mem0_extract stored n=%s for user %s", len(memories_to_store), username)
+        max_attempts = 3
+        attempt = 0
+        while attempt < max_attempts:
+            try:
+                memories_to_store = perpetual_memory.perpetual_memory.extract_personal_info(
+                    user_input,
+                    final_response,
+                    username,
+                )
+                if memories_to_store and isinstance(memories_to_store, list):
+                    perpetual_memory.perpetual_memory.store_memories(memories_to_store, username)
+                    logger.info("[MEMORY_COORD] mem0_extract stored n=%s for user %s", len(memories_to_store), username)
 
-                # Invalidate semantic cache on write
-                try:
-                    from kuro_backend import semantic_cache
-                    semantic_cache.invalidate_tag(username)
-                except Exception as sc_err:
-                    logger.warning("[MEMORY_COORD] Failed to invalidate semantic cache: %s", sc_err)
-            else:
-                logger.debug("[MEMORY_COORD] mem0_extract nothing to store")
-            return
-        except Exception as e:
-            attempt += 1
-            logger.warning("[MEMORY_COORD] mem0_extract attempt %d failed: %s", attempt, e)
-            if attempt < max_attempts:
-                time.sleep(2 ** (attempt - 1)) # Exponential backoff: 1s, 2s
-            else:
-                logger.error("[MEMORY_COORD] mem0_extract failed permanently. Writing to mem0_write_failures.")
-                try:
-                    payload = json.dumps({"user_input": user_input, "final_response": final_response})
-                    memory_manager.record_mem0_write_failure(username, payload)
-                except Exception as db_err:
-                    logger.error("[MEMORY_COORD] Failed to record mem0_write_failure: %s", db_err)
+                    # Invalidate semantic cache on write
+                    try:
+                        from kuro_backend import semantic_cache
+                        semantic_cache.invalidate_tag(username)
+                    except Exception as sc_err:
+                        logger.warning("[MEMORY_COORD] Failed to invalidate semantic cache: %s", sc_err)
+                else:
+                    logger.debug("[MEMORY_COORD] mem0_extract nothing to store")
+                return
+            except Exception as e:
+                attempt += 1
+                logger.warning("[MEMORY_COORD] mem0_extract attempt %d failed: %s", attempt, e)
+                if attempt < max_attempts:
+                    time.sleep(2 ** (attempt - 1)) # Exponential backoff: 1s, 2s
+                else:
+                    logger.error("[MEMORY_COORD] mem0_extract failed permanently. Writing to mem0_write_failures.")
+                    try:
+                        payload = json.dumps({"user_input": user_input, "final_response": final_response})
+                        memory_manager.record_mem0_write_failure(username, payload)
+                    except Exception as db_err:
+                        logger.error("[MEMORY_COORD] Failed to record mem0_write_failure: %s", db_err)
+    finally:
+        user_lock.release()
+        while True:
+            with _MEM0_QUEUE_LOCK:
+                if not _MEM0_PENDING_QUEUE[username]:
+                    break
+                queued_user_input, queued_final_response, queued_key = _MEM0_PENDING_QUEUE[username].popleft()
+                _MEM0_QUEUE_DEDUP.discard(queued_key)
+            execute_mem0_extract_task(queued_user_input, queued_final_response, username=username)
 
 
 
