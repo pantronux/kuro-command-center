@@ -60,6 +60,10 @@ CHAT_CONTEXT_MODEL = os.getenv("KURO_CHAT_CONTEXT_MODEL", "gemini-3-flash-previe
 _MEMORY_INTEGRITY_V2_ENABLED = os.getenv("KURO_MEMORY_INTEGRITY_V2_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
 _CANVAS3_MEMORY_CANONICALIZATION_ENABLED = os.getenv("KURO_CANVAS3_MEMORY_CANONICALIZATION_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
 _CANVAS3_COGNITIVE_BUDGET_ENABLED = os.getenv("KURO_CANVAS3_COGNITIVE_BUDGET_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+_INGESTION_BRIDGE_ENABLED = bool(getattr(settings, "KURO_INGESTION_BRIDGE_ENABLED", True))
+_INGESTION_BRIDGE_TOP_K = int(getattr(settings, "KURO_INGESTION_BRIDGE_TOP_K", 5))
+_INGESTION_BRIDGE_MAX_CHARS = int(getattr(settings, "KURO_INGESTION_BRIDGE_MAX_CHARS", 2500))
+_INGESTION_BRIDGE_MIN_SCORE = float(getattr(settings, "KURO_INGESTION_BRIDGE_MIN_SCORE", 0.28))
 
 
 def _parallel_gather_sync(
@@ -966,6 +970,169 @@ def maybe_trigger_chat_context(chat_id: str, persona_scope: str, username: str) 
         logger.debug("[CHAT_CONTEXT] maybe_trigger failed: %s", exc)
 
 
+def _parse_dataset_and_section(vector_id: str) -> tuple[Optional[str], Optional[int]]:
+    if not vector_id or ":" not in vector_id:
+        return None, None
+    left, right = vector_id.split(":", 1)
+    try:
+        return left, int(right)
+    except Exception:
+        return left, None
+
+
+def _distance_to_similarity(distance: Any) -> float:
+    try:
+        value = float(distance)
+    except Exception:
+        return 0.0
+    if value < 0:
+        value = 0.0
+    return 1.0 / (1.0 + value)
+
+
+def _retrieve_ingestion_evidence(
+    user_input: str,
+    *,
+    username: str,
+    chat_id: Optional[str],
+    top_k: int,
+    max_chars: int,
+    min_score: float,
+) -> List[Dict[str, Any]]:
+    if not _INGESTION_BRIDGE_ENABLED or not user_input:
+        return []
+    try:
+        from kuro_backend.ingestion_center import embedding_manager, ingestion_registry, retrieval_analytics
+
+        query_result = embedding_manager.query_owner_collection(
+            owner_username=username,
+            query_text=user_input,
+            top_k=max(1, int(top_k or 1)),
+        )
+        if (query_result or {}).get("status") != "success":
+            return []
+
+        active_rows = ingestion_registry.list_active_datasets(
+            username,
+            allowed_statuses=("completed", "partially_indexed"),
+        )
+        active_map = {row.get("dataset_uuid"): row for row in active_rows if row.get("dataset_uuid")}
+        if not active_map:
+            return []
+
+        ids = query_result.get("ids", []) or []
+        docs = query_result.get("documents", []) or []
+        metas = query_result.get("metadatas", []) or []
+        dists = query_result.get("distances", []) or []
+
+        candidates: List[Dict[str, Any]] = []
+        for idx, vector_id in enumerate(ids):
+            metadata = metas[idx] if idx < len(metas) and isinstance(metas[idx], dict) else {}
+            doc_text = str(docs[idx] or "") if idx < len(docs) else ""
+            distance = dists[idx] if idx < len(dists) else None
+            dataset_uuid = str(metadata.get("dataset_uuid") or "")
+            section_no: Optional[int]
+            if dataset_uuid:
+                raw_section = metadata.get("chunk_index")
+                try:
+                    section_no = int(raw_section)
+                except Exception:
+                    _, section_no = _parse_dataset_and_section(str(vector_id or ""))
+            else:
+                dataset_uuid, section_no = _parse_dataset_and_section(str(vector_id or ""))
+            if not dataset_uuid or dataset_uuid not in active_map or section_no is None:
+                continue
+
+            chunk_row = ingestion_registry.get_chunk_by_dataset_and_index(dataset_uuid, section_no)
+            chunk_text = str((chunk_row or {}).get("chunk_text") or doc_text or "").strip()
+            if not chunk_text:
+                continue
+
+            score = _distance_to_similarity(distance)
+            if score < min_score:
+                continue
+
+            dataset_row = active_map[dataset_uuid]
+            candidates.append(
+                {
+                    "dataset_uuid": dataset_uuid,
+                    "dataset_name": str(dataset_row.get("dataset_name") or metadata.get("dataset_name") or dataset_uuid),
+                    "chunk_index": int(section_no),
+                    "chunk_id": (chunk_row or {}).get("id"),
+                    "score": score,
+                    "chunk_text": chunk_text,
+                }
+            )
+
+        if not candidates:
+            return []
+
+        candidates.sort(key=lambda item: float(item.get("score") or 0.0), reverse=True)
+
+        selected: List[Dict[str, Any]] = []
+        used_chars = 0
+        for item in candidates:
+            if len(selected) >= max(1, int(top_k or 1)):
+                break
+            remaining = max_chars - used_chars
+            if remaining <= 0:
+                break
+            text = str(item.get("chunk_text") or "").strip()
+            if not text:
+                continue
+            if len(text) > remaining:
+                truncated = text[:remaining]
+                if " " in truncated:
+                    truncated = truncated.rsplit(" ", 1)[0]
+                text = truncated.strip() or text[:remaining]
+            if not text:
+                continue
+            row = dict(item)
+            row["chunk_text"] = text
+            selected.append(row)
+            used_chars += len(text)
+
+        for item in selected:
+            try:
+                retrieval_analytics.log_retrieval_event(
+                    dataset_uuid=str(item.get("dataset_uuid") or ""),
+                    chunk_id=item.get("chunk_id"),
+                    retrieval_source="chat_bridge",
+                    retrieval_score=float(item.get("score") or 0.0),
+                    hallucination_flag=0,
+                    username=username,
+                    chat_id=chat_id,
+                )
+                chunk_id = item.get("chunk_id")
+                if chunk_id:
+                    ingestion_registry.increment_chunk_retrieval_count(int(chunk_id))
+            except Exception as exc:
+                logger.debug("[INGESTION_BRIDGE] analytics log skipped: %s", exc)
+        return selected
+    except Exception as exc:
+        logger.debug("[INGESTION_BRIDGE] retrieval skipped: %s", exc)
+        return []
+
+
+def _build_ingestion_context_block(evidence_items: Sequence[Dict[str, Any]]) -> str:
+    if not evidence_items:
+        return ""
+    lines: List[str] = [
+        "[INGESTION_KNOWLEDGE_CONTEXT]",
+        "Gunakan referensi dokumen ingestion berikut hanya jika relevan dengan pertanyaan user.",
+    ]
+    for idx, item in enumerate(evidence_items, 1):
+        dataset_name = str(item.get("dataset_name") or item.get("dataset_uuid") or "unknown")
+        section_no = int(item.get("chunk_index") or 0)
+        score = float(item.get("score") or 0.0)
+        chunk_text = str(item.get("chunk_text") or "").strip()
+        if not chunk_text:
+            continue
+        lines.append(f"- Sumber {idx}: dokumen={dataset_name}; bagian={section_no}; skor={score:.2f}")
+        lines.append(chunk_text)
+    return "\n".join(lines)
+
+
 def build_context_for_llm(
     user_input: str,
     persona_mode: str,
@@ -981,7 +1148,7 @@ def build_context_for_llm(
     """
     Single read path: raw short-term + optional Mem0 block (same inputs as response_node / stream).
     Returns keys: recent_messages, memory_injection, mem0_context_block,
-    referent_grounding_block, budget.
+    referent_grounding_block, ingestion_context_block, ingestion_sources, budget.
 
     When ``context_budget`` is not supplied, resolves to the persona's
     :class:`kuro_backend.personas.ContextBudget` so the Layer-1 summarizer
@@ -1007,6 +1174,14 @@ def build_context_for_llm(
     parallel_tasks: Dict[str, Any] = {
         "short_term": lambda: (logger.warning("[MEMORY_COORD] chat_id is None in build_context_for_llm") if chat_id is None else None) or memory_manager.get_short_term(persona_scope=persona_mode, username=username, chat_id=chat_id),
         "session_files": lambda: memory_manager.get_session_files(session_id) if session_id else [],
+        "ingestion": lambda: _retrieve_ingestion_evidence(
+            user_input,
+            username=username,
+            chat_id=chat_id,
+            top_k=_INGESTION_BRIDGE_TOP_K,
+            max_chars=_INGESTION_BRIDGE_MAX_CHARS,
+            min_score=_INGESTION_BRIDGE_MIN_SCORE,
+        ),
     }
     if include_referent_grounding:
         parallel_tasks["referent"] = lambda: build_referent_grounding_block(
@@ -1034,6 +1209,8 @@ def build_context_for_llm(
     recent_messages = all_recent_messages[-10:]
     referent_grounding_block = fan_out.get("referent") if include_referent_grounding else None
     mem0_context_block = fan_out.get("mem0_fmt") if filtered_mem0 else None
+    ingestion_sources = fan_out.get("ingestion") or []
+    ingestion_context_block = _build_ingestion_context_block(ingestion_sources)
     if mem0_context_block:
         logger.info(
             "[MEMORY_COORD] build_context persona=%s mem0_chars=%s",
@@ -1104,6 +1281,8 @@ def build_context_for_llm(
         "memory_injection": memory_injection,
         "mem0_context_block": mem0_context_block,
         "referent_grounding_block": referent_grounding_block,
+        "ingestion_context_block": ingestion_context_block,
+        "ingestion_sources": ingestion_sources,
         "budget": budget,
         "finance_block": finance_block,
         "market_block": market_block,

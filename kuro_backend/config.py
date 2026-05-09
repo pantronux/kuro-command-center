@@ -201,6 +201,22 @@ class Settings:
     KURO_ADVISOR_SCHOLAR_NUM_RESULTS: int = int(os.getenv("KURO_ADVISOR_SCHOLAR_NUM_RESULTS", "5"))
 
     # -----------------------------------------------------------------
+    # Ingestion-to-Chat Bridge (Beta 6)
+    # -----------------------------------------------------------------
+    KURO_INGESTION_BRIDGE_ENABLED: bool = os.getenv(
+        "KURO_INGESTION_BRIDGE_ENABLED", "true"
+    ).strip().lower() in ("1", "true", "yes", "on")
+    KURO_INGESTION_BRIDGE_TOP_K: int = int(
+        os.getenv("KURO_INGESTION_BRIDGE_TOP_K", "5")
+    )
+    KURO_INGESTION_BRIDGE_MAX_CHARS: int = int(
+        os.getenv("KURO_INGESTION_BRIDGE_MAX_CHARS", "2500")
+    )
+    KURO_INGESTION_BRIDGE_MIN_SCORE: float = float(
+        os.getenv("KURO_INGESTION_BRIDGE_MIN_SCORE", "0.28")
+    )
+
+    # -----------------------------------------------------------------
     # Backup & Safety (Beta 5 Hotfix - Sovereign Shield)
     # -----------------------------------------------------------------
     KURO_BACKUP_ENABLED: bool = os.getenv(

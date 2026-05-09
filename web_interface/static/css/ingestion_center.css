@@ -124,13 +124,118 @@ small {
     flex-wrap: wrap;
 }
 
+.toolbar-controls {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.pagination-bar {
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px solid var(--ingest-border-soft);
+}
+
+.pagination-controls {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+}
+
+.pagination-controls button {
+    min-width: 72px;
+    padding: 8px 10px;
+}
+
+.pagination-controls button:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.pagination-meta {
+    color: var(--ingest-muted);
+    font-size: 0.85rem;
+}
+
 .table-wrap {
     overflow-x: auto;
+}
+
+.adaptive-scroll {
+    max-height: clamp(280px, 58vh, 760px);
+    overflow-y: auto;
+    padding-right: 6px;
+    overscroll-behavior: contain;
+}
+
+.table-wrap.adaptive-scroll {
+    overflow-x: auto;
+    overflow-y: auto;
+    max-height: clamp(280px, 56vh, 780px);
+}
+
+.adaptive-scroll-jobs {
+    max-height: clamp(260px, 52vh, 720px);
+}
+
+.adaptive-scroll-detail {
+    max-height: clamp(220px, 40vh, 560px);
+}
+
+.adaptive-scroll-chunks {
+    max-height: clamp(300px, 62vh, 920px);
+}
+
+/* Force panel-internal scrolling for long ingestion sections. */
+.table-wrap.adaptive-scroll,
+#jobList.adaptive-scroll,
+#datasetDetail.adaptive-scroll,
+#chunkExplorer.adaptive-scroll {
+    overflow-y: auto !important;
+}
+
+#jobList.adaptive-scroll {
+    height: min(56vh, 760px);
+}
+
+#datasetDetail.adaptive-scroll {
+    height: min(42vh, 560px);
+}
+
+#chunkExplorer.adaptive-scroll {
+    height: min(62vh, 920px);
+}
+
+/* Logs page: fixed internal scroll regions to prevent long page growth. */
+#failedJobs.adaptive-scroll-logs,
+#failedDatasets.adaptive-scroll-logs {
+    height: min(48vh, 720px);
+    overflow-y: auto !important;
+}
+
+#duplicateDatasets.adaptive-scroll-logs {
+    height: min(34vh, 460px);
+    overflow-y: auto !important;
+}
+
+#recentJobs.adaptive-scroll-logs {
+    height: min(54vh, 820px);
+    overflow-y: auto !important;
 }
 
 .ingestion-table {
     width: 100%;
     border-collapse: collapse;
+}
+
+.ingestion-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: rgba(15, 17, 21, 0.95);
 }
 
 .ingestion-table th,
@@ -141,6 +246,7 @@ small {
 }
 
 input,
+select,
 button {
     border-radius: 12px;
     border: 1px solid rgba(255, 255, 255, 0.08);
@@ -189,6 +295,11 @@ button:hover {
     border-radius: 8px;
     padding: 6px 10px;
     cursor: pointer;
+}
+
+.toolbar-controls select,
+.toolbar-controls input[type="search"] {
+    min-width: 160px;
 }
 
 .hidden {
@@ -304,5 +415,23 @@ button:hover {
 
     .ingestion-rail {
         position: static;
+    }
+
+    .adaptive-scroll {
+        max-height: clamp(220px, 52vh, 620px);
+        padding-right: 2px;
+    }
+
+    #jobList.adaptive-scroll,
+    #datasetDetail.adaptive-scroll,
+    #chunkExplorer.adaptive-scroll {
+        height: min(52vh, 620px);
+    }
+
+    #failedJobs.adaptive-scroll-logs,
+    #failedDatasets.adaptive-scroll-logs,
+    #duplicateDatasets.adaptive-scroll-logs,
+    #recentJobs.adaptive-scroll-logs {
+        height: min(46vh, 560px);
     }
 }

@@ -107,3 +107,47 @@ def delete_vectors(dataset_uuid: str, owner_username: Optional[str] = None) -> D
 def rebuild_vectors(dataset_uuid: str, chunks: List[Dict[str, Any]], metadata: Dict[str, Any]) -> Dict[str, Any]:
     delete_vectors(dataset_uuid, metadata.get("owner_username"))
     return embed_chunks(dataset_uuid, chunks, metadata)
+
+
+def query_owner_collection(owner_username: str, query_text: str, top_k: int = 5) -> Dict[str, Any]:
+    collection_name = _get_collection_name(owner_username or "unknown")
+    if not query_text:
+        return {
+            "status": "success",
+            "collection_name": collection_name,
+            "ids": [],
+            "documents": [],
+            "metadatas": [],
+            "distances": [],
+        }
+    try:
+        client = _get_client()
+        collection = client.get_or_create_collection(name=collection_name)
+        response = collection.query(
+            query_embeddings=[_stable_embedding(query_text)],
+            n_results=max(1, int(top_k or 1)),
+            include=["metadatas", "documents", "distances"],
+        )
+        ids = (response or {}).get("ids", [[]])[0] if isinstance(response, dict) else []
+        documents = (response or {}).get("documents", [[]])[0] if isinstance(response, dict) else []
+        metadatas = (response or {}).get("metadatas", [[]])[0] if isinstance(response, dict) else []
+        distances = (response or {}).get("distances", [[]])[0] if isinstance(response, dict) else []
+        return {
+            "status": "success",
+            "collection_name": collection_name,
+            "ids": ids or [],
+            "documents": documents or [],
+            "metadatas": metadatas or [],
+            "distances": distances or [],
+        }
+    except Exception as exc:
+        logger.warning("[INGESTION] query failed for %s: %s", collection_name, exc)
+        return {
+            "status": "failed",
+            "collection_name": collection_name,
+            "ids": [],
+            "documents": [],
+            "metadatas": [],
+            "distances": [],
+            "error": str(exc),
+        }

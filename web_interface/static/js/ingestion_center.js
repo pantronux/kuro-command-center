@@ -1,9 +1,25 @@
+const PAGE_SIZE = 10;
+
 const state = {
   datasets: [],
+  datasetViewRows: [],
   jobs: [],
   orphanFiles: [],
   selectedDataset: null,
   pollTimer: null,
+  search: {
+    datasets: "",
+    jobs: "",
+    detail: "",
+    chunks: "",
+  },
+  filters: {
+    status: "non_archived",
+    category: "all",
+  },
+  pagination: {
+    datasets: 1,
+  },
 };
 
 async function fetchJson(url, options = {}) {
@@ -36,6 +52,13 @@ function renderSummary(totals = {}) {
 }
 
 function datasetActionButtons(dataset) {
+  const status = String(dataset.ingestion_status || "").toLowerCase();
+  if (status === "deleted") {
+    return `
+      <button data-action="view" data-id="${dataset.dataset_uuid}">View</button>
+      <button data-action="archive" data-id="${dataset.dataset_uuid}">Archive</button>
+    `;
+  }
   return `
     <button data-action="view" data-id="${dataset.dataset_uuid}">View</button>
     <button data-action="reindex" data-id="${dataset.dataset_uuid}">Reindex</button>
@@ -44,9 +67,40 @@ function datasetActionButtons(dataset) {
   `;
 }
 
+function paginateRows(rows, pageKey) {
+  const totalItems = rows.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE));
+  const safePage = Math.min(Math.max(1, state.pagination[pageKey] || 1), totalPages);
+  state.pagination[pageKey] = safePage;
+  const start = (safePage - 1) * PAGE_SIZE;
+  return {
+    rows: rows.slice(start, start + PAGE_SIZE),
+    totalItems,
+    totalPages,
+    currentPage: safePage,
+    startIndex: totalItems ? start + 1 : 0,
+    endIndex: Math.min(start + PAGE_SIZE, totalItems),
+  };
+}
+
+function renderPagination(nodeId, pageKey, pageInfo) {
+  const node = document.getElementById(nodeId);
+  if (!node) return;
+  const prevDisabled = pageInfo.currentPage <= 1 ? "disabled" : "";
+  const nextDisabled = pageInfo.currentPage >= pageInfo.totalPages ? "disabled" : "";
+  node.innerHTML = `
+    <div class="pagination-controls">
+      <button type="button" data-page-target="${pageKey}" data-page-dir="-1" ${prevDisabled}>Prev</button>
+      <span class="pagination-meta">Page ${pageInfo.currentPage}/${pageInfo.totalPages} • ${pageInfo.startIndex}-${pageInfo.endIndex} of ${pageInfo.totalItems}</span>
+      <button type="button" data-page-target="${pageKey}" data-page-dir="1" ${nextDisabled}>Next</button>
+    </div>
+  `;
+}
+
 function renderDatasets(rows) {
-  const tbody = document.getElementById("datasetTableBody");
-  tbody.innerHTML = rows.map((dataset) => `
+  const tableBody = document.getElementById("datasetTableBody");
+  const page = paginateRows(rows, "datasets");
+  tableBody.innerHTML = page.rows.map((dataset) => `
     <tr>
       <td>${escapeHtml(dataset.dataset_name)}</td>
       <td><span class="status-pill status-${escapeHtml(dataset.ingestion_status)}">${escapeHtml(dataset.ingestion_status)}</span></td>
@@ -56,6 +110,80 @@ function renderDatasets(rows) {
       <td>${datasetActionButtons(dataset)}</td>
     </tr>
   `).join("");
+  renderPagination("datasetPagination", "datasets", page);
+}
+
+function renderDatasetFilterOptions() {
+  const statusNode = document.getElementById("statusFilter");
+  const categoryNode = document.getElementById("categoryFilter");
+  const statusSet = new Set(state.datasets.map((item) => item.ingestion_status).filter(Boolean));
+  const categorySet = new Set(state.datasets.map((item) => item.category).filter(Boolean));
+  const statusOptions = [
+    { value: "non_archived", label: "Status: Active" },
+    { value: "all", label: "Status: All" },
+    ...Array.from(statusSet).sort().map((value) => ({
+      value: `status:${value}`,
+      label: `Status: ${value}`,
+    })),
+  ];
+  const categoryOptions = [
+    { value: "all", label: "Category: All" },
+    ...Array.from(categorySet).sort().map((value) => ({
+      value,
+      label: `Category: ${value}`,
+    })),
+  ];
+  statusNode.innerHTML = statusOptions.map((option) => `
+    <option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>
+  `).join("");
+  categoryNode.innerHTML = categoryOptions.map((option) => `
+    <option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>
+  `).join("");
+  statusNode.value = statusOptions.some((item) => item.value === state.filters.status)
+    ? state.filters.status
+    : "non_archived";
+  categoryNode.value = categoryOptions.some((item) => item.value === state.filters.category)
+    ? state.filters.category
+    : "all";
+  state.filters.status = statusNode.value;
+  state.filters.category = categoryNode.value;
+}
+
+function applyDatasetFilters(preservePage = false) {
+  if (!preservePage) {
+    state.pagination.datasets = 1;
+  }
+  const query = state.search.datasets.trim().toLowerCase();
+  const statusFilter = state.filters.status;
+  const categoryFilter = state.filters.category;
+  const rows = state.datasets.filter((dataset) => {
+    const status = String(dataset.ingestion_status || "");
+    const category = String(dataset.category || "");
+    if (statusFilter === "non_archived" && status.toLowerCase() === "archived") {
+      return false;
+    }
+    if (statusFilter.startsWith("status:")) {
+      const expected = statusFilter.slice("status:".length);
+      if (status !== expected) {
+        return false;
+      }
+    }
+    if (categoryFilter !== "all" && category !== categoryFilter) {
+      return false;
+    }
+    if (!query) {
+      return true;
+    }
+    return [
+      dataset.dataset_name,
+      dataset.original_filename,
+      dataset.ingestion_status,
+      dataset.category,
+      dataset.dataset_uuid,
+    ].some((value) => includesQuery(value, query));
+  });
+  state.datasetViewRows = rows;
+  renderDatasets(rows);
 }
 
 function parseLogs(job) {
@@ -66,13 +194,35 @@ function parseLogs(job) {
   }
 }
 
+function includesQuery(value, query) {
+  return String(value ?? "").toLowerCase().includes(query);
+}
+
+function filterJobs(rows) {
+  const query = state.search.jobs.trim().toLowerCase();
+  if (!query) return rows;
+  return rows.filter((job) => {
+    const dataset = state.datasets.find((item) => item.dataset_uuid === job.dataset_uuid);
+    const logs = parseLogs(job).map((item) => item.message || "").join(" ");
+    return [
+      job.job_type,
+      job.status,
+      job.dataset_uuid,
+      dataset?.dataset_name || "",
+      job.error_message,
+      logs,
+    ].some((value) => includesQuery(value, query));
+  });
+}
+
 function renderJobs(rows) {
   const node = document.getElementById("jobList");
-  if (!rows.length) {
+  const filteredRows = filterJobs(rows);
+  if (!filteredRows.length) {
     node.innerHTML = `<p class="muted">No ingestion jobs yet.</p>`;
     return;
   }
-  node.innerHTML = rows.map((job) => {
+  node.innerHTML = filteredRows.map((job) => {
     const dataset = state.datasets.find((item) => item.dataset_uuid === job.dataset_uuid);
     const logs = parseLogs(job).slice(-2);
     return `
@@ -91,14 +241,50 @@ function renderJobs(rows) {
 }
 
 function renderDetail(payload) {
-  document.getElementById("datasetDetail").innerHTML = `
+  const detailNode = document.getElementById("datasetDetail");
+  const chunkNode = document.getElementById("chunkExplorer");
+  const detailQuery = state.search.detail.trim().toLowerCase();
+  const chunkQuery = state.search.chunks.trim().toLowerCase();
+  const lineageRows = (payload.lineage || []).filter((item) => {
+    if (!detailQuery) return true;
+    return [
+      item.operation_type,
+      item.metadata_json,
+      item.created_at,
+      item.parent_dataset_uuid,
+    ].some((value) => includesQuery(value, detailQuery));
+  });
+  const chunks = (payload.chunks || []).filter((chunk) => {
+    if (!chunkQuery) return true;
+    return [
+      chunk.chunk_index,
+      chunk.preview_text,
+      chunk.chunk_text,
+      chunk.metadata_json,
+    ].some((value) => includesQuery(value, chunkQuery));
+  });
+
+  const lineageHtml = lineageRows.length
+    ? lineageRows.map((item) => `
+      <article class="chunk-card">
+        <strong>${escapeHtml(item.operation_type || "event")}</strong>
+        <small>${escapeHtml(item.created_at || "-")}</small>
+        <p>${escapeHtml(item.metadata_json || "{}")}</p>
+      </article>
+    `).join("")
+    : `<p class="muted">No lineage events.</p>`;
+
+  detailNode.innerHTML = `
     <h3>${escapeHtml(payload.dataset.dataset_name)}</h3>
     <p>Status: ${escapeHtml(payload.dataset.ingestion_status)}</p>
     <p>File: ${escapeHtml(payload.dataset.original_filename || "-")}</p>
     <p>Collection: ${escapeHtml(payload.vector_health.collection_name || "-")}</p>
     <p>Orphans: ${payload.vector_health.orphan_count || 0}</p>
+    <hr>
+    <h4>Lineage</h4>
+    <div class="chunk-list">${lineageHtml}</div>
   `;
-  document.getElementById("chunkExplorer").innerHTML = payload.chunks.map((chunk) => `
+  chunkNode.innerHTML = chunks.map((chunk) => `
     <article class="chunk-card">
       <strong>Chunk ${chunk.chunk_index}</strong>
       <p>${escapeHtml(chunk.preview_text || "")}</p>
@@ -133,7 +319,7 @@ function schedulePolling() {
     try {
       await loadDashboard();
       if (state.selectedDataset?.dataset?.dataset_uuid) {
-        await loadDataset(state.selectedDataset.dataset.dataset_uuid);
+        await loadDataset(state.selectedDataset.dataset.dataset_uuid, true);
       }
     } catch (error) {
       console.error(error);
@@ -185,12 +371,13 @@ async function loadDashboard() {
   state.datasets = payload.data.datasets || [];
   state.jobs = payload.data.jobs || [];
   renderSummary(payload.data.totals || {});
-  renderDatasets(state.datasets);
+  renderDatasetFilterOptions();
+  applyDatasetFilters(true);
   renderJobs(state.jobs);
   renderActiveProgress();
 }
 
-async function loadDataset(datasetUuid) {
+async function loadDataset(datasetUuid, preservePage = false) {
   const payload = await fetchJson(`/api/ingestion/datasets/${datasetUuid}`);
   state.selectedDataset = payload.data;
   renderDetail(payload.data);
@@ -201,19 +388,35 @@ async function mutateDataset(datasetUuid, action) {
   const statusNode = document.getElementById("uploadStatus");
   if (action === "reindex") {
     statusNode.textContent = `Reindex job queued for ${datasetUuid}.`;
+  } else if (action === "archive") {
+    statusNode.textContent = `Dataset ${datasetUuid} archived.`;
   }
   await loadDashboard();
-  await loadDataset(datasetUuid);
+  if (action !== "delete") {
+    await loadDataset(datasetUuid);
+  }
   return response;
 }
 
-async function performSearch(query) {
-  if (!query.trim()) {
-    renderDatasets(state.datasets);
+async function performSearch(query, preservePage = false) {
+  state.search.datasets = query;
+  applyDatasetFilters(preservePage);
+}
+
+function onPagerClick(event) {
+  const button = event.target.closest("button[data-page-target]");
+  if (!button) return;
+  const target = button.dataset.pageTarget;
+  const dir = Number(button.dataset.pageDir || "0");
+  if (!target || !dir) return;
+  state.pagination[target] = Math.max(1, (state.pagination[target] || 1) + dir);
+  if (target === "datasets") {
+    renderDatasets(state.datasetViewRows);
     return;
   }
-  const payload = await fetchJson(`/api/ingestion/search?q=${encodeURIComponent(query)}`);
-  renderDatasets(payload.data || []);
+  if (target === "jobs") {
+    return;
+  }
 }
 
 function bindEvents() {
@@ -229,8 +432,34 @@ function bindEvents() {
     await mutateDataset(datasetUuid, action);
   });
 
+  document.getElementById("datasetPagination").addEventListener("click", onPagerClick);
+
   document.getElementById("searchInput").addEventListener("input", (event) => {
     performSearch(event.target.value).catch((error) => console.error(error));
+  });
+  document.getElementById("statusFilter").addEventListener("change", (event) => {
+    state.filters.status = event.target.value;
+    applyDatasetFilters(false);
+  });
+  document.getElementById("categoryFilter").addEventListener("change", (event) => {
+    state.filters.category = event.target.value;
+    applyDatasetFilters(false);
+  });
+  document.getElementById("jobSearchInput").addEventListener("input", (event) => {
+    state.search.jobs = event.target.value;
+    renderJobs(state.jobs);
+  });
+  document.getElementById("detailSearchInput").addEventListener("input", (event) => {
+    state.search.detail = event.target.value;
+    if (state.selectedDataset) {
+      renderDetail(state.selectedDataset);
+    }
+  });
+  document.getElementById("chunkSearchInput").addEventListener("input", (event) => {
+    state.search.chunks = event.target.value;
+    if (state.selectedDataset) {
+      renderDetail(state.selectedDataset);
+    }
   });
 
   document.getElementById("uploadForm").addEventListener("submit", async (event) => {

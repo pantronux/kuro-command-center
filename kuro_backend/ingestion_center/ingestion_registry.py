@@ -304,6 +304,27 @@ def list_datasets(owner_username: Optional[str] = None, active_only: bool = Fals
     return fetch_all(f"SELECT * FROM ingested_datasets {where} ORDER BY created_at DESC", params)
 
 
+def list_active_datasets(
+    owner_username: str,
+    allowed_statuses: tuple[str, ...] = ("completed", "partially_indexed"),
+) -> List[Dict[str, Any]]:
+    if not allowed_statuses:
+        return []
+    placeholders = ",".join("?" for _ in allowed_statuses)
+    params: List[Any] = [owner_username, *allowed_statuses]
+    return fetch_all(
+        f"""
+        SELECT * FROM ingested_datasets
+        WHERE owner_username = ?
+          AND archived_at IS NULL
+          AND deleted_at IS NULL
+          AND ingestion_status IN ({placeholders})
+        ORDER BY created_at DESC
+        """,
+        params,
+    )
+
+
 def replace_chunks(dataset_uuid: str, chunks: List[Dict[str, Any]]) -> int:
     init_db()
     conn = _get_connection()
@@ -344,6 +365,20 @@ def replace_chunks(dataset_uuid: str, chunks: List[Dict[str, Any]]) -> int:
 
 def list_chunks(dataset_uuid: str) -> List[Dict[str, Any]]:
     return fetch_all("SELECT * FROM dataset_chunks WHERE dataset_uuid = ? ORDER BY chunk_index ASC", (dataset_uuid,))
+
+
+def get_chunk_by_dataset_and_index(dataset_uuid: str, chunk_index: int) -> Optional[Dict[str, Any]]:
+    return fetch_one(
+        "SELECT * FROM dataset_chunks WHERE dataset_uuid = ? AND chunk_index = ? LIMIT 1",
+        (dataset_uuid, chunk_index),
+    )
+
+
+def increment_chunk_retrieval_count(chunk_id: int, amount: int = 1) -> None:
+    execute(
+        "UPDATE dataset_chunks SET retrieval_count = COALESCE(retrieval_count, 0) + ? WHERE id = ?",
+        (max(1, int(amount)), chunk_id),
+    )
 
 
 def update_chunk_vector(dataset_uuid: str, chunk_index: int, vector_id: Optional[str], embedding_status: str) -> None:

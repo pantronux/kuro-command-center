@@ -57,9 +57,18 @@
             <section class="panel">
                 <div class="toolbar">
                     <h2>Dataset Registry</h2>
-                    <input id="searchInput" type="search" placeholder="Search dataset, filename, tag, chunk">
+                    <div class="toolbar-controls">
+                        <input id="searchInput" type="search" placeholder="Search dataset, filename">
+                        <select id="statusFilter">
+                            <option value="non_archived">Status: Active</option>
+                            <option value="all">Status: All</option>
+                        </select>
+                        <select id="categoryFilter">
+                            <option value="all">Category: All</option>
+                        </select>
+                    </div>
                 </div>
-                <div class="table-wrap">
+                <div class="table-wrap adaptive-scroll">
                     <table class="ingestion-table">
                         <thead>
                             <tr>
@@ -74,23 +83,33 @@
                         <tbody id="datasetTableBody"></tbody>
                     </table>
                 </div>
+                <div id="datasetPagination" class="pagination-bar"></div>
             </section>
             <section class="grid-two">
                 <section class="panel">
-                    <h2>Ingestion Jobs</h2>
-                    <div id="jobList" class="job-list"></div>
+                    <div class="toolbar">
+                        <h2>Ingestion Jobs</h2>
+                        <input id="jobSearchInput" type="search" placeholder="Filter jobs">
+                    </div>
+                    <div id="jobList" class="job-list adaptive-scroll adaptive-scroll-jobs"></div>
                 </section>
                 <section class="panel">
-                    <h2>Dataset Detail</h2>
-                    <div id="datasetDetail" class="detail-block">Select a dataset.</div>
+                    <div class="toolbar">
+                        <h2>Dataset Detail</h2>
+                        <input id="detailSearchInput" type="search" placeholder="Filter detail">
+                    </div>
+                    <div id="datasetDetail" class="detail-block adaptive-scroll adaptive-scroll-detail">Select a dataset.</div>
                 </section>
             </section>
             <section class="panel">
-                <h2>Chunk Explorer</h2>
-                <div id="chunkExplorer" class="chunk-list"></div>
+                <div class="toolbar">
+                    <h2>Chunk Explorer</h2>
+                    <input id="chunkSearchInput" type="search" placeholder="Filter chunks">
+                </div>
+                <div id="chunkExplorer" class="chunk-list adaptive-scroll adaptive-scroll-chunks"></div>
             </section>
         </section>
     </main>
-    <script src="/static/js/ingestion_center.js"></script>
+    <script src="/static/js/ingestion_center.js?v=20260509e"></script>
 </body>
 </html>

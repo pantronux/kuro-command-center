@@ -2646,8 +2646,8 @@ async def get_ingestion_lineage(request: Request, dataset_uuid: str):
 
 @app.get("/api/ingestion/jobs")
 async def list_ingestion_jobs(request: Request, limit: int = Query(25, ge=1, le=200)):
-    require_admin_user(request)
-    return {"status": "success", "data": ingestion_registry.list_jobs(limit=limit)}
+    user = require_admin_user(request)
+    return {"status": "success", "data": ingestion_manager.list_jobs(owner_username=user["username"], limit=limit)}
 
 
 @app.get("/api/ingestion/search")

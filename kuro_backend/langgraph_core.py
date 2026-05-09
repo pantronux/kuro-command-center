@@ -573,6 +573,7 @@ class KuroState(TypedDict):
     # --- Advisor Research fields (V1.0.0 Beta 4) ---
     research_sources_block: str          # [RESEARCH_SOURCES] formatted block, empty string if not populated
     research_intent_detected: bool       # True if advisor_research_node was triggered
+    ingestion_sources: List[Dict]        # Owner-scoped ingestion evidence selected for this turn
     # --- Sovereign Chat features (V1.0.0 Beta 5) ---
     message_count_before: int            # Session message count before the current turn
     # --- Canvas 2: Sovereign Cognitive Runtime ---
@@ -1916,6 +1917,59 @@ def reflective_response_node(state: KuroState) -> Dict[str, Any]:
 # NODE: RESPONSE GENERATOR (Final Answer - No Guardrails)
 # ============================================
 
+def _build_ingestion_citation_instruction() -> str:
+    return (
+        "[INGESTION_CITATION_STYLE]\n"
+        "Jika memakai konteks ingestion, sebutkan sumber secara natural di dalam kalimat. "
+        "Gunakan istilah 'bagian', bukan 'chunk'. Contoh: "
+        "'Berdasarkan dokumen <nama dokumen> pada bagian <nomor> ...' atau "
+        "'Mengacu ke <nama dokumen>, khususnya bagian <nomor> ...'. "
+        "Variasikan frasa agar tidak kaku dan jangan tampilkan marker teknis mentah."
+    )
+
+
+def _response_has_ingestion_reference(
+    response_text: str,
+    ingestion_sources: Optional[List[Dict[str, Any]]],
+) -> bool:
+    if not response_text or not ingestion_sources:
+        return False
+    lowered = response_text.lower()
+    for source in ingestion_sources:
+        dataset_name = str(source.get("dataset_name") or "").strip()
+        section_no = source.get("chunk_index")
+        if not dataset_name or section_no is None:
+            continue
+        if dataset_name.lower() not in lowered:
+            continue
+        pattern = rf"\bbagian\s+{int(section_no)}\b"
+        if re.search(pattern, lowered):
+            return True
+    return False
+
+
+def _build_ingestion_reference_sentence(ingestion_sources: List[Dict[str, Any]]) -> str:
+    source = (ingestion_sources or [{}])[0]
+    dataset_name = str(source.get("dataset_name") or source.get("dataset_uuid") or "dokumen ingestion")
+    section_no = int(source.get("chunk_index") or 0)
+    return (
+        f"Berdasarkan dokumen {dataset_name} pada bagian {section_no}, "
+        "rujukan ingestion ini dipakai sebagai konteks tambahan jawaban."
+    )
+
+
+def _ensure_ingestion_reference_natural(
+    response_text: str,
+    ingestion_sources: Optional[List[Dict[str, Any]]],
+) -> str:
+    if not response_text or not ingestion_sources:
+        return response_text
+    if _response_has_ingestion_reference(response_text, ingestion_sources):
+        return response_text
+    reference_sentence = _build_ingestion_reference_sentence(ingestion_sources)
+    return f"{response_text.rstrip()}\n\n{reference_sentence}".strip()
+
+
 def response_node(state: KuroState) -> Dict[str, Any]:
     """
     Response Generator Node: Synthesizes all state data into final response.
@@ -1951,6 +2005,8 @@ def response_node(state: KuroState) -> Dict[str, Any]:
         memory_injection = ctx["memory_injection"]
         mem0_context_block = ctx.get("mem0_context_block")
         referent_block = ctx.get("referent_grounding_block")
+        ingestion_context_block = ctx.get("ingestion_context_block") or ""
+        ingestion_sources = ctx.get("ingestion_sources") or []
         context_budget = ctx.get("budget")
 
         # Build system prompt
@@ -1963,6 +2019,8 @@ def response_node(state: KuroState) -> Dict[str, Any]:
             username=username,
             session_id=chat_id or session_id,
         )
+        if ingestion_sources:
+            system_prompt += f"\n\n{_build_ingestion_citation_instruction()}"
         
         intent = state.get("_intent", "new")
         if intent == "edit":
@@ -2057,6 +2115,9 @@ def response_node(state: KuroState) -> Dict[str, Any]:
             sections["mem0"] = f"\n\n[USER_CONTEXT - PERPETUAL MEMORY]\n{mem0_context_block}"
             logger.info("[MEM0] Injected %s memories into context", len(mem0_memories or []))
 
+        if ingestion_context_block:
+            sections["ingestion"] = "\n\n" + ingestion_context_block
+
         if memory_injection:
             sections["memory_injection"] = memory_injection
 
@@ -2111,6 +2172,7 @@ def response_node(state: KuroState) -> Dict[str, Any]:
         ordered_names = (
             "referent",
             "mem0",
+            "ingestion",
             "memory_injection",
             "finance",
             "market",
@@ -2368,6 +2430,12 @@ def response_node(state: KuroState) -> Dict[str, Any]:
                 )
             except Exception as exc:
                 logger.debug("[CANVAS3][MEM_CANON] response snapshot skipped: %s", exc)
+
+        if response_text and ingestion_sources and not degraded_mode_active:
+            response_text = _ensure_ingestion_reference_natural(
+                response_text,
+                ingestion_sources,
+            )
 
         # Single consolidated persist path (short-term + enqueue memory_write + mem0_extract).
         # memory_extraction_node still runs as a dedupe/guardian, but mem0 fingerprint dedupe
@@ -3026,10 +3094,14 @@ async def process_chat_with_graph_stream(
             memory_injection = ctx["memory_injection"]
             mem0_block = ctx.get("mem0_context_block") or ""
             ref_block = ctx.get("referent_grounding_block") or ""
+            ingestion_block = ctx.get("ingestion_context_block") or ""
+            ingestion_sources = ctx.get("ingestion_sources") or []
             fin_block = ctx.get("finance_block") or ""
             mkt_block = ctx.get("market_block") or ""
             if mem0_block:
                 memory_injection = f"\n\n[USER_CONTEXT - PERPETUAL MEMORY]\n{mem0_block}{memory_injection}"
+            if ingestion_block:
+                memory_injection = f"\n\n{ingestion_block}{memory_injection}"
             if fin_block:
                 memory_injection = f"\n\n{fin_block}{memory_injection}"
             if mkt_block:
@@ -3045,6 +3117,8 @@ async def process_chat_with_graph_stream(
                 username=username,
                 session_id=chat_id or session_id,
             )
+            if ingestion_sources:
+                system_prompt += f"\n\n{_build_ingestion_citation_instruction()}"
 
             # Re-evaluate reflection node logic for fastpath
             intent = reflection_node({"user_input": message}).get("_intent", "new")
@@ -3123,6 +3197,17 @@ async def process_chat_with_graph_stream(
                     )
                 except Exception as exc:
                     logger.debug("[EPISTEMIC_FASTPATH] annotate skipped: %s", exc)
+            response_with_ref = _ensure_ingestion_reference_natural(response_text, ingestion_sources)
+            if response_with_ref != response_text:
+                extra_tail = (
+                    response_with_ref[len(response_text):]
+                    if response_with_ref.startswith(response_text)
+                    else f"\n\n{_build_ingestion_reference_sentence(ingestion_sources)}"
+                )
+                if extra_tail:
+                    yield extra_tail
+                    emitted += 1
+                response_text = response_with_ref
             _persist_short_term_and_enqueue_writes(message, response_text, persona_mode, username, chat_id=chat_id, message_count_before=msg_count_before)
             try:
                 persona_runtime.upsert_runtime_state(
@@ -3213,6 +3298,7 @@ async def process_chat_with_graph_stream(
             "epistemic_labels": {},
             "research_sources_block": "",
             "research_intent_detected": False,
+            "ingestion_sources": [],
             # Canvas 2 defaults
             "active_goals": [],
             "goal_context_block": "",

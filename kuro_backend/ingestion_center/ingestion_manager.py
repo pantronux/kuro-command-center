@@ -5,6 +5,7 @@ import logging
 import os
 import shutil
 import uuid
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -36,6 +37,15 @@ def _notify_refresh() -> None:
         dashboard_broadcast.schedule_ui_command("STATUS_TICKER", {"message": "Ingestion center updated."})
     except Exception:
         pass
+
+
+def _parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except Exception:
+        return None
 
 
 def _ingestion_source_dir(username: str) -> Path:
@@ -224,8 +234,9 @@ def search_datasets(query: str, owner_username: Optional[str] = None) -> Dict[st
 
 
 def get_dashboard_snapshot(owner_username: Optional[str] = None, active_only: bool = False) -> Dict[str, Any]:
+    reconcile_stale_jobs(owner_username=owner_username)
     datasets = ingestion_registry.list_datasets(owner_username=owner_username, active_only=active_only)
-    jobs = ingestion_registry.list_jobs(limit=25)
+    jobs = list_jobs(owner_username=owner_username, limit=25)
     return {
         "status": "success",
         "data": {
@@ -235,6 +246,57 @@ def get_dashboard_snapshot(owner_username: Optional[str] = None, active_only: bo
             "collection_health": get_collection_health(),
         },
     }
+
+
+def list_jobs(owner_username: Optional[str] = None, limit: int = 25) -> List[Dict[str, Any]]:
+    reconcile_stale_jobs(owner_username=owner_username)
+    if owner_username:
+        return ingestion_registry.fetch_all(
+            "SELECT * FROM ingestion_jobs WHERE username = ? ORDER BY created_at DESC LIMIT ?",
+            (owner_username, limit),
+        )
+    return ingestion_registry.list_jobs(limit=limit)
+
+
+def reconcile_stale_jobs(owner_username: Optional[str] = None, stale_minutes: int = 30) -> int:
+    cutoff = datetime.utcnow() - timedelta(minutes=stale_minutes)
+    params: List[Any] = []
+    where = "status IN ('queued', 'processing')"
+    if owner_username:
+        where += " AND username = ?"
+        params.append(owner_username)
+    rows = ingestion_registry.fetch_all(
+        f"SELECT * FROM ingestion_jobs WHERE {where} ORDER BY created_at ASC",
+        params,
+    )
+    stale_count = 0
+    for row in rows:
+        anchor = _parse_iso_datetime(row.get("updated_at")) or _parse_iso_datetime(row.get("created_at"))
+        if anchor is None or anchor > cutoff:
+            continue
+        job_id = row["id"]
+        error_message = f"Job stale timeout after {stale_minutes} minutes."
+        ingestion_registry.update_job(
+            job_id,
+            status="failed",
+            completed_at=ingestion_registry.now_iso(),
+            error_message=error_message,
+        )
+        ingestion_registry.append_job_log(job_id, f"Failed: {error_message}")
+        dataset_uuid = row.get("dataset_uuid")
+        if dataset_uuid:
+            dataset = ingestion_registry.get_dataset(dataset_uuid)
+            dataset_status = (dataset or {}).get("ingestion_status")
+            if dataset_status in {"queued", "processing"}:
+                ingestion_registry.update_dataset(
+                    dataset_uuid,
+                    ingestion_status="failed",
+                    last_error=error_message,
+                )
+        stale_count += 1
+    if stale_count:
+        _notify_refresh()
+    return stale_count
 
 
 def get_dataset_detail(dataset_uuid: str) -> Dict[str, Any]:
@@ -346,6 +408,7 @@ def recover_orphan_source_files(
 
 
 def get_logs_overview(username: str, job_limit: int = 100, failed_limit: int = 50) -> Dict[str, Any]:
+    reconcile_stale_jobs(owner_username=username)
     failed_jobs = ingestion_registry.fetch_all(
         """
         SELECT j.*, d.dataset_name

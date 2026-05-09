@@ -232,7 +232,9 @@ Kuro AI is your **Intelligent Personal Sovereign**—a sophisticated digital com
     - Vector failures degrade to `partially_indexed` without losing dataset, job, or chunk records.
 - **Chroma-owned ingestion vectors**:
     - Ingestion vectors are written to a dedicated Chroma root under `kuro_chromadb/ingestion_center`.
-    - Existing Mem0-based chat retrieval remains behaviorally unchanged unless provenance is available safely.
+    - Chat runtime now bridges ingestion retrieval as an additional owner-scoped context layer (always-on) with silent fallback.
+    - Only `completed` and `partially_indexed` datasets are eligible for chat grounding; `archived` / `deleted` remain excluded.
+    - User-facing provenance language is natural sentence style with document + **bagian** references (no raw technical markers).
 - **Lifecycle and observability**:
     - New admin routes: `/ingestion`, `/ingestion/analytics`, `/api/ingestion/*`.
     - Supports upload, reindex, archive, delete, search, chunk explorer, lineage viewer, vector health, orphan inspection, retrieval analytics, and dataset-scoped semantic graph payloads.
@@ -373,6 +375,10 @@ Side-branches not drawn on the trunk but reachable from the same
 - **Admin ingestion center** — `/api/ingestion/*` and `/ingestion*`
   → `ingestion_manager` → `ingestion_pipeline` → `ingestion_registry`
   + `chroma_inspector` / `retrieval_analytics`.
+- **Chat ingestion bridge** — main chat flow
+  → `langgraph_core.response_node` / `process_chat_with_graph_stream`
+  → `memory_coordinator.build_context_for_llm*`
+  → ingestion Chroma + `ingestion_registry` filtering (`completed`/`partially_indexed`, owner-scoped).
 - **Dreaming / CVE + fiscal sentinels** — `dreaming_worker.run_dreaming_cycle`
   → `proactive_events.publish` → `telegram_notifier` (CVE + `fiscal_alert`).
 - **Proactive greeting** — `proactive_greeting.maybe_send` on first
@@ -795,7 +801,8 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
   (→ `kuro_intelligence.db`).
 - [`kuro_backend/ingestion_center/ingestion_registry.py`](kuro_backend/ingestion_center/ingestion_registry.py) —
   *public*: `init_db`, `create_dataset`, `update_dataset`, `list_datasets`,
-  `replace_chunks`, `create_job`, `update_job`, `create_lineage`,
+  `list_active_datasets`, `replace_chunks`, `get_chunk_by_dataset_and_index`,
+  `create_job`, `update_job`, `create_lineage`,
   `create_retrieval_event`, `search_datasets`, `get_totals`.
   **Tables**: `ingested_datasets`, `dataset_chunks`, `ingestion_jobs`,
   `retrieval_analytics`, `dataset_lineage` (→ `kuro_ingestion.db`).
