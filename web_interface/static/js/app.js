@@ -188,6 +188,14 @@ const elements = {
     playgroundCreateSessionBtn: document.getElementById('playgroundCreateSessionBtn'),
     playgroundReconnectLatestBtn: document.getElementById('playgroundReconnectLatestBtn'),
     playgroundUseCustomSessionBtn: document.getElementById('playgroundUseCustomSessionBtn'),
+    playgroundForensicViewSelect: document.getElementById('playgroundForensicViewSelect'),
+    playgroundWorkflowModeSelect: document.getElementById('playgroundWorkflowModeSelect'),
+    playgroundLoadForensicViewBtn: document.getElementById('playgroundLoadForensicViewBtn'),
+    playgroundIntegrityOverviewBtn: document.getElementById('playgroundIntegrityOverviewBtn'),
+    playgroundIntegrityOverview: document.getElementById('playgroundIntegrityOverview'),
+    playgroundVerifySnapshotBtn: document.getElementById('playgroundVerifySnapshotBtn'),
+    playgroundExportBundleBtn: document.getElementById('playgroundExportBundleBtn'),
+    playgroundLineageBtn: document.getElementById('playgroundLineageBtn'),
     playgroundExecuteBtn: document.getElementById('playgroundExecuteBtn'),
     playgroundListTracesBtn: document.getElementById('playgroundListTracesBtn'),
     playgroundExecuteBtnLabel: document.getElementById('playgroundExecuteBtnLabel'),
@@ -204,6 +212,13 @@ const elements = {
     playgroundHistoryMeta: document.getElementById('playgroundHistoryMeta'),
     playgroundHistoryExecutions: document.getElementById('playgroundHistoryExecutions'),
     playgroundDownloadSessionArtifactBtn: document.getElementById('playgroundDownloadSessionArtifactBtn'),
+    playgroundArtifactDrawer: document.getElementById('playgroundArtifactDrawer'),
+    playgroundArtifactDrawerBackdrop: document.getElementById('playgroundArtifactDrawerBackdrop'),
+    playgroundArtifactDrawerClose: document.getElementById('playgroundArtifactDrawerClose'),
+    playgroundArtifactAcquisition: document.getElementById('playgroundArtifactAcquisition'),
+    playgroundArtifactIntegrity: document.getElementById('playgroundArtifactIntegrity'),
+    playgroundArtifactTransformation: document.getElementById('playgroundArtifactTransformation'),
+    playgroundArtifactProvenance: document.getElementById('playgroundArtifactProvenance'),
     exportModal: document.getElementById('exportModal'),
     exportBackdrop: document.getElementById('exportBackdrop'),
     closeExportModal: document.getElementById('closeExportModal'),
@@ -542,6 +557,27 @@ function setupEventListeners() {
     }
     if (elements.playgroundListTracesBtn) {
         elements.playgroundListTracesBtn.addEventListener('click', playgroundListTraces);
+    }
+    if (elements.playgroundLoadForensicViewBtn) {
+        elements.playgroundLoadForensicViewBtn.addEventListener('click', playgroundLoadForensicView);
+    }
+    if (elements.playgroundIntegrityOverviewBtn) {
+        elements.playgroundIntegrityOverviewBtn.addEventListener('click', playgroundLoadIntegrityOverview);
+    }
+    if (elements.playgroundVerifySnapshotBtn) {
+        elements.playgroundVerifySnapshotBtn.addEventListener('click', playgroundVerifyLatestSnapshot);
+    }
+    if (elements.playgroundExportBundleBtn) {
+        elements.playgroundExportBundleBtn.addEventListener('click', playgroundExportForensicBundle);
+    }
+    if (elements.playgroundLineageBtn) {
+        elements.playgroundLineageBtn.addEventListener('click', playgroundLoadLineage);
+    }
+    if (elements.playgroundArtifactDrawerClose) {
+        elements.playgroundArtifactDrawerClose.addEventListener('click', closePlaygroundArtifactDrawer);
+    }
+    if (elements.playgroundArtifactDrawerBackdrop) {
+        elements.playgroundArtifactDrawerBackdrop.addEventListener('click', closePlaygroundArtifactDrawer);
     }
     if (elements.playgroundCopyOutputBtn) {
         elements.playgroundCopyOutputBtn.addEventListener('click', copyPlaygroundOutput);
@@ -1343,11 +1379,13 @@ function renderPlaygroundHistoryList(sessions) {
         const sid = s.session_id || '';
         const mode = s.mode || 'unknown';
         const created = s.created_at_utc || '-';
+        const integrity = (s.session_integrity_status || 'unverified').toUpperCase();
         const active = sid === playgroundSessionId ? 'border-l-2 border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20' : '';
         return `
             <button data-session-id="${sid}" class="playground-history-item w-full text-left px-3 py-2 border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800/70 ${active}">
                 <p class="font-medium text-gray-800 dark:text-gray-100 truncate">${sid}</p>
                 <p class="text-[11px] text-gray-500 dark:text-gray-400">${mode} • ${created}</p>
+                <p class="text-[10px] text-emerald-600 dark:text-emerald-300">Integrity: ${escapeHtml(integrity)}</p>
             </button>
         `;
     }).join('');
@@ -1372,9 +1410,24 @@ async function playgroundRefreshSessionHistory() {
     }
 }
 
-function buildExecutionArtifactButtons(sessionId, executionId) {
+function buildExecutionArtifactButtons(sessionId, executionId, trustRow = null) {
+    const integrityChip = trustRow
+        ? `<span class="px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 text-[10px]">Integrity: ${escapeHtml(trustRow.integrity_status || 'UNVERIFIED')}</span>`
+        : '';
+    const snapshotChip = trustRow
+        ? `<span class="px-2 py-0.5 rounded-md bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 text-[10px]">Snapshot: ${escapeHtml(trustRow.snapshot_state || 'UNVERIFIED')}</span>`
+        : '';
+    const driftChip = trustRow && trustRow.schema_drift_detected
+        ? `<span class="px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-700 dark:text-amber-300 text-[10px]">Schema Drift</span>`
+        : '';
+    const transformChip = trustRow
+        ? `<span class="px-2 py-0.5 rounded-md bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 text-[10px]">Transform: ${escapeHtml(trustRow.transformation_integrity_state || 'UNKNOWN')}</span>`
+        : '';
     return `
+        <div class="flex flex-wrap gap-1 mt-1">${integrityChip}${snapshotChip}${driftChip}${transformChip}</div>
         <div class="flex items-center gap-2 mt-1">
+            <button class="playground-open-integrity-detail px-2 py-1 rounded-lg bg-purple-500/15 hover:bg-purple-500/25 text-purple-700 dark:text-purple-300 text-[11px]"
+                data-session-id="${sessionId}" data-execution-id="${executionId}">Trust Detail</button>
             <button class="playground-download-artifact px-2 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-700 dark:text-emerald-300 text-[11px]"
                 data-session-id="${sessionId}" data-execution-id="${executionId}" data-type="execution_raw">Download Raw JSON</button>
             <button class="playground-download-artifact px-2 py-1 rounded-lg bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-700 dark:text-cyan-300 text-[11px]"
@@ -1393,6 +1446,14 @@ function installArtifactDownloadHandlers(scope) {
             await downloadPlaygroundArtifactJson(sid, type, eid, btn);
         });
     });
+    scope.querySelectorAll('.playground-open-integrity-detail').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+            const sid = btn.getAttribute('data-session-id');
+            const eid = btn.getAttribute('data-execution-id');
+            if (!sid || !eid) return;
+            await playgroundOpenIntegrityDetail(sid, eid);
+        });
+    });
 }
 
 async function playgroundLoadSessionHistoryDetail(sessionId) {
@@ -1404,12 +1465,31 @@ async function playgroundLoadSessionHistoryDetail(sessionId) {
         const data = await fetchPlaygroundJson(`/api/playground/sessions/${encodeURIComponent(sessionId)}/history`);
         const session = data.session || {};
         const executions = Array.isArray(data.executions) ? data.executions : [];
+        const integrityRows = Array.isArray(data.execution_integrity_rows) ? data.execution_integrity_rows : [];
+        const trustByExecution = new Map(integrityRows.map((row) => [row.execution_id, row]));
         elements.playgroundHistoryMeta.innerHTML = `
             <p><span class="font-medium">Session:</span> ${escapeHtml(session.session_id || '-')}</p>
             <p><span class="font-medium">Mode:</span> ${escapeHtml(session.mode || '-')} • <span class="font-medium">Status:</span> ${escapeHtml(session.status || '-')}</p>
             <p><span class="font-medium">Created:</span> ${escapeHtml(session.created_at_utc || '-')}</p>
             <p><span class="font-medium">Traces:</span> ${escapeHtml(String((data.traces_summary || {}).count || 0))} • <span class="font-medium">Reports:</span> ${escapeHtml(String((data.reports || []).length || 0))}</p>
+            <p><span class="font-medium">Session Integrity:</span> ${escapeHtml(session.session_integrity_status || 'unverified')}</p>
         `;
+        if (elements.playgroundIntegrityOverview) {
+            const overview = data.integrity_overview || {};
+            const metrics = overview.metrics || {};
+            const alerts = Array.isArray(overview.alerts) ? overview.alerts : [];
+            const alertText = alerts.length > 0
+                ? alerts.map((a) => `${a.severity}: ${a.message}`).join(' | ')
+                : 'No active integrity alerts.';
+            elements.playgroundIntegrityOverview.innerHTML = `
+                <p class="font-semibold text-gray-800 dark:text-gray-100">Forensic Integrity Overview</p>
+                <p>verified artifacts: ${escapeHtml(String(metrics.verified_artifacts || 0))}</p>
+                <p>integrity failures: ${escapeHtml(String(metrics.integrity_failures || 0))}</p>
+                <p>schema drift events: ${escapeHtml(String(metrics.schema_drift_events || 0))}</p>
+                <p>snapshot mismatches: ${escapeHtml(String(metrics.snapshot_mismatches || 0))}</p>
+                <p class="text-[11px] text-amber-600 dark:text-amber-300">${escapeHtml(alertText)}</p>
+            `;
+        }
         if (executions.length === 0) {
             elements.playgroundHistoryExecutions.innerHTML = '<p class="text-gray-500 dark:text-gray-400">No executions yet.</p>';
         } else {
@@ -1418,7 +1498,7 @@ async function playgroundLoadSessionHistoryDetail(sessionId) {
                     <p class="font-medium text-gray-800 dark:text-gray-100">${escapeHtml(row.execution_id || '-')}</p>
                     <p class="text-gray-600 dark:text-gray-300">${escapeHtml(row.provider_id || '-')} • ${escapeHtml(row.model_id || '-')}</p>
                     <p class="text-gray-500 dark:text-gray-400 text-[11px]">${escapeHtml(row.created_at_utc || '-')} • latency: ${escapeHtml(String(row.latency_ms || '-'))} ms</p>
-                    ${buildExecutionArtifactButtons(sessionId, row.execution_id || '')}
+                    ${buildExecutionArtifactButtons(sessionId, row.execution_id || '', trustByExecution.get(row.execution_id || ''))}
                 </div>
             `).join('');
             installArtifactDownloadHandlers(elements.playgroundHistoryExecutions);
@@ -1700,6 +1780,156 @@ async function playgroundListTraces() {
         await playgroundLoadSessionHistoryDetail(playgroundSessionId);
     } catch (error) {
         playgroundPrint(`List traces failed: ${error.message}`);
+    }
+}
+
+async function playgroundLoadForensicView() {
+    const sid = playgroundHistorySessionId || playgroundSessionId;
+    if (!sid) {
+        playgroundPrint('No active session. Create session first.');
+        return;
+    }
+    const view = (elements.playgroundForensicViewSelect?.value || 'summary').trim();
+    const workflowMode = (elements.playgroundWorkflowModeSelect?.value || 'quick').trim();
+    try {
+        const data = await fetchPlaygroundJson(
+            `/api/playground/sessions/${encodeURIComponent(sid)}/forensic-view?view=${encodeURIComponent(view)}&workflow_mode=${encodeURIComponent(workflowMode)}`
+        );
+        playgroundPrint(data);
+    } catch (error) {
+        playgroundPrint(`Forensic view failed: ${error.message}`);
+    }
+}
+
+async function playgroundLoadIntegrityOverview() {
+    const sid = playgroundHistorySessionId || playgroundSessionId;
+    if (!sid) {
+        playgroundPrint('No active session. Create session first.');
+        return;
+    }
+    const workflowMode = (elements.playgroundWorkflowModeSelect?.value || 'quick').trim();
+    try {
+        const data = await fetchPlaygroundJson(
+            `/api/playground/sessions/${encodeURIComponent(sid)}/integrity-overview?workflow_mode=${encodeURIComponent(workflowMode)}`
+        );
+        if (elements.playgroundIntegrityOverview) {
+            const metrics = data.metrics || {};
+            const alerts = Array.isArray(data.alerts) ? data.alerts : [];
+            const alertText = alerts.length > 0 ? alerts.map((a) => `${a.severity}: ${a.message}`).join(' | ') : 'No active integrity alerts.';
+            elements.playgroundIntegrityOverview.innerHTML = `
+                <p class="font-semibold text-gray-800 dark:text-gray-100">Forensic Integrity Overview</p>
+                <p>verified artifacts: ${escapeHtml(String(metrics.verified_artifacts || 0))}</p>
+                <p>integrity failures: ${escapeHtml(String(metrics.integrity_failures || 0))}</p>
+                <p>schema drift events: ${escapeHtml(String(metrics.schema_drift_events || 0))}</p>
+                <p>orphaned traces: ${escapeHtml(String(metrics.orphaned_traces || 0))}</p>
+                <p>snapshot mismatches: ${escapeHtml(String(metrics.snapshot_mismatches || 0))}</p>
+                <p>unresolved mappings: ${escapeHtml(String(metrics.unresolved_canonical_mappings || 0))}</p>
+                <p>corrupted exports: ${escapeHtml(String(metrics.corrupted_exports || 0))}</p>
+                <p class="text-[11px] text-amber-600 dark:text-amber-300">${escapeHtml(alertText)}</p>
+            `;
+        }
+        playgroundPrint({ integrity_overview: data });
+    } catch (error) {
+        playgroundPrint(`Integrity overview failed: ${error.message}`);
+    }
+}
+
+async function playgroundVerifyLatestSnapshot() {
+    const sid = playgroundHistorySessionId || playgroundSessionId;
+    if (!sid) {
+        playgroundPrint('No active session. Create session first.');
+        return;
+    }
+    try {
+        const history = await fetchPlaygroundJson(`/api/playground/sessions/${encodeURIComponent(sid)}/history`);
+        const snapshots = (history.evidence_snapshots || {}).items || [];
+        if (!Array.isArray(snapshots) || snapshots.length === 0) {
+            playgroundPrint('No snapshot found for this session.');
+            return;
+        }
+        const snapshotId = snapshots[0].snapshot_id;
+        const response = await authFetch(`/api/playground/snapshots/${encodeURIComponent(snapshotId)}/verify`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_id: sid }),
+        });
+        const data = await parsePlaygroundJson(response);
+        if (!response.ok) {
+            playgroundPrint(formatPlaygroundError('Verify snapshot', response, data));
+            return;
+        }
+        playgroundPrint({ snapshot_verification: data });
+        await playgroundLoadSessionHistoryDetail(sid);
+    } catch (error) {
+        playgroundPrint(`Snapshot verification failed: ${error.message}`);
+    }
+}
+
+async function playgroundExportForensicBundle() {
+    const sid = playgroundHistorySessionId || playgroundSessionId;
+    if (!sid) {
+        playgroundPrint('No active session. Create session first.');
+        return;
+    }
+    try {
+        const response = await authFetch(`/api/playground/sessions/${encodeURIComponent(sid)}/exports/forensic-bundle`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({}),
+        });
+        const data = await parsePlaygroundJson(response);
+        if (!response.ok) {
+            playgroundPrint(formatPlaygroundError('Export forensic bundle', response, data));
+            return;
+        }
+        playgroundPrint({ forensic_bundle: data });
+    } catch (error) {
+        playgroundPrint(`Forensic bundle export failed: ${error.message}`);
+    }
+}
+
+async function playgroundLoadLineage() {
+    const sid = playgroundHistorySessionId || playgroundSessionId;
+    if (!sid) {
+        playgroundPrint('No active session. Create session first.');
+        return;
+    }
+    try {
+        const data = await fetchPlaygroundJson(`/api/playground/sessions/${encodeURIComponent(sid)}/lineage`);
+        playgroundPrint({ lineage: data });
+    } catch (error) {
+        playgroundPrint(`Lineage view failed: ${error.message}`);
+    }
+}
+
+async function playgroundOpenIntegrityDetail(sessionId, executionId) {
+    try {
+        const data = await fetchPlaygroundJson(
+            `/api/playground/sessions/${encodeURIComponent(sessionId)}/executions/${encodeURIComponent(executionId)}/integrity-detail`
+        );
+        if (elements.playgroundArtifactAcquisition) {
+            elements.playgroundArtifactAcquisition.textContent = JSON.stringify(data.acquisition_metadata || {}, null, 2);
+        }
+        if (elements.playgroundArtifactIntegrity) {
+            elements.playgroundArtifactIntegrity.textContent = JSON.stringify(data.integrity_metadata || {}, null, 2);
+        }
+        if (elements.playgroundArtifactTransformation) {
+            elements.playgroundArtifactTransformation.textContent = JSON.stringify(data.transformation_metadata || {}, null, 2);
+        }
+        if (elements.playgroundArtifactProvenance) {
+            elements.playgroundArtifactProvenance.textContent = JSON.stringify(data.provenance_metadata || {}, null, 2);
+        }
+        if (elements.playgroundArtifactDrawer) {
+            elements.playgroundArtifactDrawer.classList.remove('hidden');
+        }
+    } catch (error) {
+        playgroundPrint(`Integrity detail failed: ${error.message}`);
+    }
+}
+
+function closePlaygroundArtifactDrawer() {
+    if (elements.playgroundArtifactDrawer) {
+        elements.playgroundArtifactDrawer.classList.add('hidden');
     }
 }
 // ============================================

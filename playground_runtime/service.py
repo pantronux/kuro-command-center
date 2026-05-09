@@ -23,15 +23,27 @@ from playground_runtime.config import PlaygroundSettings, get_settings
 from playground_runtime.db.playground_db import PlaygroundDB
 from playground_runtime.errors import PlaygroundError, ProviderExecutionError
 from playground_runtime.evaluation.report_builder import build_report
+from playground_runtime.export.forensic_bundle_exporter import ForensicBundleExporter
 from playground_runtime.export.report_exporter import ReportExporter
+from playground_runtime.divergence.semantic_diff import compute_semantic_divergence
 from playground_runtime.forensic.epistemic_diff import compute_epistemic_diff
 from playground_runtime.forensic.evidence_store import EvidenceStore
 from playground_runtime.forensic.hallucination_analyzer import analyze_trace
 from playground_runtime.governance.boundary_validator import validate_playground_imports
 from playground_runtime.governance.isolation_gate import IsolationGate
+from playground_runtime.integrity.artifact_hashing import canonical_json_dumps, sha256_json
+from playground_runtime.integrity.chain_of_custody import build_custody_event
+from playground_runtime.integrity.evidence_snapshot import build_snapshot_bundle
+from playground_runtime.integrity.forensic_verification import verify_hash
+from playground_runtime.integrity.provenance_integrity import (
+    capability_snapshot_hash,
+    capability_snapshot_payload,
+)
+from playground_runtime.integrity.transformation_manifest import build_transformation_manifest
 from playground_runtime.modes import resolve_mode_profile
 from playground_runtime.ontology.graph_exporter import export_jsonld, export_rdf_star
 from playground_runtime.ontology.reconstructor import reconstruct_ontology_graph
+from playground_runtime.providers.capabilities.catalog import extend_capability_payload
 from playground_runtime.providers.adapters.base_adapter import ProviderRequest, ProviderResponse
 from playground_runtime.providers.registry import ProviderRegistry
 from playground_runtime.providers.router import ProviderRouter
@@ -63,6 +75,7 @@ class PlaygroundRuntimeService:
         self.normalization = NormalizationRegistry()
         self.evidence_store = EvidenceStore(self.db)
         self.report_exporter = ReportExporter()
+        self.bundle_exporter = ForensicBundleExporter()
 
         self.telemetry: Optional[TelemetryCollector] = None
         if self.settings.KURO_PLAYGROUND_TELEMETRY_ENABLED:
@@ -105,6 +118,7 @@ class PlaygroundRuntimeService:
         mode: str,
         runtime_config_override: Optional[dict] = None,
         session_id: Optional[str] = None,
+        actor: Optional[str] = None,
     ) -> dict:
         profile = resolve_mode_profile(mode)
         if session_id:
@@ -141,7 +155,35 @@ class PlaygroundRuntimeService:
             session_id=sid,
             snapshot=self.settings.snapshot_flags(),
         )
+        for provider_id in self.registry.list_active():
+            spec = self.registry.get_capability_spec(provider_id)
+            payload = extend_capability_payload(provider_id, capability_snapshot_payload(spec))
+            cap_hash = capability_snapshot_hash(spec)
+            self.db.insert_provider_capability(
+                session_id=sid,
+                provider_id=provider_id,
+                capability_json=payload,
+                capability_hash=cap_hash,
+            )
+            self._record_custody_event(
+                build_custody_event(
+                    artifact_id=provider_id,
+                    action_type="PROVIDER_CAPABILITY_SNAPSHOT",
+                    actor=actor,
+                    new_hash=cap_hash,
+                    notes=f"session_id={sid}",
+                )
+            )
         self._emit("session_created", sid, None, None, {"mode": profile.name})
+        self._record_custody_event(
+            build_custody_event(
+                artifact_id=sid,
+                action_type="SESSION_CREATED",
+                actor=actor,
+                notes=f"mode={profile.name}",
+            )
+        )
+        self.build_session_timeline_integrity(session_id=sid, actor=actor)
         return {
             "session_id": sid,
             "mode": profile.name,
@@ -157,6 +199,7 @@ class PlaygroundRuntimeService:
         dataset_version: Optional[str] = None,
         model_override: Optional[str] = None,
         metadata: Optional[dict] = None,
+        actor: Optional[str] = None,
     ) -> dict:
         session = self._require_session(session_id)
         request = ProviderRequest(
@@ -172,6 +215,7 @@ class PlaygroundRuntimeService:
             prompt=prompt,
             dataset_version=dataset_version,
             response=response,
+            actor=actor,
         )
         self._emit(
             "execution_single_completed",
@@ -180,6 +224,7 @@ class PlaygroundRuntimeService:
             provider_id,
             {"trace_id": trace.trace_id},
         )
+        self.build_session_timeline_integrity(session_id=session_id, actor=actor)
         return self._trace_to_dict(trace)
 
     def execute_comparative(
@@ -189,6 +234,7 @@ class PlaygroundRuntimeService:
         prompt: str,
         dataset_version: Optional[str] = None,
         metadata: Optional[dict] = None,
+        actor: Optional[str] = None,
     ) -> dict:
         session = self._require_session(session_id)
         request = ProviderRequest(
@@ -207,6 +253,7 @@ class PlaygroundRuntimeService:
                     prompt=prompt,
                     dataset_version=dataset_version,
                     response=response,
+                    actor=actor,
                 )
             )
 
@@ -223,6 +270,9 @@ class PlaygroundRuntimeService:
                     divergence_score=row["divergence_score"],
                     payload=row,
                 )
+        divergence_rows = compute_semantic_divergence(traces)
+        for row in divergence_rows:
+            self.db.insert_semantic_divergence(session_id=session_id, payload=row)
         self._emit(
             "execution_comparative_completed",
             session_id,
@@ -230,13 +280,15 @@ class PlaygroundRuntimeService:
             None,
             {"providers": provider_ids, "trace_count": len(traces)},
         )
+        self.build_session_timeline_integrity(session_id=session_id, actor=actor)
         return {
             "prompt_sha256": comparative.prompt_sha256,
             "traces": [self._trace_to_dict(t) for t in traces],
             "epistemic_diffs": diff_rows,
+            "semantic_divergence": divergence_rows,
         }
 
-    def reconstruct_ontology(self, session_id: str) -> dict:
+    def reconstruct_ontology(self, session_id: str, actor: Optional[str] = None) -> dict:
         self._require_session(session_id)
         traces = self._load_session_traces(session_id)
         graph = reconstruct_ontology_graph(traces)
@@ -265,12 +317,36 @@ class PlaygroundRuntimeService:
                 node_label=node.label,
                 edges=related_edges,
             )
+            self.db.insert_ontology_entity(
+                graph_id=graph_id,
+                entity_id=node.node_id,
+                label=node.label,
+                entity_type="concept",
+                provenance={"session_id": session_id},
+            )
+        for edge in graph.edges:
+            self.db.insert_ontology_relationship(
+                graph_id=graph_id,
+                source_entity_id=edge.source,
+                target_entity_id=edge.target,
+                relation=edge.relation,
+                weight=edge.weight,
+                provenance={"session_id": session_id},
+            )
         self._emit(
             "ontology_reconstructed",
             session_id,
             None,
             None,
             {"graph_id": graph_id, "nodes": len(graph.nodes), "edges": len(graph.edges)},
+        )
+        self._record_custody_event(
+            build_custody_event(
+                artifact_id=graph_id,
+                action_type="ONTOLOGY_RECONSTRUCTED",
+                actor=actor,
+                notes=f"session_id={session_id}",
+            )
         )
         return {
             "graph_id": graph_id,
@@ -280,7 +356,13 @@ class PlaygroundRuntimeService:
             "rdf_star": export_rdf_star(graph),
         }
 
-    def build_and_export_report(self, session_id: str, report_format: str, output_path: Optional[str] = None) -> dict:
+    def build_and_export_report(
+        self,
+        session_id: str,
+        report_format: str,
+        output_path: Optional[str] = None,
+        actor: Optional[str] = None,
+    ) -> dict:
         session = self._require_session(session_id)
         traces = self._load_session_traces(session_id)
         raw_rows = self.db.list_raw_evidence(session_id=session_id)
@@ -329,6 +411,23 @@ class PlaygroundRuntimeService:
             reproducibility_record_id=reproducibility_id,
             artifact_path=output_path,
         )
+        report_hash = sha256(rendered.encode("utf-8")).hexdigest()
+        self.db.insert_artifact_integrity(
+            artifact_id=report_id,
+            artifact_type="forensic_report",
+            sha256_value=report_hash,
+            acquisition_session=session_id,
+            verification_status="verified",
+        )
+        self._record_custody_event(
+            build_custody_event(
+                artifact_id=report_id,
+                action_type="REPORT_EXPORTED",
+                actor=actor,
+                new_hash=report_hash,
+                notes=f"format={report_format.lower()}",
+            )
+        )
         self._emit(
             "report_exported",
             session_id,
@@ -336,6 +435,7 @@ class PlaygroundRuntimeService:
             None,
             {"report_id": report_id, "format": report_format.lower()},
         )
+        self.build_session_timeline_integrity(session_id=session_id, actor=actor)
         return {
             "report_id": report_id,
             "format": report_format.lower(),
@@ -361,6 +461,9 @@ class PlaygroundRuntimeService:
                     "ended_at_utc": row["ended_at_utc"],
                     "runtime_config_hash": row["runtime_config_hash"],
                     "notes": row.get("notes", ""),
+                    "session_integrity_hash": row.get("session_integrity_hash"),
+                    "session_integrity_status": str(row.get("session_integrity_status") or "unverified").upper(),
+                    "session_integrity_verified_at": row.get("session_integrity_verified_at"),
                 }
             )
         return sessions
@@ -377,18 +480,44 @@ class PlaygroundRuntimeService:
             "ended_at_utc": row["ended_at_utc"],
             "runtime_config_hash": row["runtime_config_hash"],
             "notes": row.get("notes", ""),
+            "session_integrity_hash": row.get("session_integrity_hash"),
+            "session_integrity_status": str(row.get("session_integrity_status") or "unverified").upper(),
+            "session_integrity_verified_at": row.get("session_integrity_verified_at"),
         }
 
     def get_session_history(self, session_id: str) -> dict:
-        session = self._require_session(session_id)
+        self._require_session(session_id)
         runtime_rows = self.db.list_runtime_configs(session_id=session_id)
         feature_rows = self.db.list_feature_flag_snapshots(session_id=session_id)
         executions = self.db.list_session_executions(session_id=session_id)
         traces = self.db.list_canonical_traces(session_id=session_id)
         reports = self.db.list_forensic_reports(session_id=session_id)
         diffs = self.db.list_epistemic_diffs(session_id=session_id)
+        semantic_divergence = self.db.list_semantic_divergence(session_id=session_id)
         graphs = self.db.list_ontology_graphs(session_id=session_id)
         reproducibility = self.db.list_reproducibility_records(session_id=session_id)
+        integrity_rows = self.db.list_artifact_integrity(session_id=session_id)
+        manifests = self.db.list_transformation_manifests(session_id=session_id)
+        snapshots = self.db.list_snapshots(session_id=session_id)
+        capabilities = self.db.list_provider_capabilities(session_id=session_id)
+        artifact_scope = [session_id]
+        artifact_scope.extend([row["id"] for row in executions if row.get("id")])
+        artifact_scope.extend([row["id"] for row in traces if row.get("id")])
+        artifact_scope.extend([row["id"] for row in reports if row.get("id")])
+        artifact_scope.extend([row["snapshot_id"] for row in snapshots if row.get("snapshot_id")])
+        custody_rows = self.db.list_chain_of_custody_for_artifacts(artifact_scope)
+        integrity_overview = self.build_integrity_overview(session_id=session_id, workflow_mode="quick")
+        session_timeline = self.build_session_timeline_integrity(session_id=session_id)
+        session = self.db.get_session(session_id) or {}
+        execution_integrity_rows = [
+            self._compact_execution_trust(session_id=session_id, execution_id=row["id"])
+            for row in executions[:50]
+        ]
+        snapshot_trust_rows = [
+            self.build_snapshot_trust_summary(session_id=session_id, snapshot_id=row["snapshot_id"])
+            for row in snapshots[:50]
+            if row.get("snapshot_id")
+        ]
 
         return {
             "session": {
@@ -399,6 +528,9 @@ class PlaygroundRuntimeService:
                 "ended_at_utc": session["ended_at_utc"],
                 "runtime_config_hash": session["runtime_config_hash"],
                 "notes": session.get("notes", ""),
+                "session_integrity_hash": session.get("session_integrity_hash"),
+                "session_integrity_status": str(session.get("session_integrity_status") or "unverified").upper(),
+                "session_integrity_verified_at": session.get("session_integrity_verified_at"),
             },
             "runtime_configs": {
                 "latest": self._decode_json(runtime_rows[0]["config_json"], {}) if runtime_rows else {},
@@ -467,6 +599,10 @@ class PlaygroundRuntimeService:
                     for row in diffs[:20]
                 ],
             },
+            "semantic_divergence": {
+                "count": len(semantic_divergence),
+                "items": [self._decode_semantic_divergence_row(row) for row in semantic_divergence[:20]],
+            },
             "ontology_graphs": {
                 "count": len(graphs),
                 "items": [
@@ -491,6 +627,30 @@ class PlaygroundRuntimeService:
                 }
                 for row in reproducibility
             ],
+            "artifact_integrity": {
+                "count": len(integrity_rows),
+                "items": integrity_rows[:50],
+            },
+            "transformation_manifests": {
+                "count": len(manifests),
+                "items": [self._decode_manifest_row(row) for row in manifests[:20]],
+            },
+            "evidence_snapshots": {
+                "count": len(snapshots),
+                "items": snapshots[:20],
+            },
+            "provider_capabilities": {
+                "count": len(capabilities),
+                "items": [self._decode_capability_row(row) for row in capabilities[:20]],
+            },
+            "chain_of_custody": {
+                "count": len(custody_rows),
+                "items": custody_rows[:50],
+            },
+            "integrity_overview": integrity_overview,
+            "session_timeline_integrity": session_timeline,
+            "execution_integrity_rows": execution_integrity_rows,
+            "snapshot_trust_rows": snapshot_trust_rows,
         }
 
     def build_session_json_artifact(
@@ -547,11 +707,598 @@ class PlaygroundRuntimeService:
         }
         return (f"playground-exec-trace-{execution_id}.json", json.dumps(payload, ensure_ascii=False, indent=2))
 
+    def create_snapshot(
+        self,
+        *,
+        session_id: str,
+        execution_id: Optional[str] = None,
+        actor: Optional[str] = None,
+    ) -> dict:
+        self._require_session(session_id)
+        if execution_id:
+            execution = self.db.get_model_execution(execution_id=execution_id)
+            if not execution or execution["session_id"] != session_id:
+                raise PlaygroundError(f"Unknown execution_id '{execution_id}' for session '{session_id}'")
+            raw_rows = [self.db.get_raw_evidence_by_execution(execution_id)] if execution_id else []
+            trace_rows = [self.db.get_canonical_trace_by_execution(execution_id)] if execution_id else []
+            raw_rows = [r for r in raw_rows if r]
+            trace_rows = [r for r in trace_rows if r]
+        else:
+            raw_rows = self.db.list_raw_evidence(session_id=session_id)
+            trace_rows = self.db.list_canonical_traces(session_id=session_id)
+
+        manifests = self.db.list_transformation_manifests(session_id=session_id, execution_id=execution_id)
+        integrity_rows = self.db.list_artifact_integrity(session_id=session_id)
+        runtime_rows = self.db.list_runtime_configs(session_id=session_id)
+        runtime_config = self._decode_json(runtime_rows[0]["config_json"], {}) if runtime_rows else {}
+        capability_rows = self.db.list_provider_capabilities(session_id=session_id)
+
+        bundle, snapshot_hash = build_snapshot_bundle(
+            session_id=session_id,
+            execution_id=execution_id,
+            raw_evidence=[self._decode_raw_evidence_row(row) for row in raw_rows],
+            canonical_traces=[self._decode_canonical_trace_row(row) for row in trace_rows],
+            transformation_manifests=[self._decode_manifest_row(row) for row in manifests],
+            integrity_rows=integrity_rows,
+            provider_capabilities=[self._decode_capability_row(row) for row in capability_rows],
+            runtime_config=runtime_config,
+        )
+        snapshot_id = self.db.insert_evidence_snapshot(
+            session_id=session_id,
+            execution_id=execution_id,
+            snapshot_hash=snapshot_hash,
+            snapshot_bundle_json=canonical_json_dumps(bundle),
+            verification_status="unverified",
+        )
+        self.db.insert_artifact_integrity(
+            artifact_id=snapshot_id,
+            artifact_type="evidence_snapshot",
+            sha256_value=snapshot_hash,
+            acquisition_session=session_id,
+            verification_status="unverified",
+        )
+        self._record_custody_event(
+            build_custody_event(
+                artifact_id=snapshot_id,
+                action_type="SNAPSHOT_CREATED",
+                actor=actor,
+                new_hash=snapshot_hash,
+                notes=f"session_id={session_id}",
+            )
+        )
+        self.build_session_timeline_integrity(session_id=session_id, actor=actor)
+        return {
+            "snapshot_id": snapshot_id,
+            "snapshot_hash": snapshot_hash,
+            "verification_status": "unverified",
+            "bundle": bundle,
+        }
+
+    def verify_snapshot(self, *, session_id: str, snapshot_id: str, actor: Optional[str] = None) -> dict:
+        self._require_session(session_id)
+        row = self.db.get_snapshot(snapshot_id)
+        if not row or row["session_id"] != session_id:
+            raise PlaygroundError(f"Unknown snapshot_id '{snapshot_id}' for session '{session_id}'")
+        bundle = self._decode_json(row.get("snapshot_bundle_json"), {})
+        recalculated = sha256_json(bundle)
+        checks = [verify_hash(expected_sha256=row["snapshot_hash"], payload=bundle)]
+        raw_rows = bundle.get("raw_evidence", []) if isinstance(bundle, dict) else []
+        for raw in raw_rows:
+            rid = raw.get("id")
+            if not rid:
+                continue
+            db_row = self.db.get_raw_evidence_by_id(rid)
+            if not db_row:
+                checks.append({"artifact_id": rid, "verified": False, "reason": "missing_raw"})
+                continue
+            checks.append(
+                {
+                    "artifact_id": rid,
+                    **verify_hash(expected_sha256=raw.get("raw_sha256", ""), text=db_row.get("raw_json", "")),
+                }
+            )
+        verified = all(bool(c.get("verified")) for c in checks) and recalculated == row["snapshot_hash"]
+        status = "verified" if verified else "failed"
+        self.db.update_evidence_snapshot_verification(snapshot_id=snapshot_id, verification_status=status)
+        self._record_custody_event(
+            build_custody_event(
+                artifact_id=snapshot_id,
+                action_type="SNAPSHOT_VERIFIED",
+                actor=actor,
+                previous_hash=row["snapshot_hash"],
+                new_hash=recalculated,
+                notes=f"status={status}",
+            )
+        )
+        return {
+            "snapshot_id": snapshot_id,
+            "expected_hash": row["snapshot_hash"],
+            "recalculated_hash": recalculated,
+            "verification_status": status,
+            "checks": checks,
+            "trust_summary": self.build_snapshot_trust_summary(session_id=session_id, snapshot_id=snapshot_id),
+        }
+
+    def build_forensic_view(self, *, session_id: str, view: str, workflow_mode: str = "quick") -> dict:
+        self._require_session(session_id)
+        mode = self._normalize_workflow_mode(workflow_mode)
+        view_name = (view or "summary").strip().lower()
+        if view_name == "raw":
+            rows = self.db.list_raw_evidence(session_id=session_id)
+            payload = {"view": "raw", "session_id": session_id, "items": [self._decode_raw_evidence_row(r) for r in rows]}
+            return self._shape_view_payload(payload, mode)
+        if view_name == "canonical":
+            rows = self.db.list_canonical_traces(session_id=session_id)
+            payload = {"view": "canonical", "session_id": session_id, "items": [self._decode_canonical_trace_row(r) for r in rows]}
+            return self._shape_view_payload(payload, mode)
+        if view_name == "ontology":
+            rows = self.db.list_ontology_graphs(session_id=session_id)
+            payload = {"view": "ontology", "session_id": session_id, "graphs": rows}
+            return self._shape_view_payload(payload, mode)
+        if view_name == "divergence":
+            rows = self.db.list_semantic_divergence(session_id=session_id)
+            payload = {"view": "divergence", "session_id": session_id, "items": [self._decode_semantic_divergence_row(r) for r in rows]}
+            return self._shape_view_payload(payload, mode)
+        if view_name != "summary":
+            raise PlaygroundError("view must be one of: raw, canonical, summary, ontology, divergence")
+        history = self.get_session_history(session_id=session_id)
+        divergence_rows = self.db.list_semantic_divergence(session_id=session_id)
+        payload = {
+            "view": "summary",
+            "session_id": session_id,
+            "workflow_mode": mode,
+            "summary": {
+                "execution_count": len(history.get("executions", [])),
+                "trace_count": history.get("traces_summary", {}).get("count", 0),
+                "report_count": len(history.get("reports", [])),
+                "divergence_pairs": len(divergence_rows),
+            },
+            "narrative": self._build_forensic_narrative(history, divergence_rows),
+            "integrity_overview": self.build_integrity_overview(session_id=session_id, workflow_mode=mode),
+        }
+        return self._shape_view_payload(payload, mode)
+
+    def build_integrity_overview(self, *, session_id: str, workflow_mode: str = "quick") -> dict:
+        self._require_session(session_id)
+        mode = self._normalize_workflow_mode(workflow_mode)
+        artifacts = self.db.list_artifact_integrity(session_id=session_id)
+        traces = self.db.list_canonical_traces(session_id=session_id)
+        snapshots = self.db.list_snapshots(session_id=session_id)
+        manifests = self.db.list_transformation_manifests(session_id=session_id)
+
+        verified_count = sum(1 for row in artifacts if str(row.get("verification_status", "")).lower() == "verified")
+        failed_count = sum(1 for row in artifacts if str(row.get("verification_status", "")).lower() in {"failed", "corrupted"})
+        drift_count = 0
+        unresolved_mapping = 0
+        for trace in traces:
+            warnings = self._decode_json(trace.get("normalization_warnings_json"), [])
+            if any(str(w).startswith("SCHEMA_DRIFT") for w in warnings):
+                drift_count += 1
+        for row in manifests:
+            sem_flags = self._decode_json(row.get("semantic_loss_flags_json"), [])
+            if "UNRESOLVED_PROVIDER_ALIAS" in sem_flags:
+                unresolved_mapping += 1
+
+        trace_ids = {row.get("id") for row in traces if row.get("id")}
+        execution_ids = {row.get("id") for row in self.db.list_model_executions(session_id=session_id)}
+        linked_execution_ids = {row.get("execution_id") for row in traces if row.get("execution_id")}
+        orphaned_traces = max(0, len(trace_ids) - len(linked_execution_ids & execution_ids))
+
+        snapshot_mismatches = sum(1 for row in snapshots if str(row.get("verification_status", "")).lower() in {"failed", "corrupted"})
+        corrupted_exports = sum(
+            1
+            for row in artifacts
+            if row.get("artifact_type") in {"forensic_bundle_zip", "forensic_report"}
+            and str(row.get("verification_status", "")).lower() in {"failed", "corrupted"}
+        )
+
+        alerts = []
+        if failed_count > 0 or snapshot_mismatches > 0:
+            alerts.append({"severity": "HIGH", "message": "Integrity mismatch or corrupted evidence detected."})
+        if unresolved_mapping > 0:
+            alerts.append({"severity": "MEDIUM", "message": "Canonical degradation or unresolved mappings detected."})
+        if drift_count > 0 and not alerts:
+            alerts.append({"severity": "LOW", "message": "Schema drift detected; integrity still recoverable."})
+
+        payload = {
+            "session_id": session_id,
+            "workflow_mode": mode,
+            "metrics": {
+                "verified_artifacts": verified_count,
+                "integrity_failures": failed_count,
+                "schema_drift_events": drift_count,
+                "orphaned_traces": orphaned_traces,
+                "snapshot_mismatches": snapshot_mismatches,
+                "unresolved_canonical_mappings": unresolved_mapping,
+                "corrupted_exports": corrupted_exports,
+            },
+            "alerts": alerts,
+        }
+        return self._shape_view_payload(payload, mode)
+
+    def build_execution_trust_record(self, *, session_id: str, execution_id: str) -> dict:
+        self._require_session(session_id)
+        execution = self.db.get_model_execution(execution_id=execution_id)
+        if not execution or execution.get("session_id") != session_id:
+            raise PlaygroundError(f"Unknown execution_id '{execution_id}' for session '{session_id}'")
+
+        raw_row = self.db.get_raw_evidence_by_execution(execution_id=execution_id)
+        trace_row = self.db.get_canonical_trace_by_execution(execution_id=execution_id)
+        if not raw_row or not trace_row:
+            raise PlaygroundError(f"Execution '{execution_id}' is missing raw or canonical artifacts")
+
+        raw_integrity = self.db.get_artifact_integrity(raw_row["id"], "raw_evidence")
+        canonical_integrity = self.db.get_artifact_integrity(trace_row["id"], "canonical_trace")
+        snapshot_rows = [row for row in self.db.list_snapshots(session_id=session_id) if row.get("execution_id") == execution_id]
+        snapshot_row = snapshot_rows[0] if snapshot_rows else None
+        snapshot_trust = self.build_snapshot_trust_summary(session_id=session_id, snapshot_id=snapshot_row["snapshot_id"]) if snapshot_row else None
+
+        manifest_rows = self.db.list_transformation_manifests(session_id=session_id, execution_id=execution_id)
+        manifest = self._decode_manifest_row(manifest_rows[0]) if manifest_rows else None
+        custody = self.db.list_chain_of_custody_for_artifacts([execution_id, raw_row["id"], trace_row["id"]])
+
+        trace_warnings = self._decode_json(trace_row.get("normalization_warnings_json"), [])
+        trust_status = self._map_execution_integrity_status(
+            raw_integrity=raw_integrity,
+            canonical_integrity=canonical_integrity,
+            trace_warnings=trace_warnings,
+            snapshot_trust=snapshot_trust,
+        )
+
+        return {
+            "session_id": session_id,
+            "execution_id": execution_id,
+            "integrity_status": trust_status,
+            "acquisition_metadata": {
+                "acquired_at": raw_row.get("collected_at_utc"),
+                "provider_request_id": raw_row.get("request_id"),
+                "provider_model": execution.get("model_id"),
+                "runtime_version": "playground_runtime/current",
+                "schema_version": trace_row.get("schema_version"),
+            },
+            "integrity_metadata": {
+                "raw_sha256": raw_row.get("raw_sha256"),
+                "canonical_sha256": canonical_integrity.get("sha256") if canonical_integrity else None,
+                "snapshot_hash": snapshot_row.get("snapshot_hash") if snapshot_row else None,
+                "export_hash": None,
+                "verification_timestamp": canonical_integrity.get("created_at") if canonical_integrity else None,
+            },
+            "transformation_metadata": {
+                "normalization_version": trace_row.get("schema_version"),
+                "mapping_confidence": manifest.get("mapping_confidence") if manifest else None,
+                "semantic_loss_flags": manifest.get("semantic_loss_flags_json") if manifest else [],
+                "provider_alias_mapping": manifest.get("provider_alias_mapping_json") if manifest else {},
+                "canonicalization_warnings": trace_warnings,
+            },
+            "provenance_metadata": {
+                "execution_lineage": execution,
+                "session_lineage": self.db.get_session(session_id),
+                "export_lineage": self.db.list_forensic_reports(session_id=session_id),
+                "replay_lineage": self.db.list_reproducibility_records(session_id=session_id),
+                "custody_events": custody,
+            },
+            "snapshot_trust": snapshot_trust,
+        }
+
+    def build_snapshot_trust_summary(self, *, session_id: str, snapshot_id: str) -> dict:
+        self._require_session(session_id)
+        row = self.db.get_snapshot(snapshot_id)
+        if not row or row.get("session_id") != session_id:
+            raise PlaygroundError(f"Unknown snapshot_id '{snapshot_id}' for session '{session_id}'")
+        status_raw = str(row.get("verification_status") or "unverified").lower()
+        bundle = self._decode_json(row.get("snapshot_bundle_json"), {})
+        manifest_rows = bundle.get("transformation_manifests", []) if isinstance(bundle, dict) else []
+        runtime_config = bundle.get("runtime_config", {}) if isinstance(bundle, dict) else {}
+        schema_versions = {
+            item.get("schema_version")
+            for item in bundle.get("canonical_traces", [])
+            if isinstance(item, dict) and item.get("schema_version")
+        } if isinstance(bundle, dict) else set()
+
+        replay = "YES"
+        if status_raw in {"failed", "corrupted"}:
+            replay = "NO"
+        elif status_raw in {"unverified"} or len(schema_versions) > 1:
+            replay = "LIMITED"
+
+        status_map = {
+            "verified": "VALID",
+            "failed": "CORRUPTED",
+            "corrupted": "CORRUPTED",
+            "unverified": "UNVERIFIED",
+            "partial": "PARTIAL",
+            "drifted": "DRIFTED",
+        }
+        trust_status = status_map.get(status_raw, "PARTIAL")
+        if trust_status == "VALID":
+            for manifest in manifest_rows:
+                drift_flags = manifest.get("schema_drift_flags_json") or manifest.get("schema_drift_flags") or []
+                if drift_flags:
+                    trust_status = "DRIFTED"
+                    if replay == "YES":
+                        replay = "LIMITED"
+                    break
+
+        summary = {
+            "snapshot_id": snapshot_id,
+            "snapshot_hash": row.get("snapshot_hash"),
+            "snapshot_integrity": trust_status,
+            "provider_schema": ",".join(sorted(schema_versions)) if schema_versions else "unknown",
+            "transformation_version": manifest_rows[0].get("transformer_version") if manifest_rows else "unknown",
+            "replay_compatibility": replay,
+            "verified_at": row.get("verified_at"),
+            "runtime_mode": runtime_config.get("mode"),
+        }
+        summary["summary_text"] = self._build_snapshot_trust_text(summary)
+        return summary
+
+    def build_session_timeline_integrity(self, *, session_id: str, actor: Optional[str] = None) -> dict:
+        session = self._require_session(session_id)
+        executions = self.db.list_model_executions(session_id=session_id)
+        traces = self.db.list_canonical_traces(session_id=session_id)
+        manifests = self.db.list_transformation_manifests(session_id=session_id)
+
+        trace_by_execution = {row.get("execution_id"): row for row in traces}
+        manifest_by_execution: dict[str, list[dict]] = {}
+        for row in manifests:
+            key = str(row.get("execution_id") or "")
+            manifest_by_execution.setdefault(key, []).append(row)
+
+        timeline_rows: list[dict] = []
+        for execution in executions:
+            execution_id = execution.get("id")
+            trace = trace_by_execution.get(execution_id, {})
+            manifest_rows = manifest_by_execution.get(str(execution_id), [])
+            manifest_hashes = [row.get("target_hash") for row in manifest_rows if row.get("target_hash")]
+            timeline_rows.append(
+                {
+                    "execution_id": execution_id,
+                    "provider_id": execution.get("provider_id"),
+                    "created_at_utc": execution.get("created_at_utc"),
+                    "trace_id": trace.get("id"),
+                    "forensic_flags": self._decode_json(trace.get("forensic_flags_json"), []),
+                    "manifest_hashes": manifest_hashes,
+                }
+            )
+
+        integrity_hash = sha256_json(timeline_rows)
+        status = "VERIFIED"
+        if not timeline_rows:
+            status = "UNVERIFIED"
+
+        existing = self.db.get_artifact_integrity(session_id, "session_timeline")
+        self.db.update_session_integrity(session_id, integrity_hash, status.lower())
+        existing_hash = (existing or {}).get("sha256")
+        if existing_hash != integrity_hash:
+            self.db.insert_artifact_integrity(
+                artifact_id=session_id,
+                artifact_type="session_timeline",
+                sha256_value=integrity_hash,
+                acquisition_session=session_id,
+                verification_status="verified" if status == "VERIFIED" else "unverified",
+            )
+            self._record_custody_event(
+                build_custody_event(
+                    artifact_id=session_id,
+                    action_type="SESSION_TIMELINE_HASHED",
+                    actor=actor,
+                    previous_hash=existing_hash,
+                    new_hash=integrity_hash,
+                    notes=f"rows={len(timeline_rows)}",
+                )
+            )
+        session_updated = self.db.get_session(session_id) or session
+        return {
+            "session_id": session_id,
+            "session_integrity_hash": integrity_hash,
+            "session_integrity_status": status,
+            "session_integrity_verified_at": session_updated.get("session_integrity_verified_at"),
+            "timeline_rows": timeline_rows,
+        }
+
+    def build_transformation_lineage(self, *, session_id: str) -> dict:
+        self._require_session(session_id)
+        manifests = [self._decode_manifest_row(row) for row in self.db.list_transformation_manifests(session_id=session_id)]
+        nodes = []
+        edges = []
+        for row in manifests:
+            execution_id = row.get("execution_id")
+            raw_node = f"raw:{row.get('source_artifact_id')}"
+            candidate_node = f"candidate:{execution_id}"
+            normalize_node = f"normalize:{execution_id}"
+            canonical_node = f"canonical:{row.get('target_artifact_id')}"
+            ontology_node = f"ontology:{execution_id}"
+            summary_node = f"summary:{execution_id}"
+            nodes.extend(
+                [
+                    {"id": raw_node, "label": "Raw Provider Artifact"},
+                    {"id": candidate_node, "label": "Canonical Candidate Layer"},
+                    {"id": normalize_node, "label": "Normalization Engine"},
+                    {"id": canonical_node, "label": "Canonical Trace"},
+                    {"id": ontology_node, "label": "Ontology Reconstruction"},
+                    {"id": summary_node, "label": "Forensic Summary"},
+                ]
+            )
+            edges.extend(
+                [
+                    {"source": raw_node, "target": candidate_node, "hash_state": row.get("source_hash"), "mapping_confidence": row.get("mapping_confidence")},
+                    {"source": candidate_node, "target": normalize_node, "hash_state": row.get("source_hash"), "schema_drift_flags": row.get("schema_drift_flags_json")},
+                    {"source": normalize_node, "target": canonical_node, "hash_state": row.get("target_hash"), "semantic_loss_flags": row.get("semantic_loss_flags_json")},
+                    {"source": canonical_node, "target": ontology_node, "hash_state": row.get("target_hash")},
+                    {"source": ontology_node, "target": summary_node, "hash_state": row.get("target_hash")},
+                ]
+            )
+
+        # deduplicate nodes by id
+        unique_nodes: dict[str, dict] = {}
+        for node in nodes:
+            unique_nodes[str(node["id"])] = node
+        return {
+            "session_id": session_id,
+            "nodes": list(unique_nodes.values()),
+            "edges": edges,
+        }
+
+    def export_forensic_bundle(
+        self,
+        *,
+        session_id: str,
+        output_path: Optional[str] = None,
+        actor: Optional[str] = None,
+    ) -> dict:
+        self._require_session(session_id)
+        timeline = self.build_session_timeline_integrity(session_id=session_id, actor=actor)
+        snapshots = self.db.list_snapshots(session_id=session_id)
+        snapshot_summary = {"snapshot_integrity": "UNVERIFIED", "replay_compatibility": "LIMITED"}
+        if snapshots:
+            snapshot_summary = self.build_snapshot_trust_summary(session_id=session_id, snapshot_id=snapshots[0]["snapshot_id"])
+        trust_notes = self._build_integrity_explanation(
+            integrity_overview=self.build_integrity_overview(session_id=session_id, workflow_mode="academic"),
+            snapshot_trust=snapshot_summary,
+            workflow_mode="academic",
+        )
+
+        ontology_graphs = self.db.list_ontology_graphs(session_id=session_id)
+        ontology_payload = {}
+        if ontology_graphs:
+            graph_id = ontology_graphs[0].get("id")
+            ontology_payload = {
+                "graphs": ontology_graphs,
+                "entities": self.db.list_ontology_entities(graph_id),
+                "relationships": self.db.list_ontology_relationships(graph_id),
+                "mappings": self.db.list_ontology_mappings(session_id),
+            }
+
+        bundle_payload = {
+            "session_id": session_id,
+            "created_at": datetime.utcnow().isoformat(),
+            "raw": [self._decode_raw_evidence_row(row) for row in self.db.list_raw_evidence(session_id=session_id)],
+            "canonical": [self._decode_canonical_trace_row(row) for row in self.db.list_canonical_traces(session_id=session_id)],
+            "manifests": [self._decode_manifest_row(row) for row in self.db.list_transformation_manifests(session_id=session_id)],
+            "hashes": self.db.list_artifact_integrity(session_id=session_id),
+            "custody": self.db.list_chain_of_custody_for_artifacts(
+                [session_id]
+                + [row.get("id") for row in self.db.list_model_executions(session_id=session_id)]
+            ),
+            "ontology": ontology_payload,
+            "reports": self.db.list_forensic_reports(session_id=session_id),
+            "trust_summary": {
+                "session_integrity": timeline.get("session_integrity_status", "UNVERIFIED"),
+                "snapshot_status": snapshot_summary.get("snapshot_integrity", "UNVERIFIED"),
+                "replay_compatibility": snapshot_summary.get("replay_compatibility", "LIMITED"),
+                "notes": trust_notes.splitlines(),
+            },
+        }
+        exported = self.bundle_exporter.export_bundle(session_id=session_id, bundle_payload=bundle_payload, output_path=output_path)
+        self.db.insert_artifact_integrity(
+            artifact_id=exported["bundle_path"],
+            artifact_type="forensic_bundle_zip",
+            sha256_value=exported["bundle_sha256"],
+            acquisition_session=session_id,
+            verification_status="verified",
+        )
+        self._record_custody_event(
+            build_custody_event(
+                artifact_id=session_id,
+                action_type="FORENSIC_BUNDLE_EXPORTED",
+                actor=actor,
+                new_hash=exported["bundle_sha256"],
+                notes=exported["bundle_path"],
+            )
+        )
+        return {
+            "session_id": session_id,
+            "bundle": exported,
+            "trust_summary": bundle_payload["trust_summary"],
+        }
+
+    def execute_dataset(
+        self,
+        *,
+        session_id: str,
+        provider_ids: list[str],
+        mode: str,
+        dataset_items: list[dict],
+        execution_config: dict,
+        actor: Optional[str] = None,
+    ) -> dict:
+        session = self._require_session(session_id)
+        dataset_payload = {"dataset_items": dataset_items, "mode": mode}
+        dataset_hash = sha256_json(dataset_payload)
+        exec_cfg_hash = sha256_json({"provider_ids": provider_ids, "execution_config": execution_config})
+        dataset_version = None
+        if dataset_items:
+            dataset_version = dataset_items[0].get("dataset_version")
+        dataset_execution_id = self.db.insert_dataset_execution(
+            session_id=session_id,
+            dataset_hash=dataset_hash,
+            dataset_version=dataset_version,
+            provider_set_json=provider_ids,
+            execution_config_hash=exec_cfg_hash,
+            item_count=len(dataset_items),
+            status="running",
+        )
+        result_rows: list[dict] = []
+        for item in dataset_items:
+            prompt = str(item.get("prompt", "")).strip()
+            if not prompt:
+                continue
+            data_version = item.get("dataset_version")
+            metadata = item.get("metadata", {})
+            if len(provider_ids) > 1:
+                row = self.execute_comparative(
+                    session_id=session_id,
+                    provider_ids=provider_ids,
+                    prompt=prompt,
+                    dataset_version=data_version,
+                    metadata=metadata,
+                    actor=actor,
+                )
+            else:
+                row = self.execute_single(
+                    session_id=session_id,
+                    provider_id=provider_ids[0],
+                    prompt=prompt,
+                    dataset_version=data_version,
+                    metadata=metadata,
+                    actor=actor,
+                )
+            result_rows.append(row)
+        summary = {
+            "dataset_execution_id": dataset_execution_id,
+            "session_id": session_id,
+            "mode": session["mode"],
+            "dataset_hash": dataset_hash,
+            "provider_ids": provider_ids,
+            "item_count": len(dataset_items),
+            "completed_count": len(result_rows),
+        }
+        self.db.update_dataset_execution(dataset_execution_id, "completed", summary)
+        self._record_custody_event(
+            build_custody_event(
+                artifact_id=dataset_execution_id,
+                action_type="REPROCESSING",
+                actor=actor,
+                notes=f"dataset_items={len(dataset_items)}",
+            )
+        )
+        return {"summary": summary, "results": result_rows}
+
     def _require_session(self, session_id: str) -> dict:
         session = self.db.get_session(session_id)
         if not session:
             raise PlaygroundError(f"Unknown session_id '{session_id}'")
         return session
+
+    def _record_custody_event(self, payload: dict) -> None:
+        self.db.insert_chain_of_custody(
+            artifact_id=payload["artifact_id"],
+            action_type=payload["action_type"],
+            actor=payload["actor"],
+            previous_hash=payload.get("previous_hash"),
+            new_hash=payload.get("new_hash"),
+            notes=payload.get("notes", ""),
+        )
 
     def _emit(
         self,
@@ -578,6 +1325,7 @@ class PlaygroundRuntimeService:
         prompt: str,
         dataset_version: Optional[str],
         response: ProviderResponse,
+        actor: Optional[str] = None,
     ) -> CanonicalInferenceTrace:
         prompt_sha = sha256(prompt.encode("utf-8")).hexdigest()
         execution_id = self.db.insert_model_execution(
@@ -594,6 +1342,14 @@ class PlaygroundRuntimeService:
             total_tokens=response.total_tokens,
             finish_reason=response.finish_reason,
         )
+        self._record_custody_event(
+            build_custody_event(
+                artifact_id=execution_id,
+                action_type="EXECUTION_CREATED",
+                actor=actor,
+                notes=f"provider={response.provider_id}",
+            )
+        )
         artifact = EvidenceArtifact(
             provider_id=response.provider_id,
             model_version=response.model_version,
@@ -608,6 +1364,26 @@ class PlaygroundRuntimeService:
             session_id=session_id,
             execution_id=execution_id,
             artifact=artifact,
+        )
+        raw_row = self.db.get_raw_evidence_by_id(raw_id) or {}
+        raw_sha = str(raw_row.get("raw_sha256") or sha256_json(response.raw_json))
+        self.db.insert_artifact_integrity(
+            artifact_id=raw_id,
+            artifact_type="raw_evidence",
+            sha256_value=raw_sha,
+            provider=response.provider_id,
+            schema_version="provider_raw/1.0",
+            acquisition_session=session_id,
+            verification_status="verified",
+        )
+        self._record_custody_event(
+            build_custody_event(
+                artifact_id=raw_id,
+                action_type="RAW_PERSISTED",
+                actor=actor,
+                new_hash=raw_sha,
+                notes=f"execution_id={execution_id}",
+            )
         )
         normalized_input = {
             "provider_id": response.provider_id,
@@ -649,6 +1425,41 @@ class PlaygroundRuntimeService:
             raw_record=normalized_input,
         )
         self.db.insert_canonical_trace(trace)
+        canonical_payload = self._decode_canonical_trace_row(self.db.get_canonical_trace_by_id(trace.trace_id) or {})
+        canonical_hash = sha256_json(canonical_payload)
+        self.db.insert_artifact_integrity(
+            artifact_id=trace.trace_id,
+            artifact_type="canonical_trace",
+            sha256_value=canonical_hash,
+            provider=trace.provider_id,
+            schema_version=trace.schema_version,
+            acquisition_session=session_id,
+            verification_status="verified",
+        )
+        manifest = build_transformation_manifest(
+            source_hash=raw_sha,
+            target_hash=canonical_hash,
+            transformer_version=trace.schema_version,
+            raw_record=normalized_input,
+            trace=trace,
+        )
+        self.db.insert_transformation_manifest(
+            session_id=session_id,
+            execution_id=execution_id,
+            source_artifact_id=raw_id,
+            target_artifact_id=trace.trace_id,
+            manifest=manifest,
+        )
+        self._record_custody_event(
+            build_custody_event(
+                artifact_id=trace.trace_id,
+                action_type="CANONICAL_CREATED",
+                actor=actor,
+                previous_hash=raw_sha,
+                new_hash=canonical_hash,
+                notes=f"execution_id={execution_id}",
+            )
+        )
 
         if self.settings.KURO_PLAYGROUND_HALLUCINATION_ANALYZER:
             hallucination = analyze_trace(trace)
@@ -716,3 +1527,162 @@ class PlaygroundRuntimeService:
             return json.loads(raw)
         except Exception:
             return default
+
+    def _decode_raw_evidence_row(self, row: dict) -> dict:
+        return {
+            **row,
+            "raw_json": self._decode_json(row.get("raw_json"), {}),
+        }
+
+    def _decode_canonical_trace_row(self, row: dict) -> dict:
+        if not row:
+            return {}
+        return {
+            **row,
+            "grounding_chunks_json": self._decode_json(row.get("grounding_chunks_json"), []),
+            "citation_objects_json": self._decode_json(row.get("citation_objects_json"), []),
+            "safety_ratings_json": self._decode_json(row.get("safety_ratings_json"), None),
+            "forensic_flags_json": self._decode_json(row.get("forensic_flags_json"), []),
+            "normalization_warnings_json": self._decode_json(row.get("normalization_warnings_json"), []),
+            "extra_fields_json": self._decode_json(row.get("extra_fields_json"), {}),
+        }
+
+    def _decode_manifest_row(self, row: dict) -> dict:
+        return {
+            **row,
+            "semantic_loss_flags_json": self._decode_json(row.get("semantic_loss_flags_json"), []),
+            "schema_drift_flags_json": self._decode_json(row.get("schema_drift_flags_json"), []),
+            "canonical_candidates_json": self._decode_json(row.get("canonical_candidates_json"), []),
+            "provider_alias_mapping_json": self._decode_json(row.get("provider_alias_mapping_json"), {}),
+        }
+
+    def _decode_capability_row(self, row: dict) -> dict:
+        return {
+            **row,
+            "capability_json": self._decode_json(row.get("capability_json"), {}),
+        }
+
+    def _decode_semantic_divergence_row(self, row: dict) -> dict:
+        return {
+            **row,
+            "contradiction_flags_json": self._decode_json(row.get("contradiction_flags_json"), []),
+            "provider_variance_json": self._decode_json(row.get("provider_variance_json"), {}),
+        }
+
+    @staticmethod
+    def _build_forensic_narrative(history: dict, divergence_rows: list[dict]) -> str:
+        providers = {row.get("provider_id", "unknown") for row in history.get("executions", [])}
+        trace_count = history.get("traces_summary", {}).get("count", 0)
+        if not providers:
+            return "No execution evidence has been recorded for this session."
+        provider_list = ", ".join(sorted(providers))
+        if not divergence_rows:
+            return f"Session contains {trace_count} trace(s) from provider(s): {provider_list}. Divergence data is not available yet."
+        return (
+            f"Session contains {trace_count} trace(s) from provider(s): {provider_list}. "
+            f"Observed {len(divergence_rows)} semantic divergence pair(s) across provider outputs."
+        )
+
+    @staticmethod
+    def _normalize_workflow_mode(value: str) -> str:
+        mode = (value or "quick").strip().lower()
+        if mode not in {"quick", "deep", "academic"}:
+            raise PlaygroundError("workflow_mode must be one of: quick, deep, academic")
+        return mode
+
+    def _shape_view_payload(self, payload: dict, mode: str) -> dict:
+        shaped = {**payload, "workflow_mode": mode}
+        if mode == "quick":
+            return shaped
+        if mode == "deep":
+            shaped["rendering_hint"] = "deep_forensic"
+            return shaped
+        shaped["rendering_hint"] = "academic_presentation"
+        return shaped
+
+    def _map_execution_integrity_status(
+        self,
+        *,
+        raw_integrity: dict | None,
+        canonical_integrity: dict | None,
+        trace_warnings: list,
+        snapshot_trust: dict | None,
+    ) -> str:
+        raw_status = str((raw_integrity or {}).get("verification_status") or "unverified").lower()
+        canonical_status = str((canonical_integrity or {}).get("verification_status") or "unverified").lower()
+        if raw_status in {"failed", "corrupted"} or canonical_status in {"failed", "corrupted"}:
+            return "CORRUPTED"
+        if snapshot_trust and snapshot_trust.get("snapshot_integrity") == "CORRUPTED":
+            return "CORRUPTED"
+        if raw_status == "unverified" or canonical_status == "unverified":
+            return "UNVERIFIED"
+        if snapshot_trust and snapshot_trust.get("snapshot_integrity") == "PARTIAL":
+            return "PARTIAL"
+        if any(str(w).startswith("SCHEMA_DRIFT") for w in trace_warnings):
+            return "DRIFTED"
+        if snapshot_trust and snapshot_trust.get("snapshot_integrity") == "DRIFTED":
+            return "MODIFIED"
+        return "VERIFIED"
+
+    @staticmethod
+    def _build_snapshot_trust_text(summary: dict) -> str:
+        status = summary.get("snapshot_integrity", "UNVERIFIED")
+        replay = summary.get("replay_compatibility", "LIMITED")
+        if status == "VALID":
+            return f"Snapshot verification passed with status VALID; replay compatibility is {replay}."
+        if status == "DRIFTED":
+            return f"Snapshot is DRIFTED with recoverable lineage; replay compatibility is {replay}."
+        if status == "PARTIAL":
+            return f"Snapshot is PARTIAL because one or more integrity components are missing; replay compatibility is {replay}."
+        if status == "CORRUPTED":
+            return f"Snapshot is CORRUPTED due to integrity mismatch; replay compatibility is {replay}."
+        return f"Snapshot has not been verified; replay compatibility is {replay}."
+
+    def _compact_execution_trust(self, *, session_id: str, execution_id: str) -> dict:
+        try:
+            detail = self.build_execution_trust_record(session_id=session_id, execution_id=execution_id)
+        except PlaygroundError:
+            return {
+                "execution_id": execution_id,
+                "integrity_status": "UNVERIFIED",
+                "raw_sha256": None,
+                "canonical_sha256": None,
+                "snapshot_state": "UNVERIFIED",
+                "schema_drift_detected": False,
+                "transformation_integrity_state": "PARTIAL",
+            }
+        transform_flags = detail.get("transformation_metadata", {}).get("semantic_loss_flags", [])
+        warning_flags = detail.get("transformation_metadata", {}).get("canonicalization_warnings", [])
+        snapshot = detail.get("snapshot_trust") or {}
+        return {
+            "execution_id": execution_id,
+            "integrity_status": detail.get("integrity_status", "UNVERIFIED"),
+            "raw_sha256": detail.get("integrity_metadata", {}).get("raw_sha256"),
+            "canonical_sha256": detail.get("integrity_metadata", {}).get("canonical_sha256"),
+            "snapshot_state": snapshot.get("snapshot_integrity", "UNVERIFIED"),
+            "schema_drift_detected": any(str(w).startswith("SCHEMA_DRIFT") for w in warning_flags),
+            "transformation_integrity_state": "PARTIAL" if transform_flags else "VALID",
+        }
+
+    def _build_integrity_explanation(self, *, integrity_overview: dict, snapshot_trust: dict, workflow_mode: str) -> str:
+        metrics = integrity_overview.get("metrics", {})
+        drift = int(metrics.get("schema_drift_events", 0) or 0)
+        failed = int(metrics.get("integrity_failures", 0) or 0)
+        replay = snapshot_trust.get("replay_compatibility", "LIMITED")
+        lines = []
+        if failed == 0:
+            lines.append("The raw provider artifacts remain unchanged since acquisition.")
+        else:
+            lines.append("Integrity violations were detected in one or more artifacts.")
+        if drift > 0:
+            lines.append("Schema drift was detected but semantic preservation remains under active review.")
+        else:
+            lines.append("Canonical normalization completed without schema drift events.")
+        lines.append(f"Replay compatibility is currently assessed as {replay}.")
+        if workflow_mode == "quick":
+            return " ".join(lines[:2])
+        if workflow_mode == "deep":
+            lines.append("This trust state distinguishes integrity, compatibility, and semantic similarity independently.")
+            return "\n".join(lines)
+        lines.append("No deterministic equivalence claim is made for probabilistic model outputs.")
+        return "\n".join(lines)

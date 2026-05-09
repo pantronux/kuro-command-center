@@ -3,6 +3,116 @@
 > Private changelog for the isolated Playground lab under `playground_runtime/`.
 > This document is separate from the main `CHANGELOG.md` by design.
 
+## [2026-05-09] Forensic Integrity Expansion and Trust Workflow UI
+
+### New Features
+- Added full forensic integrity expansion across runtime artifacts:
+  - artifact hashing ledger,
+  - transformation manifests,
+  - chain-of-custody records,
+  - evidence snapshots and verification,
+  - provider capability persistence,
+  - semantic divergence persistence,
+  - synchronous dataset execution records.
+- Added investigator-facing trust workflow surfaces:
+  - integrity overview metrics,
+  - execution trust detail view,
+  - session timeline integrity hashing,
+  - snapshot trust summary,
+  - forensic bundle ZIP export,
+  - transformation lineage view,
+  - workflow modes: `quick`, `deep`, `academic`.
+
+### Architecture & Backend
+- Added integrity modules under `playground_runtime/integrity/`:
+  - `artifact_hashing.py`
+  - `transformation_manifest.py`
+  - `chain_of_custody.py`
+  - `evidence_snapshot.py`
+  - `provenance_integrity.py`
+  - `forensic_verification.py`
+- Added divergence modules under `playground_runtime/divergence/`:
+  - `semantic_diff.py`
+  - `grounding_diff.py`
+  - `claim_overlap.py`
+  - `hallucination_comparison.py`
+  - `provider_variance.py`
+- Added provider capability catalog persistence layer:
+  - `playground_runtime/providers/capabilities/__init__.py`
+  - `playground_runtime/providers/capabilities/catalog.py`
+- Added forensic bundle exporter:
+  - `playground_runtime/export/forensic_bundle_exporter.py`
+- Extended `PlaygroundRuntimeService` with trust and integrity methods:
+  - `build_integrity_overview()`
+  - `build_execution_trust_record()`
+  - `build_snapshot_trust_summary()`
+  - `build_session_timeline_integrity()`
+  - `build_transformation_lineage()`
+  - `export_forensic_bundle()`
+
+### API & Contracts
+- Added endpoints:
+  - `GET /api/playground/sessions/{session_id}/integrity-overview`
+  - `GET /api/playground/sessions/{session_id}/executions/{execution_id}/integrity-detail`
+  - `POST /api/playground/sessions/{session_id}/integrity/refresh`
+  - `GET /api/playground/snapshots/{snapshot_id}/trust-summary?session_id=...`
+  - `POST /api/playground/sessions/{session_id}/exports/forensic-bundle`
+  - `GET /api/playground/sessions/{session_id}/lineage`
+- Enhanced endpoint:
+  - `GET /api/playground/sessions/{session_id}/forensic-view`
+    now supports `workflow_mode=quick|deep|academic`.
+- Extended history payload (additive):
+  - `integrity_overview`
+  - `session_timeline_integrity`
+  - `execution_integrity_rows`
+  - `snapshot_trust_rows`
+
+### Database & Migration
+- Added migration `002_forensic_integrity_expansion.sql`.
+- Added migration `003_forensic_trust_workflow.sql`.
+- Extended migration execution strategy in `PlaygroundDB.init_db()` to apply
+  all `*.sql` in lexical order with `schema_migrations` tracking.
+- Added trust-related session columns:
+  - `session_integrity_hash`
+  - `session_integrity_status`
+  - `session_integrity_verified_at`
+
+### Frontend & UX
+- Added Playground trust controls:
+  - workflow mode selector,
+  - integrity overview action,
+  - verify snapshot action,
+  - forensic bundle export action,
+  - lineage view action.
+- Added artifact trust drawer with grouped sections:
+  - acquisition metadata
+  - integrity metadata
+  - transformation metadata
+  - provenance metadata
+- Added execution-level trust chips in history details:
+  - Integrity
+  - Snapshot
+  - Schema Drift
+  - Transform
+
+### Testing & Verification
+- Added tests:
+  - `tests/test_playground_forensic_integrity.py`
+  - `tests/test_playground_transformation_manifest.py`
+  - `tests/test_playground_chain_of_custody.py`
+  - `tests/test_playground_snapshot_verification.py`
+  - `tests/test_playground_divergence_engine.py`
+  - `tests/test_playground_dataset_pipeline.py`
+  - `tests/test_playground_rendering_modes.py`
+  - `tests/test_playground_integrity_trust_api.py`
+  - `tests/test_playground_integrity_status_mapping.py`
+  - `tests/test_playground_forensic_bundle_export.py`
+  - `tests/test_playground_integrity_history_ui_contract.py`
+  - `tests/test_playground_snapshot_trust_states.py`
+  - `tests/test_playground_session_timeline_integrity.py`
+- Verified regression suite for Playground schema, service flow, history API,
+  integrity, trust workflow, and rendering-mode contracts.
+
 ## [2026-05-09] Playground Private Docs & Tutorial Isolation
 
 ### New Features

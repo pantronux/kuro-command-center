@@ -90,7 +90,18 @@ Routes currently relevant to the private lab:
 - `POST /api/playground/comparative-executions`
 - `POST /api/playground/ontology/reconstruct`
 - `POST /api/playground/reports/{format}`
+- `POST /api/playground/snapshots`
+- `POST /api/playground/snapshots/{snapshot_id}/verify`
+- `GET /api/playground/sessions/{session_id}/forensic-view`
+- `POST /api/playground/datasets/executions`
 - `GET /api/playground/sessions/{session_id}/traces`
+- `GET /api/playground/sessions/{session_id}/history`
+- `GET /api/playground/sessions/{session_id}/integrity-overview`
+- `GET /api/playground/sessions/{session_id}/executions/{execution_id}/integrity-detail`
+- `POST /api/playground/sessions/{session_id}/integrity/refresh`
+- `GET /api/playground/snapshots/{snapshot_id}/trust-summary?session_id=...`
+- `POST /api/playground/sessions/{session_id}/exports/forensic-bundle`
+- `GET /api/playground/sessions/{session_id}/lineage`
 - `GET /playground/tutorial`
 - `GET /api/playground/tutorial/content`
 
@@ -206,6 +217,7 @@ Core dependencies wired there:
 - telemetry bridge;
 - ontology reconstruction;
 - report export.
+- forensic bundle export.
 
 Important methods:
 
@@ -214,6 +226,16 @@ Important methods:
 - `execute_comparative()`
 - `reconstruct_ontology()`
 - `build_and_export_report()`
+- `create_snapshot()`
+- `verify_snapshot()`
+- `build_forensic_view()`
+- `execute_dataset()`
+- `build_integrity_overview()`
+- `build_execution_trust_record()`
+- `build_snapshot_trust_summary()`
+- `build_session_timeline_integrity()`
+- `build_transformation_lineage()`
+- `export_forensic_bundle()`
 - `list_session_traces()`
 
 ## DB Schema and Persistence Flow
@@ -221,6 +243,10 @@ Important methods:
 Persistence lives in:
 
 - `playground_runtime/db/playground_db.py`
+- migrations:
+  - `playground_runtime/db/migrations/001_initial_schema.sql`
+  - `playground_runtime/db/migrations/002_forensic_integrity_expansion.sql`
+  - `playground_runtime/db/migrations/003_forensic_trust_workflow.sql`
 
 Database design goals:
 
@@ -235,6 +261,17 @@ Execution invariants:
 3. normalize from a copied payload
 4. insert `canonical_traces`
 5. optionally persist hallucination or comparative diff artifacts
+
+Additional forensic integrity layers:
+
+1. write `artifact_integrity` rows for raw/canonical/report/snapshot/timeline/export artifacts
+2. write `transformation_manifest` rows for normalization lineage
+3. write `chain_of_custody` lifecycle events
+4. persist `evidence_snapshots` and verification status
+5. persist `provider_capabilities` per session
+6. persist `semantic_divergence` structured comparison rows
+7. persist `ontology_entities` and `ontology_relationships`
+8. persist `dataset_executions` summaries for synchronous batch runs
 
 Why raw-first matters:
 
@@ -313,6 +350,25 @@ Recent UX hardening:
 - output copy and file download actions;
 - dedicated `Tutorial` button for private docs access.
 
+Trust workflow UI additions:
+
+- workflow selector (`quick`, `deep`, `academic`) in Playground quick checks;
+- integrity overview panel with alert severity rendering;
+- execution trust chips inside history detail:
+  - Integrity
+  - Snapshot
+  - Schema Drift
+  - Transform
+- artifact trust detail drawer with four metadata sections:
+  - acquisition
+  - integrity
+  - transformation
+  - provenance
+- quick actions for:
+  - snapshot verification
+  - forensic bundle export
+  - lineage view
+
 ## Tutorial / Documentation Surface
 
 Private documentation files:
@@ -346,6 +402,19 @@ Primary tests around Playground include:
 - `tests/test_playground_gemini_adapter.py`
 - `tests/test_main_playground_mount.py`
 - `tests/test_playground_tutorial_routes.py`
+- `tests/test_playground_forensic_integrity.py`
+- `tests/test_playground_transformation_manifest.py`
+- `tests/test_playground_chain_of_custody.py`
+- `tests/test_playground_snapshot_verification.py`
+- `tests/test_playground_divergence_engine.py`
+- `tests/test_playground_dataset_pipeline.py`
+- `tests/test_playground_rendering_modes.py`
+- `tests/test_playground_integrity_trust_api.py`
+- `tests/test_playground_integrity_status_mapping.py`
+- `tests/test_playground_forensic_bundle_export.py`
+- `tests/test_playground_integrity_history_ui_contract.py`
+- `tests/test_playground_snapshot_trust_states.py`
+- `tests/test_playground_session_timeline_integrity.py`
 
 These tests cover:
 
@@ -355,7 +424,11 @@ These tests cover:
 - provider activation and comparative constraints;
 - normalization safety;
 - route access control;
-- tutorial route isolation.
+- tutorial route isolation;
+- trust status mapping and integrity timeline drift detection;
+- snapshot trust interpretation and replay compatibility states;
+- forensic bundle export structure and audit trail;
+- additive history payload compatibility for trust data.
 
 ## Known Current Limits
 
@@ -368,6 +441,7 @@ Current intentional limits in this phase:
   canonical trace while the mapped values remain in `extra_fields`;
 - Playground remains a mounted subsystem inside `main.py`, not a separate
   process.
+- ZIP cleanup for exported forensic bundle artifacts is manual.
 
 ## Recent Fixes Captured by This Lab
 
@@ -381,3 +455,5 @@ This iteration resolved several operational issues:
 5. Playground output gained `Copy` and `Download` actions.
 6. A private tutorial surface was added so Playground knowledge stays outside
    the main Kuro documentation stream.
+7. Forensic trust workflow now exposes session/execution integrity in readable
+   UI and API projections without breaking older payload contracts.

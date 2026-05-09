@@ -16,6 +16,7 @@ import sqlite3
 from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
+from glob import glob
 from typing import Any
 from uuid import uuid4
 
@@ -43,11 +44,30 @@ class PlaygroundDB:
     def init_db(self) -> None:
         if self._init_done:
             return
-        migration = Path(__file__).resolve().parent / "migrations" / "001_initial_schema.sql"
-        sql = migration.read_text(encoding="utf-8")
+        migration_dir = Path(__file__).resolve().parent / "migrations"
+        migration_paths = sorted(glob(str(migration_dir / "*.sql")))
         conn = self._conn()
         try:
-            conn.executescript(sql)
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS schema_migrations (
+                    name TEXT PRIMARY KEY,
+                    applied_at TEXT NOT NULL
+                )
+                """
+            )
+            applied_rows = conn.execute("SELECT name FROM schema_migrations").fetchall()
+            applied = {str(row[0]) for row in applied_rows}
+            for migration_path in migration_paths:
+                migration_name = Path(migration_path).name
+                if migration_name in applied:
+                    continue
+                sql = Path(migration_path).read_text(encoding="utf-8")
+                conn.executescript(sql)
+                conn.execute(
+                    "INSERT INTO schema_migrations(name, applied_at) VALUES (?, ?)",
+                    (migration_name, self._now()),
+                )
             conn.commit()
         finally:
             conn.close()
@@ -58,6 +78,15 @@ class PlaygroundDB:
         return datetime.now(timezone.utc).isoformat()
 
     def _insert(self, sql: str, values: tuple) -> None:
+        self.init_db()
+        conn = self._conn()
+        try:
+            conn.execute(sql, values)
+            conn.commit()
+        finally:
+            conn.close()
+
+    def _execute(self, sql: str, values: tuple = ()) -> None:
         self.init_db()
         conn = self._conn()
         try:
@@ -243,6 +272,234 @@ class PlaygroundDB:
         )
         return fid
 
+    def insert_artifact_integrity(
+        self,
+        *,
+        artifact_id: str,
+        artifact_type: str,
+        sha256_value: str,
+        acquisition_session: str,
+        provider: str | None = None,
+        schema_version: str | None = None,
+        verification_status: str = "verified",
+    ) -> str:
+        iid = str(uuid4())
+        self._insert(
+            "INSERT INTO artifact_integrity(id, artifact_id, artifact_type, sha256, created_at, provider, schema_version, acquisition_session, verification_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                iid,
+                artifact_id,
+                artifact_type,
+                sha256_value,
+                self._now(),
+                provider,
+                schema_version,
+                acquisition_session,
+                verification_status,
+            ),
+        )
+        return iid
+
+    def insert_transformation_manifest(
+        self,
+        *,
+        session_id: str,
+        execution_id: str,
+        source_artifact_id: str,
+        target_artifact_id: str,
+        manifest: dict,
+    ) -> str:
+        mid = str(uuid4())
+        manifest_id = str(uuid4())
+        self._insert(
+            """
+            INSERT INTO transformation_manifest(
+                id, manifest_id, session_id, execution_id, source_artifact_id, target_artifact_id,
+                source_hash, target_hash, transformer_version, mapping_confidence,
+                semantic_loss_flags_json, schema_drift_flags_json, canonical_candidates_json,
+                provider_alias_mapping_json, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                mid,
+                manifest_id,
+                session_id,
+                execution_id,
+                source_artifact_id,
+                target_artifact_id,
+                manifest.get("source_hash", ""),
+                manifest.get("target_hash", ""),
+                manifest.get("transformer_version", "unknown"),
+                float(manifest.get("mapping_confidence", 0.0)),
+                json.dumps(manifest.get("semantic_loss_flags", []), ensure_ascii=False),
+                json.dumps(manifest.get("schema_drift_flags", []), ensure_ascii=False),
+                json.dumps(manifest.get("canonical_candidates", []), ensure_ascii=False),
+                json.dumps(manifest.get("provider_alias_mapping", {}), ensure_ascii=False),
+                self._now(),
+            ),
+        )
+        return mid
+
+    def insert_chain_of_custody(
+        self,
+        *,
+        artifact_id: str,
+        action_type: str,
+        actor: str,
+        previous_hash: str | None,
+        new_hash: str | None,
+        notes: str = "",
+    ) -> str:
+        cid = str(uuid4())
+        custody_id = str(uuid4())
+        self._insert(
+            "INSERT INTO chain_of_custody(id, custody_id, artifact_id, action_type, actor, created_at, previous_hash, new_hash, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (cid, custody_id, artifact_id, action_type, actor, self._now(), previous_hash, new_hash, notes),
+        )
+        return cid
+
+    def insert_evidence_snapshot(
+        self,
+        *,
+        session_id: str,
+        execution_id: str | None,
+        snapshot_hash: str,
+        snapshot_bundle_json: str,
+        verification_status: str = "unverified",
+    ) -> str:
+        sid = str(uuid4())
+        snapshot_id = str(uuid4())
+        self._insert(
+            """
+            INSERT INTO evidence_snapshots(
+                id, snapshot_id, session_id, execution_id, snapshot_hash, snapshot_bundle_json,
+                created_at, verification_status, verified_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                sid,
+                snapshot_id,
+                session_id,
+                execution_id,
+                snapshot_hash,
+                snapshot_bundle_json,
+                self._now(),
+                verification_status,
+                None,
+            ),
+        )
+        return snapshot_id
+
+    def update_evidence_snapshot_verification(self, snapshot_id: str, verification_status: str) -> None:
+        verified_at = self._now() if verification_status == "verified" else None
+        self._execute(
+            "UPDATE evidence_snapshots SET verification_status=?, verified_at=? WHERE snapshot_id=?",
+            (verification_status, verified_at, snapshot_id),
+        )
+
+    def insert_provider_capability(self, session_id: str, provider_id: str, capability_json: dict, capability_hash: str) -> str:
+        pid = str(uuid4())
+        self._insert(
+            "INSERT INTO provider_capabilities(id, session_id, provider_id, capability_json, capability_hash, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (pid, session_id, provider_id, json.dumps(capability_json, ensure_ascii=False), capability_hash, self._now()),
+        )
+        return pid
+
+    def insert_semantic_divergence(self, session_id: str, payload: dict) -> str:
+        did = str(uuid4())
+        self._insert(
+            """
+            INSERT INTO semantic_divergence(
+                id, session_id, prompt_sha256, left_trace_id, right_trace_id,
+                semantic_overlap, claim_overlap, grounding_delta, citation_density_delta,
+                hallucination_delta, contradiction_flags_json, provider_variance_json, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                did,
+                session_id,
+                payload.get("prompt_sha256", ""),
+                payload.get("left_trace_id", ""),
+                payload.get("right_trace_id", ""),
+                float(payload.get("semantic_overlap", 0.0)),
+                float(payload.get("claim_overlap", 0.0)),
+                float(payload.get("grounding_delta", 0.0)),
+                float(payload.get("citation_density_delta", 0.0)),
+                float(payload.get("hallucination_delta", 0.0)),
+                json.dumps(payload.get("contradiction_flags", []), ensure_ascii=False),
+                json.dumps(payload.get("provider_variance", {}), ensure_ascii=False),
+                self._now(),
+            ),
+        )
+        return did
+
+    def insert_ontology_entity(self, graph_id: str, entity_id: str, label: str, entity_type: str, provenance: dict) -> str:
+        oid = str(uuid4())
+        self._insert(
+            "INSERT INTO ontology_entities(id, graph_id, entity_id, label, entity_type, provenance_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (oid, graph_id, entity_id, label, entity_type, json.dumps(provenance, ensure_ascii=False), self._now()),
+        )
+        return oid
+
+    def insert_ontology_relationship(self, graph_id: str, source_entity_id: str, target_entity_id: str, relation: str, weight: float, provenance: dict) -> str:
+        rid = str(uuid4())
+        self._insert(
+            "INSERT INTO ontology_relationships(id, graph_id, source_entity_id, target_entity_id, relation, weight, provenance_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (rid, graph_id, source_entity_id, target_entity_id, relation, weight, json.dumps(provenance, ensure_ascii=False), self._now()),
+        )
+        return rid
+
+    def insert_dataset_execution(
+        self,
+        *,
+        session_id: str,
+        dataset_hash: str,
+        dataset_version: str | None,
+        provider_set_json: list[str],
+        execution_config_hash: str,
+        item_count: int,
+        status: str,
+        result_summary: dict | None = None,
+    ) -> str:
+        did = str(uuid4())
+        self._insert(
+            """
+            INSERT INTO dataset_executions(
+                id, session_id, dataset_hash, dataset_version, provider_set_json, execution_config_hash,
+                item_count, status, result_summary_json, created_at, completed_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                did,
+                session_id,
+                dataset_hash,
+                dataset_version,
+                json.dumps(provider_set_json, ensure_ascii=False),
+                execution_config_hash,
+                item_count,
+                status,
+                json.dumps(result_summary, ensure_ascii=False) if result_summary is not None else None,
+                self._now(),
+                None,
+            ),
+        )
+        return did
+
+    def update_dataset_execution(self, dataset_execution_id: str, status: str, result_summary: dict | None) -> None:
+        self._execute(
+            "UPDATE dataset_executions SET status=?, result_summary_json=?, completed_at=? WHERE id=?",
+            (
+                status,
+                json.dumps(result_summary, ensure_ascii=False) if result_summary is not None else None,
+                self._now() if status == "completed" else None,
+                dataset_execution_id,
+            ),
+        )
+
     def list_canonical_traces(self, session_id: str) -> list[dict]:
         self.init_db()
         conn = self._conn()
@@ -269,6 +526,16 @@ class PlaygroundDB:
             return dict(row) if row else None
         finally:
             conn.close()
+
+    def update_session_integrity(self, session_id: str, integrity_hash: str, integrity_status: str) -> None:
+        self._execute(
+            """
+            UPDATE playground_sessions
+            SET session_integrity_hash=?, session_integrity_status=?, session_integrity_verified_at=?
+            WHERE id=?
+            """,
+            (integrity_hash, integrity_status, self._now(), session_id),
+        )
 
     def list_sessions(self, limit: int = 20, mode: str | None = None) -> list[dict]:
         self.init_db()
@@ -342,6 +609,24 @@ class PlaygroundDB:
         finally:
             conn.close()
 
+    def get_raw_evidence_by_id(self, raw_id: str) -> dict | None:
+        self.init_db()
+        conn = self._conn()
+        try:
+            row = conn.execute("SELECT * FROM raw_evidence WHERE id=? LIMIT 1", (raw_id,)).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def get_canonical_trace_by_id(self, trace_id: str) -> dict | None:
+        self.init_db()
+        conn = self._conn()
+        try:
+            row = conn.execute("SELECT * FROM canonical_traces WHERE id=? LIMIT 1", (trace_id,)).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
     def list_epistemic_diffs(self, session_id: str) -> list[dict]:
         self.init_db()
         conn = self._conn()
@@ -354,6 +639,146 @@ class PlaygroundDB:
         finally:
             conn.close()
 
+    def list_transformation_manifests(self, session_id: str, execution_id: str | None = None) -> list[dict]:
+        self.init_db()
+        conn = self._conn()
+        try:
+            if execution_id:
+                rows = conn.execute(
+                    "SELECT * FROM transformation_manifest WHERE session_id=? AND execution_id=? ORDER BY created_at DESC",
+                    (session_id, execution_id),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM transformation_manifest WHERE session_id=? ORDER BY created_at DESC",
+                    (session_id,),
+                ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def list_artifact_integrity(self, session_id: str) -> list[dict]:
+        self.init_db()
+        conn = self._conn()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM artifact_integrity WHERE acquisition_session=? ORDER BY created_at DESC",
+                (session_id,),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def get_artifact_integrity(self, artifact_id: str, artifact_type: str | None = None) -> dict | None:
+        self.init_db()
+        conn = self._conn()
+        try:
+            if artifact_type:
+                row = conn.execute(
+                    """
+                    SELECT * FROM artifact_integrity
+                    WHERE artifact_id=? AND artifact_type=?
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """,
+                    (artifact_id, artifact_type),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    "SELECT * FROM artifact_integrity WHERE artifact_id=? ORDER BY created_at DESC LIMIT 1",
+                    (artifact_id,),
+                ).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def list_chain_of_custody(self, artifact_id: str | None = None) -> list[dict]:
+        self.init_db()
+        conn = self._conn()
+        try:
+            if artifact_id:
+                rows = conn.execute(
+                    "SELECT * FROM chain_of_custody WHERE artifact_id=? ORDER BY created_at DESC",
+                    (artifact_id,),
+                ).fetchall()
+            else:
+                rows = conn.execute("SELECT * FROM chain_of_custody ORDER BY created_at DESC").fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def list_chain_of_custody_for_artifacts(self, artifact_ids: list[str]) -> list[dict]:
+        self.init_db()
+        if not artifact_ids:
+            return []
+        placeholders = ",".join(["?"] * len(artifact_ids))
+        conn = self._conn()
+        try:
+            rows = conn.execute(
+                f"SELECT * FROM chain_of_custody WHERE artifact_id IN ({placeholders}) ORDER BY created_at DESC",
+                tuple(artifact_ids),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def get_snapshot(self, snapshot_id: str) -> dict | None:
+        self.init_db()
+        conn = self._conn()
+        try:
+            row = conn.execute(
+                "SELECT * FROM evidence_snapshots WHERE snapshot_id=? ORDER BY created_at DESC LIMIT 1",
+                (snapshot_id,),
+            ).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def list_snapshots(self, session_id: str) -> list[dict]:
+        self.init_db()
+        conn = self._conn()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM evidence_snapshots WHERE session_id=? ORDER BY created_at DESC",
+                (session_id,),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def list_provider_capabilities(self, session_id: str) -> list[dict]:
+        self.init_db()
+        conn = self._conn()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM provider_capabilities WHERE session_id=? ORDER BY created_at DESC",
+                (session_id,),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def list_semantic_divergence(self, session_id: str) -> list[dict]:
+        self.init_db()
+        conn = self._conn()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM semantic_divergence WHERE session_id=? ORDER BY created_at DESC",
+                (session_id,),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def get_dataset_execution(self, dataset_execution_id: str) -> dict | None:
+        self.init_db()
+        conn = self._conn()
+        try:
+            row = conn.execute("SELECT * FROM dataset_executions WHERE id=?", (dataset_execution_id,)).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
     def list_ontology_graphs(self, session_id: str) -> list[dict]:
         self.init_db()
         conn = self._conn()
@@ -361,6 +786,42 @@ class PlaygroundDB:
             rows = conn.execute(
                 "SELECT * FROM ontology_graphs WHERE session_id=? ORDER BY created_at_utc DESC",
                 (session_id,),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def list_ontology_mappings(self, session_id: str) -> list[dict]:
+        self.init_db()
+        conn = self._conn()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM ontology_mappings WHERE session_id=? ORDER BY created_at_utc DESC",
+                (session_id,),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def list_ontology_entities(self, graph_id: str) -> list[dict]:
+        self.init_db()
+        conn = self._conn()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM ontology_entities WHERE graph_id=? ORDER BY created_at DESC",
+                (graph_id,),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def list_ontology_relationships(self, graph_id: str) -> list[dict]:
+        self.init_db()
+        conn = self._conn()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM ontology_relationships WHERE graph_id=? ORDER BY created_at DESC",
+                (graph_id,),
             ).fetchall()
             return [dict(r) for r in rows]
         finally:

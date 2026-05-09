@@ -720,6 +720,51 @@
                             class="w-full px-3 py-2 rounded-xl bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-100 text-sm font-medium transition-colors">
                             List Traces
                         </button>
+                        <div class="grid grid-cols-2 gap-2">
+                            <select id="playgroundWorkflowModeSelect"
+                                class="px-2 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 text-xs">
+                                <option value="quick">quick review</option>
+                                <option value="deep">deep forensic</option>
+                                <option value="academic">academic presentation</option>
+                            </select>
+                            <button id="playgroundIntegrityOverviewBtn"
+                                class="px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-medium transition-colors">
+                                Integrity Overview
+                            </button>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2">
+                            <select id="playgroundForensicViewSelect"
+                                class="px-2 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 text-xs">
+                                <option value="summary">summary</option>
+                                <option value="raw">raw</option>
+                                <option value="canonical">canonical</option>
+                                <option value="ontology">ontology</option>
+                                <option value="divergence">divergence</option>
+                            </select>
+                            <button id="playgroundLoadForensicViewBtn"
+                                class="px-3 py-2 rounded-xl bg-indigo-500 hover:bg-indigo-600 text-white text-xs font-medium transition-colors">
+                                Load View
+                            </button>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2">
+                            <button id="playgroundVerifySnapshotBtn"
+                                class="px-3 py-2 rounded-xl bg-violet-500 hover:bg-violet-600 text-white text-xs font-medium transition-colors">
+                                Verify Snapshot
+                            </button>
+                            <button id="playgroundExportBundleBtn"
+                                class="px-3 py-2 rounded-xl bg-sky-500 hover:bg-sky-600 text-white text-xs font-medium transition-colors">
+                                Export Bundle
+                            </button>
+                        </div>
+                        <button id="playgroundLineageBtn"
+                            class="w-full px-3 py-2 rounded-xl bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-100 text-sm font-medium transition-colors">
+                            Lineage View
+                        </button>
+                        <div id="playgroundIntegrityOverview"
+                            class="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-2 text-xs space-y-1 text-gray-700 dark:text-gray-200">
+                            <p class="font-semibold text-gray-800 dark:text-gray-100">Forensic Integrity Overview</p>
+                            <p class="text-gray-500 dark:text-gray-400">No integrity overview loaded.</p>
+                        </div>
                         <div class="pt-2 border-t border-gray-200 dark:border-gray-700 space-y-2">
                             <p class="text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400">Session History</p>
                             <div id="playgroundHistoryList"
@@ -758,6 +803,35 @@
                     <pre id="playgroundOutput" class="text-xs whitespace-pre-wrap break-words max-h-[45vh] overflow-y-auto">(no output)</pre>
                 </div>
             </section>
+
+            <div id="playgroundArtifactDrawer" class="hidden fixed inset-0 z-[90]">
+                <div id="playgroundArtifactDrawerBackdrop" class="absolute inset-0 bg-black/60"></div>
+                <div class="absolute right-0 top-0 h-full w-full max-w-xl bg-white dark:bg-gray-800 shadow-2xl overflow-y-auto">
+                    <div class="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                        <h4 class="font-semibold text-gray-800 dark:text-gray-100">Artifact Trust Detail</h4>
+                        <button id="playgroundArtifactDrawerClose"
+                            class="px-2 py-1 rounded-lg bg-gray-100 dark:bg-gray-700 text-xs text-gray-700 dark:text-gray-200">Close</button>
+                    </div>
+                    <div class="p-4 space-y-3 text-xs">
+                        <div>
+                            <p class="font-semibold text-gray-800 dark:text-gray-100">Acquisition Metadata</p>
+                            <pre id="playgroundArtifactAcquisition" class="mt-1 whitespace-pre-wrap text-gray-700 dark:text-gray-200"></pre>
+                        </div>
+                        <div>
+                            <p class="font-semibold text-gray-800 dark:text-gray-100">Integrity Metadata</p>
+                            <pre id="playgroundArtifactIntegrity" class="mt-1 whitespace-pre-wrap text-gray-700 dark:text-gray-200"></pre>
+                        </div>
+                        <div>
+                            <p class="font-semibold text-gray-800 dark:text-gray-100">Transformation Metadata</p>
+                            <pre id="playgroundArtifactTransformation" class="mt-1 whitespace-pre-wrap text-gray-700 dark:text-gray-200"></pre>
+                        </div>
+                        <div>
+                            <p class="font-semibold text-gray-800 dark:text-gray-100">Provenance Metadata</p>
+                            <pre id="playgroundArtifactProvenance" class="mt-1 whitespace-pre-wrap text-gray-700 dark:text-gray-200"></pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
 
             <!-- Welcome Screen -->
             <div id="welcomeScreen" class="flex-1 flex flex-col items-center justify-center p-8 animate-fade-in hidden">
