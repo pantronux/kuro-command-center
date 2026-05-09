@@ -3399,8 +3399,9 @@ async def get_persona(request: Request):
 
 
 @app.get("/api/persona/history/stats")
-async def persona_history_stats():
+async def persona_history_stats(request: Request):
     """Get persona distribution and available backup snapshots."""
+    require_admin_user(request)
     try:
         return {
             "status": "success",
@@ -3413,8 +3414,9 @@ async def persona_history_stats():
 
 
 @app.get("/api/persona/history/preview")
-async def persona_history_preview(limit_turns: int = 30):
+async def persona_history_preview(request: Request, limit_turns: int = 30):
     """Preview consultant/advisor turn classification without writing data."""
+    require_admin_user(request)
     try:
         preview = persona_history_admin.preview_reclassify(limit_turns=limit_turns)
         return {"status": "success", "preview": preview}
@@ -3426,6 +3428,7 @@ async def persona_history_preview(limit_turns: int = 30):
 @app.post("/api/persona/history/reclassify")
 async def persona_history_reclassify(request: Request):
     """Reclassify consultant/advisor history into separated persona buckets."""
+    require_admin_user(request)
     try:
         body = await request.json()
         apply_changes = bool(body.get("apply", False))
@@ -3439,6 +3442,7 @@ async def persona_history_reclassify(request: Request):
 @app.post("/api/persona/history/override")
 async def persona_history_override(request: Request):
     """Manual override persona assignment for specific chat_history row IDs."""
+    require_admin_user(request)
     try:
         body = await request.json()
         row_ids = body.get("row_ids", [])
@@ -3455,6 +3459,7 @@ async def persona_history_override(request: Request):
 @app.post("/api/persona/history/restore")
 async def persona_history_restore(request: Request):
     """Restore persona labels from a selected DB backup snapshot."""
+    require_admin_user(request)
     try:
         body = await request.json()
         backup_file = body.get("backup_file", "")
