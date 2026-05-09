@@ -1,0 +1,785 @@
+2026-05-08 01:03:33 [INFO] __main__: Hardware Sentinel Check [off-hours]: CPU=2.0%, RAM=15.4%, Disk=72.4%, Net TX=12889.9MB, RX=9582.0MB
+2026-05-08 02:00:00 [INFO] kuro_backend.file_retention_worker: [RETENTION] Starting cycle (dry_run=False)
+2026-05-08 02:00:00 [INFO] kuro_backend.file_retention_worker: [RETENTION] Cycle complete: {'total': 0, 'archived': 0, 'failed': 0}
+2026-05-08 02:30:00 [INFO] kuro_backend.evaluation.evaluation_scheduler: Running nightly autonomous evaluation...
+2026-05-08 02:30:00 [ERROR] kuro_backend.evaluation.evaluation_scheduler: Nightly evaluation failed: module 'kuro_backend.intelligence_db' has no attribute '_conn'
+2026-05-08 03:00:00 [INFO] kuro_backend.dreaming_worker: [DREAMING] Starting cycle for user: Faikhira
+2026-05-08 03:00:00 [INFO] kuro_backend.dreaming_worker: [CVE] openclaw non-ok result: None
+2026-05-08 03:00:00 [INFO] kuro_backend.dreaming_worker: [CVE] sentinel: no CVEs above CVSS 7.0
+2026-05-08 03:00:00 [WARNING] kuro_backend.dreaming_worker: [DREAMING] Market sentinel failed for Faikhira: ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint
+2026-05-08 03:00:00 [INFO] kuro_backend.dreaming_worker: [DREAMING] Starting cycle for user: Pantronux
+2026-05-08 03:00:00 [INFO] kuro_backend.dreaming_worker: [CVE] openclaw non-ok result: None
+2026-05-08 03:00:00 [INFO] kuro_backend.dreaming_worker: [CVE] sentinel: no CVEs above CVSS 7.0
+2026-05-08 03:00:00 [WARNING] kuro_backend.dreaming_worker: [DREAMING] Market sentinel failed for Pantronux: ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint
+2026-05-08 05:03:33 [INFO] __main__: Hardware Sentinel Check [off-hours]: CPU=2.0%, RAM=15.4%, Disk=72.4%, Net TX=12891.2MB, RX=9587.7MB
+2026-05-08 05:16:15 [INFO] __main__: Unauthenticated access to / from 192.168.18.244, redirecting to /login
+2026-05-08 05:16:24 [INFO] __main__: Successful login: Pantronux from 192.168.18.244
+2026-05-08 06:50:07 [WARNING] __main__: Network error: Bad Gateway
+2026-05-08 06:50:08 [WARNING] __main__: Network error: Bad Gateway
+2026-05-08 06:50:10 [WARNING] __main__: Network error: Bad Gateway
+2026-05-08 06:50:13 [WARNING] __main__: Network error: Bad Gateway
+2026-05-08 08:00:00 [INFO] __main__: [INTELLIGENCE] Running daily research for Faikhira (08:00 AM briefing)...
+2026-05-08 08:00:00 [INFO] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-05-08 08:00:03 [INFO] __main__: Hardware Sentinel Check [work hours]: CPU=1.0%, RAM=15.6%, Disk=72.4%, Net TX=12897.5MB, RX=9594.2MB
+2026-05-08 08:00:49 [INFO] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-05-08 08:01:15 [INFO] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-05-08 08:01:40 [INFO] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-05-08 08:02:08 [INFO] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-05-08 08:02:20 [INFO] __main__: [INTELLIGENCE] Briefing generated for Faikhira, skipping Telegram (non-Admin).
+2026-05-08 08:02:20 [INFO] __main__: [INTELLIGENCE] Running daily research for Pantronux (08:00 AM briefing)...
+2026-05-08 08:02:20 [INFO] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-05-08 08:03:08 [INFO] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-05-08 08:03:36 [INFO] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-05-08 08:04:05 [INFO] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-05-08 08:04:34 [INFO] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-05-08 08:04:58 [INFO] __main__: [INTELLIGENCE] Daily briefing sent to Telegram for Pantronux
+2026-05-08 09:00:00 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-08 09:00:00 [INFO] kuro_backend.market_sentinel: [SENTINEL] Starting Hybrid Triangulation scan for Faikhira...
+2026-05-08 09:00:00 [WARNING] kuro_backend.market_sentinel: [SENTINEL] No stock data found in DB. Run price update first.
+2026-05-08 09:00:00 [INFO] kuro_backend.market_sentinel: [SENTINEL] Starting Hybrid Triangulation scan for Pantronux...
+2026-05-08 09:00:00 [INFO] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for ADRO.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for AKRA.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for AMRT.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for ANTM.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for ASII.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for BBCA.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for BBNI.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for BBRI.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for BBTN.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for BMRI.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for BRPT.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for BUKA.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for CPIN.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for EMTK.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for ESSA.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for EXCL.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for GGRM.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for GOTO.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for HRUM.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for ICBP.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for INCO.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for INDF.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for INKP.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for INTP.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for ITMG.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for KLBF.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for MDKA.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for MEDC.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for MIKA.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for PGAS.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for PTBA.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for SCMA.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for SMGR.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for TBIG.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for TLKM.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for TOWR.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for TPIA.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for UNTR.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for UNVR.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for UNVR.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for ELSA.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for BUMI.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for ENRG.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for BRMS.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for DEWA.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for LPPS.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for PKPK.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for KRAS.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for MLPL.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for WIIM.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for DOID.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for SMDR.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for BSDE.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for PWON.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for ASRI.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:07 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 0 updated, 56 failed.
+2026-05-08 09:00:07 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for ADRO.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for AKRA.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for AMRT.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for ANTM.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for ASII.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for BBCA.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for BBNI.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for BBRI.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for BBTN.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for BMRI.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for BRPT.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for BUKA.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for CPIN.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for EMTK.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for ESSA.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for EXCL.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for GGRM.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for GOTO.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for HRUM.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for ICBP.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for INCO.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for INDF.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for INKP.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for INTP.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for ITMG.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for KLBF.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for MDKA.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for MEDC.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for MIKA.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for PGAS.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for PTBA.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for SCMA.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for SMGR.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for TBIG.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for TLKM.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for TOWR.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for TPIA.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for UNTR.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for UNVR.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for UNVR.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for ELSA.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for BUMI.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for ENRG.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for BRMS.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for DEWA.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for LPPS.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for PKPK.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for KRAS.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for MLPL.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for WIIM.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for DOID.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for SMDR.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for BSDE.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for PWON.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for ASRI.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:00:12 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 0 updated, 56 failed.
+2026-05-08 09:00:12 [INFO] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-05-08 09:00:53 [INFO] kuro_backend.market_sentinel: [SENTINEL] Hybrid Triangulation scan complete for 55 stocks.
+2026-05-08 09:30:00 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-08 09:30:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:30:04 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-08 09:30:04 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-08 09:30:10 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 09:30:10 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-08 09:36:56 [INFO] __main__: Unauthenticated access to / from 100.72.160.126, redirecting to /login
+2026-05-08 09:37:03 [INFO] __main__: Successful login: Pantronux from 100.72.160.126
+2026-05-08 09:57:58 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-08 09:57:58 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-08 09:57:58 [INFO] main: [TITLE_GEN] Generated title for c0f1488a-88c2-46e8-9e96-a5a18efba855: New Chat
+2026-05-08 09:57:59 [ERROR] main: Error in streaming endpoint: stream boom
+Traceback (most recent call last):
+  File "/home/kuro/projects/kuro/main.py", line 1478, in event_generator
+    async for chunk in process_chat_with_graph_stream(
+  File "/home/kuro/projects/kuro/tests/test_api_sse_contract.py", line 99, in _fake_stream
+    raise RuntimeError("stream boom")
+RuntimeError: stream boom
+2026-05-08 09:57:59 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-08 09:57:59 [INFO] main: [TITLE_GEN] Generated title for 77a3dbf7-42d3-4641-91cb-29aecbfad131: New Chat
+2026-05-08 09:58:13 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-08 09:58:14 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-08 09:58:14 [INFO] main: [TITLE_GEN] Generated title for ab27d43f-3681-4b98-8b7a-74578331b9c9: New Chat
+2026-05-08 09:58:15 [ERROR] main: Error in streaming endpoint: stream boom
+Traceback (most recent call last):
+  File "/home/kuro/projects/kuro/main.py", line 1478, in event_generator
+    async for chunk in process_chat_with_graph_stream(
+  File "/home/kuro/projects/kuro/tests/test_api_sse_contract.py", line 99, in _fake_stream
+    raise RuntimeError("stream boom")
+RuntimeError: stream boom
+2026-05-08 09:58:15 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-08 09:58:15 [INFO] main: [TITLE_GEN] Generated title for 5d487cf8-ab4a-428f-b63d-39da046f4b51: New Chat
+2026-05-08 09:58:25 [INFO] kuro_backend.dreaming_worker: [CVE] sentinel disabled via KURO_CVE_SENTINEL_ENABLED
+2026-05-08 09:58:25 [INFO] kuro_backend.dreaming_worker: [CVE] sentinel source=openclaw targets=1 cves=2 (cap=3)
+2026-05-08 09:58:25 [INFO] kuro_backend.proactive_events: [PROACTIVE] event kind=security_cve severity=critical title=CVE CVE-2026-0001 on pve01 (CVSS 9.1)
+2026-05-08 09:58:25 [INFO] kuro_backend.proactive_events: [PROACTIVE] event kind=security_cve severity=warning title=CVE CVE-2026-0002 on pve01 (CVSS 7.4)
+2026-05-08 09:58:26 [INFO] kuro_backend.dreaming_worker: [CVE] sentinel source=nvd_direct targets=1 cves=1 (cap=5)
+2026-05-08 09:58:26 [INFO] kuro_backend.proactive_events: [PROACTIVE] event kind=security_cve severity=warning title=CVE CVE-2026-9999 on pve01 (CVSS 8.2)
+2026-05-08 09:58:26 [INFO] kuro_backend.dreaming_worker: [CVE] sentinel source=openclaw targets=1 cves=5 (cap=2)
+2026-05-08 09:58:26 [INFO] kuro_backend.proactive_events: [PROACTIVE] event kind=security_cve severity=critical title=CVE CVE-2026-0000 on pve01 (CVSS 9.5)
+2026-05-08 09:58:26 [INFO] kuro_backend.proactive_events: [PROACTIVE] event kind=security_cve severity=critical title=CVE CVE-2026-0001 on pve01 (CVSS 9.4)
+2026-05-08 09:58:27 [INFO] kuro_backend.dreaming_worker: [CVE] sentinel source=openclaw targets=1 cves=1 (cap=5)
+2026-05-08 09:58:27 [INFO] kuro_backend.dreaming_worker: [CVE] dry_run cve=CVE-DRY target=pve01
+2026-05-08 09:58:28 [INFO] kuro_backend.proactive_events: [PROACTIVE] event kind=security_cve severity=critical title=CVE CVE-DEDUP on pve01 (CVSS 9.2)
+2026-05-08 09:58:28 [INFO] kuro_backend.proactive_events: [PROACTIVE] event kind=security_cve severity=critical title=CVE CVE-DEDUP on pve01 (CVSS 9.2)
+2026-05-08 09:58:29 [WARNING] kuro_backend.dreaming_worker: [DREAMING] openclaw google_search raised: openclaw down
+2026-05-08 09:58:30 [INFO] kuro_backend.dreaming_worker: [DREAMING] ssot bumped cycle=1 finding= persona=advisor
+2026-05-08 09:58:30 [INFO] kuro_backend.dreaming_worker: [DREAMING] dry_run ssot_bump finding= persona=advisor user=Pantronux
+2026-05-08 09:58:30 [INFO] kuro_backend.dreaming_worker: [DREAMING] notify skipped (dedup) finding= user=Pantronux
+2026-05-08 09:58:31 [INFO] kuro_backend.dreaming_worker: [DREAMING] skipped — idle gate not cleared
+2026-05-08 09:58:32 [INFO] kuro_backend.dreaming_worker: [DREAMING] skipped — another holder owns the lease
+2026-05-08 09:58:32 [INFO] kuro_backend.dreaming_worker: [DREAMING] Starting cycle for user: Pantronux
+2026-05-08 09:58:32 [INFO] kuro_backend.dreaming_worker: [CVE] sentinel disabled via KURO_CVE_SENTINEL_ENABLED
+2026-05-08 09:58:32 [INFO] kuro_backend.dreaming_worker: [DREAMING] Starting cycle for user: Pantronux
+2026-05-08 09:58:44 [INFO] kuro_backend.token_budget: [TOKEN_BUDGET] global overshoot by 16497 tokens (total=24997, cap=8500); trimming low-priority sections
+2026-05-08 09:58:44 [WARNING] kuro_backend.token_budget: [TOKEN_BUDGET] global cap still exceeded by 11314 tokens after trimming (Layer 3 SSoT floor protected; allowing overshoot rather than evicting SSoT)
+2026-05-08 09:58:51 [INFO] kuro_backend.proactive_events: [PROACTIVE] event kind=hardware severity=warning title=cpu high
+2026-05-08 09:58:51 [INFO] kuro_backend.proactive_events: [PROACTIVE] event kind=hardware severity=warning title=cpu 90
+2026-05-08 09:58:51 [INFO] kuro_backend.proactive_events: [PROACTIVE] event kind=security_cve severity=warning title=cve
+2026-05-08 09:58:52 [INFO] kuro_backend.proactive_events: [PROACTIVE] event kind=hardware severity=warning title=dry
+2026-05-08 09:58:52 [INFO] kuro_backend.proactive_events: [PROACTIVE] event kind=hardware severity=warning title=dry
+2026-05-08 09:58:52 [INFO] kuro_backend.proactive_events: [PROACTIVE] event kind=hardware severity=warning title=bg
+2026-05-08 09:58:52 [WARNING] kuro_backend.proactive_events: [PROACTIVE] non-event payload ignored
+2026-05-08 09:59:08 [INFO] main: File saved: /tmp/pytest-of-kuro/pytest-51/test_chat_history_records_uniq0/tester/docs/my_file_20260508_095908.txt
+2026-05-08 09:59:08 [INFO] main: File saved: /tmp/pytest-of-kuro/pytest-51/test_chat_history_records_uniq0/tester/docs/my_file_20260508_095908_1067.txt
+2026-05-08 10:00:00 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-08 10:00:03 [INFO] __main__: Hardware Sentinel Check [work hours]: CPU=54.3%, RAM=39.3%, Disk=75.6%, Net TX=13045.5MB, RX=9979.4MB
+2026-05-08 10:00:05 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 10:00:05 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-08 10:00:05 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-08 10:00:10 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 10:00:10 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-08 10:03:38 [INFO] telegram.ext.Application: Application is stopping. This might take a moment.
+2026-05-08 10:03:38 [INFO] telegram.ext.Application: Application.stop() complete
+2026-05-08 10:03:38 [INFO] __main__: Starting Telegram bot polling... (Attempt 2/5)
+2026-05-08 10:03:39 [INFO] telegram.ext.Application: Application started
+2026-05-08 10:05:29 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-08 10:05:29 [INFO] __main__: Kuro AI Reborn is starting...
+2026-05-08 10:05:30 [INFO] __main__: Memory stats: {'tier1_short_term': {'type': 'SQLite', 'entries': 15, 'limit': 15}, 'tier2_long_term': {'type': 'Mem0', 'entries': 1}, 'tier3_profile': {'type': 'JSON', 'file': '/home/kuro/projects/kuro/master_profile.json', 'notes': 0}, 'importance_threshold': 7}
+2026-05-08 10:05:30 [INFO] __main__: Web Dashboard: http://0.0.0.0:8000 (Authentication Required)
+2026-05-08 10:05:30 [INFO] __main__: Login Page: http://0.0.0.0:8000/login
+2026-05-08 10:05:30 [INFO] __main__: Reminder Dashboard: http://0.0.0.0:8000/reminders
+2026-05-08 10:05:30 [INFO] __main__: Habits Dashboard: http://0.0.0.0:8000/habits
+2026-05-08 10:05:30 [INFO] __main__: Databases initialized (Auth & Chat History)
+2026-05-08 10:05:30 [INFO] __main__: Price Ticker updates scheduled for all users.
+2026-05-08 10:05:30 [INFO] __main__: Market Sentinel Triangulation scans scheduled for all users.
+2026-05-08 10:05:30 [INFO] __main__: Autonomous dreaming cycle scheduled at 03:00 daily.
+2026-05-08 10:05:30 [INFO] __main__: Intelligence scheduler started.
+2026-05-08 10:05:30 [INFO] __main__: Evaluation Scheduler started.
+2026-05-08 10:05:30 [INFO] __main__: Hardware Sentinel scheduler started.
+2026-05-08 10:05:30 [INFO] phoenix.config: 📋 Ensuring phoenix working directory: /home/kuro/projects/kuro/phoenix_data
+2026-05-08 10:05:30 [INFO] alembic.runtime.migration: Context impl SQLiteImpl.
+2026-05-08 10:05:30 [INFO] alembic.runtime.migration: Will assume transactional DDL.
+2026-05-08 10:05:34 [INFO] __main__: [OBSERVABILITY] Phoenix dashboard available at: http://localhost:6006/
+2026-05-08 10:05:34 [INFO] __main__: [OBSERVABILITY] Auth: DISABLED (local private network)
+2026-05-08 10:05:34 [INFO] __main__: [OBSERVABILITY] Project: Kuro-AI-Audit
+2026-05-08 10:05:34 [INFO] __main__: [OBSERVABILITY] OpenTelemetry instrumentation enabled
+2026-05-08 10:05:34 [INFO] __main__: FastAPI server started in background thread on port 8443
+2026-05-08 10:05:34 [INFO] __main__: HTTPS enabled with mkcert certificates
+2026-05-08 10:05:34 [INFO] __main__: Secure Web Dashboard: https://0.0.0.0:8443
+2026-05-08 10:05:34 [INFO] __main__: Secure Login Page: https://0.0.0.0:8443/login
+2026-05-08 10:05:36 [INFO] __main__: Starting Telegram bot in main thread...
+2026-05-08 10:05:36 [INFO] __main__: Starting Telegram bot polling... (Attempt 1/5)
+2026-05-08 10:05:37 [INFO] telegram.ext.Application: Application started
+2026-05-08 10:06:01 [INFO] __main__: Hardware Sentinel Check [work hours]: CPU=4.6%, RAM=38.8%, Disk=75.6%, Net TX=13062.7MB, RX=9992.2MB
+2026-05-08 10:30:00 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-08 10:30:10 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 10:30:10 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-08 10:30:10 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-08 10:30:16 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 10:30:16 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-08 10:44:40 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-08 10:44:40 [INFO] __main__: Kuro AI Reborn is starting...
+2026-05-08 10:44:40 [INFO] __main__: Memory stats: {'tier1_short_term': {'type': 'SQLite', 'entries': 15, 'limit': 15}, 'tier2_long_term': {'type': 'Mem0', 'entries': 1}, 'tier3_profile': {'type': 'JSON', 'file': '/home/kuro/projects/kuro/master_profile.json', 'notes': 0}, 'importance_threshold': 7}
+2026-05-08 10:44:40 [INFO] __main__: Web Dashboard: http://0.0.0.0:8000 (Authentication Required)
+2026-05-08 10:44:40 [INFO] __main__: Login Page: http://0.0.0.0:8000/login
+2026-05-08 10:44:40 [INFO] __main__: Reminder Dashboard: http://0.0.0.0:8000/reminders
+2026-05-08 10:44:40 [INFO] __main__: Habits Dashboard: http://0.0.0.0:8000/habits
+2026-05-08 10:44:40 [INFO] __main__: Databases initialized (Auth & Chat History)
+2026-05-08 10:44:40 [INFO] __main__: Price Ticker updates scheduled for all users.
+2026-05-08 10:44:41 [INFO] __main__: Market Sentinel Triangulation scans scheduled for all users.
+2026-05-08 10:44:41 [INFO] __main__: Autonomous dreaming cycle scheduled at 03:00 daily.
+2026-05-08 10:44:41 [INFO] __main__: Intelligence scheduler started.
+2026-05-08 10:44:41 [INFO] __main__: Evaluation Scheduler started.
+2026-05-08 10:44:41 [INFO] __main__: Hardware Sentinel scheduler started.
+2026-05-08 10:44:41 [INFO] phoenix.config: 📋 Ensuring phoenix working directory: /home/kuro/projects/kuro/phoenix_data
+2026-05-08 10:44:41 [INFO] alembic.runtime.migration: Context impl SQLiteImpl.
+2026-05-08 10:44:41 [INFO] alembic.runtime.migration: Will assume transactional DDL.
+2026-05-08 10:44:45 [INFO] __main__: [OBSERVABILITY] Phoenix dashboard available at: http://localhost:6006/
+2026-05-08 10:44:45 [INFO] __main__: [OBSERVABILITY] Auth: DISABLED (local private network)
+2026-05-08 10:44:45 [INFO] __main__: [OBSERVABILITY] Project: Kuro-AI-Audit
+2026-05-08 10:44:45 [INFO] __main__: [OBSERVABILITY] OpenTelemetry instrumentation enabled
+2026-05-08 10:44:45 [INFO] __main__: FastAPI server started in background thread on port 8443
+2026-05-08 10:44:45 [INFO] __main__: HTTPS enabled with mkcert certificates
+2026-05-08 10:44:45 [INFO] __main__: Secure Web Dashboard: https://0.0.0.0:8443
+2026-05-08 10:44:45 [INFO] __main__: Secure Login Page: https://0.0.0.0:8443/login
+2026-05-08 10:44:47 [INFO] __main__: Starting Telegram bot in main thread...
+2026-05-08 10:44:47 [INFO] __main__: Starting Telegram bot polling... (Attempt 1/5)
+2026-05-08 10:44:48 [INFO] telegram.ext.Application: Application started
+2026-05-08 10:45:12 [INFO] __main__: Hardware Sentinel Check [work hours]: CPU=18.2%, RAM=39.3%, Disk=75.6%, Net TX=13897.0MB, RX=10829.1MB
+2026-05-08 11:00:00 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-08 11:00:09 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 11:00:09 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-08 11:00:09 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-08 11:00:14 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 11:00:14 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-08 11:14:46 [INFO] telegram.ext.Application: Application is stopping. This might take a moment.
+2026-05-08 11:14:46 [INFO] telegram.ext.Application: Application.stop() complete
+2026-05-08 11:14:46 [INFO] __main__: Starting Telegram bot polling... (Attempt 2/5)
+2026-05-08 11:14:47 [INFO] telegram.ext.Application: Application started
+2026-05-08 11:16:33 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-08 11:16:34 [INFO] __main__: Kuro AI Reborn is starting...
+2026-05-08 11:16:34 [INFO] __main__: Memory stats: {'tier1_short_term': {'type': 'SQLite', 'entries': 15, 'limit': 15}, 'tier2_long_term': {'type': 'Mem0', 'entries': 1}, 'tier3_profile': {'type': 'JSON', 'file': '/home/kuro/projects/kuro/master_profile.json', 'notes': 0}, 'importance_threshold': 7}
+2026-05-08 11:16:34 [INFO] __main__: Web Dashboard: http://0.0.0.0:8000 (Authentication Required)
+2026-05-08 11:16:34 [INFO] __main__: Login Page: http://0.0.0.0:8000/login
+2026-05-08 11:16:34 [INFO] __main__: Reminder Dashboard: http://0.0.0.0:8000/reminders
+2026-05-08 11:16:34 [INFO] __main__: Habits Dashboard: http://0.0.0.0:8000/habits
+2026-05-08 11:16:34 [INFO] __main__: Databases initialized (Auth & Chat History)
+2026-05-08 11:16:34 [INFO] __main__: Price Ticker updates scheduled for all users.
+2026-05-08 11:16:34 [INFO] __main__: Market Sentinel Triangulation scans scheduled for all users.
+2026-05-08 11:16:34 [INFO] __main__: Autonomous dreaming cycle scheduled at 03:00 daily.
+2026-05-08 11:16:34 [INFO] __main__: Intelligence scheduler started.
+2026-05-08 11:16:34 [INFO] __main__: Evaluation Scheduler started.
+2026-05-08 11:16:34 [INFO] __main__: Hardware Sentinel scheduler started.
+2026-05-08 11:16:34 [INFO] phoenix.config: 📋 Ensuring phoenix working directory: /home/kuro/projects/kuro/phoenix_data
+2026-05-08 11:16:35 [INFO] alembic.runtime.migration: Context impl SQLiteImpl.
+2026-05-08 11:16:35 [INFO] alembic.runtime.migration: Will assume transactional DDL.
+2026-05-08 11:16:39 [INFO] __main__: [OBSERVABILITY] Phoenix dashboard available at: http://localhost:6006/
+2026-05-08 11:16:39 [INFO] __main__: [OBSERVABILITY] Auth: DISABLED (local private network)
+2026-05-08 11:16:39 [INFO] __main__: [OBSERVABILITY] Project: Kuro-AI-Audit
+2026-05-08 11:16:39 [INFO] __main__: [OBSERVABILITY] OpenTelemetry instrumentation enabled
+2026-05-08 11:16:39 [INFO] __main__: FastAPI server started in background thread on port 8443
+2026-05-08 11:16:39 [INFO] __main__: HTTPS enabled with mkcert certificates
+2026-05-08 11:16:39 [INFO] __main__: Secure Web Dashboard: https://0.0.0.0:8443
+2026-05-08 11:16:39 [INFO] __main__: Secure Login Page: https://0.0.0.0:8443/login
+2026-05-08 11:16:41 [INFO] __main__: Starting Telegram bot in main thread...
+2026-05-08 11:16:41 [INFO] __main__: Starting Telegram bot polling... (Attempt 1/5)
+2026-05-08 11:16:42 [INFO] telegram.ext.Application: Application started
+2026-05-08 11:17:05 [INFO] __main__: Hardware Sentinel Check [work hours]: CPU=5.1%, RAM=39.6%, Disk=75.6%, Net TX=13960.1MB, RX=10853.1MB
+2026-05-08 11:30:00 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-08 11:30:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 11:30:08 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-08 11:30:08 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-08 11:30:13 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 11:30:13 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-08 12:00:00 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-08 12:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 12:00:04 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-08 12:00:04 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-08 12:00:10 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 12:00:10 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-08 12:30:00 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-08 12:30:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 12:30:05 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-08 12:30:05 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-08 12:30:10 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 12:30:10 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-08 13:00:00 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-08 13:00:00 [INFO] kuro_backend.market_sentinel: [SENTINEL] Starting Hybrid Triangulation scan for Faikhira...
+2026-05-08 13:00:00 [WARNING] kuro_backend.market_sentinel: [SENTINEL] No stock data found in DB. Run price update first.
+2026-05-08 13:00:00 [INFO] kuro_backend.market_sentinel: [SENTINEL] Starting Hybrid Triangulation scan for Pantronux...
+2026-05-08 13:00:00 [INFO] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-05-08 13:00:05 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 13:00:05 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-08 13:00:05 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-08 13:00:10 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 13:00:10 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-08 13:00:14 [INFO] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-05-08 13:00:55 [INFO] kuro_backend.market_sentinel: [SENTINEL] Hybrid Triangulation scan complete for 55 stocks.
+2026-05-08 13:17:35 [INFO] __main__: Hardware Sentinel Check [work hours]: CPU=4.1%, RAM=40.1%, Disk=75.6%, Net TX=14020.5MB, RX=10918.9MB
+2026-05-08 13:30:00 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-08 13:30:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 13:30:04 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-08 13:30:04 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-08 13:30:09 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 13:30:09 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-08 13:38:02 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-08 13:38:03 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-08 13:38:03 [INFO] main: [TITLE_GEN] Generated title for 81ab3e6b-1160-4544-9148-fcbdedb7c58e: New Chat
+2026-05-08 13:38:03 [ERROR] main: Error in streaming endpoint: stream boom
+Traceback (most recent call last):
+  File "/home/kuro/projects/kuro/main.py", line 1548, in event_generator
+    async for chunk in process_chat_with_graph_stream(
+  File "/home/kuro/projects/kuro/tests/test_api_sse_contract.py", line 99, in _fake_stream
+    raise RuntimeError("stream boom")
+RuntimeError: stream boom
+2026-05-08 13:38:03 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-08 13:38:03 [INFO] main: [TITLE_GEN] Generated title for 4a45cd3a-f31d-4537-97e8-2afbb6cc3aaf: New Chat
+2026-05-08 13:38:16 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-08 13:38:17 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-08 13:38:17 [INFO] main: [TITLE_GEN] Generated title for 37f3ffc4-64f7-477d-92aa-b759a56fc333: New Chat
+2026-05-08 13:38:17 [ERROR] main: Error in streaming endpoint: stream boom
+Traceback (most recent call last):
+  File "/home/kuro/projects/kuro/main.py", line 1548, in event_generator
+    async for chunk in process_chat_with_graph_stream(
+  File "/home/kuro/projects/kuro/tests/test_api_sse_contract.py", line 99, in _fake_stream
+    raise RuntimeError("stream boom")
+RuntimeError: stream boom
+2026-05-08 13:38:17 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-08 13:38:17 [INFO] main: [TITLE_GEN] Generated title for 398359be-d4d8-45f2-b288-3d811cc78c21: New Chat
+2026-05-08 13:38:26 [INFO] kuro_backend.dreaming_worker: [CVE] sentinel disabled via KURO_CVE_SENTINEL_ENABLED
+2026-05-08 13:38:27 [INFO] kuro_backend.dreaming_worker: [CVE] sentinel source=openclaw targets=1 cves=2 (cap=3)
+2026-05-08 13:38:27 [INFO] kuro_backend.proactive_events: [PROACTIVE] event kind=security_cve severity=critical title=CVE CVE-2026-0001 on pve01 (CVSS 9.1)
+2026-05-08 13:38:27 [INFO] kuro_backend.proactive_events: [PROACTIVE] event kind=security_cve severity=warning title=CVE CVE-2026-0002 on pve01 (CVSS 7.4)
+2026-05-08 13:38:28 [INFO] kuro_backend.dreaming_worker: [CVE] sentinel source=nvd_direct targets=1 cves=1 (cap=5)
+2026-05-08 13:38:28 [INFO] kuro_backend.proactive_events: [PROACTIVE] event kind=security_cve severity=warning title=CVE CVE-2026-9999 on pve01 (CVSS 8.2)
+2026-05-08 13:38:28 [INFO] kuro_backend.dreaming_worker: [CVE] sentinel source=openclaw targets=1 cves=5 (cap=2)
+2026-05-08 13:38:28 [INFO] kuro_backend.proactive_events: [PROACTIVE] event kind=security_cve severity=critical title=CVE CVE-2026-0000 on pve01 (CVSS 9.5)
+2026-05-08 13:38:28 [INFO] kuro_backend.proactive_events: [PROACTIVE] event kind=security_cve severity=critical title=CVE CVE-2026-0001 on pve01 (CVSS 9.4)
+2026-05-08 13:38:29 [INFO] kuro_backend.dreaming_worker: [CVE] sentinel source=openclaw targets=1 cves=1 (cap=5)
+2026-05-08 13:38:29 [INFO] kuro_backend.dreaming_worker: [CVE] dry_run cve=CVE-DRY target=pve01
+2026-05-08 13:38:29 [INFO] kuro_backend.proactive_events: [PROACTIVE] event kind=security_cve severity=critical title=CVE CVE-DEDUP on pve01 (CVSS 9.2)
+2026-05-08 13:38:29 [INFO] kuro_backend.proactive_events: [PROACTIVE] event kind=security_cve severity=critical title=CVE CVE-DEDUP on pve01 (CVSS 9.2)
+2026-05-08 13:38:32 [WARNING] kuro_backend.dreaming_worker: [DREAMING] openclaw google_search raised: openclaw down
+2026-05-08 13:38:32 [INFO] kuro_backend.dreaming_worker: [DREAMING] ssot bumped cycle=1 finding= persona=advisor
+2026-05-08 13:38:32 [INFO] kuro_backend.dreaming_worker: [DREAMING] dry_run ssot_bump finding= persona=advisor user=Pantronux
+2026-05-08 13:38:33 [INFO] kuro_backend.dreaming_worker: [DREAMING] notify skipped (dedup) finding= user=Pantronux
+2026-05-08 13:38:34 [INFO] kuro_backend.dreaming_worker: [DREAMING] skipped — idle gate not cleared
+2026-05-08 13:38:34 [INFO] kuro_backend.dreaming_worker: [DREAMING] skipped — another holder owns the lease
+2026-05-08 13:38:34 [INFO] kuro_backend.dreaming_worker: [DREAMING] Starting cycle for user: Pantronux
+2026-05-08 13:38:34 [INFO] kuro_backend.dreaming_worker: [CVE] sentinel disabled via KURO_CVE_SENTINEL_ENABLED
+2026-05-08 13:38:35 [INFO] kuro_backend.dreaming_worker: [DREAMING] Starting cycle for user: Pantronux
+2026-05-08 13:38:48 [INFO] kuro_backend.token_budget: [TOKEN_BUDGET] global overshoot by 16497 tokens (total=24997, cap=8500); trimming low-priority sections
+2026-05-08 13:38:48 [WARNING] kuro_backend.token_budget: [TOKEN_BUDGET] global cap still exceeded by 11314 tokens after trimming (Layer 3 SSoT floor protected; allowing overshoot rather than evicting SSoT)
+2026-05-08 13:38:54 [INFO] kuro_backend.proactive_events: [PROACTIVE] event kind=hardware severity=warning title=cpu high
+2026-05-08 13:38:54 [INFO] kuro_backend.proactive_events: [PROACTIVE] event kind=hardware severity=warning title=cpu 90
+2026-05-08 13:38:54 [INFO] kuro_backend.proactive_events: [PROACTIVE] event kind=security_cve severity=warning title=cve
+2026-05-08 13:38:55 [INFO] kuro_backend.proactive_events: [PROACTIVE] event kind=hardware severity=warning title=dry
+2026-05-08 13:38:55 [INFO] kuro_backend.proactive_events: [PROACTIVE] event kind=hardware severity=warning title=dry
+2026-05-08 13:38:55 [INFO] kuro_backend.proactive_events: [PROACTIVE] event kind=hardware severity=warning title=bg
+2026-05-08 13:38:55 [WARNING] kuro_backend.proactive_events: [PROACTIVE] non-event payload ignored
+2026-05-08 13:39:11 [INFO] main: File saved: /tmp/pytest-of-kuro/pytest-54/test_chat_history_records_uniq0/tester/docs/my_file_20260508_133911.txt
+2026-05-08 13:39:11 [INFO] main: File saved: /tmp/pytest-of-kuro/pytest-54/test_chat_history_records_uniq0/tester/docs/my_file_20260508_133911_8150.txt
+2026-05-08 13:39:50 [INFO] telegram.ext.Application: Application is stopping. This might take a moment.
+2026-05-08 13:39:50 [INFO] telegram.ext.Application: Application.stop() complete
+2026-05-08 13:39:50 [INFO] __main__: Starting Telegram bot polling... (Attempt 2/5)
+2026-05-08 13:39:51 [INFO] telegram.ext.Application: Application started
+2026-05-08 13:41:40 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-08 13:41:40 [INFO] __main__: Kuro AI Reborn is starting...
+2026-05-08 13:41:41 [INFO] __main__: Memory stats: {'tier1_short_term': {'type': 'SQLite', 'entries': 15, 'limit': 15}, 'tier2_long_term': {'type': 'Mem0', 'entries': 1}, 'tier3_profile': {'type': 'JSON', 'file': '/home/kuro/projects/kuro/master_profile.json', 'notes': 0}, 'importance_threshold': 7}
+2026-05-08 13:41:41 [INFO] __main__: Web Dashboard: http://0.0.0.0:8000 (Authentication Required)
+2026-05-08 13:41:41 [INFO] __main__: Login Page: http://0.0.0.0:8000/login
+2026-05-08 13:41:41 [INFO] __main__: Reminder Dashboard: http://0.0.0.0:8000/reminders
+2026-05-08 13:41:41 [INFO] __main__: Habits Dashboard: http://0.0.0.0:8000/habits
+2026-05-08 13:41:41 [INFO] __main__: Databases initialized (Auth & Chat History)
+2026-05-08 13:41:41 [INFO] __main__: Price Ticker updates scheduled for all users.
+2026-05-08 13:41:41 [INFO] __main__: Market Sentinel Triangulation scans scheduled for all users.
+2026-05-08 13:41:41 [INFO] __main__: Autonomous dreaming cycle scheduled at 03:00 daily.
+2026-05-08 13:41:41 [INFO] __main__: Intelligence scheduler started.
+2026-05-08 13:41:41 [INFO] __main__: Evaluation Scheduler started.
+2026-05-08 13:41:41 [INFO] __main__: Hardware Sentinel scheduler started.
+2026-05-08 13:41:41 [INFO] phoenix.config: 📋 Ensuring phoenix working directory: /home/kuro/projects/kuro/phoenix_data
+2026-05-08 13:41:41 [INFO] alembic.runtime.migration: Context impl SQLiteImpl.
+2026-05-08 13:41:41 [INFO] alembic.runtime.migration: Will assume transactional DDL.
+2026-05-08 13:41:45 [INFO] __main__: [OBSERVABILITY] Phoenix dashboard available at: http://localhost:6006/
+2026-05-08 13:41:45 [INFO] __main__: [OBSERVABILITY] Auth: DISABLED (local private network)
+2026-05-08 13:41:45 [INFO] __main__: [OBSERVABILITY] Project: Kuro-AI-Audit
+2026-05-08 13:41:45 [INFO] __main__: [OBSERVABILITY] OpenTelemetry instrumentation enabled
+2026-05-08 13:41:45 [INFO] __main__: FastAPI server started in background thread on port 8443
+2026-05-08 13:41:45 [INFO] __main__: HTTPS enabled with mkcert certificates
+2026-05-08 13:41:45 [INFO] __main__: Secure Web Dashboard: https://0.0.0.0:8443
+2026-05-08 13:41:45 [INFO] __main__: Secure Login Page: https://0.0.0.0:8443/login
+2026-05-08 13:41:47 [INFO] __main__: Starting Telegram bot in main thread...
+2026-05-08 13:41:47 [INFO] __main__: Starting Telegram bot polling... (Attempt 1/5)
+2026-05-08 13:41:48 [INFO] telegram.ext.Application: Application started
+2026-05-08 13:42:12 [INFO] __main__: Hardware Sentinel Check [work hours]: CPU=7.2%, RAM=40.0%, Disk=75.7%, Net TX=14074.5MB, RX=10964.4MB
+2026-05-08 13:47:43 [INFO] __main__: API auth failed for 100.72.160.126 on /api/backup/run
+2026-05-08 14:00:00 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-08 14:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 14:00:08 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-08 14:00:08 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-08 14:00:13 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 14:00:13 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-08 14:01:37 [INFO] __main__: Successful login: Pantronux from 127.0.0.1
+2026-05-08 14:02:32 [INFO] __main__: API auth failed for 100.72.160.126 on /api/backup/run
+2026-05-08 14:02:43 [INFO] __main__: API auth failed for 100.72.160.126 on /api/backup/run
+2026-05-08 14:03:22 [INFO] __main__: Successful login: Pantronux from 100.72.160.126
+2026-05-08 14:04:43 [INFO] __main__: Successful login: Pantronux from 100.72.160.126
+2026-05-08 14:06:55 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-08 14:06:57 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-08 14:06:57 [INFO] main: [TITLE_GEN] Generated title for 8366941b-7fdc-400f-b4a8-f3e544955504: New Chat
+2026-05-08 14:06:57 [ERROR] main: Error in streaming endpoint: stream boom
+Traceback (most recent call last):
+  File "/home/kuro/projects/kuro/main.py", line 1548, in event_generator
+    async for chunk in process_chat_with_graph_stream(
+  File "/home/kuro/projects/kuro/tests/test_api_sse_contract.py", line 99, in _fake_stream
+    raise RuntimeError("stream boom")
+RuntimeError: stream boom
+2026-05-08 14:06:57 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-08 14:06:57 [INFO] main: [TITLE_GEN] Generated title for 2d8bbe75-9d23-4e47-9f8c-07b2378dc6e9: New Chat
+2026-05-08 14:07:11 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-08 14:07:12 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-08 14:07:12 [INFO] main: [TITLE_GEN] Generated title for 200b63cd-de59-4948-acd2-7a16879d481b: New Chat
+2026-05-08 14:07:12 [ERROR] main: Error in streaming endpoint: stream boom
+Traceback (most recent call last):
+  File "/home/kuro/projects/kuro/main.py", line 1548, in event_generator
+    async for chunk in process_chat_with_graph_stream(
+  File "/home/kuro/projects/kuro/tests/test_api_sse_contract.py", line 99, in _fake_stream
+    raise RuntimeError("stream boom")
+RuntimeError: stream boom
+2026-05-08 14:07:12 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-08 14:07:12 [INFO] main: [TITLE_GEN] Generated title for 4d17eec7-1662-4620-8212-7638bba56fe4: New Chat
+2026-05-08 14:07:18 [INFO] kuro_backend.dreaming_worker: [CVE] sentinel disabled via KURO_CVE_SENTINEL_ENABLED
+2026-05-08 14:07:19 [INFO] kuro_backend.dreaming_worker: [CVE] sentinel source=openclaw targets=1 cves=2 (cap=3)
+2026-05-08 14:07:19 [INFO] kuro_backend.proactive_events: [PROACTIVE] event kind=security_cve severity=critical title=CVE CVE-2026-0001 on pve01 (CVSS 9.1)
+2026-05-08 14:07:19 [INFO] kuro_backend.proactive_events: [PROACTIVE] event kind=security_cve severity=warning title=CVE CVE-2026-0002 on pve01 (CVSS 7.4)
+2026-05-08 14:07:19 [INFO] kuro_backend.dreaming_worker: [CVE] sentinel source=nvd_direct targets=1 cves=1 (cap=5)
+2026-05-08 14:07:19 [INFO] kuro_backend.proactive_events: [PROACTIVE] event kind=security_cve severity=warning title=CVE CVE-2026-9999 on pve01 (CVSS 8.2)
+2026-05-08 14:07:19 [INFO] kuro_backend.dreaming_worker: [CVE] sentinel source=openclaw targets=1 cves=5 (cap=2)
+2026-05-08 14:07:19 [INFO] kuro_backend.proactive_events: [PROACTIVE] event kind=security_cve severity=critical title=CVE CVE-2026-0000 on pve01 (CVSS 9.5)
+2026-05-08 14:07:19 [INFO] kuro_backend.proactive_events: [PROACTIVE] event kind=security_cve severity=critical title=CVE CVE-2026-0001 on pve01 (CVSS 9.4)
+2026-05-08 14:07:19 [INFO] kuro_backend.dreaming_worker: [CVE] sentinel source=openclaw targets=1 cves=1 (cap=5)
+2026-05-08 14:07:19 [INFO] kuro_backend.dreaming_worker: [CVE] dry_run cve=CVE-DRY target=pve01
+2026-05-08 14:07:20 [INFO] kuro_backend.proactive_events: [PROACTIVE] event kind=security_cve severity=critical title=CVE CVE-DEDUP on pve01 (CVSS 9.2)
+2026-05-08 14:07:20 [INFO] kuro_backend.proactive_events: [PROACTIVE] event kind=security_cve severity=critical title=CVE CVE-DEDUP on pve01 (CVSS 9.2)
+2026-05-08 14:07:22 [WARNING] kuro_backend.dreaming_worker: [DREAMING] openclaw google_search raised: openclaw down
+2026-05-08 14:07:22 [INFO] kuro_backend.dreaming_worker: [DREAMING] ssot bumped cycle=1 finding= persona=advisor
+2026-05-08 14:07:22 [INFO] kuro_backend.dreaming_worker: [DREAMING] dry_run ssot_bump finding= persona=advisor user=Pantronux
+2026-05-08 14:07:22 [INFO] kuro_backend.dreaming_worker: [DREAMING] notify skipped (dedup) finding= user=Pantronux
+2026-05-08 14:07:24 [INFO] kuro_backend.dreaming_worker: [DREAMING] skipped — idle gate not cleared
+2026-05-08 14:07:24 [INFO] kuro_backend.dreaming_worker: [DREAMING] skipped — another holder owns the lease
+2026-05-08 14:07:25 [INFO] kuro_backend.dreaming_worker: [DREAMING] Starting cycle for user: Pantronux
+2026-05-08 14:07:25 [INFO] kuro_backend.dreaming_worker: [CVE] sentinel disabled via KURO_CVE_SENTINEL_ENABLED
+2026-05-08 14:07:25 [INFO] kuro_backend.dreaming_worker: [DREAMING] Starting cycle for user: Pantronux
+2026-05-08 14:07:38 [INFO] kuro_backend.token_budget: [TOKEN_BUDGET] global overshoot by 16497 tokens (total=24997, cap=8500); trimming low-priority sections
+2026-05-08 14:07:38 [WARNING] kuro_backend.token_budget: [TOKEN_BUDGET] global cap still exceeded by 11314 tokens after trimming (Layer 3 SSoT floor protected; allowing overshoot rather than evicting SSoT)
+2026-05-08 14:07:43 [INFO] kuro_backend.proactive_events: [PROACTIVE] event kind=hardware severity=warning title=cpu high
+2026-05-08 14:07:43 [INFO] kuro_backend.proactive_events: [PROACTIVE] event kind=hardware severity=warning title=cpu 90
+2026-05-08 14:07:43 [INFO] kuro_backend.proactive_events: [PROACTIVE] event kind=security_cve severity=warning title=cve
+2026-05-08 14:07:44 [INFO] kuro_backend.proactive_events: [PROACTIVE] event kind=hardware severity=warning title=dry
+2026-05-08 14:07:44 [INFO] kuro_backend.proactive_events: [PROACTIVE] event kind=hardware severity=warning title=dry
+2026-05-08 14:07:45 [INFO] kuro_backend.proactive_events: [PROACTIVE] event kind=hardware severity=warning title=bg
+2026-05-08 14:07:45 [WARNING] kuro_backend.proactive_events: [PROACTIVE] non-event payload ignored
+2026-05-08 14:08:00 [INFO] main: File saved: /tmp/pytest-of-kuro/pytest-57/test_chat_history_records_uniq0/tester/docs/my_file_20260508_140800.txt
+2026-05-08 14:08:00 [INFO] main: File saved: /tmp/pytest-of-kuro/pytest-57/test_chat_history_records_uniq0/tester/docs/my_file_20260508_140800_6848.txt
+2026-05-08 14:11:28 [INFO] telegram.ext.Application: Application is stopping. This might take a moment.
+2026-05-08 14:11:28 [INFO] telegram.ext.Application: Application.stop() complete
+2026-05-08 14:11:28 [INFO] __main__: Starting Telegram bot polling... (Attempt 2/5)
+2026-05-08 14:11:29 [INFO] telegram.ext.Application: Application started
+2026-05-08 14:13:16 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-08 14:13:16 [INFO] __main__: Kuro AI Reborn is starting...
+2026-05-08 14:13:17 [INFO] __main__: Memory stats: {'tier1_short_term': {'type': 'SQLite', 'entries': 15, 'limit': 15}, 'tier2_long_term': {'type': 'Mem0', 'entries': 1}, 'tier3_profile': {'type': 'JSON', 'file': '/home/kuro/projects/kuro/master_profile.json', 'notes': 0}, 'importance_threshold': 7}
+2026-05-08 14:13:17 [INFO] __main__: Web Dashboard: http://0.0.0.0:8000 (Authentication Required)
+2026-05-08 14:13:17 [INFO] __main__: Login Page: http://0.0.0.0:8000/login
+2026-05-08 14:13:17 [INFO] __main__: Reminder Dashboard: http://0.0.0.0:8000/reminders
+2026-05-08 14:13:17 [INFO] __main__: Habits Dashboard: http://0.0.0.0:8000/habits
+2026-05-08 14:13:17 [INFO] __main__: Databases initialized (Auth & Chat History)
+2026-05-08 14:13:17 [INFO] __main__: Price Ticker updates scheduled for all users.
+2026-05-08 14:13:17 [INFO] __main__: Market Sentinel Triangulation scans scheduled for all users.
+2026-05-08 14:13:17 [INFO] __main__: Autonomous dreaming cycle scheduled at 03:00 daily.
+2026-05-08 14:13:17 [INFO] __main__: Intelligence scheduler started.
+2026-05-08 14:13:17 [INFO] __main__: Evaluation Scheduler started.
+2026-05-08 14:13:17 [INFO] __main__: Hardware Sentinel scheduler started.
+2026-05-08 14:13:17 [INFO] phoenix.config: 📋 Ensuring phoenix working directory: /home/kuro/projects/kuro/phoenix_data
+2026-05-08 14:13:17 [INFO] alembic.runtime.migration: Context impl SQLiteImpl.
+2026-05-08 14:13:17 [INFO] alembic.runtime.migration: Will assume transactional DDL.
+2026-05-08 14:13:21 [INFO] __main__: [OBSERVABILITY] Phoenix dashboard available at: http://localhost:6006/
+2026-05-08 14:13:21 [INFO] __main__: [OBSERVABILITY] Auth: DISABLED (local private network)
+2026-05-08 14:13:21 [INFO] __main__: [OBSERVABILITY] Project: Kuro-AI-Audit
+2026-05-08 14:13:21 [INFO] __main__: [OBSERVABILITY] OpenTelemetry instrumentation enabled
+2026-05-08 14:13:21 [INFO] __main__: FastAPI server started in background thread on port 8443
+2026-05-08 14:13:21 [INFO] __main__: HTTPS enabled with mkcert certificates
+2026-05-08 14:13:21 [INFO] __main__: Secure Web Dashboard: https://0.0.0.0:8443
+2026-05-08 14:13:21 [INFO] __main__: Secure Login Page: https://0.0.0.0:8443/login
+2026-05-08 14:13:23 [INFO] __main__: Starting Telegram bot in main thread...
+2026-05-08 14:13:23 [INFO] __main__: Starting Telegram bot polling... (Attempt 1/5)
+2026-05-08 14:13:24 [INFO] telegram.ext.Application: Application started
+2026-05-08 14:13:48 [INFO] __main__: Hardware Sentinel Check [work hours]: CPU=11.0%, RAM=40.8%, Disk=75.7%, Net TX=14203.9MB, RX=11037.2MB
+2026-05-08 14:30:00 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-08 14:30:26 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 14:30:26 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-08 14:30:26 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-08 14:30:47 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 14:30:47 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-08 14:56:22 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-08 14:56:22 [INFO] __main__: Kuro AI Reborn is starting...
+2026-05-08 14:56:23 [INFO] __main__: Memory stats: {'tier1_short_term': {'type': 'SQLite', 'entries': 15, 'limit': 15}, 'tier2_long_term': {'type': 'Mem0', 'entries': 1}, 'tier3_profile': {'type': 'JSON', 'file': '/home/kuro/projects/kuro/master_profile.json', 'notes': 0}, 'importance_threshold': 7}
+2026-05-08 14:56:23 [INFO] __main__: Web Dashboard: http://0.0.0.0:8000 (Authentication Required)
+2026-05-08 14:56:23 [INFO] __main__: Login Page: http://0.0.0.0:8000/login
+2026-05-08 14:56:23 [INFO] __main__: Reminder Dashboard: http://0.0.0.0:8000/reminders
+2026-05-08 14:56:23 [INFO] __main__: Habits Dashboard: http://0.0.0.0:8000/habits
+2026-05-08 14:56:23 [INFO] __main__: Databases initialized (Auth & Chat History)
+2026-05-08 14:56:23 [INFO] __main__: Price Ticker updates scheduled for all users.
+2026-05-08 14:56:23 [INFO] __main__: Market Sentinel Triangulation scans scheduled for all users.
+2026-05-08 14:56:23 [INFO] __main__: Autonomous dreaming cycle scheduled at 03:00 daily.
+2026-05-08 14:56:23 [INFO] __main__: Intelligence scheduler started.
+2026-05-08 14:56:23 [INFO] __main__: Evaluation Scheduler started.
+2026-05-08 14:56:23 [INFO] __main__: Hardware Sentinel scheduler started.
+2026-05-08 14:56:23 [INFO] phoenix.config: 📋 Ensuring phoenix working directory: /home/kuro/projects/kuro/phoenix_data
+2026-05-08 14:56:23 [INFO] alembic.runtime.migration: Context impl SQLiteImpl.
+2026-05-08 14:56:23 [INFO] alembic.runtime.migration: Will assume transactional DDL.
+2026-05-08 14:56:27 [INFO] __main__: [OBSERVABILITY] Phoenix dashboard available at: http://localhost:6006/
+2026-05-08 14:56:27 [INFO] __main__: [OBSERVABILITY] Auth: DISABLED (local private network)
+2026-05-08 14:56:27 [INFO] __main__: [OBSERVABILITY] Project: Kuro-AI-Audit
+2026-05-08 14:56:27 [INFO] __main__: [OBSERVABILITY] OpenTelemetry instrumentation enabled
+2026-05-08 14:56:27 [INFO] __main__: FastAPI server started in background thread on port 8443
+2026-05-08 14:56:27 [INFO] __main__: HTTPS enabled with mkcert certificates
+2026-05-08 14:56:27 [INFO] __main__: Secure Web Dashboard: https://0.0.0.0:8443
+2026-05-08 14:56:27 [INFO] __main__: Secure Login Page: https://0.0.0.0:8443/login
+2026-05-08 14:56:29 [INFO] __main__: Starting Telegram bot in main thread...
+2026-05-08 14:56:29 [INFO] __main__: Starting Telegram bot polling... (Attempt 1/5)
+2026-05-08 14:56:32 [INFO] telegram.ext.Application: Application started
+2026-05-08 14:56:54 [INFO] __main__: Hardware Sentinel Check [work hours]: CPU=1.0%, RAM=16.0%, Disk=54.9%, Net TX=0.3MB, RX=0.1MB
+2026-05-08 15:00:00 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-08 15:00:10 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 15:00:10 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-08 15:00:10 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-08 15:00:15 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 15:00:15 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-08 15:11:42 [INFO] __main__: Unauthenticated access to / from 100.72.160.126, redirecting to /login
+2026-05-08 15:11:48 [INFO] __main__: Successful login: Pantronux from 100.72.160.126
+2026-05-08 15:30:00 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-08 15:30:05 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 15:30:05 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-08 15:30:05 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-08 15:30:10 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 15:30:10 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-08 16:00:00 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-08 16:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 16:00:04 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-08 16:00:04 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-08 16:00:09 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 16:00:09 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-08 16:30:00 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-08 16:30:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 16:30:04 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-08 16:30:04 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-08 16:30:09 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-07 00:00:00) -> ignoring to prevent overwrite
+2026-05-08 16:30:09 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-08 17:00:00 [INFO] kuro_backend.market_sentinel: [SENTINEL] Starting Hybrid Triangulation scan for Faikhira...
+2026-05-08 17:00:00 [WARNING] kuro_backend.market_sentinel: [SENTINEL] No stock data found in DB. Run price update first.
+2026-05-08 17:00:00 [INFO] kuro_backend.market_sentinel: [SENTINEL] Starting Hybrid Triangulation scan for Pantronux...
+2026-05-08 17:00:00 [INFO] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-05-08 17:00:10 [INFO] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-05-08 17:00:52 [INFO] kuro_backend.market_sentinel: [SENTINEL] Hybrid Triangulation scan complete for 55 stocks.
+2026-05-08 18:57:24 [INFO] __main__: Hardware Sentinel Check [off-hours]: CPU=6.8%, RAM=69.9%, Disk=12.8%, Net TX=38.2MB, RX=39.3MB
+2026-05-08 19:18:17 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-08 19:18:45 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-08 19:19:13 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-08 19:25:03 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-08 19:25:40 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-08 19:29:44 [INFO] __main__: Unauthenticated access to / from 192.168.18.246, redirecting to /login
+2026-05-08 19:29:49 [INFO] __main__: Successful login: Pantronux from 192.168.18.246
+2026-05-08 19:32:28 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-08 19:37:32 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-08 19:37:32 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-08 19:37:32 [INFO] main: [TITLE_GEN] Generated title for 8fdb9b32-ac42-4b4f-bd65-7aa97f0e55ae: New Chat
+2026-05-08 19:37:32 [ERROR] main: Error in streaming endpoint: stream boom
+Traceback (most recent call last):
+  File "/home/kuro/projects/kuro/main.py", line 1593, in event_generator
+    async for chunk in process_chat_with_graph_stream(
+  File "/home/kuro/projects/kuro/tests/test_api_sse_contract.py", line 99, in _fake_stream
+    raise RuntimeError("stream boom")
+RuntimeError: stream boom
+2026-05-08 19:37:32 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-08 19:37:32 [INFO] main: [TITLE_GEN] Generated title for b4771862-4fe2-4ca8-9317-2cc6c644fa70: New Chat
+2026-05-08 19:37:32 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-08 19:37:32 [INFO] main: [TITLE_GEN] Generated title for b5f80e78-459a-4727-ad0a-2df0d7e45e3e: New Chat
+2026-05-08 19:39:40 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-08 19:39:41 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-08 19:39:41 [INFO] main: [TITLE_GEN] Generated title for 2545d23d-d56d-4bfd-b3b9-541c673221bb: New Chat
+2026-05-08 19:39:41 [ERROR] main: Error in streaming endpoint: stream boom
+Traceback (most recent call last):
+  File "/home/kuro/projects/kuro/main.py", line 1600, in event_generator
+    async for chunk in process_chat_with_graph_stream(
+  File "/home/kuro/projects/kuro/tests/test_api_sse_contract.py", line 99, in _fake_stream
+    raise RuntimeError("stream boom")
+RuntimeError: stream boom
+2026-05-08 19:39:41 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-08 19:39:41 [INFO] main: [TITLE_GEN] Generated title for be195dcb-ef13-4b45-af86-3228f5f79a0f: New Chat
+2026-05-08 19:39:41 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-08 19:39:41 [INFO] main: [TITLE_GEN] Generated title for cd0b484f-d126-4b36-bdba-129ab69cfe96: New Chat
+2026-05-08 19:44:06 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-08 19:44:07 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-08 19:44:07 [INFO] main: [TITLE_GEN] Generated title for be209c78-2e8f-44ce-919f-7bbd6e807f85: New Chat
+2026-05-08 19:44:07 [ERROR] main: Error in streaming endpoint: stream boom
+Traceback (most recent call last):
+  File "/home/kuro/projects/kuro/main.py", line 1679, in event_generator
+    async for chunk in process_chat_with_graph_stream(
+  File "/home/kuro/projects/kuro/tests/test_api_sse_contract.py", line 99, in _fake_stream
+    raise RuntimeError("stream boom")
+RuntimeError: stream boom
+2026-05-08 19:44:07 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-08 19:44:07 [INFO] main: [TITLE_GEN] Generated title for 0b7d67df-71a8-4be9-941a-25ddc43ad399: New Chat
+2026-05-08 19:44:08 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-08 19:44:08 [INFO] main: [TITLE_GEN] Generated title for 94455e66-bdf5-4909-a7a4-f4f8b675c680: New Chat
+2026-05-08 19:44:08 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-08 19:44:08 [INFO] main: [TITLE_GEN] Generated title for 5d5b0fa4-acc5-4993-9d61-51cbda334812: New Chat
+2026-05-08 19:44:08 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-08 19:44:08 [INFO] main: [TITLE_GEN] Generated title for 8f4671b1-81dd-47bd-b426-9da7d35c7571: New Chat
+2026-05-08 19:44:08 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-08 19:44:08 [INFO] main: [TITLE_GEN] Generated title for auditor_hist_1: New Chat
+2026-05-08 20:01:12 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-08 20:01:32 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-08 20:01:33 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-08 20:01:33 [INFO] main: [TITLE_GEN] Generated title for c949a69e-32b2-4bd7-b607-201c63227df7: New Chat
+2026-05-08 20:01:33 [ERROR] main: Error in streaming endpoint: stream boom
+Traceback (most recent call last):
+  File "/home/kuro/projects/kuro/main.py", line 1680, in event_generator
+    async for chunk in process_chat_with_graph_stream(
+  File "/home/kuro/projects/kuro/tests/test_api_sse_contract.py", line 99, in _fake_stream
+    raise RuntimeError("stream boom")
+RuntimeError: stream boom
+2026-05-08 20:01:33 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-08 20:01:33 [INFO] main: [TITLE_GEN] Generated title for 11fc03e9-1a6b-43c1-abbb-b4c8c732d018: New Chat
+2026-05-08 20:01:33 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-08 20:01:33 [INFO] main: [TITLE_GEN] Generated title for 2c900ed2-b2be-467b-ad8f-39df65642720: New Chat
+2026-05-08 20:01:33 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-08 20:01:33 [INFO] main: [TITLE_GEN] Generated title for b893784d-9bd6-4630-b9fb-ad96df629c5b: New Chat
+2026-05-08 20:01:34 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-08 20:01:34 [INFO] main: [TITLE_GEN] Generated title for 46bce744-6047-46fa-a72f-f9beafbf2aed: New Chat
+2026-05-08 20:01:34 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-08 20:01:34 [INFO] main: [TITLE_GEN] Generated title for auditor_hist_1: New Chat
+2026-05-08 20:02:38 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-08 20:05:55 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-08 20:20:08 [INFO] telegram.ext.Application: Application is stopping. This might take a moment.
+2026-05-08 20:20:08 [INFO] telegram.ext.Application: Application.stop() complete
+2026-05-08 20:20:08 [INFO] __main__: Starting Telegram bot polling... (Attempt 2/5)
+2026-05-08 20:20:09 [INFO] telegram.ext.Application: Application started
+2026-05-08 20:34:53 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-08 20:34:53 [INFO] __main__: Kuro AI Reborn is starting...
+2026-05-08 20:34:54 [INFO] __main__: Memory stats: {'tier1_short_term': {'type': 'SQLite', 'entries': 15, 'limit': 15}, 'tier2_long_term': {'type': 'Mem0', 'entries': 1}, 'tier3_profile': {'type': 'JSON', 'file': '/home/kuro/projects/kuro/master_profile.json', 'notes': 0}, 'importance_threshold': 7}
+2026-05-08 20:34:54 [INFO] __main__: Web Dashboard: http://0.0.0.0:8000 (Authentication Required)
+2026-05-08 20:34:54 [INFO] __main__: Login Page: http://0.0.0.0:8000/login
+2026-05-08 20:34:54 [INFO] __main__: Reminder Dashboard: http://0.0.0.0:8000/reminders
+2026-05-08 20:34:54 [INFO] __main__: Habits Dashboard: http://0.0.0.0:8000/habits
+2026-05-08 20:34:54 [INFO] __main__: Databases initialized (Auth & Chat History)
+2026-05-08 20:34:54 [INFO] __main__: Price Ticker updates scheduled for all users.
+2026-05-08 20:34:54 [INFO] __main__: Market Sentinel Triangulation scans scheduled for all users.
+2026-05-08 20:34:54 [INFO] __main__: Autonomous dreaming cycle scheduled at 03:00 daily.
+2026-05-08 20:34:54 [INFO] __main__: Intelligence scheduler started.
+2026-05-08 20:34:54 [INFO] __main__: Evaluation Scheduler started.
+2026-05-08 20:34:54 [INFO] __main__: Hardware Sentinel scheduler started.
+2026-05-08 20:34:54 [INFO] phoenix.config: 📋 Ensuring phoenix working directory: /home/kuro/projects/kuro/phoenix_data
+2026-05-08 20:34:54 [INFO] alembic.runtime.migration: Context impl SQLiteImpl.
+2026-05-08 20:34:54 [INFO] alembic.runtime.migration: Will assume transactional DDL.
+2026-05-08 20:34:58 [INFO] __main__: [OBSERVABILITY] Phoenix dashboard available at: http://localhost:6006/
+2026-05-08 20:34:58 [INFO] __main__: [OBSERVABILITY] Auth: DISABLED (local private network)
+2026-05-08 20:34:58 [INFO] __main__: [OBSERVABILITY] Project: Kuro-AI-Audit
+2026-05-08 20:34:58 [INFO] __main__: [OBSERVABILITY] OpenTelemetry instrumentation enabled
+2026-05-08 20:34:58 [INFO] __main__: FastAPI server started in background thread on port 8443
+2026-05-08 20:34:58 [INFO] __main__: HTTPS enabled with mkcert certificates
+2026-05-08 20:34:58 [INFO] __main__: Secure Web Dashboard: https://0.0.0.0:8443
+2026-05-08 20:34:58 [INFO] __main__: Secure Login Page: https://0.0.0.0:8443/login
+2026-05-08 20:35:00 [INFO] __main__: Starting Telegram bot in main thread...
+2026-05-08 20:35:00 [INFO] __main__: Starting Telegram bot polling... (Attempt 1/5)
+2026-05-08 20:35:02 [INFO] telegram.ext.Application: Application started
+2026-05-08 20:35:25 [INFO] __main__: Hardware Sentinel Check [off-hours]: CPU=21.2%, RAM=53.6%, Disk=12.8%, Net TX=1355.2MB, RX=1349.9MB
+2026-05-08 20:52:01 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-08 20:55:05 [INFO] telegram.ext.Application: Application is stopping. This might take a moment.
+2026-05-08 20:55:05 [INFO] telegram.ext.Application: Application.stop() complete
+2026-05-08 20:55:05 [INFO] __main__: Starting Telegram bot polling... (Attempt 2/5)
+2026-05-08 20:55:06 [INFO] telegram.ext.Application: Application started
+2026-05-08 20:56:56 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-08 20:56:57 [INFO] __main__: Kuro AI Reborn is starting...
+2026-05-08 20:56:58 [INFO] __main__: Memory stats: {'tier1_short_term': {'type': 'SQLite', 'entries': 15, 'limit': 15}, 'tier2_long_term': {'type': 'Mem0', 'entries': 1}, 'tier3_profile': {'type': 'JSON', 'file': '/home/kuro/projects/kuro/master_profile.json', 'notes': 0}, 'importance_threshold': 7}
+2026-05-08 20:56:58 [INFO] __main__: Web Dashboard: http://0.0.0.0:8000 (Authentication Required)
+2026-05-08 20:56:58 [INFO] __main__: Login Page: http://0.0.0.0:8000/login
+2026-05-08 20:56:58 [INFO] __main__: Reminder Dashboard: http://0.0.0.0:8000/reminders
+2026-05-08 20:56:58 [INFO] __main__: Habits Dashboard: http://0.0.0.0:8000/habits
+2026-05-08 20:56:58 [INFO] __main__: Databases initialized (Auth & Chat History)
+2026-05-08 20:56:58 [INFO] __main__: Price Ticker updates scheduled for all users.
+2026-05-08 20:56:58 [INFO] __main__: Market Sentinel Triangulation scans scheduled for all users.
+2026-05-08 20:56:58 [INFO] __main__: Autonomous dreaming cycle scheduled at 03:00 daily.
+2026-05-08 20:56:58 [INFO] __main__: Intelligence scheduler started.
+2026-05-08 20:56:58 [INFO] __main__: Evaluation Scheduler started.
+2026-05-08 20:56:58 [INFO] __main__: Hardware Sentinel scheduler started.
+2026-05-08 20:56:58 [INFO] phoenix.config: 📋 Ensuring phoenix working directory: /home/kuro/projects/kuro/phoenix_data
+2026-05-08 20:56:58 [INFO] alembic.runtime.migration: Context impl SQLiteImpl.
+2026-05-08 20:56:58 [INFO] alembic.runtime.migration: Will assume transactional DDL.
+2026-05-08 20:57:02 [INFO] __main__: [OBSERVABILITY] Phoenix dashboard available at: http://localhost:6006/
+2026-05-08 20:57:02 [INFO] __main__: [OBSERVABILITY] Auth: DISABLED (local private network)
+2026-05-08 20:57:02 [INFO] __main__: [OBSERVABILITY] Project: Kuro-AI-Audit
+2026-05-08 20:57:02 [INFO] __main__: [OBSERVABILITY] OpenTelemetry instrumentation enabled
+2026-05-08 20:57:02 [INFO] __main__: FastAPI server started in background thread on port 8443
+2026-05-08 20:57:02 [INFO] __main__: HTTPS enabled with mkcert certificates
+2026-05-08 20:57:02 [INFO] __main__: Secure Web Dashboard: https://0.0.0.0:8443
+2026-05-08 20:57:02 [INFO] __main__: Secure Login Page: https://0.0.0.0:8443/login
+2026-05-08 20:57:04 [INFO] __main__: Starting Telegram bot in main thread...
+2026-05-08 20:57:04 [INFO] __main__: Starting Telegram bot polling... (Attempt 1/5)
+2026-05-08 20:57:06 [INFO] telegram.ext.Application: Application started
+2026-05-08 20:57:29 [INFO] __main__: Hardware Sentinel Check [off-hours]: CPU=12.4%, RAM=47.4%, Disk=12.9%, Net TX=1712.1MB, RX=1680.5MB
+2026-05-08 21:00:00 [INFO] kuro_backend.market_sentinel: [SENTINEL] Starting Hybrid Triangulation scan for Faikhira...
+2026-05-08 21:00:00 [WARNING] kuro_backend.market_sentinel: [SENTINEL] No stock data found in DB. Run price update first.
+2026-05-08 21:00:00 [INFO] kuro_backend.market_sentinel: [SENTINEL] Starting Hybrid Triangulation scan for Pantronux...
+2026-05-08 21:00:00 [INFO] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-05-08 21:00:10 [INFO] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-05-08 21:00:56 [INFO] kuro_backend.market_sentinel: [SENTINEL] Hybrid Triangulation scan complete for 55 stocks.

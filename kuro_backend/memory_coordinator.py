@@ -27,6 +27,15 @@ import re
 import threading
 import time
 from typing import Any, Dict, List, Optional, Sequence
+from datetime import datetime
+
+from kuro_backend.memory_validation import validate_memory_relevance
+from kuro_backend.temporal_weighting import apply_temporal_decay_weighting
+from kuro_backend.semantic_integrity import prevent_memory_mutation
+from kuro_backend.contradiction_memory_guard import contradiction_score as memory_contradiction_score
+from kuro_backend.intelligence.retrieval_quality import detect_context_bleed
+from kuro_backend.memory_canonicalization import canonical_selection_score, canonicalize_memory_payload
+from kuro_backend.cognitive_budget_engine import evaluate_budget
 
 logger = logging.getLogger(__name__)
 logger.propagate = False
@@ -48,6 +57,9 @@ _CONTEXT_FETCH_TIMEOUT_SEC = float(os.getenv("KURO_CONTEXT_FETCH_TIMEOUT_SEC", "
 from kuro_backend.config import settings
 CHAT_CONTEXT_REFRESH_THRESHOLD = getattr(settings, "KURO_CHAT_CONTEXT_REFRESH_THRESHOLD", int(os.getenv("KURO_CHAT_CONTEXT_REFRESH_THRESHOLD", "20")))
 CHAT_CONTEXT_MODEL = os.getenv("KURO_CHAT_CONTEXT_MODEL", "gemini-3-flash-preview")
+_MEMORY_INTEGRITY_V2_ENABLED = os.getenv("KURO_MEMORY_INTEGRITY_V2_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+_CANVAS3_MEMORY_CANONICALIZATION_ENABLED = os.getenv("KURO_CANVAS3_MEMORY_CANONICALIZATION_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+_CANVAS3_COGNITIVE_BUDGET_ENABLED = os.getenv("KURO_CANVAS3_COGNITIVE_BUDGET_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _parallel_gather_sync(
@@ -1004,9 +1016,16 @@ def build_context_for_llm(
             username=username,
             chat_id=chat_id,
         )
-    if mem0_retrieved_memories:
+    filtered_mem0 = list(mem0_retrieved_memories or [])
+    if _MEMORY_INTEGRITY_V2_ENABLED and filtered_mem0:
+        filtered_mem0 = validate_memory_relevance(user_input, filtered_mem0)
+        if detect_context_bleed(user_input, filtered_mem0):
+            logger.warning("[MEMORY_COORD] context_bleed detected for query=%r", (user_input or "")[:80])
+            filtered_mem0 = []
+
+    if filtered_mem0:
         parallel_tasks["mem0_fmt"] = lambda: perpetual_memory.perpetual_memory.format_memories_for_context(
-            mem0_retrieved_memories
+            filtered_mem0
         )
 
     fan_out = _parallel_gather_sync(parallel_tasks)
@@ -1014,13 +1033,28 @@ def build_context_for_llm(
     # V1.0.0: Raw Episodic Buffer (Last 10 turns MUST be passed in raw, unsummarized form)
     recent_messages = all_recent_messages[-10:]
     referent_grounding_block = fan_out.get("referent") if include_referent_grounding else None
-    mem0_context_block = fan_out.get("mem0_fmt") if mem0_retrieved_memories else None
+    mem0_context_block = fan_out.get("mem0_fmt") if filtered_mem0 else None
     if mem0_context_block:
         logger.info(
             "[MEMORY_COORD] build_context persona=%s mem0_chars=%s",
             persona_mode,
             len(mem0_context_block),
         )
+        if _MEMORY_INTEGRITY_V2_ENABLED:
+            weighted = apply_temporal_decay_weighting(filtered_mem0)
+            if weighted:
+                mem0_context_block = (
+                    "[MEMORY_INTEGRITY]\n"
+                    f"weighted_memories={len(weighted)}\n"
+                    + mem0_context_block
+                )
+        if _CANVAS3_MEMORY_CANONICALIZATION_ENABLED:
+            cscore = canonical_selection_score(filtered_mem0)
+            mem0_context_block = (
+                "[MEMORY_CANONICALIZATION]\n"
+                f"selection_score={cscore:.2f}\n"
+                + mem0_context_block
+            )
 
     # KURO V1.0.0: raw short-term window only (no summary compression) and Mem0 as
     # sole long-term semantic layer. Keep memory_injection focused on raw turns.
@@ -1038,6 +1072,19 @@ def build_context_for_llm(
         for sf in session_files:
             session_files_block += f"\n--- File: {sf['filename']} ---\n{sf['content']}\n"
         memory_injection = f"{session_files_block}\n\n{memory_injection}"
+
+    if _CANVAS3_COGNITIVE_BUDGET_ENABLED:
+        budget_state = evaluate_budget(
+            {
+                "retrieval_retry_count": 0,
+                "tool_budget_status": {},
+            }
+        )
+        memory_injection = (
+            "[COGNITIVE_BUDGET]\n"
+            f"degradation_mode={budget_state.get('degradation_mode', 'normal')}\n\n"
+            + memory_injection
+        )
 
     finance_block = ""
     market_block = ""
@@ -1217,9 +1264,64 @@ def execute_memory_write_task(
     user_input: str,
     final_response: str,
     persona_scope: str,
+    username: str = "Pantronux",
 ) -> None:
     """Post-response memory writer for Mem0-only long-term semantic storage."""
-    pass
+    from kuro_backend import memory_manager
+
+    if not (user_input or "").strip() or not (final_response or "").strip():
+        return
+
+    integrity_ok = prevent_memory_mutation(final_response, [user_input])
+    contradiction = memory_contradiction_score(user_input, [final_response])
+    integrity_score = max(0.0, min(1.0, (0.75 if integrity_ok else 0.25) - (contradiction * 0.25)))
+    canonicalization_result = {
+        "validation_passed": True,
+        "canonical_summary": final_response,
+        "conflict_resolution": "none",
+        "temporal_score": 1.0,
+        "promoted": True,
+        "contradiction_detected": False,
+    }
+
+    if _CANVAS3_MEMORY_CANONICALIZATION_ENABLED:
+        canonicalization_result = canonicalize_memory_payload(
+            user_input=user_input,
+            final_response=final_response,
+        )
+        if hasattr(memory_manager, "append_memory_canonicalization_log"):
+            try:
+                memory_manager.append_memory_canonicalization_log(
+                    username=username,
+                    session_id=persona_scope,
+                    promoted=bool(canonicalization_result.get("promoted", False)),
+                    temporal_score=float(canonicalization_result.get("temporal_score", 0.0) or 0.0),
+                    canonical_summary=str(canonicalization_result.get("canonical_summary", "")),
+                    payload=canonicalization_result,
+                )
+            except Exception as exc:
+                logger.debug("[MEM_CANON] append log skipped: %s", exc)
+
+    if not integrity_ok:
+        logger.warning("[MEMORY_COORD] memory write blocked by semantic_integrity guard")
+        if hasattr(memory_manager, "append_memory_integrity_log"):
+            memory_manager.append_memory_integrity_log(
+                memory_id=f"{int(time.time())}:{persona_scope}",
+                integrity_score=integrity_score,
+                drift_detected=1,
+                contradiction_detected=1 if contradiction >= 0.5 else 0,
+            )
+        return
+
+    mem0_text = str(canonicalization_result.get("canonical_summary", final_response) or final_response)
+    execute_mem0_extract_task(user_input, mem0_text, username=username)
+    if hasattr(memory_manager, "append_memory_integrity_log"):
+        memory_manager.append_memory_integrity_log(
+            memory_id=f"{int(time.time())}:{persona_scope}",
+            integrity_score=integrity_score,
+            drift_detected=0,
+            contradiction_detected=1 if contradiction >= 0.5 else 0,
+        )
 
 
 def execute_mem0_extract_task(user_input: str, final_response: str, username: str = "Pantronux") -> None:

@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kuro AI - Ingestion Analytics</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/ingestion_center.css">
+</head>
+<body class="ingestion-shell">
+    <main class="ingestion-page analytics-page">
+        <aside class="ingestion-rail">
+            <h1>Sovereign Knowledge</h1>
+            <p class="subtitle">Admin Ingestion Analytics Center</p>
+            <nav class="ingestion-nav">
+                <a href="/">Chat</a>
+                <a href="/intelligence">Intelligence</a>
+                <a href="/ingestion">Ingestion Center</a>
+                <a href="/ingestion/analytics" class="active">Ingestion Analytics</a>
+                <a href="/ingestion/logs">Ingestion Logs</a>
+            </nav>
+            <section class="panel">
+                <h2>Analytics Scope</h2>
+                <p class="muted">Vector health, retrieval quality, orphan chunk detection, and semantic graph inspection.</p>
+            </section>
+        </aside>
+        <section class="ingestion-main">
+            <section class="grid-two">
+                <section class="panel">
+                    <h2>Retrieval Leaderboard</h2>
+                    <div id="leaderboard" class="job-list"></div>
+                </section>
+                <section class="panel">
+                    <h2>Chroma Health</h2>
+                    <div id="chromaHealth" class="detail-block"></div>
+                </section>
+            </section>
+            <section class="grid-two">
+                <section class="panel">
+                    <h2>Low Quality Retrieval</h2>
+                    <div id="lowQuality" class="chunk-list"></div>
+                </section>
+                <section class="panel">
+                    <h2>Orphan Chunks</h2>
+                    <div id="orphans" class="chunk-list"></div>
+                </section>
+            </section>
+            <section class="panel">
+                <div class="toolbar">
+                    <h2>Semantic Graph</h2>
+                    <input id="graphDatasetUuid" type="text" placeholder="Dataset UUID">
+                    <button id="loadGraphBtn" type="button">Load Graph</button>
+                </div>
+                <div id="graphCanvas" class="graph-canvas"></div>
+            </section>
+        </section>
+    </main>
+    <script src="/static/js/semantic_graph.js"></script>
+</body>
+</html>

@@ -3,6 +3,10 @@
 *.log
 *.json
 !requirements.txt
+!implementation_plan.md
+!kuro_epistemic_persona_refactor_implementation_plan_canvas_1.md
+!kuro_sovereign_cognitive_runtime_continuation_plan_canvas_2.md
+
 
 # Virtual Environment
 venv/
@@ -48,3 +52,11 @@ kuro_compliance_chroma/
 *.compliance.db
 test_venv/
 test_venv3/
+
+# DB Files
+*.db
+*.db-wal
+*.db-shm
+*.db-backup*
+*.db-recovery*
+*.db.corrupted*

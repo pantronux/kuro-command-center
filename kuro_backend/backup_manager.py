@@ -21,6 +21,7 @@ import logging
 import os
 import shutil
 import sqlite3
+import tarfile
 import tempfile
 import time
 from datetime import datetime, timedelta
@@ -45,6 +46,7 @@ _BACKUP_TIER2: Sequence[Tuple[str, str]] = (
     ("kuro_compliance.db", "sqlite"),
     ("phoenix_data/phoenix.db", "sqlite"),
 )
+_BACKUP_DAILY_DIRS: Sequence[str] = ("logs",)
 _BACKUP_WEEKLY_DIRS: Sequence[str] = ("kuro_chromadb", "uploaded_files")
 _SQLITE_REQUIRED_CORE = {
     "kuro_chat_history.db",
@@ -209,6 +211,21 @@ def _run_backup_job(backup_type: str, label: str = "") -> Dict[str, Any]:
         except Exception as exc:
             errors.append(f"backup failed for {relative_path}: {exc}")
 
+    for relative_dir in _BACKUP_DAILY_DIRS:
+        source_dir = (_working_dir() / relative_dir).resolve()
+        dest = daily_dir / f"{Path(relative_dir).name}.tar.gz"
+        try:
+            if not source_dir.exists():
+                raise FileNotFoundError(source_dir)
+            size = _copy_directory_archive(source_dir, dest)
+            files.append(dest.name)
+            files_backed_up += 1
+            total_size_bytes += size
+        except FileNotFoundError:
+            errors.append(f"missing asset: {relative_dir}")
+        except Exception as exc:
+            errors.append(f"backup failed for {relative_dir}: {exc}")
+
     weekly_files: List[str] = []
     if started_at.weekday() == 6:
         iso_year, iso_week, _ = started_at.isocalendar()
@@ -353,6 +370,26 @@ def _copy_directory_snapshot(source_dir: Path, dest_dir: Path) -> int:
         if child.is_file():
             total += child.stat().st_size
     return total
+
+
+def _copy_directory_archive(source_dir: Path, dest_tar_gz: Path) -> int:
+    """Create a compressed tar archive for a directory tree."""
+    dest_tar_gz.parent.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(dest_tar_gz, "w:gz") as tar:
+        tar.add(
+            source_dir,
+            arcname=source_dir.name,
+            filter=_tarinfo_filter,
+        )
+    return dest_tar_gz.stat().st_size
+
+
+def _tarinfo_filter(tarinfo: tarfile.TarInfo) -> tarfile.TarInfo | None:
+    name = tarinfo.name
+    basename = Path(name).name
+    if basename == "__pycache__" or basename.endswith(".lock"):
+        return None
+    return tarinfo
 
 
 def _prune_daily_backups(retain_days: int) -> int:

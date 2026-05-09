@@ -343,6 +343,7 @@ def _init_db_locked():
             ("is_bookmarked",  "INTEGER NOT NULL DEFAULT 0"),
             ("is_regenerated", "INTEGER NOT NULL DEFAULT 0"),
             ("edit_group_id",  "TEXT DEFAULT NULL"),
+            ("export_suggestions_json", "TEXT DEFAULT NULL"),
         ]:
             if col not in history_cols:
                 cursor.execute(f"ALTER TABLE chat_history ADD COLUMN {col} {ddl}")
@@ -381,8 +382,8 @@ def add_message(
     request_id: Optional[str] = None,
     username: str = "Pantronux",
     chat_id: Optional[str] = None,
-):
-    """Add a message to the chat history."""
+) -> Optional[int]:
+    """Add a message to the chat history and return its row ID if inserted."""
     conn = None
     try:
         conn = _get_connection()
@@ -396,6 +397,7 @@ def add_message(
             "INSERT OR IGNORE INTO chat_history (platform, role, content, attachments, persona, request_id, username, chat_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (platform, role, content, json.dumps(attachments or []), normalized_persona, request_id, username, final_chat_id)
         )
+        inserted_id = int(cursor.lastrowid) if cursor.lastrowid else None
         
         # Update session timestamp
         cursor.execute(
@@ -404,8 +406,10 @@ def add_message(
         )
         
         conn.commit()
+        return inserted_id
     except Exception as e:
         logger.error(f"Failed to add chat message: {e}")
+        return None
     finally:
         if conn:
             conn.close()
@@ -476,7 +480,12 @@ def get_history(
                 "is_edited": row["is_edited"] if "is_edited" in row.keys() else 0,
                 "is_bookmarked": row["is_bookmarked"] if "is_bookmarked" in row.keys() else 0,
                 "is_regenerated": row["is_regenerated"] if "is_regenerated" in row.keys() else 0,
-                "edit_group_id": row["edit_group_id"] if "edit_group_id" in row.keys() else None
+                "edit_group_id": row["edit_group_id"] if "edit_group_id" in row.keys() else None,
+                "export_suggestions": (
+                    json.loads(row["export_suggestions_json"])
+                    if "export_suggestions_json" in row.keys() and row["export_suggestions_json"]
+                    else []
+                ),
             })
         
         return list(reversed(history))
@@ -1080,6 +1089,26 @@ def update_message_content(message_id: int, new_content: str) -> bool:
         return cursor.rowcount > 0
     except Exception as e:
         logger.error(f"Failed to update message content: {e}")
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+
+def update_message_export_suggestions(message_id: int, suggestions: List[Dict]) -> bool:
+    """Persist export suggestions metadata for a message."""
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE chat_history SET export_suggestions_json = ? WHERE id = ?",
+            (json.dumps(suggestions or [], ensure_ascii=False), message_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    except Exception as e:
+        logger.error(f"Failed to update export suggestions: {e}")
         return False
     finally:
         if conn:

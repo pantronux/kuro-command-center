@@ -3,7 +3,7 @@
  * One UI + Glassmorphism Design with Infinite Scroll
  *
  * --- Header Doc ---
- * Purpose: Frontend app for the main chat dashboard (chat, personas, HUD, market chips, infinite scroll).
+ * Purpose: Frontend app for the main chat dashboard (chat, personas, HUD, market chips, infinite scroll, System Status modal).
  * Caller: Loaded from web_interface/templates/index.html.
  * Dependencies: Tailwind (CDN), Lucide icons, live2d_manager.js (avatar), browser Web APIs (WebSocket, fetch).
  * Main Functions: kuroSendMessage, kuroLoadHistory, kuroRenderSentinelTicker, persona switcher.
@@ -80,6 +80,10 @@ let chatHistory = [];
 let selectedPersona = 'consultant';
 let currentChatId = null;
 let chatSessions = [];
+let runtimeMode = localStorage.getItem('kuro-runtime-mode') || 'normal';
+let playgroundSessionId = null;
+let playgroundExecuting = false;
+let playgroundHistorySessionId = null;
 
 // Infinite Scroll State
 let chatOffset = 0;
@@ -176,6 +180,38 @@ const elements = {
     searchInput: document.getElementById('searchInput'),
     searchResults: document.getElementById('searchResults'),
     closeSearchModal: document.getElementById('closeSearchModal'),
+    normalModeBtn: document.getElementById('normalModeBtn'),
+    playgroundModeBtn: document.getElementById('playgroundModeBtn'),
+    playgroundPanel: document.getElementById('playgroundPanel'),
+    playgroundHealthBtn: document.getElementById('playgroundHealthBtn'),
+    playgroundProvidersBtn: document.getElementById('playgroundProvidersBtn'),
+    playgroundCreateSessionBtn: document.getElementById('playgroundCreateSessionBtn'),
+    playgroundReconnectLatestBtn: document.getElementById('playgroundReconnectLatestBtn'),
+    playgroundUseCustomSessionBtn: document.getElementById('playgroundUseCustomSessionBtn'),
+    playgroundExecuteBtn: document.getElementById('playgroundExecuteBtn'),
+    playgroundListTracesBtn: document.getElementById('playgroundListTracesBtn'),
+    playgroundExecuteBtnLabel: document.getElementById('playgroundExecuteBtnLabel'),
+    playgroundSessionMode: document.getElementById('playgroundSessionMode'),
+    playgroundCustomSessionId: document.getElementById('playgroundCustomSessionId'),
+    playgroundProviderChecklist: document.getElementById('playgroundProviderChecklist'),
+    playgroundPromptInput: document.getElementById('playgroundPromptInput'),
+    playgroundSessionId: document.getElementById('playgroundSessionId'),
+    playgroundOutput: document.getElementById('playgroundOutput'),
+    playgroundCopyOutputBtn: document.getElementById('playgroundCopyOutputBtn'),
+    playgroundDownloadOutputBtn: document.getElementById('playgroundDownloadOutputBtn'),
+    playgroundHistoryList: document.getElementById('playgroundHistoryList'),
+    playgroundHistoryDetail: document.getElementById('playgroundHistoryDetail'),
+    playgroundHistoryMeta: document.getElementById('playgroundHistoryMeta'),
+    playgroundHistoryExecutions: document.getElementById('playgroundHistoryExecutions'),
+    playgroundDownloadSessionArtifactBtn: document.getElementById('playgroundDownloadSessionArtifactBtn'),
+    exportModal: document.getElementById('exportModal'),
+    exportBackdrop: document.getElementById('exportBackdrop'),
+    closeExportModal: document.getElementById('closeExportModal'),
+    exportTargetLabel: document.getElementById('exportTargetLabel'),
+    exportFormatSelect: document.getElementById('exportFormatSelect'),
+    exportSubmitBtn: document.getElementById('exportSubmitBtn'),
+    exportStatus: document.getElementById('exportStatus'),
+    exportDownloadLink: document.getElementById('exportDownloadLink'),
     // Chat Sessions & Persona Accordion
     chatDrawer: document.getElementById('chatDrawer'),
     chatSessionsList: document.getElementById('chatSessionsList'),
@@ -218,8 +254,9 @@ document.addEventListener('DOMContentLoaded', () => {
     updateUserInfo();
     kuroRestoreUIMode();
     kuroConnectDashboardWS();
+    applyRuntimeMode(runtimeMode);
     // Show welcome screen on first load
-    showWelcomeScreen();
+    if (runtimeMode === 'normal') showWelcomeScreen();
 });
 
 // ============================================
@@ -410,6 +447,16 @@ function setupEventListeners() {
         });
     }
 
+    if (elements.exportSubmitBtn) {
+        elements.exportSubmitBtn.addEventListener('click', submitExportRequest);
+    }
+    if (elements.closeExportModal) {
+        elements.closeExportModal.addEventListener('click', closeExportModal);
+    }
+    if (elements.exportBackdrop) {
+        elements.exportBackdrop.addEventListener('click', closeExportModal);
+    }
+
     // Beta 5: Scroll to Bottom Button
     if (elements.scrollToBottomBtn) {
         elements.scrollToBottomBtn.addEventListener('click', scrollToBottom);
@@ -467,6 +514,43 @@ function setupEventListeners() {
     }
     if (elements.searchInput) {
         elements.searchInput.addEventListener('input', debounce(handleSearch, 300));
+    }
+
+    if (elements.normalModeBtn) {
+        elements.normalModeBtn.addEventListener('click', () => applyRuntimeMode('normal'));
+    }
+    if (elements.playgroundModeBtn) {
+        elements.playgroundModeBtn.addEventListener('click', () => applyRuntimeMode('playground'));
+    }
+    if (elements.playgroundHealthBtn) {
+        elements.playgroundHealthBtn.addEventListener('click', playgroundHealth);
+    }
+    if (elements.playgroundProvidersBtn) {
+        elements.playgroundProvidersBtn.addEventListener('click', playgroundProviders);
+    }
+    if (elements.playgroundCreateSessionBtn) {
+        elements.playgroundCreateSessionBtn.addEventListener('click', playgroundCreateSession);
+    }
+    if (elements.playgroundReconnectLatestBtn) {
+        elements.playgroundReconnectLatestBtn.addEventListener('click', playgroundReconnectLatestSession);
+    }
+    if (elements.playgroundUseCustomSessionBtn) {
+        elements.playgroundUseCustomSessionBtn.addEventListener('click', playgroundUseCustomSessionId);
+    }
+    if (elements.playgroundExecuteBtn) {
+        elements.playgroundExecuteBtn.addEventListener('click', playgroundExecute);
+    }
+    if (elements.playgroundListTracesBtn) {
+        elements.playgroundListTracesBtn.addEventListener('click', playgroundListTraces);
+    }
+    if (elements.playgroundCopyOutputBtn) {
+        elements.playgroundCopyOutputBtn.addEventListener('click', copyPlaygroundOutput);
+    }
+    if (elements.playgroundDownloadOutputBtn) {
+        elements.playgroundDownloadOutputBtn.addEventListener('click', downloadPlaygroundOutput);
+    }
+    if (elements.playgroundDownloadSessionArtifactBtn) {
+        elements.playgroundDownloadSessionArtifactBtn.addEventListener('click', downloadSelectedSessionArtifact);
     }
 }
 
@@ -576,7 +660,7 @@ function renderChatSessions() {
                 <button onclick="event.stopPropagation(); renameChatSession('${session.chat_id}')" class="p-1.5 hover:text-blue-500 transition-colors" title="Rename">
                     <i data-lucide="pencil" class="w-3 h-3"></i>
                 </button>
-                <button onclick="event.stopPropagation(); exportChatSession('${session.chat_id}')" class="p-1.5 hover:text-amber-500 transition-colors" title="Export">
+                <button onclick="event.stopPropagation(); openExportModal('${session.chat_id}')" class="p-1.5 hover:text-amber-500 transition-colors" title="Export">
                     <i data-lucide="download" class="w-3 h-3"></i>
                 </button>
                 <button onclick="event.stopPropagation(); deleteChatSession('${session.chat_id}')" class="p-1.5 hover:text-red-500 transition-colors" title="Delete">
@@ -764,7 +848,8 @@ async function kuroLoadHistory(isInitial = false) {
                 prependMessageToChat(role, msg.content, attachments, msg.id, {
                     is_edited: msg.is_edited,
                     is_bookmarked: msg.is_bookmarked,
-                    is_regenerated: msg.is_regenerated
+                    is_regenerated: msg.is_regenerated,
+                    export_suggestions: msg.export_suggestions || [],
                 });
             });
 
@@ -1128,6 +1213,7 @@ function removeFile(index) {
 }
 
 function showWelcomeScreen() {
+    if (runtimeMode === 'playground') return;
     if (elements.welcomeScreen) elements.welcomeScreen.classList.remove('hidden');
     elements.chatContainer.classList.add('hidden');
     if (elements.mainInputArea) elements.mainInputArea.classList.add('hidden');
@@ -1135,6 +1221,485 @@ function showWelcomeScreen() {
     // Close sidebar on mobile when starting new chat
     if (window.innerWidth < 1024) {
         closeSidebar();
+    }
+}
+
+function isPlaygroundAuthorizedUser() {
+    return (window.KURO_USER_CONTEXT?.username || '').trim() === 'Pantronux';
+}
+
+function applyRuntimeMode(mode) {
+    const wantsPlayground = mode === 'playground';
+    if (wantsPlayground && !isPlaygroundAuthorizedUser()) {
+        runtimeMode = 'normal';
+        localStorage.setItem('kuro-runtime-mode', runtimeMode);
+        openAccessDeniedModal();
+        playgroundPrint('Forbidden: Playground access is only for Pantronux.');
+    } else {
+        runtimeMode = wantsPlayground ? 'playground' : 'normal';
+        localStorage.setItem('kuro-runtime-mode', runtimeMode);
+    }
+
+    if (elements.normalModeBtn) {
+        const active = runtimeMode === 'normal';
+        elements.normalModeBtn.classList.toggle('bg-emerald-500', active);
+        elements.normalModeBtn.classList.toggle('text-white', active);
+        elements.normalModeBtn.classList.toggle('text-gray-600', !active);
+        elements.normalModeBtn.classList.toggle('dark:text-gray-200', !active);
+        elements.normalModeBtn.classList.toggle('hover:bg-gray-200', !active);
+        elements.normalModeBtn.classList.toggle('dark:hover:bg-gray-600', !active);
+    }
+    if (elements.playgroundModeBtn) {
+        const active = runtimeMode === 'playground';
+        elements.playgroundModeBtn.classList.toggle('bg-emerald-500', active);
+        elements.playgroundModeBtn.classList.toggle('text-white', active);
+        elements.playgroundModeBtn.classList.toggle('text-gray-600', !active);
+        elements.playgroundModeBtn.classList.toggle('dark:text-gray-200', !active);
+        elements.playgroundModeBtn.classList.toggle('hover:bg-gray-200', !active);
+        elements.playgroundModeBtn.classList.toggle('dark:hover:bg-gray-600', !active);
+    }
+
+    if (runtimeMode === 'playground') {
+        if (elements.playgroundPanel) elements.playgroundPanel.classList.remove('hidden');
+        if (elements.welcomeScreen) elements.welcomeScreen.classList.add('hidden');
+        if (elements.chatContainer) elements.chatContainer.classList.add('hidden');
+        if (elements.mainInputArea) elements.mainInputArea.classList.add('hidden');
+        playgroundRefreshSessionHistory();
+        playgroundPrint({
+            mode: 'playground',
+            note: 'Playground mode active. Use panel controls to hit /api/playground/*.',
+        });
+        return;
+    }
+
+    if (elements.playgroundPanel) elements.playgroundPanel.classList.add('hidden');
+    if (currentChatId) {
+        if (elements.welcomeScreen) elements.welcomeScreen.classList.add('hidden');
+        if (elements.chatContainer) elements.chatContainer.classList.remove('hidden');
+        if (elements.mainInputArea) elements.mainInputArea.classList.remove('hidden');
+    } else {
+        showWelcomeScreen();
+    }
+}
+window.applyRuntimeMode = applyRuntimeMode;
+
+function playgroundPrint(payload) {
+    if (!elements.playgroundOutput) return;
+    if (typeof payload === 'string') {
+        elements.playgroundOutput.textContent = payload;
+        return;
+    }
+    elements.playgroundOutput.textContent = JSON.stringify(payload, null, 2);
+}
+
+async function parsePlaygroundJson(response) {
+    try {
+        return await response.json();
+    } catch (_) {
+        return null;
+    }
+}
+
+function resolvePlaygroundSessionId(payload) {
+    if (!payload || typeof payload !== 'object') return null;
+    if (typeof payload.session_id === 'string' && payload.session_id) return payload.session_id;
+    if (payload.data && typeof payload.data === 'object') {
+        const nested = payload.data.session_id;
+        if (typeof nested === 'string' && nested) return nested;
+    }
+    return null;
+}
+
+function formatPlaygroundError(action, response, payload) {
+    const detail = payload && typeof payload === 'object'
+        ? (payload.detail || payload.error || JSON.stringify(payload))
+        : 'Unknown error';
+    return `${action} failed (${response.status} ${response.statusText}): ${detail}`;
+}
+
+function setActivePlaygroundSession(sessionId) {
+    playgroundSessionId = sessionId || null;
+    if (elements.playgroundSessionId) {
+        elements.playgroundSessionId.textContent = playgroundSessionId || '-';
+    }
+}
+
+async function fetchPlaygroundJson(path) {
+    const response = await authFetch(path);
+    const data = await parsePlaygroundJson(response);
+    if (!response.ok) {
+        throw new Error(formatPlaygroundError('Playground request', response, data));
+    }
+    return data;
+}
+
+function renderPlaygroundHistoryList(sessions) {
+    if (!elements.playgroundHistoryList) return;
+    if (!Array.isArray(sessions) || sessions.length === 0) {
+        elements.playgroundHistoryList.innerHTML = '<p class="px-3 py-2 text-gray-500 dark:text-gray-400">(no sessions)</p>';
+        return;
+    }
+    const rows = sessions.map((s) => {
+        const sid = s.session_id || '';
+        const mode = s.mode || 'unknown';
+        const created = s.created_at_utc || '-';
+        const active = sid === playgroundSessionId ? 'border-l-2 border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20' : '';
+        return `
+            <button data-session-id="${sid}" class="playground-history-item w-full text-left px-3 py-2 border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800/70 ${active}">
+                <p class="font-medium text-gray-800 dark:text-gray-100 truncate">${sid}</p>
+                <p class="text-[11px] text-gray-500 dark:text-gray-400">${mode} • ${created}</p>
+            </button>
+        `;
+    }).join('');
+    elements.playgroundHistoryList.innerHTML = rows;
+    elements.playgroundHistoryList.querySelectorAll('.playground-history-item').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+            const sid = btn.getAttribute('data-session-id');
+            if (!sid) return;
+            playgroundHistorySessionId = sid;
+            await playgroundLoadSessionHistoryDetail(sid);
+        });
+    });
+}
+
+async function playgroundRefreshSessionHistory() {
+    if (!elements.playgroundHistoryList) return;
+    try {
+        const data = await fetchPlaygroundJson('/api/playground/sessions?limit=20');
+        renderPlaygroundHistoryList(data.sessions || []);
+    } catch (error) {
+        elements.playgroundHistoryList.innerHTML = `<p class="px-3 py-2 text-red-500">${escapeHtml(error.message)}</p>`;
+    }
+}
+
+function buildExecutionArtifactButtons(sessionId, executionId) {
+    return `
+        <div class="flex items-center gap-2 mt-1">
+            <button class="playground-download-artifact px-2 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-700 dark:text-emerald-300 text-[11px]"
+                data-session-id="${sessionId}" data-execution-id="${executionId}" data-type="execution_raw">Download Raw JSON</button>
+            <button class="playground-download-artifact px-2 py-1 rounded-lg bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-700 dark:text-cyan-300 text-[11px]"
+                data-session-id="${sessionId}" data-execution-id="${executionId}" data-type="execution_trace">Download Trace JSON</button>
+        </div>
+    `;
+}
+
+function installArtifactDownloadHandlers(scope) {
+    scope.querySelectorAll('.playground-download-artifact').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+            const sid = btn.getAttribute('data-session-id');
+            const eid = btn.getAttribute('data-execution-id');
+            const type = btn.getAttribute('data-type');
+            if (!sid || !eid || !type) return;
+            await downloadPlaygroundArtifactJson(sid, type, eid, btn);
+        });
+    });
+}
+
+async function playgroundLoadSessionHistoryDetail(sessionId) {
+    if (!elements.playgroundHistoryDetail || !elements.playgroundHistoryMeta || !elements.playgroundHistoryExecutions) return;
+    elements.playgroundHistoryDetail.classList.remove('hidden');
+    elements.playgroundHistoryMeta.innerHTML = '<p class="text-gray-500 dark:text-gray-400">Loading history...</p>';
+    elements.playgroundHistoryExecutions.innerHTML = '';
+    try {
+        const data = await fetchPlaygroundJson(`/api/playground/sessions/${encodeURIComponent(sessionId)}/history`);
+        const session = data.session || {};
+        const executions = Array.isArray(data.executions) ? data.executions : [];
+        elements.playgroundHistoryMeta.innerHTML = `
+            <p><span class="font-medium">Session:</span> ${escapeHtml(session.session_id || '-')}</p>
+            <p><span class="font-medium">Mode:</span> ${escapeHtml(session.mode || '-')} • <span class="font-medium">Status:</span> ${escapeHtml(session.status || '-')}</p>
+            <p><span class="font-medium">Created:</span> ${escapeHtml(session.created_at_utc || '-')}</p>
+            <p><span class="font-medium">Traces:</span> ${escapeHtml(String((data.traces_summary || {}).count || 0))} • <span class="font-medium">Reports:</span> ${escapeHtml(String((data.reports || []).length || 0))}</p>
+        `;
+        if (executions.length === 0) {
+            elements.playgroundHistoryExecutions.innerHTML = '<p class="text-gray-500 dark:text-gray-400">No executions yet.</p>';
+        } else {
+            elements.playgroundHistoryExecutions.innerHTML = executions.map((row) => `
+                <div class="rounded-lg border border-gray-200 dark:border-gray-700 p-2">
+                    <p class="font-medium text-gray-800 dark:text-gray-100">${escapeHtml(row.execution_id || '-')}</p>
+                    <p class="text-gray-600 dark:text-gray-300">${escapeHtml(row.provider_id || '-')} • ${escapeHtml(row.model_id || '-')}</p>
+                    <p class="text-gray-500 dark:text-gray-400 text-[11px]">${escapeHtml(row.created_at_utc || '-')} • latency: ${escapeHtml(String(row.latency_ms || '-'))} ms</p>
+                    ${buildExecutionArtifactButtons(sessionId, row.execution_id || '')}
+                </div>
+            `).join('');
+            installArtifactDownloadHandlers(elements.playgroundHistoryExecutions);
+        }
+    } catch (error) {
+        elements.playgroundHistoryMeta.innerHTML = `<p class="text-red-500">${escapeHtml(error.message)}</p>`;
+    }
+}
+
+async function downloadPlaygroundArtifactJson(sessionId, type, executionId = null, button = null) {
+    const q = new URLSearchParams({ type });
+    if (executionId) q.set('execution_id', executionId);
+    const url = `/api/playground/sessions/${encodeURIComponent(sessionId)}/artifacts/json?${q.toString()}`;
+    const originalText = button ? button.textContent : null;
+    if (button) button.textContent = 'Downloading...';
+    try {
+        const response = await authFetch(url);
+        if (!response.ok) {
+            const payload = await parsePlaygroundJson(response);
+            throw new Error(formatPlaygroundError('Artifact download', response, payload));
+        }
+        const blob = await response.blob();
+        const header = response.headers.get('content-disposition') || '';
+        const m = header.match(/filename=\"?([^\";]+)\"?/i);
+        const filename = m ? m[1] : `playground-${type}.json`;
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(link.href);
+    } catch (error) {
+        playgroundPrint(`Artifact download failed: ${error.message}`);
+    } finally {
+        if (button && originalText) button.textContent = originalText;
+    }
+}
+
+async function downloadSelectedSessionArtifact() {
+    const sid = playgroundHistorySessionId || playgroundSessionId;
+    if (!sid) {
+        playgroundPrint('No session selected for artifact download.');
+        return;
+    }
+    await downloadPlaygroundArtifactJson(sid, 'session', null, elements.playgroundDownloadSessionArtifactBtn);
+}
+
+function setPlaygroundExecuteLoading(isLoading) {
+    playgroundExecuting = isLoading;
+    if (!elements.playgroundExecuteBtn) return;
+    elements.playgroundExecuteBtn.disabled = isLoading;
+    elements.playgroundExecuteBtn.classList.toggle('opacity-70', isLoading);
+    elements.playgroundExecuteBtn.classList.toggle('cursor-not-allowed', isLoading);
+    if (elements.playgroundExecuteBtnLabel) {
+        elements.playgroundExecuteBtnLabel.textContent = isLoading ? 'Executing...' : 'Execute';
+    } else {
+        elements.playgroundExecuteBtn.textContent = isLoading ? 'Executing...' : 'Execute';
+    }
+}
+
+function getPlaygroundOutputText() {
+    return (elements.playgroundOutput?.textContent || '').trim();
+}
+
+function flashPlaygroundAction(button, text, fallbackText) {
+    if (!button) return;
+    const original = button.textContent || fallbackText;
+    button.textContent = text;
+    setTimeout(() => {
+        button.textContent = original || fallbackText;
+    }, 1200);
+}
+
+async function copyPlaygroundOutput() {
+    const text = getPlaygroundOutputText();
+    if (!text || text === '(no output)') {
+        flashPlaygroundAction(elements.playgroundCopyOutputBtn, 'No output', 'Copy');
+        return;
+    }
+    try {
+        await navigator.clipboard.writeText(text);
+        flashPlaygroundAction(elements.playgroundCopyOutputBtn, 'Copied', 'Copy');
+    } catch (_) {
+        flashPlaygroundAction(elements.playgroundCopyOutputBtn, 'Copy failed', 'Copy');
+    }
+}
+
+function downloadPlaygroundOutput() {
+    const text = getPlaygroundOutputText();
+    if (!text || text === '(no output)') {
+        flashPlaygroundAction(elements.playgroundDownloadOutputBtn, 'No output', 'Download');
+        return;
+    }
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const blob = new Blob([text], { type: 'application/json;charset=utf-8' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `playground-output-${stamp}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(link.href);
+    flashPlaygroundAction(elements.playgroundDownloadOutputBtn, 'Downloaded', 'Download');
+}
+
+async function playgroundHealth() {
+    try {
+        const response = await authFetch('/api/playground/health');
+        const data = await parsePlaygroundJson(response);
+        if (!response.ok) {
+            playgroundPrint(formatPlaygroundError('Health check', response, data));
+            return;
+        }
+        playgroundPrint(data);
+    } catch (error) {
+        playgroundPrint(`Health check failed: ${error.message}`);
+    }
+}
+
+async function playgroundProviders() {
+    try {
+        const response = await authFetch('/api/playground/providers');
+        const data = await parsePlaygroundJson(response);
+        if (!response.ok) {
+            playgroundPrint(formatPlaygroundError('Providers check', response, data));
+            return;
+        }
+        playgroundPrint(data);
+    } catch (error) {
+        playgroundPrint(`Providers check failed: ${error.message}`);
+    }
+}
+
+async function playgroundCreateSession(customSessionId = null) {
+    const mode = elements.playgroundSessionMode?.value || 'research';
+    const payload = { mode };
+    const sid = (customSessionId || '').trim();
+    if (sid) {
+        payload.session_id = sid;
+    }
+    try {
+        const response = await authFetch('/api/playground/sessions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        const data = await parsePlaygroundJson(response);
+        if (!response.ok) {
+            playgroundPrint(formatPlaygroundError('Create session', response, data));
+            return;
+        }
+        const sessionId = resolvePlaygroundSessionId(data);
+        if (sessionId) {
+            setActivePlaygroundSession(sessionId);
+            playgroundHistorySessionId = sessionId;
+            if (elements.playgroundCustomSessionId && !customSessionId) {
+                elements.playgroundCustomSessionId.value = '';
+            }
+        } else {
+            playgroundPrint('Create session succeeded but `session_id` missing in response.');
+            return;
+        }
+        playgroundPrint(data);
+        await playgroundRefreshSessionHistory();
+        await playgroundLoadSessionHistoryDetail(sessionId);
+    } catch (error) {
+        playgroundPrint(`Create session failed: ${error.message}`);
+    }
+}
+
+async function playgroundReconnectLatestSession() {
+    try {
+        const data = await fetchPlaygroundJson('/api/playground/sessions/latest');
+        const sessionId = data.session_id;
+        if (!sessionId) {
+            playgroundPrint('Latest session payload missing session_id.');
+            return;
+        }
+        setActivePlaygroundSession(sessionId);
+        playgroundHistorySessionId = sessionId;
+        if (elements.playgroundCustomSessionId) {
+            elements.playgroundCustomSessionId.value = sessionId;
+        }
+        playgroundPrint({ reconnected_latest: data });
+        await playgroundRefreshSessionHistory();
+        await playgroundLoadSessionHistoryDetail(sessionId);
+    } catch (error) {
+        playgroundPrint(`Reconnect latest failed: ${error.message}`);
+    }
+}
+
+async function playgroundUseCustomSessionId() {
+    const customId = (elements.playgroundCustomSessionId?.value || '').trim();
+    if (!customId) {
+        playgroundPrint('Custom Session ID is empty.');
+        return;
+    }
+    await playgroundCreateSession(customId);
+}
+
+async function playgroundExecute() {
+    if (playgroundExecuting) {
+        return;
+    }
+    const prompt = (elements.playgroundPromptInput?.value || '').trim();
+    const selectedProviders = Array.from(
+        (elements.playgroundProviderChecklist || document).querySelectorAll('input[type="checkbox"]:checked')
+    ).map((el) => el.value);
+    if (!playgroundSessionId) {
+        playgroundPrint('No active session. Create session first.');
+        return;
+    }
+    if (!prompt) {
+        playgroundPrint('Prompt is empty.');
+        return;
+    }
+    if (selectedProviders.length === 0) {
+        playgroundPrint('No provider selected. Checklist minimal 1 model.');
+        return;
+    }
+    setPlaygroundExecuteLoading(true);
+    try {
+        const isComparative = selectedProviders.length > 1;
+        const endpoint = isComparative
+            ? '/api/playground/comparative-executions'
+            : '/api/playground/executions';
+        const payload = isComparative
+            ? {
+                session_id: playgroundSessionId,
+                provider_ids: selectedProviders,
+                prompt,
+            }
+            : {
+                session_id: playgroundSessionId,
+                provider_id: selectedProviders[0],
+                prompt,
+            };
+        const response = await authFetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        const data = await parsePlaygroundJson(response);
+        if (!response.ok) {
+            playgroundPrint(formatPlaygroundError('Execution', response, data));
+            return;
+        }
+        playgroundPrint({
+            mode: isComparative ? 'comparative' : 'single',
+            selected_providers: selectedProviders,
+            response: data,
+        });
+        await playgroundRefreshSessionHistory();
+        playgroundHistorySessionId = playgroundSessionId;
+        await playgroundLoadSessionHistoryDetail(playgroundSessionId);
+    } catch (error) {
+        playgroundPrint(`Execution failed: ${error.message}`);
+    } finally {
+        setPlaygroundExecuteLoading(false);
+    }
+}
+
+async function playgroundListTraces() {
+    if (!playgroundSessionId) {
+        playgroundPrint('No active session. Create session first.');
+        return;
+    }
+    try {
+        const response = await authFetch(`/api/playground/sessions/${encodeURIComponent(playgroundSessionId)}/traces`);
+        const data = await parsePlaygroundJson(response);
+        if (!response.ok) {
+            playgroundPrint(formatPlaygroundError('List traces', response, data));
+            return;
+        }
+        playgroundPrint(data);
+        await playgroundRefreshSessionHistory();
+        playgroundHistorySessionId = playgroundSessionId;
+        await playgroundLoadSessionHistoryDetail(playgroundSessionId);
+    } catch (error) {
+        playgroundPrint(`List traces failed: ${error.message}`);
     }
 }
 // ============================================
@@ -1318,6 +1883,11 @@ async function sendMessage(isFromWelcome = false) {
                             metaInfo.className = 'text-[10px] text-gray-400 mt-2';
                             metaInfo.textContent = `TTFB ${streamMeta.ttfb_ms ?? '-'} ms | Total ${streamMeta.total_ms ?? '-'} ms`;
                             streamingContent.appendChild(metaInfo);
+                        }
+                        if (streamMeta?.export_suggestions?.length) {
+                            renderExportSuggestions(streamingContent, streamMeta.export_suggestions);
+                        } else if (streamMeta?.export_suggestion) {
+                            renderExportSuggestions(streamingContent, [streamMeta.export_suggestion]);
                         }
                         if (wasPinnedToBottom) {
                             scrollToBottom();
@@ -1503,6 +2073,12 @@ function addMessageToChat(role, content, files = [], messageId = null, extra = {
     if (role === 'ai') {
         addCodeBlockCopyButtons(messageDiv);
         addTableCopyButtons(messageDiv);
+        if (extra.export_suggestions?.length) {
+            renderExportSuggestions(
+                messageDiv.querySelector('.markdown-content'),
+                extra.export_suggestions
+            );
+        }
     }
 
     if (!isLoadingMore) scrollToBottom();
@@ -1586,6 +2162,16 @@ function prependMessageToChat(role, content, attachments = [], messageId = null,
     }
 
     lucide.createIcons();
+    if (role === 'ai') {
+        addCodeBlockCopyButtons(messageDiv);
+        addTableCopyButtons(messageDiv);
+        if (extra.export_suggestions?.length) {
+            renderExportSuggestions(
+                messageDiv.querySelector('.markdown-content'),
+                extra.export_suggestions
+            );
+        }
+    }
 }
 
 function getIconForExt(ext) {
@@ -1829,7 +2415,12 @@ async function loadChatHistory() {
             messages.forEach(msg => {
                 const role = msg.role === 'user' ? 'user' : 'ai';
                 const attachments = Array.isArray(msg.attachments) ? msg.attachments : (typeof msg.attachments === 'string' ? JSON.parse(msg.attachments) : []);
-                addMessageToChat(role, msg.content, attachments, msg.id);
+                addMessageToChat(role, msg.content, attachments, msg.id, {
+                    is_edited: msg.is_edited,
+                    is_regenerated: msg.is_regenerated,
+                    is_bookmarked: msg.is_bookmarked,
+                    export_suggestions: msg.export_suggestions || [],
+                });
             });
 
             chatOffset = data.history.length;
@@ -1910,18 +2501,26 @@ async function openSystemStatus() {
         const logData = await logResponse.json();
 
         if (sysData.status === 'success') {
+            const systemStatus = sysData.data || {};
+            const healthReport = typeof systemStatus === 'string'
+                ? systemStatus
+                : (systemStatus.system_health_report || 'System status unavailable.');
             let logStorageHtml = '';
+            let backupHtml = '';
             if (logData.status === 'success' && logData.data) {
                 const logInfo = logData.data;
                 let breakdownHtml = '';
 
                 if (logInfo.breakdown) {
                     breakdownHtml = '<div class="mt-3 space-y-1">';
-                    Object.entries(logInfo.breakdown).forEach(([name, size]) => {
+                    logInfo.breakdown.forEach((entry) => {
                         breakdownHtml += `
-                            <div class="flex justify-between items-center text-xs text-blue-700/70 dark:text-blue-300/60">
-                                <span>${name}</span>
-                                <span class="font-mono">${size.toFixed(2)} MB</span>
+                            <div class="flex justify-between items-start gap-3 text-xs text-blue-700/70 dark:text-blue-300/60">
+                                <div>
+                                    <div>${entry.name}</div>
+                                    <div class="text-[11px] opacity-70">Updated ${entry.modified_at}</div>
+                                </div>
+                                <span class="font-mono whitespace-nowrap">${entry.size_mb.toFixed(2)} MB</span>
                             </div>
                         `;
                     });
@@ -1953,10 +2552,13 @@ async function openSystemStatus() {
                 `;
             }
 
+            backupHtml = renderBackupStatusCard(systemStatus.backup);
+
             elements.systemStatusContent.innerHTML = `
                 <div class="space-y-4">
-                    <div class="bg-gray-50 dark:bg-gray-700 rounded-xl p-4 font-mono text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">${sysData.data}</div>
+                    <div class="bg-gray-50 dark:bg-gray-700 rounded-xl p-4 font-mono text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">${healthReport}</div>
                     ${logStorageHtml}
+                    ${backupHtml}
                 </div>
             `;
             lucide.createIcons();
@@ -1971,6 +2573,141 @@ async function openSystemStatus() {
 function closeSystemStatus() {
     elements.systemStatusModal.classList.add('hidden');
     elements.systemStatusModal.classList.remove('flex');
+}
+
+function renderBackupStatusCard(backup) {
+    if (backup === null || backup === undefined) {
+        return `
+            <div class="p-4 bg-teal-50 dark:bg-teal-900/20 rounded-xl border border-teal-200 dark:border-teal-800">
+                <div class="flex items-center justify-between gap-3 mb-2">
+                    <div class="flex items-center gap-2">
+                        <i data-lucide="database-backup" class="w-4 h-4 text-teal-600 dark:text-teal-400"></i>
+                        <h4 class="font-medium text-teal-800 dark:text-teal-300">Backup Status</h4>
+                    </div>
+                </div>
+                <p class="text-sm text-teal-700 dark:text-teal-200">Backup system not yet configured.</p>
+            </div>
+        `;
+    }
+
+    const badge = getBackupStatusBadge(backup.last_backup_status);
+    const assets = Array.isArray(backup.assets_covered) ? backup.assets_covered : [];
+    const assetItems = assets.length
+        ? assets.map((asset) => `
+            <div class="font-mono text-[0.75rem] text-gray-500 dark:text-gray-400 break-all">${asset}</div>
+        `).join('')
+        : '<div class="font-mono text-[0.75rem] text-gray-500 dark:text-gray-400">No assets recorded.</div>';
+    const errorHtml = backup.last_backup_status === 'failed' && backup.error_message
+        ? `<p class="mt-3 text-xs text-red-600 dark:text-red-400">${escapeHtml(backup.error_message)}</p>`
+        : '';
+
+    return `
+        <div class="p-4 bg-teal-50 dark:bg-teal-900/20 rounded-xl border border-teal-200 dark:border-teal-800">
+            <div class="flex items-center justify-between gap-3 mb-3">
+                <div class="flex items-center gap-2">
+                    <i data-lucide="database-backup" class="w-4 h-4 text-teal-600 dark:text-teal-400"></i>
+                    <h4 class="font-medium text-teal-800 dark:text-teal-300">Backup Status</h4>
+                </div>
+                <button
+                    type="button"
+                    onclick="openBackupHistoryDetails()"
+                    class="inline-flex items-center gap-1 rounded-lg border border-teal-300/70 dark:border-teal-700 px-2.5 py-1 text-xs font-semibold text-teal-700 dark:text-teal-300 hover:bg-teal-100 dark:hover:bg-teal-900/40 transition-colors"
+                    title="Open /api/backup/history details"
+                >
+                    <i data-lucide="external-link" class="w-3.5 h-3.5"></i>
+                    <span>View history</span>
+                </button>
+            </div>
+            <div class="grid grid-cols-3 gap-3 text-sm mb-4">
+                <div>
+                    <p class="text-teal-600 dark:text-teal-400">Last Backup</p>
+                    <p class="font-mono text-teal-900 dark:text-teal-100">${formatBackupTimestamp(backup.last_backup_at)}</p>
+                </div>
+                <div>
+                    <p class="text-teal-600 dark:text-teal-400">Status</p>
+                    <p>${badge}</p>
+                </div>
+                <div>
+                    <p class="text-teal-600 dark:text-teal-400">Next Backup</p>
+                    <p class="font-mono text-teal-900 dark:text-teal-100">${formatBackupTimestamp(backup.next_backup_at)}</p>
+                </div>
+            </div>
+            <div class="grid grid-cols-3 gap-3 text-sm mb-4">
+                <div>
+                    <p class="text-teal-600 dark:text-teal-400">Total Backup Size</p>
+                    <p class="font-mono text-teal-900 dark:text-teal-100">${formatBackupMegabytes(backup.backup_dir_size_mb)}</p>
+                </div>
+                <div>
+                    <p class="text-teal-600 dark:text-teal-400">Daily Copies</p>
+                    <p class="font-mono text-teal-900 dark:text-teal-100">${backup.backup_count_daily ?? 0}</p>
+                </div>
+                <div>
+                    <p class="text-teal-600 dark:text-teal-400">Retention</p>
+                    <p class="font-mono text-teal-900 dark:text-teal-100">${backup.retain_days ?? 0} days</p>
+                </div>
+            </div>
+            <div class="mb-4">
+                <p class="text-sm text-teal-700 dark:text-teal-200 mb-2">Assets Covered (${assets.length} files):</p>
+                <div class="grid grid-cols-2 gap-x-3 gap-y-1">
+                    ${assetItems}
+                </div>
+            </div>
+            <div class="flex flex-wrap gap-x-6 gap-y-2 text-sm">
+                <p class="text-teal-700 dark:text-teal-200">Last duration: <span class="font-mono text-teal-900 dark:text-teal-100">${formatBackupDuration(backup.duration_seconds)}</span></p>
+                <p class="text-teal-700 dark:text-teal-200">Pre-migration snaps: <span class="font-mono text-teal-900 dark:text-teal-100">${backup.backup_count_pre_migration ?? 0}</span></p>
+            </div>
+            ${errorHtml}
+        </div>
+    `;
+}
+
+function getBackupStatusBadge(status) {
+    switch ((status || '').toLowerCase()) {
+        case 'success':
+            return '<span class="inline-flex items-center rounded-full bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">✅ Success</span>';
+        case 'partial':
+            return '<span class="inline-flex items-center rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">⚠️ Partial</span>';
+        case 'failed':
+            return '<span class="inline-flex items-center rounded-full bg-red-100 px-2 py-1 text-xs font-semibold text-red-700 dark:bg-red-900/40 dark:text-red-300">❌ Failed</span>';
+        default:
+            return '<span class="inline-flex items-center rounded-full bg-gray-100 px-2 py-1 text-xs font-semibold text-gray-700 dark:bg-gray-800 dark:text-gray-300">⚪ Not configured</span>';
+    }
+}
+
+function formatBackupTimestamp(value) {
+    if (!value) return 'N/A';
+    const parsed = new Date(String(value).replace(' ', 'T'));
+    if (Number.isNaN(parsed.getTime())) return String(value);
+    return parsed.toLocaleString('en-GB', {
+        day: '2-digit',
+        month: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+    });
+}
+
+function formatBackupMegabytes(value) {
+    const amount = Number(value);
+    return Number.isFinite(amount) ? `${amount.toFixed(1)} MB` : '0.0 MB';
+}
+
+function formatBackupDuration(value) {
+    const seconds = Number(value);
+    return Number.isFinite(seconds) ? `${seconds.toFixed(1)}s` : '0.0s';
+}
+
+function openBackupHistoryDetails() {
+    window.open(`${CONFIG.API_BASE}/backup/history`, '_blank', 'noopener,noreferrer');
+}
+
+function escapeHtml(value) {
+    return String(value)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
 }
 
 // ============================================
@@ -2903,11 +3640,162 @@ function closeSearchModal() {
 }
 
 async function exportChatSession(chatId) {
-    const format = prompt('Export format: "md" for Markdown, "txt" for Plain Text', 'md');
-    if (!format || (format !== 'md' && format !== 'txt')) return;
+    openExportModal(chatId);
+}
 
-    const url = `${CONFIG.API_BASE}/chats/${chatId}/export?format=${format}`;
-    window.location.href = url;
+function openExportModal(chatId) {
+    if (!elements.exportModal) return;
+    elements.exportModal.dataset.chatId = chatId;
+    elements.exportTargetLabel.textContent = `Chat Session: ${chatId}`;
+    elements.exportFormatSelect.value = 'md';
+    elements.exportStatus.textContent = '';
+    elements.exportStatus.className = 'text-sm text-gray-500 dark:text-gray-400';
+    elements.exportDownloadLink.classList.add('hidden');
+    elements.exportDownloadLink.href = '#';
+    elements.exportModal.classList.remove('hidden');
+}
+
+function closeExportModal() {
+    if (!elements.exportModal) return;
+    elements.exportModal.classList.add('hidden');
+}
+
+function renderExportSuggestions(container, suggestions) {
+    if (!container || !Array.isArray(suggestions) || suggestions.length === 0) return;
+
+    const existing = container.querySelector('.export-suggestion');
+    if (existing) existing.remove();
+
+    const action = document.createElement('div');
+    action.className = 'export-suggestion mt-3 flex flex-col gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-3 py-2';
+    const reason = suggestions[0]?.reason || 'Structured output detected.';
+    const iconForFormat = (format) => {
+        if (format === 'pdf' || format === 'docx') return 'file-text';
+        if (format === 'csv' || format === 'xlsx') return 'table';
+        return 'download';
+    };
+    const buttons = suggestions.map((suggestion, index) => `
+        <button data-suggestion-index="${index}" class="inline-flex items-center gap-2 rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-600 transition-colors">
+            <i data-lucide="${iconForFormat(suggestion.format)}" class="w-3.5 h-3.5"></i>
+            ${escapeHtml(suggestion.title || `Export to ${String(suggestion.format || '').toUpperCase()}`)}
+        </button>
+    `).join('');
+
+    action.innerHTML = `
+        <span class="text-[11px] text-emerald-700 dark:text-emerald-300">${escapeHtml(reason)}</span>
+        <div class="flex flex-wrap gap-2">${buttons}</div>
+    `;
+    action.querySelectorAll('button[data-suggestion-index]').forEach((button) => {
+        button.addEventListener('click', () => {
+            const idx = Number(button.getAttribute('data-suggestion-index'));
+            quickExportSuggestedChat(suggestions[idx]);
+        });
+    });
+    container.appendChild(action);
+    lucide.createIcons();
+}
+
+async function quickExportSuggestedChat(suggestion) {
+    const chatId = suggestion.chat_id || currentChatId;
+    if (!chatId) {
+        showNotification('Chat session not available for export.', 'error');
+        return;
+    }
+
+    try {
+        const response = await authFetch(`${CONFIG.API_BASE}/export`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                target: suggestion.target || 'chat_session',
+                chat_id: chatId,
+                format: suggestion.format || 'xlsx',
+                message_ids: Array.isArray(suggestion.message_ids) ? suggestion.message_ids : [],
+            }),
+        });
+        await downloadBlobResponse(response, `chat_${chatId}.${suggestion.format || 'xlsx'}`);
+        showNotification(`${String(suggestion.format || 'file').toUpperCase()} export generated`, 'success');
+    } catch (error) {
+        showNotification(`Export failed: ${error.message}`, 'error');
+    }
+}
+
+async function submitExportRequest() {
+    const chatId = elements.exportModal?.dataset.chatId;
+    const format = elements.exportFormatSelect?.value || 'md';
+    if (!chatId) return;
+
+    elements.exportSubmitBtn.disabled = true;
+    elements.exportStatus.textContent = 'Preparing export...';
+    elements.exportStatus.className = 'text-sm text-gray-500 dark:text-gray-400';
+    elements.exportDownloadLink.classList.add('hidden');
+
+    try {
+        const response = await authFetch(`${CONFIG.API_BASE}/export`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                target: 'chat_session',
+                chat_id: chatId,
+                format,
+                message_ids: [],
+            }),
+        });
+
+        if (format === 'pdf') {
+            const result = await response.json();
+            elements.exportStatus.textContent = `PDF export queued. Job #${result.job_id}`;
+            await pollExportJob(result.job_id);
+        } else {
+            await downloadBlobResponse(response, `chat_${chatId}.${format}`);
+            elements.exportStatus.textContent = 'Export ready. Download started.';
+            showNotification('Export generated', 'success');
+        }
+    } catch (error) {
+        elements.exportStatus.textContent = `Export failed: ${error.message}`;
+        elements.exportStatus.className = 'text-sm text-red-500';
+        showNotification('Export failed', 'error');
+    } finally {
+        elements.exportSubmitBtn.disabled = false;
+    }
+}
+
+async function pollExportJob(jobId) {
+    const maxAttempts = 40;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        const response = await authFetch(`${CONFIG.API_BASE}/export/${jobId}`);
+        const job = await response.json();
+
+        if (job.status === 'completed') {
+            elements.exportStatus.textContent = 'PDF export completed.';
+            elements.exportDownloadLink.href = job.download_url;
+            elements.exportDownloadLink.classList.remove('hidden');
+            showNotification('PDF export completed', 'success');
+            return;
+        }
+        if (job.status === 'failed') {
+            throw new Error(job.error_message || 'PDF export failed');
+        }
+
+        elements.exportStatus.textContent = `PDF export ${job.status}...`;
+    }
+    throw new Error('PDF export timed out');
+}
+
+async function downloadBlobResponse(response, fallbackFilename) {
+    const blob = await response.blob();
+    const header = response.headers.get('Content-Disposition') || '';
+    const match = header.match(/filename=\"?([^\";]+)\"?/i);
+    const filename = match ? match[1] : fallbackFilename;
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
 }
 
 function copyMessageText(btn) {

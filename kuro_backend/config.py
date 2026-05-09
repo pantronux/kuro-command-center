@@ -32,6 +32,74 @@ class Settings:
     # -----------------------------------------------------------------
     KURO_CHAT_CONTEXT_REFRESH_THRESHOLD: int = int(os.getenv("KURO_CHAT_CONTEXT_REFRESH_THRESHOLD", "20"))
     KURO_CHAT_CONTEXT_MODEL: str = os.getenv("KURO_CHAT_CONTEXT_MODEL", CLASSIFIER_MODEL)
+    KURO_EPISTEMIC_V2_ENABLED: bool = os.getenv(
+        "KURO_EPISTEMIC_V2_ENABLED", "true"
+    ).strip().lower() in ("1", "true", "yes", "on")
+    KURO_STREAM_SANITIZER_ENABLED: bool = os.getenv(
+        "KURO_STREAM_SANITIZER_ENABLED", "true"
+    ).strip().lower() in ("1", "true", "yes", "on")
+    KURO_RETRIEVAL_QUALITY_V2_ENABLED: bool = os.getenv(
+        "KURO_RETRIEVAL_QUALITY_V2_ENABLED", "true"
+    ).strip().lower() in ("1", "true", "yes", "on")
+    KURO_PERSONA_RUNTIME_V2_ENABLED: bool = os.getenv(
+        "KURO_PERSONA_RUNTIME_V2_ENABLED", "true"
+    ).strip().lower() in ("1", "true", "yes", "on")
+    KURO_MEMORY_INTEGRITY_V2_ENABLED: bool = os.getenv(
+        "KURO_MEMORY_INTEGRITY_V2_ENABLED", "true"
+    ).strip().lower() in ("1", "true", "yes", "on")
+    KURO_CANVAS2_GOAL_RUNTIME_ENABLED: bool = os.getenv(
+        "KURO_CANVAS2_GOAL_RUNTIME_ENABLED", "false"
+    ).strip().lower() in ("1", "true", "yes", "on")
+    KURO_CANVAS2_GOVERNANCE_ENABLED: bool = os.getenv(
+        "KURO_CANVAS2_GOVERNANCE_ENABLED", "false"
+    ).strip().lower() in ("1", "true", "yes", "on")
+    KURO_CANVAS2_REFLECTION_ENABLED: bool = os.getenv(
+        "KURO_CANVAS2_REFLECTION_ENABLED", "false"
+    ).strip().lower() in ("1", "true", "yes", "on")
+    KURO_CANVAS2_COG_ROUTER_ENABLED: bool = os.getenv(
+        "KURO_CANVAS2_COG_ROUTER_ENABLED", "false"
+    ).strip().lower() in ("1", "true", "yes", "on")
+    KURO_CANVAS2_OPENAI_MODEL_PLACEHOLDER_ENABLED: bool = os.getenv(
+        "KURO_CANVAS2_OPENAI_MODEL_PLACEHOLDER_ENABLED", "false"
+    ).strip().lower() in ("1", "true", "yes", "on")
+    KURO_CANVAS2_AUTONOMOUS_REPRIORITIZATION_ENABLED: bool = os.getenv(
+        "KURO_CANVAS2_AUTONOMOUS_REPRIORITIZATION_ENABLED", "false"
+    ).strip().lower() in ("1", "true", "yes", "on")
+    KURO_CANVAS3_TOOL_GOVERNANCE_ENABLED: bool = os.getenv(
+        "KURO_CANVAS3_TOOL_GOVERNANCE_ENABLED", "false"
+    ).strip().lower() in ("1", "true", "yes", "on")
+    KURO_CANVAS3_MEMORY_CANONICALIZATION_ENABLED: bool = os.getenv(
+        "KURO_CANVAS3_MEMORY_CANONICALIZATION_ENABLED", "false"
+    ).strip().lower() in ("1", "true", "yes", "on")
+    KURO_CANVAS3_COGNITIVE_BUDGET_ENABLED: bool = os.getenv(
+        "KURO_CANVAS3_COGNITIVE_BUDGET_ENABLED", "false"
+    ).strip().lower() in ("1", "true", "yes", "on")
+    KURO_CANVAS3_FAILURE_RECOVERY_ENABLED: bool = os.getenv(
+        "KURO_CANVAS3_FAILURE_RECOVERY_ENABLED", "false"
+    ).strip().lower() in ("1", "true", "yes", "on")
+    KURO_CANVAS3_RUNTIME_MODES_ENABLED: bool = os.getenv(
+        "KURO_CANVAS3_RUNTIME_MODES_ENABLED", "false"
+    ).strip().lower() in ("1", "true", "yes", "on")
+    KURO_CANVAS3_IDENTITY_CORE_ENABLED: bool = os.getenv(
+        "KURO_CANVAS3_IDENTITY_CORE_ENABLED", "false"
+    ).strip().lower() in ("1", "true", "yes", "on")
+    KURO_CANVAS3_CONSTITUTION_ENABLED: bool = os.getenv(
+        "KURO_CANVAS3_CONSTITUTION_ENABLED", "false"
+    ).strip().lower() in ("1", "true", "yes", "on")
+    KURO_CANVAS3_SOURCE_RELIABILITY_ENABLED: bool = os.getenv(
+        "KURO_CANVAS3_SOURCE_RELIABILITY_ENABLED", "false"
+    ).strip().lower() in ("1", "true", "yes", "on")
+    KURO_CANVAS3_AUTONOMY_BOUNDARIES_ENABLED: bool = os.getenv(
+        "KURO_CANVAS3_AUTONOMY_BOUNDARIES_ENABLED", "false"
+    ).strip().lower() in ("1", "true", "yes", "on")
+    KURO_CANVAS3_EVALUATION_RUNTIME_ENABLED: bool = os.getenv(
+        "KURO_CANVAS3_EVALUATION_RUNTIME_ENABLED", "false"
+    ).strip().lower() in ("1", "true", "yes", "on")
+    KURO_RUNTIME_MODE_DEFAULT: str = os.getenv("KURO_RUNTIME_MODE_DEFAULT", "BALANCED")
+    KURO_CANVAS3_MAX_TOOL_CALLS: int = int(os.getenv("KURO_CANVAS3_MAX_TOOL_CALLS", "4"))
+    KURO_CANVAS3_MAX_REFLECTION_DEPTH: int = int(os.getenv("KURO_CANVAS3_MAX_REFLECTION_DEPTH", "2"))
+    KURO_CANVAS3_MAX_CONSENSUS_ROUNDS: int = int(os.getenv("KURO_CANVAS3_MAX_CONSENSUS_ROUNDS", "3"))
+    KURO_CANVAS3_MAX_RETRIEVAL_EXPANSION: int = int(os.getenv("KURO_CANVAS3_MAX_RETRIEVAL_EXPANSION", "5"))
 
     """
     Loads environment variables from the .env file.
@@ -139,7 +207,7 @@ class Settings:
         "KURO_BACKUP_ENABLED", "true"
     ).strip().lower() in ("1", "true", "yes", "on")
     KURO_BACKUP_DIR: str = os.getenv("KURO_BACKUP_DIR", "./backups")
-    KURO_BACKUP_RETAIN_DAYS: int = int(os.getenv("KURO_BACKUP_RETAIN_DAYS", "14"))
+    KURO_BACKUP_RETAIN_DAYS: int = int(os.getenv("KURO_BACKUP_RETAIN_DAYS", "30"))
     KURO_BACKUP_WEEKLY_RETAIN_WEEKS: int = int(
         os.getenv("KURO_BACKUP_WEEKLY_RETAIN_WEEKS", "8")
     )

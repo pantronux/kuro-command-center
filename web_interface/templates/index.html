@@ -1,10 +1,10 @@
 <!DOCTYPE html>
 <!--
   Header Doc ---
-  Purpose: Primary dashboard / chat UI for Kuro AI (Sovereign Intelligence V1.0.0 Beta 4).
+  Purpose: Primary dashboard / chat UI for Kuro AI (Sovereign Chat V1.1.0 Beta 1).
   Caller: main.py GET "/" (HTMLResponse via Jinja2).
   Dependencies: static/js/app.js, static/css/style.css, Tailwind CDN, Lucide.
-  Main Sections: persona picker, chat log, HUD chips bar (market), settings/nav.
+  Main Sections: persona picker, chat log, HUD chips bar (market), settings/nav, System Status modal.
   Side Effects: Opens /ws/dashboard WebSocket, polls /api/market/hud on a timer.
 -->
 <html lang="en" class="scroll-smooth">
@@ -235,6 +235,17 @@
                 box-shadow: 0 0 14px 3px rgba(34, 211, 238, 0.35);
             }
         }
+
+        /* Playground panel readability on dark themes */
+        #playgroundPanel select option {
+            color: #0f172a;
+            background-color: #f8fafc;
+        }
+
+        html.dark #playgroundPanel select option {
+            color: #e5e7eb;
+            background-color: #111827;
+        }
     </style>
 </head>
 
@@ -273,7 +284,7 @@
                         <div class="sidebar-text">
                             <h1 class="text-lg font-bold text-gray-800 dark:text-white">Kuro AI</h1>
                             <p class="text-xs text-gray-500 dark:text-gray-400">
-                                <span id="kuroVersionBadge">V1.0 Beta 4 Sovereign Intelligence</span>
+                                <span id="kuroVersionBadge">V1.1.0 Beta 1 Sovereign Chat</span>
                             </p>
                         </div>
                     </div>
@@ -408,6 +419,31 @@
                         <i data-lucide="line-chart" class="w-5 h-5 flex-shrink-0"></i>
                         <span class="sidebar-text">Market Sentinel</span>
                     </a>
+                    {% if is_admin %}
+                    <!-- Ingestion Section -->
+                    <div class="pt-4 pb-2 sidebar-section-label">
+                        <p class="px-4 text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
+                            Ingestion</p>
+                    </div>
+                    <a href="/ingestion"
+                        class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-all"
+                        title="Ingestion Center">
+                        <i data-lucide="database-zap" class="w-5 h-5 flex-shrink-0"></i>
+                        <span class="sidebar-text">Ingestion Center</span>
+                    </a>
+                    <a href="/ingestion/analytics"
+                        class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-all"
+                        title="Ingestion Analytics">
+                        <i data-lucide="network" class="w-5 h-5 flex-shrink-0"></i>
+                        <span class="sidebar-text">Ingestion Analytics</span>
+                    </a>
+                    <a href="/ingestion/logs"
+                        class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-all"
+                        title="Ingestion Logs">
+                        <i data-lucide="clipboard-list" class="w-5 h-5 flex-shrink-0"></i>
+                        <span class="sidebar-text">Ingestion Logs</span>
+                    </a>
+                    {% endif %}
 
                     <!-- System Section -->
                     <div class="pt-4 pb-2 sidebar-section-label">
@@ -508,6 +544,22 @@
                 </div>
 
                 <div class="flex items-center gap-3">
+                    <!-- Runtime Toggle -->
+                    <div id="runtimeModeToggle"
+                        class="flex items-center p-1 rounded-xl bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600">
+                        <button id="normalModeBtn"
+                            type="button"
+                            onclick="if(window.applyRuntimeMode){window.applyRuntimeMode('normal')}"
+                            class="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 bg-emerald-500 text-white cursor-pointer">
+                            Normal
+                        </button>
+                        <button id="playgroundModeBtn"
+                            type="button"
+                            onclick="if(window.applyRuntimeMode){window.applyRuntimeMode('playground')}"
+                            class="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 text-gray-600 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600 cursor-pointer">
+                            Playground
+                        </button>
+                    </div>
                     <!-- Search Toggle -->
                     <button id="openSearchBtn"
                         class="p-2 rounded-xl bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-all duration-300">
@@ -584,6 +636,129 @@
                 </div>
             </header>
 
+            <!-- Playground Runtime Panel -->
+            <section id="playgroundPanel" class="hidden p-6 lg:p-8 space-y-4 overflow-y-auto">
+                <div class="rounded-2xl border border-emerald-200 dark:border-emerald-900 bg-emerald-50/70 dark:bg-emerald-900/20 p-4">
+                    <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div class="min-w-0">
+                            <h3 class="text-lg font-bold text-emerald-700 dark:text-emerald-300">Playground Runtime</h3>
+                            <p class="text-sm text-emerald-700/80 dark:text-emerald-300/80 mt-1">
+                                Mode ini untuk eksperimen forensic KPR. Chat normal disembunyikan saat mode ini aktif.
+                            </p>
+                        </div>
+                        <a href="/playground/tutorial"
+                            class="inline-flex items-center justify-center px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold transition-colors whitespace-nowrap">
+                            Tutorial
+                        </a>
+                    </div>
+                </div>
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                    <div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-800/70 p-4 space-y-3">
+                        <h4 class="font-semibold text-gray-800 dark:text-gray-100">Session</h4>
+                        <label class="block text-xs text-gray-500 dark:text-gray-400">Mode</label>
+                        <select id="playgroundSessionMode"
+                            class="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 text-sm">
+                            <option value="research">research</option>
+                            <option value="forensic">forensic</option>
+                            <option value="comparative">comparative</option>
+                            <option value="ontology">ontology</option>
+                        </select>
+                        <button id="playgroundCreateSessionBtn"
+                            class="w-full px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-semibold transition-colors">
+                            Create Session
+                        </button>
+                        <input id="playgroundCustomSessionId"
+                            type="text"
+                            maxlength="80"
+                            placeholder="Custom Session ID (A-Za-z0-9._:-)"
+                            class="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 text-xs" />
+                        <div class="grid grid-cols-2 gap-2">
+                            <button id="playgroundReconnectLatestBtn"
+                                class="px-3 py-2 rounded-xl bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-100 text-xs font-medium transition-colors">
+                                Reconnect Latest
+                            </button>
+                            <button id="playgroundUseCustomSessionBtn"
+                                class="px-3 py-2 rounded-xl bg-teal-500 hover:bg-teal-600 text-white text-xs font-medium transition-colors">
+                                Use Custom ID
+                            </button>
+                        </div>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 break-all">Active Session: <span id="playgroundSessionId">-</span></p>
+                    </div>
+                    <div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-800/70 p-4 space-y-3">
+                        <h4 class="font-semibold text-gray-800 dark:text-gray-100">Execution</h4>
+                        <label class="block text-xs text-gray-500 dark:text-gray-400">Providers (Checklist)</label>
+                        <div id="playgroundProviderChecklist"
+                            class="grid grid-cols-2 gap-2 p-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 text-xs">
+                            <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" value="openai" checked> openai</label>
+                            <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" value="gemini"> gemini</label>
+                            <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" value="anthropic"> anthropic</label>
+                            <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" value="deepseek"> deepseek</label>
+                            <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" value="ollama"> ollama</label>
+                            <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" value="openai_compat"> openai_compat</label>
+                        </div>
+                        <p class="text-[11px] text-gray-500 dark:text-gray-400">Pilih 1 provider = single execution. Pilih 2+ provider = comparative execution otomatis.</p>
+                        <textarea id="playgroundPromptInput" rows="4" placeholder="Prompt for playground execution..."
+                            class="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400 text-sm resize-none"></textarea>
+                        <button id="playgroundExecuteBtn"
+                            class="w-full px-4 py-2 rounded-xl bg-teal-500 hover:bg-teal-600 text-white text-sm font-semibold transition-colors">
+                            <span id="playgroundExecuteBtnLabel">Execute</span>
+                        </button>
+                    </div>
+                    <div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-800/70 p-4 space-y-3">
+                        <h4 class="font-semibold text-gray-800 dark:text-gray-100">Quick Checks</h4>
+                        <div class="grid grid-cols-2 gap-2">
+                            <button id="playgroundHealthBtn"
+                                class="px-3 py-2 rounded-xl bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-100 text-sm font-medium transition-colors">
+                                Health
+                            </button>
+                            <button id="playgroundProvidersBtn"
+                                class="px-3 py-2 rounded-xl bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-100 text-sm font-medium transition-colors">
+                                Providers
+                            </button>
+                        </div>
+                        <button id="playgroundListTracesBtn"
+                            class="w-full px-3 py-2 rounded-xl bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-100 text-sm font-medium transition-colors">
+                            List Traces
+                        </button>
+                        <div class="pt-2 border-t border-gray-200 dark:border-gray-700 space-y-2">
+                            <p class="text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400">Session History</p>
+                            <div id="playgroundHistoryList"
+                                class="max-h-40 overflow-y-auto rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-xs">
+                                <p class="px-3 py-2 text-gray-500 dark:text-gray-400">(no sessions)</p>
+                            </div>
+                            <div id="playgroundHistoryDetail"
+                                class="hidden max-h-56 overflow-y-auto rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-2 text-xs space-y-2">
+                                <div class="flex items-center justify-between gap-2">
+                                    <p class="font-semibold text-gray-800 dark:text-gray-100">History Detail</p>
+                                    <button id="playgroundDownloadSessionArtifactBtn"
+                                        class="px-2 py-1 rounded-lg bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-700 dark:text-cyan-300 text-[11px] font-medium transition-colors">
+                                        Download Session JSON
+                                    </button>
+                                </div>
+                                <div id="playgroundHistoryMeta" class="text-gray-600 dark:text-gray-300"></div>
+                                <div id="playgroundHistoryExecutions" class="space-y-2"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-gray-950 text-emerald-200 p-4">
+                    <div class="flex items-center justify-between gap-3 mb-2">
+                        <p class="text-xs uppercase tracking-wider text-emerald-400">Playground Output</p>
+                        <div class="flex items-center gap-2">
+                            <button id="playgroundCopyOutputBtn"
+                                class="px-2.5 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-200 text-[11px] font-medium transition-colors">
+                                Copy
+                            </button>
+                            <button id="playgroundDownloadOutputBtn"
+                                class="px-2.5 py-1 rounded-lg bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-200 text-[11px] font-medium transition-colors">
+                                Download
+                            </button>
+                        </div>
+                    </div>
+                    <pre id="playgroundOutput" class="text-xs whitespace-pre-wrap break-words max-h-[45vh] overflow-y-auto">(no output)</pre>
+                </div>
+            </section>
+
             <!-- Welcome Screen -->
             <div id="welcomeScreen" class="flex-1 flex flex-col items-center justify-center p-8 animate-fade-in hidden">
                 <div
@@ -659,12 +834,14 @@
 
                     <!-- Stop Generating Button -->
                     <button id="stopGeneratingBtn" aria-label="Stop generating"
-                        class="hidden p-3 rounded-xl bg-red-500 hover:bg-red-600 text-white shadow-lg transition-all duration-300 hover:scale-105" title="Stop generating">
+                        class="hidden p-3 rounded-xl bg-red-500 hover:bg-red-600 text-white shadow-lg transition-all duration-300 hover:scale-105"
+                        title="Stop generating">
                         <i data-lucide="square" class="w-5 h-5"></i>
                     </button>
                     <!-- Send Button -->
                     <button id="sendBtn" aria-label="Send message"
-                        class="p-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100" title="Send message">
+                        class="p-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+                        title="Send message">
                         <i data-lucide="send" class="w-5 h-5"></i>
                     </button>
                 </div>
@@ -938,6 +1115,49 @@
         </div>
     </div>
 
+    <!-- Export Modal -->
+    <div id="exportModal" class="fixed inset-0 z-[80] hidden flex items-center justify-center p-4">
+        <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" id="exportBackdrop"></div>
+        <div
+            class="relative w-full max-w-lg bg-white dark:bg-gray-800 rounded-3xl shadow-2xl overflow-hidden animate-slide-up">
+            <div class="p-6 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
+                <div>
+                    <h3 class="text-lg font-bold text-gray-800 dark:text-white">Export Chat</h3>
+                    <p id="exportTargetLabel" class="text-sm text-gray-500 dark:text-gray-400"></p>
+                </div>
+                <button id="closeExportModal"
+                    class="text-gray-400 hover:text-gray-600 dark:hover:text-white transition-colors">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+            <div class="p-6 space-y-4">
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-200">
+                    Format
+                    <select id="exportFormatSelect"
+                        class="mt-2 w-full px-4 py-3 bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700 rounded-2xl focus:ring-2 focus:ring-emerald-500 outline-none">
+                        <option value="md">Markdown (.md)</option>
+                        <option value="txt">Plain Text (.txt)</option>
+                        <option value="json">JSON (.json)</option>
+                        <option value="csv">CSV (.csv)</option>
+                        <option value="xlsx">Excel (.xlsx)</option>
+                        <option value="docx">Word (.docx)</option>
+                        <option value="pdf">PDF (.pdf)</option>
+                    </select>
+                </label>
+                <p id="exportStatus" class="text-sm text-gray-500 dark:text-gray-400"></p>
+                <a id="exportDownloadLink" href="#"
+                    class="hidden inline-flex items-center gap-2 px-4 py-3 bg-emerald-500 text-white rounded-2xl font-semibold hover:bg-emerald-600 transition-colors">
+                    <i data-lucide="download" class="w-4 h-4"></i>
+                    Download PDF
+                </a>
+                <button id="exportSubmitBtn"
+                    class="w-full py-3 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-2xl shadow-lg shadow-emerald-500/20 transition-all active:scale-95">
+                    Start Export
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- File Preview Modal -->
     <div id="filePreviewModal" class="fixed inset-0 z-[80] hidden flex items-center justify-center">
         <div class="absolute inset-0 bg-black/80 backdrop-blur-md" id="filePreviewBackdrop"></div>
@@ -975,9 +1195,10 @@
             username: "{{ username }}",
             displayName: "{{ display_name }}",
             role: "{{ role }}",
-            restrictedPersona: "{{ restricted_persona }}",
+            isAdmin: {{ "true" if is_admin else "false" }},
+        restrictedPersona: "{{ restricted_persona }}",
             masterName: "{{ master_name }}",
-            customPersona: `{{ custom_persona }}`
+                customPersona: `{{ custom_persona }}`
         };
     </script>
 

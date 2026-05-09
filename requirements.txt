@@ -10,6 +10,7 @@ jinja2
 python-multipart
 chromadb
 pdfplumber
+reportlab
 apscheduler
 pytz
 python-docx

@@ -29,6 +29,7 @@ from google.genai.errors import APIError, ClientError
 
 from kuro_backend import chat_history, memory_manager, tools
 from kuro_backend.config import PRIMARY_MODEL, settings
+from kuro_backend import version as kuro_version
 from kuro_backend.personas import (
     PERSONA_INSTRUCTIONS as _PERSONA_INSTRUCTIONS,  # re-export for backward compat
     build_system_instruction,
@@ -53,7 +54,7 @@ def _get_system_instruction_with_time(persona_override: Optional[str] = None) ->
         active_persona,
         current_time=current_time,
         current_date=current_date,
-        kuro_version_label="V5.5 Official - Contextual RAG",
+        kuro_version_label=kuro_version.VERSION_LABEL,
         variant="core",
     )
 

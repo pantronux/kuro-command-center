@@ -48,7 +48,7 @@ def _configure_backup_settings(tmp_path: Path, monkeypatch) -> Path:
     monkeypatch.setattr(settings, "KURO_BACKUP_DIR", str(backup_dir), raising=False)
     monkeypatch.setattr(settings, "KURO_BACKUP_ENABLED", True, raising=False)
     monkeypatch.setattr(settings, "KURO_BACKUP_ALERT_ON_FAILURE", False, raising=False)
-    monkeypatch.setattr(settings, "KURO_BACKUP_RETAIN_DAYS", 14, raising=False)
+    monkeypatch.setattr(settings, "KURO_BACKUP_RETAIN_DAYS", 30, raising=False)
     monkeypatch.setattr(settings, "KURO_BACKUP_WEEKLY_RETAIN_WEEKS", 8, raising=False)
     monkeypatch.setattr(
         settings, "KURO_BACKUP_PRE_MIGRATION_RETAIN_DAYS", 7, raising=False

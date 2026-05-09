@@ -1,6 +1,8 @@
 import importlib
 import json
 import logging
+import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -8,11 +10,28 @@ import pytest
 
 logger = logging.getLogger("conftest")
 
+# Test-only stub for optional phoenix dependency used by observability.
+if "phoenix" not in sys.modules:
+    fake_phoenix = types.ModuleType("phoenix")
+
+    class _FakePhoenixApp:
+        url = "http://localhost:6006"
+
+        def close(self):
+            return None
+
+    def _launch_app(*args, **kwargs):
+        return _FakePhoenixApp()
+
+    fake_phoenix.launch_app = _launch_app
+    sys.modules["phoenix"] = fake_phoenix
+
 _DB_MODULES = (
     ("kuro_backend.chat_history", "DB_PATH", "kuro_chat_history.db", "init_db", True),
     ("kuro_backend.auth_db", "DB_PATH", "kuro_auth.db", "init_auth_db", True),
     ("kuro_backend.intelligence_db", "DB_PATH", "kuro_intelligence.db", "init_db", True),
     ("kuro_backend.compliance_db", "DB_PATH", "kuro_compliance.db", "init_db", False),
+    ("kuro_backend.ingestion_center.ingestion_registry", "DB_PATH", "kuro_ingestion.db", "init_db", True),
 )
 
 
@@ -56,6 +75,7 @@ def isolate_all_dbs(tmp_path, monkeypatch):
             logger.warning("DB isolation warning for %s: %s", module_name, exc)
 
     from kuro_backend import finance_db
+    from kuro_backend.ingestion_center import embedding_manager
 
     finance_path = tmp_path / "kuro_finances.db"
     monkeypatch.setenv("KURO_FINANCE_DB_PATH", str(finance_path))
@@ -74,6 +94,7 @@ def isolate_all_dbs(tmp_path, monkeypatch):
     monkeypatch.setattr(memory_manager, "SHORT_TERM_DB", str(short_term_path), raising=False)
     monkeypatch.setattr(memory_manager, "MASTER_PROFILE_PATH", str(profile_path), raising=False)
     monkeypatch.setattr(core_service, "SHORT_TERM_DB_PATH", str(short_term_path), raising=False)
+    monkeypatch.setattr(embedding_manager, "CHROMA_DIR", str(tmp_path / "kuro_chromadb" / "ingestion_center"), raising=False)
     core_service._reset_schema_ready_for_tests()
     memory_manager._reset_short_term_schema_ready_for_tests()
 

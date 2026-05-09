@@ -12,6 +12,7 @@ Main Functions: build_kuro_graph(), process_chat_with_graph_stream(), supervisor
 Side Effects: Executes LLM calls; triggers memory writes; manages state persistence.
 """
 import asyncio
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import functools
 import hashlib
 import json
@@ -41,13 +42,49 @@ from kuro_backend import (
     memory_coordinator,
     memory_manager,
     observability,
+    persona_runtime,
     perpetual_memory,
+    version as kuro_version,
 )
 from kuro_backend import tools as kuro_tools
 from kuro_backend.config import PRIMARY_MODEL, settings
 
 from kuro_backend import personas, token_budget
 from kuro_backend.personas import build_system_instruction
+from kuro_backend.intelligence.response_sanitizer import response_sanitizer
+from kuro_backend.intelligence.stream_safety import sanitize_stream_chunk
+from kuro_backend.intelligence.epistemic_engine import epistemic_engine
+from kuro_backend.intelligence.retrieval_quality import (
+    VALID_GRADES as RETRIEVAL_GRADES_V2,
+    score_retrieval_quality,
+)
+from kuro_backend.goals.goal_engine import goal_engine
+from kuro_backend.goals.strategic_planner import strategic_planner
+from kuro_backend.goals.progress_evaluator import evaluate_progress
+from kuro_backend.goals.reflection_engine import reflect_on_outcome
+from kuro_backend.goals.cognitive_state_engine import cognitive_state_engine
+from kuro_backend.governance.policy_engine import evaluate_policy
+from kuro_backend.governance.compliance_router import route_compliance
+from kuro_backend.governance.explainability_engine import explain_governance
+from kuro_backend.governance.tenant_runtime import build_tenant_context
+from kuro_backend.cognitive_router.model_router import choose_route
+from kuro_backend.cognitive_router.consensus_engine import run_consensus
+from kuro_backend.cognitive_router.memory_authority import canonicalize_memory_write
+from kuro_backend.runtime_modes import resolve_runtime_mode
+from kuro_backend.failure_recovery_engine import classify_failure, recovery_payload
+from kuro_backend.cognitive_budget_engine import evaluate_budget
+from kuro_backend.identity_core import evaluate_identity_alignment
+from kuro_backend.constitution_engine import check_constitution
+from kuro_backend.source_reliability_engine import score_sources
+from kuro_backend.autonomy_boundaries import evaluate_autonomy_boundaries
+from kuro_backend.evaluation_runtime.regression_suite import run_regression_snapshot
+from kuro_backend.tools.tool_execution_guard import evaluate_tool_execution_guard
+from kuro_backend.tools.tool_trace_logger import (
+    log_tool_budget,
+    log_tool_risk,
+    log_tool_trace,
+)
+from kuro_backend.tools.tool_budget_manager import consume_tool_budget
 
 logger = logging.getLogger(__name__)
 logger.propagate = False  # Prevent double-reporting to root logger
@@ -91,6 +128,34 @@ _TRUE_TOKEN_STREAMING_ENABLED = (
 )
 _POST_RESPONSE_QUEUE_MAXSIZE = int(os.getenv("KURO_POST_RESPONSE_QUEUE_MAXSIZE", "500"))
 _post_response_queue = queue.Queue(maxsize=_POST_RESPONSE_QUEUE_MAXSIZE)  # type: ignore[assignment]
+_EPISTEMIC_V2_ENABLED = os.getenv("KURO_EPISTEMIC_V2_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+_STREAM_SANITIZER_ENABLED = os.getenv("KURO_STREAM_SANITIZER_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+_RETRIEVAL_QUALITY_V2_ENABLED = os.getenv("KURO_RETRIEVAL_QUALITY_V2_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+_CANVAS2_GOAL_RUNTIME_ENABLED = bool(getattr(settings, "KURO_CANVAS2_GOAL_RUNTIME_ENABLED", False))
+_CANVAS2_GOVERNANCE_ENABLED = bool(getattr(settings, "KURO_CANVAS2_GOVERNANCE_ENABLED", False))
+_CANVAS2_REFLECTION_ENABLED = bool(getattr(settings, "KURO_CANVAS2_REFLECTION_ENABLED", False))
+_CANVAS2_COG_ROUTER_ENABLED = bool(getattr(settings, "KURO_CANVAS2_COG_ROUTER_ENABLED", False))
+_CANVAS2_OPENAI_MODEL_PLACEHOLDER_ENABLED = bool(getattr(settings, "KURO_CANVAS2_OPENAI_MODEL_PLACEHOLDER_ENABLED", False))
+_CANVAS2_ANY_RUNTIME_ENABLED = any(
+    (
+        _CANVAS2_GOAL_RUNTIME_ENABLED,
+        _CANVAS2_GOVERNANCE_ENABLED,
+        _CANVAS2_REFLECTION_ENABLED,
+        _CANVAS2_COG_ROUTER_ENABLED,
+        _CANVAS2_OPENAI_MODEL_PLACEHOLDER_ENABLED,
+    )
+)
+_CANVAS3_TOOL_GOVERNANCE_ENABLED = bool(getattr(settings, "KURO_CANVAS3_TOOL_GOVERNANCE_ENABLED", False))
+_CANVAS3_MEMORY_CANONICALIZATION_ENABLED = bool(getattr(settings, "KURO_CANVAS3_MEMORY_CANONICALIZATION_ENABLED", False))
+_CANVAS3_COGNITIVE_BUDGET_ENABLED = bool(getattr(settings, "KURO_CANVAS3_COGNITIVE_BUDGET_ENABLED", False))
+_CANVAS3_FAILURE_RECOVERY_ENABLED = bool(getattr(settings, "KURO_CANVAS3_FAILURE_RECOVERY_ENABLED", False))
+_CANVAS3_RUNTIME_MODES_ENABLED = bool(getattr(settings, "KURO_CANVAS3_RUNTIME_MODES_ENABLED", False))
+_CANVAS3_IDENTITY_CORE_ENABLED = bool(getattr(settings, "KURO_CANVAS3_IDENTITY_CORE_ENABLED", False))
+_CANVAS3_CONSTITUTION_ENABLED = bool(getattr(settings, "KURO_CANVAS3_CONSTITUTION_ENABLED", False))
+_CANVAS3_SOURCE_RELIABILITY_ENABLED = bool(getattr(settings, "KURO_CANVAS3_SOURCE_RELIABILITY_ENABLED", False))
+_CANVAS3_AUTONOMY_BOUNDARIES_ENABLED = bool(getattr(settings, "KURO_CANVAS3_AUTONOMY_BOUNDARIES_ENABLED", False))
+_CANVAS3_EVALUATION_RUNTIME_ENABLED = bool(getattr(settings, "KURO_CANVAS3_EVALUATION_RUNTIME_ENABLED", False))
+_RUNTIME_MODE_DEFAULT = str(getattr(settings, "KURO_RUNTIME_MODE_DEFAULT", "BALANCED"))
 
 
 @functools.lru_cache(maxsize=1)
@@ -260,7 +325,7 @@ def _execute_post_response_task(task: Dict[str, Any]) -> None:
         final_response = task.get("final_response", "")
         username = task.get("username", "Pantronux")
         persona_scope = task.get("persona_scope") or memory_manager.get_active_persona(username)
-        memory_coordinator.execute_memory_write_task(user_input, final_response, persona_scope)
+        memory_coordinator.execute_memory_write_task(user_input, final_response, persona_scope, username=username)
     elif kind == "mem0_extract":
         user_input = task.get("user_input", "")
         final_response = task.get("final_response", "")
@@ -490,8 +555,13 @@ class KuroState(TypedDict):
     alignment_score: float
     metacognitive_flag: bool
     joint_goal_block: str
-    # --- Auto-RAG fields (V1.0.0 Self-Correction Loop) ---
-    retrieval_grade: str          # "relevant" | "ambiguous" | "irrelevant"
+    # --- Auto-RAG fields (Canvas 1 V2) ---
+    retrieval_grade: str          # "grounded" | "partial" | "weak" | "contradictory" | "stale" | "irrelevant"
+    retrieval_quality_score: float
+    evidence_density: float
+    freshness_score: float
+    contradiction_score: float
+    confidence_score: float
     retrieval_retry_count: int    # bounded 0–2; failover to Serper at max
     rewritten_query: str          # LLM-transformed query after grading fail
     master_name: str              # User-specific name (e.g. Pantronux, Master Faikhira)
@@ -505,6 +575,34 @@ class KuroState(TypedDict):
     research_intent_detected: bool       # True if advisor_research_node was triggered
     # --- Sovereign Chat features (V1.0.0 Beta 5) ---
     message_count_before: int            # Session message count before the current turn
+    # --- Canvas 2: Sovereign Cognitive Runtime ---
+    active_goals: List[Dict[str, Any]]
+    goal_context_block: str
+    goal_priority_score: float
+    goal_decision_trace: List[str]
+    goal_execution_plan: List[Dict[str, Any]]
+    governance_status: Dict[str, Any]
+    governance_block: str
+    cognitive_state: Dict[str, Any]
+    cognitive_router_decision: Dict[str, Any]
+    consensus_result: Dict[str, Any]
+    memory_authority_result: Dict[str, Any]
+    reflection_summary: Dict[str, Any]
+    # --- Canvas 3: Operational Maturity ---
+    runtime_mode: str
+    tool_governance_decision: Dict[str, Any]
+    tool_risk_profile: Dict[str, Any]
+    tool_budget_status: Dict[str, Any]
+    cognitive_budget: Dict[str, Any]
+    budget_enforcement_trace: List[str]
+    failure_recovery_status: Dict[str, Any]
+    degraded_mode_active: bool
+    identity_core_status: Dict[str, Any]
+    constitution_checks: Dict[str, Any]
+    source_reliability_report: Dict[str, Any]
+    autonomy_boundary_status: Dict[str, Any]
+    memory_canonicalization_result: Dict[str, Any]
+    operational_eval_snapshot: Dict[str, Any]
 
 
 # ============================================
@@ -512,7 +610,13 @@ class KuroState(TypedDict):
 # ============================================
 
 
-def get_system_instruction(persona_override: Optional[str] = None, master_name: str = "Pantronux", custom_persona: str = "") -> str:
+def get_system_instruction(
+    persona_override: Optional[str] = None,
+    master_name: str = "Pantronux",
+    custom_persona: str = "",
+    username: str = "Pantronux",
+    session_id: Optional[str] = None,
+) -> str:
     """Get system instruction with current time and active persona (graph variant)."""
     current_time = settings.get_current_time_formatted()
     current_date = settings.get_current_time().strftime("%Y-%m-%d")
@@ -523,10 +627,12 @@ def get_system_instruction(persona_override: Optional[str] = None, master_name: 
         active_persona,
         current_time=current_time,
         current_date=current_date,
-        kuro_version_label="V5.5 LangGraph",
+        kuro_version_label=kuro_version.VERSION_LABEL,
         variant="graph",
         master_name=master_name,
         custom_persona=custom_persona,
+        username=username,
+        session_id=session_id,
     )
 
 # ============================================
@@ -813,79 +919,65 @@ _RAG_MAX_RETRIES: int = 3  # hard ceiling — prevents token-burn loops
 
 def retrieval_grader_node(state: KuroState) -> Dict[str, Any]:
     """
-    Auto-RAG Step 1 — Retrieval Quality Grader.
-
-    Evaluates whether Mem0-retrieved memories are relevant to the current
-    user_input using CLASSIFIER_MODEL. Fast path: if Mem0 returned nothing,
-    grade immediately as 'irrelevant' without an LLM call.
-
-    Grades:
-      "relevant"   → context is useful; proceed to attention_filter_node.
-      "ambiguous"  → context is partially useful; attempt query rewrite.
-      "irrelevant" → context is useless; trigger query_transform_node.
+    Canvas 1 retrieval quality scorer (6-state).
 
     --- Header Doc ---
     Purpose: CRAG-style retrieval quality gating (Yan et al. 2024).
     Caller: memory_retrieval_node (via graph edge).
-    Dependencies: CLASSIFIER_MODEL, genai_types.
+    Dependencies: retrieval_quality scorer.
     Main Functions: retrieval_grader_node(state) -> Dict
     Side Effects: None (read-only evaluation).
     """
     user_input = state.get("user_input", "")
-    memories: List[Dict] = state.get("mem0_retrieved_memories") or []
+    memories: List[Any] = state.get("mem0_retrieved_memories") or []
     retry_count: int = state.get("retrieval_retry_count", 0)
     trace_attrs = {"persona": state.get("persona_mode", "unknown"), "username": state.get("username", "unknown"), "chat_id": state.get("chat_id", "")}
 
     with observability.trace_node("retrieval_grader_node", trace_attrs) as span:
-        # ── Fast path: nothing retrieved ─────────────────────────────────────────
-        if not memories:
-            logger.info("[RAG_GRADER] No memories retrieved — grade=irrelevant")
-            notification = personas.build_autorag_notification_block("irrelevant", retry_count)
-            return {"retrieval_grade": "irrelevant", "_autorag_notification": notification}
+        if _RETRIEVAL_QUALITY_V2_ENABLED:
+            report = score_retrieval_quality(user_input, memories)
+            grade = report.retrieval_grade
+            if grade not in RETRIEVAL_GRADES_V2:
+                grade = "weak"
+            try:
+                from kuro_backend import intelligence_db
 
-        # Summarise retrieved context for the grader prompt (cap at 1200 chars)
-        context_preview = "\n".join(
-            f"- {m.get('memory', m.get('content', str(m)))}" for m in memories[:6]
-        )[:1200]
+                intelligence_db.save_retrieval_quality_log(
+                    session_id=str(state.get("_session_id", "")),
+                    retrieval_grade=grade,
+                    confidence=report.retrieval_quality_score,
+                    evidence_density=report.evidence_density,
+                    freshness_score=report.freshness_score,
+                    contradiction_score=report.contradiction_score,
+                )
+            except Exception as exc:
+                logger.debug("[RAG_GRADER] retrieval_quality_log skipped: %s", exc)
+            notification = personas.build_autorag_notification_block(grade, retry_count)
+            return {
+                "retrieval_grade": grade,
+                "retrieval_quality_score": report.retrieval_quality_score,
+                "evidence_density": report.evidence_density,
+                "freshness_score": report.freshness_score,
+                "contradiction_score": report.contradiction_score,
+                "_autorag_notification": notification,
+            }
 
-        try:
-            from kuro_backend.config import CLASSIFIER_MODEL
-            client = _get_genai_client()
-
-            prompt = (
-                "You are a strict retrieval quality judge.\n\n"
-                f"User Query:\n{user_input}\n\n"
-                f"Retrieved Context:\n{context_preview}\n\n"
-                "Grade whether the retrieved context is useful for answering the query.\n"
-                "Reply with ONLY one of these words: relevant | ambiguous | irrelevant\n"
-                "- relevant:   context directly addresses the query.\n"
-                "- ambiguous:  context is partially related or vague.\n"
-                "- irrelevant: context does not address the query at all.\n\n"
-                "Grade:"
-            )
-            resp = client.models.generate_content(
-                model=CLASSIFIER_MODEL,
-                contents=prompt,
-                config=genai_types.GenerateContentConfig(
-                    temperature=0.0,
-                    max_output_tokens=5,
-                ),
-            )
-            raw = (resp.text or "").strip().lower().split()[0] if resp.text else ""
-            grade = raw if raw in ("relevant", "ambiguous", "irrelevant") else "ambiguous"
-        except Exception as exc:
-            logger.warning("[RAG_GRADER] Grading failed (%s) — defaulting to relevant", exc)
-            if span:
-                span.record_exception(exc)
-                span.set_status(Status(StatusCode.ERROR, str(exc)))
-            grade = "relevant"
+        # Legacy fallback if feature flag is disabled.
+        grade = "grounded" if memories else "irrelevant"
 
         logger.info(
             "[RAG_GRADER] retry=%d grade=%s memories=%d",
             retry_count, grade, len(memories),
         )
         notification = personas.build_autorag_notification_block(grade, retry_count)
-        return {"retrieval_grade": grade, "_autorag_notification": notification}
+        return {
+            "retrieval_grade": grade,
+            "retrieval_quality_score": 1.0 if grade == "grounded" else 0.0,
+            "evidence_density": 1.0 if memories else 0.0,
+            "freshness_score": 0.5 if memories else 0.0,
+            "contradiction_score": 0.0,
+            "_autorag_notification": notification,
+        }
 
 
 def query_transform_node(state: KuroState) -> Dict[str, Any]:
@@ -900,7 +992,7 @@ def query_transform_node(state: KuroState) -> Dict[str, Any]:
         back to memory_retrieval_node with the rewritten_query in state.
       - If retry_count == _RAG_MAX_RETRIES: invoke Serper web search as a
         last-resort retrieval, inject results into mem0_retrieved_memories,
-        and force retrieval_grade="relevant" to unblock the pipeline.
+        and force retrieval_grade="partial" to unblock the pipeline.
 
     Token-burn protection: bounded by _RAG_MAX_RETRIES=2 (max 2 extra
     CLASSIFIER_MODEL calls + 1 Serper HTTP call per turn).
@@ -915,7 +1007,7 @@ def query_transform_node(state: KuroState) -> Dict[str, Any]:
     user_input = state.get("user_input", "")
     rewritten = state.get("rewritten_query") or user_input
     retry_count: int = state.get("retrieval_retry_count", 0)
-    grade = state.get("retrieval_grade", "irrelevant")
+    grade = state.get("retrieval_grade", "weak")
     trace_attrs = {"persona": state.get("persona_mode", "unknown"), "username": state.get("username", "unknown"), "chat_id": state.get("chat_id", "")}
 
     with observability.trace_node("query_transform_node", trace_attrs) as span:
@@ -925,7 +1017,10 @@ def query_transform_node(state: KuroState) -> Dict[str, Any]:
                 "[RAG_TRANSFORM] Max retries reached (%d) — Hard cap triggered for: %s",
                 retry_count, rewritten[:80],
             )
-            return {"retrieval_retry_count": retry_count + 1} # Will trigger route_after_transform -> END
+            return {
+                "retrieval_retry_count": retry_count + 1,
+                "retrieval_grade": "irrelevant",
+            }
 
         # ── LLM query rewrite ─────────────────────────────────────────────────────
         new_query = rewritten
@@ -964,10 +1059,9 @@ def query_transform_node(state: KuroState) -> Dict[str, Any]:
         return {
             "rewritten_query": new_query,
             "retrieval_retry_count": retry_count + 1,
-        "retrieval_retry_count": retry_count + 1,
-        # Reset grade so next retrieval gets re-evaluated
-        "retrieval_grade": "ambiguous",
-    }
+            # Reset grade so next retrieval gets re-evaluated
+            "retrieval_grade": "weak",
+        }
 
 
 # ── Auto-RAG Routing ──────────────────────────────────────────────────────────
@@ -976,15 +1070,14 @@ def route_after_grader(state: KuroState) -> str:
     """
     Auto-RAG conditional edge after retrieval_grader_node.
 
-    relevant   → attention_filter_node  (proceed with Natural Agency pipeline)
-    ambiguous  → query_transform_node   (rewrite query, loop back)
-    irrelevant → query_transform_node   (rewrite query, loop back)
+    grounded/partial → attention_filter_node  (proceed with Natural Agency pipeline)
+    weak/contradictory/stale/irrelevant → query_transform_node   (rewrite query, loop back)
 
     Loop is bounded by retrieval_retry_count via query_transform_node's
     Serper failover at _RAG_MAX_RETRIES.
     """
-    grade = state.get("retrieval_grade", "ambiguous")
-    if grade == "relevant":
+    grade = state.get("retrieval_grade", "weak")
+    if grade in ("grounded", "partial"):
         return "attention_filter_node"
     return "query_transform_node"
 
@@ -1067,6 +1160,294 @@ def attention_filter_node(state: KuroState) -> Dict[str, Any]:
         if span:
             span.set_attribute("attention.category", category)
         return {"_intent_category": category}
+
+
+# ── Canvas 2: Goal Runtime ────────────────────────────────────────────────────
+
+def goal_runtime_node(state: KuroState) -> Dict[str, Any]:
+    if not _CANVAS2_GOAL_RUNTIME_ENABLED:
+        return {}
+    try:
+        result = goal_engine.run(
+            user_input=state.get("user_input", ""),
+            confidence_score=float(state.get("confidence_score", 1.0) or 1.0),
+            contradiction_score=float(state.get("contradiction_score", 0.0) or 0.0),
+        )
+        return result
+    except Exception as exc:
+        logger.warning("[CANVAS2][GOAL] node failed: %s", exc)
+        return {
+            "active_goals": [],
+            "goal_context_block": "",
+            "goal_priority_score": 0.0,
+            "goal_decision_trace": [f"fallback:{type(exc).__name__}"],
+            "goal_execution_plan": [],
+        }
+
+
+def governance_gate_node(state: KuroState) -> Dict[str, Any]:
+    if not _CANVAS2_GOVERNANCE_ENABLED:
+        return {}
+    try:
+        decision = evaluate_policy(
+            state.get("user_input", ""),
+            contradiction_score=float(state.get("contradiction_score", 0.0) or 0.0),
+            confidence_score=float(state.get("confidence_score", 1.0) or 1.0),
+        )
+        compliance = route_compliance(decision.get("action", "allow"))
+        tenant = build_tenant_context(state.get("username", "Pantronux"))
+        payload = {
+            "governance_status": {**decision, "compliance_route": compliance, "tenant": tenant},
+            "governance_block": explain_governance(decision),
+        }
+        try:
+            memory_manager.append_governance_audit_log(
+                username=str(state.get("username", "Pantronux")),
+                action=str(decision.get("action", "allow")),
+                risk_label=str((decision.get("risk") or {}).get("risk_label", "low")),
+                payload={**decision, "compliance_route": compliance, "tenant": tenant},
+            )
+        except Exception as exc:
+            logger.debug("[CANVAS2][GOV] audit log skipped: %s", exc)
+        return payload
+    except Exception as exc:
+        logger.warning("[CANVAS2][GOV] node failed: %s", exc)
+        return {
+            "governance_status": {"status": "degraded", "action": "allow"},
+            "governance_block": "[GOVERNANCE_CONTEXT] degraded mode.",
+        }
+
+
+def cognitive_router_node(state: KuroState) -> Dict[str, Any]:
+    if not _CANVAS2_COG_ROUTER_ENABLED:
+        return {}
+    try:
+        decision = choose_route(
+            user_input=state.get("user_input", ""),
+            confidence_score=float(state.get("confidence_score", 1.0) or 1.0),
+            contradiction_score=float(state.get("contradiction_score", 0.0) or 0.0),
+            openai_model_placeholder_enabled=_CANVAS2_OPENAI_MODEL_PLACEHOLDER_ENABLED,
+        )
+        try:
+            from kuro_backend import intelligence_db
+            intelligence_db.save_model_router_log(
+                session_id=str(state.get("_session_id", "")),
+                selected_role=str(decision.get("selected_role", "")),
+                router_note=str(decision.get("router_note", "")),
+                payload=decision,
+            )
+        except Exception as exc:
+            logger.debug("[CANVAS2][ROUTER] router log skipped: %s", exc)
+        if _CANVAS2_OPENAI_MODEL_PLACEHOLDER_ENABLED:
+            try:
+                from kuro_backend import intelligence_db
+                intelligence_db.save_openai_model_placeholder_log(
+                    session_id=str(state.get("_session_id", "")),
+                    payload=decision.get("verification", {}) if isinstance(decision.get("verification"), dict) else {},
+                )
+            except Exception as exc:
+                logger.debug("[CANVAS2][ROUTER] placeholder log skipped: %s", exc)
+        return {"cognitive_router_decision": decision}
+    except Exception as exc:
+        logger.warning("[CANVAS2][ROUTER] node failed: %s", exc)
+        return {"cognitive_router_decision": {"selected_role": "fallback", "status": "degraded"}}
+
+
+def strategic_planning_node(state: KuroState) -> Dict[str, Any]:
+    if not _CANVAS2_GOAL_RUNTIME_ENABLED:
+        return {}
+    try:
+        plan = strategic_planner.plan(state.get("user_input", ""))
+        progress = evaluate_progress(plan.get("execution_state", {}))
+        return {"goal_execution_plan": plan.get("subgoals", []), "progress_evaluation": progress}
+    except Exception as exc:
+        logger.warning("[CANVAS2][PLAN] node failed: %s", exc)
+        return {"goal_execution_plan": []}
+
+
+def consensus_node(state: KuroState) -> Dict[str, Any]:
+    if not _CANVAS2_COG_ROUTER_ENABLED:
+        return {}
+    try:
+        router_decision = state.get("cognitive_router_decision") or {}
+        result = run_consensus(
+            confidence_score=float(state.get("confidence_score", 1.0) or 1.0),
+            contradiction_score=float(state.get("contradiction_score", 0.0) or 0.0),
+            router_decision=router_decision,
+        )
+        try:
+            from kuro_backend import intelligence_db
+            intelligence_db.save_consensus_log(
+                session_id=str(state.get("_session_id", "")),
+                selected_role=str(result.get("selected_role", "")),
+                consensus_score=float(result.get("consensus_score", 0.0)),
+                consensus_label=str(result.get("consensus_label", "")),
+                payload=result,
+            )
+        except Exception as exc:
+            logger.debug("[CANVAS2][CONSENSUS] log skipped: %s", exc)
+        return {"consensus_result": result}
+    except Exception as exc:
+        logger.warning("[CANVAS2][CONSENSUS] node failed: %s", exc)
+        return {"consensus_result": {"consensus_score": 0.0, "consensus_label": "degraded"}}
+
+
+def memory_authority_node(state: KuroState) -> Dict[str, Any]:
+    if not _CANVAS2_COG_ROUTER_ENABLED:
+        return {}
+    try:
+        canonical = canonicalize_memory_write(
+            user_input=state.get("user_input", ""),
+            consensus_result=state.get("consensus_result") or {},
+            source_models=["gemini", "openai_model_placeholder"] if _CANVAS2_OPENAI_MODEL_PLACEHOLDER_ENABLED else ["gemini"],
+        )
+        try:
+            from kuro_backend import intelligence_db
+            intelligence_db.save_memory_authority_log(
+                session_id=str(state.get("_session_id", "")),
+                payload=canonical,
+            )
+        except Exception as exc:
+            logger.debug("[CANVAS2][MEM_AUTH] log skipped: %s", exc)
+        return {"memory_authority_result": canonical}
+    except Exception as exc:
+        logger.warning("[CANVAS2][MEM_AUTH] node failed: %s", exc)
+        return {"memory_authority_result": {}}
+
+
+def reflection_loop_node(state: KuroState) -> Dict[str, Any]:
+    if not _CANVAS2_REFLECTION_ENABLED:
+        return {}
+    try:
+        summary = reflect_on_outcome(
+            float(state.get("goal_priority_score", 0.0) or 0.0),
+            float(state.get("confidence_score", 1.0) or 1.0),
+            float(state.get("contradiction_score", 0.0) or 0.0),
+        )
+        return {"reflection_summary": summary}
+    except Exception as exc:
+        logger.warning("[CANVAS2][REFLECT] node failed: %s", exc)
+        return {"reflection_summary": {"decision_quality": 0.0, "drift_detected": False, "recommendation": "continue"}}
+
+
+def cognitive_state_update_node(state: KuroState) -> Dict[str, Any]:
+    if not _CANVAS2_REFLECTION_ENABLED:
+        return {}
+    try:
+        cstate = cognitive_state_engine.build(
+            goal_priority_score=float(state.get("goal_priority_score", 0.0) or 0.0),
+            confidence_score=float(state.get("confidence_score", 1.0) or 1.0),
+            contradiction_score=float(state.get("contradiction_score", 0.0) or 0.0),
+            user_input=state.get("user_input", ""),
+        )
+        return {"cognitive_state": cstate}
+    except Exception as exc:
+        logger.warning("[CANVAS2][CSTATE] node failed: %s", exc)
+        return {"cognitive_state": {}}
+
+
+# ── Canvas 3: Runtime Mode + Tool Governance ────────────────────────────────
+
+def runtime_mode_node(state: KuroState) -> Dict[str, Any]:
+    if not _CANVAS3_RUNTIME_MODES_ENABLED and not _CANVAS3_COGNITIVE_BUDGET_ENABLED:
+        return {}
+    try:
+        requested = state.get("runtime_mode") or _RUNTIME_MODE_DEFAULT
+        mode_payload = resolve_runtime_mode(str(requested))
+        payload: Dict[str, Any] = dict(mode_payload)
+        if _CANVAS3_RUNTIME_MODES_ENABLED and hasattr(memory_manager, "append_runtime_mode_state"):
+            memory_manager.append_runtime_mode_state(
+                username=str(state.get("username", "Pantronux")),
+                session_id=str(state.get("_session_id", "")),
+                runtime_mode=str(mode_payload.get("runtime_mode", "BALANCED")),
+                profile=dict(mode_payload.get("profile", {})),
+            )
+        if _CANVAS3_COGNITIVE_BUDGET_ENABLED:
+            cbudget = evaluate_budget(state)
+            payload["cognitive_budget"] = cbudget
+            payload["budget_enforcement_trace"] = list(cbudget.get("budget_enforcement_trace", []))
+            if hasattr(memory_manager, "append_cognitive_budget_log"):
+                memory_manager.append_cognitive_budget_log(
+                    username=str(state.get("username", "Pantronux")),
+                    session_id=str(state.get("_session_id", "")),
+                    blocked=bool(cbudget.get("blocked", False)),
+                    budget=cbudget,
+                )
+        return payload
+    except Exception as exc:
+        logger.warning("[CANVAS3][RUNTIME_MODE] node failed: %s", exc)
+        if _CANVAS3_FAILURE_RECOVERY_ENABLED:
+            return recovery_payload(reason=f"runtime_mode_node:{type(exc).__name__}")
+        return {"runtime_mode": _RUNTIME_MODE_DEFAULT}
+
+
+def tool_governance_node(state: KuroState) -> Dict[str, Any]:
+    if not _CANVAS3_TOOL_GOVERNANCE_ENABLED:
+        return {"tool_governance_decision": {"decision": "tool_allowed", "reason": "canvas3_disabled"}}
+    try:
+        tool_result = state.get("tool_execution_result") or {}
+        tool_name = str(tool_result.get("tool", "") or "")
+        decision = evaluate_tool_execution_guard(
+            user_input=state.get("user_input", ""),
+            next_step=state.get("next_step", "response_node"),
+            tool_name=tool_name,
+            tool_args=tool_result.get("args", {}) if isinstance(tool_result, dict) else {},
+            state=state,
+        )
+        session_id = str(state.get("_session_id", ""))
+        log_tool_trace(session_id=session_id, payload=decision)
+        log_tool_budget(session_id=session_id, payload=decision.get("tool_budget_status", {}))
+        log_tool_risk(
+            session_id=session_id,
+            tool_name=tool_name or "unknown",
+            risk_profile=decision.get("tool_risk_profile", {}),
+            payload=decision,
+        )
+        return {
+            "tool_governance_decision": decision,
+            "tool_risk_profile": decision.get("tool_risk_profile", {}),
+            "tool_budget_status": decision.get("tool_budget_status", {}),
+            "tool_execution_result": (
+                {
+                    "status": "error",
+                    "tool": "tool_governance",
+                    "message": f"Tool execution blocked by governance: {decision.get('reason', 'unspecified')}",
+                }
+                if decision.get("decision") == "tool_blocked"
+                else (
+                    {
+                        "status": "no_tool",
+                        "tool": "tool_governance",
+                        "message": f"Tool skipped by governance: {decision.get('reason', 'unspecified')}",
+                    }
+                    if decision.get("decision") == "tool_not_required"
+                    else state.get("tool_execution_result", {}) or {}
+                )
+            ),
+        }
+    except Exception as exc:
+        logger.warning("[CANVAS3][TOOL_GOV] node failed: %s", exc)
+        if _CANVAS3_FAILURE_RECOVERY_ENABLED:
+            classification = classify_failure(exc)
+            rec = recovery_payload(
+                reason=f"tool_governance_node:{classification.get('error_type', type(exc).__name__)}"
+            )
+            if hasattr(memory_manager, "append_failure_recovery_log"):
+                try:
+                    memory_manager.append_failure_recovery_log(
+                        username=str(state.get("username", "Pantronux")),
+                        session_id=str(state.get("_session_id", "")),
+                        recovery_strategy=str(classification.get("recovery_strategy", "degraded_safe")),
+                        reason=str(rec.get("failure_recovery_status", {}).get("reason", "")),
+                        payload=rec,
+                    )
+                except Exception:
+                    pass
+            return {
+                **rec,
+                "tool_governance_decision": {"decision": "tool_not_required", "reason": "recovery_degraded"},
+            }
+        return {"tool_governance_decision": {"decision": "tool_not_required", "reason": "error"}}
 
 
 # ── T1b: Executive Monitor (Inhibit + Simulate) ───────────────────────────────
@@ -1214,7 +1595,7 @@ def executive_monitor_node(state: KuroState) -> Dict[str, Any]:
 
 # ── T1.5: Advisor Autonomous Research (Beta 4) ────────────────────────────────
 
-async def advisor_research_node(state: KuroState) -> Dict[str, Any]:
+def advisor_research_node(state: KuroState) -> Dict[str, Any]:
     """
     Autonomous research grounding for advisor persona.
     Fires serper_scholar + serper_news without waiting for user instruction.
@@ -1275,36 +1656,51 @@ async def advisor_research_node(state: KuroState) -> Dict[str, Any]:
     # 2. Fire Serper calls in parallel
     from kuro_backend import serper_tool
     
-    async def run_searches():
-        tasks = []
-        for q in queries:
-            # Scholar search
-            tasks.append(asyncio.to_thread(
-                serper_tool.serper_scholar, q, 
-                num_results=getattr(settings, "KURO_ADVISOR_SCHOLAR_NUM_RESULTS", 5)
-            ))
-            # News search (only for the first query to avoid quota burn)
-            if q == queries[0]:
-                tasks.append(asyncio.to_thread(serper_tool.serper_news, q, num_results=3))
-        
-        return await asyncio.gather(*tasks, return_exceptions=True)
+    search_specs: List[Dict[str, Any]] = []
+    for q in queries:
+        search_specs.append({"kind": "scholar", "query": q})
+        # News search only for first query to reduce quota burn.
+        if q == queries[0]:
+            search_specs.append({"kind": "news", "query": q})
 
-    results = await run_searches()
+    results: List[Any] = []
+    with ThreadPoolExecutor(max_workers=min(4, max(1, len(search_specs)))) as executor:
+        future_map = {}
+        for spec in search_specs:
+            if spec["kind"] == "scholar":
+                fut = executor.submit(
+                    serper_tool.serper_scholar,
+                    spec["query"],
+                    num_results=getattr(settings, "KURO_ADVISOR_SCHOLAR_NUM_RESULTS", 5),
+                )
+            else:
+                fut = executor.submit(
+                    serper_tool.serper_news,
+                    spec["query"],
+                    num_results=3,
+                )
+            future_map[fut] = spec
+        for fut in as_completed(future_map):
+            spec = future_map[fut]
+            try:
+                data = fut.result()
+                results.append({"spec": spec, "data": data})
+            except Exception as exc:
+                results.append({"spec": spec, "error": exc})
     
     collected_sources = []
     source_lines = []
     
-    for i, res in enumerate(results):
-        if isinstance(res, Exception):
-            logger.warning(f"[ADVISOR_RESEARCH] Serper call failed: {res}")
+    for res_item in results:
+        if "error" in res_item:
+            logger.warning(f"[ADVISOR_RESEARCH] Serper call failed: {res_item['error']}")
             continue
-        
-        # Determine if scholar or news based on task order
-        is_news = (i == 1) if len(queries) > 0 else False
-        source_type = "news" if is_news else "scholar"
-        query_for_this_res = queries[0] if is_news else queries[i // (2 if i > 0 else 1)] # Approximate mapping
 
-        for item in res:
+        spec = res_item.get("spec", {})
+        source_type = str(spec.get("kind", "scholar"))
+        query_for_this_res = str(spec.get("query", ""))
+
+        for item in res_item.get("data", []) or []:
             source_data = {
                 "query": query_for_this_res,
                 "source_type": source_type,
@@ -1328,18 +1724,37 @@ async def advisor_research_node(state: KuroState) -> Dict[str, Any]:
     # 3. Format block
     block = "\n\n[RESEARCH_SOURCES — Auto-retrieved by Advisor]\n" + "\n".join(source_lines)
     
-    # 4. Persistence (Background)
+    # 4. Persistence (best-effort, sync-safe)
     from kuro_backend import intelligence_db
     try:
-        loop = asyncio.get_running_loop()
-        loop.run_in_executor(None, intelligence_db.save_research_sources, chat_id, collected_sources)
+        intelligence_db.save_research_sources(
+            session_id=str(session_id or ""),
+            username=str(username or "Pantronux"),
+            chat_id=chat_id,
+            sources=collected_sources,
+        )
     except Exception as e:
         logger.warning(f"[ADVISOR_RESEARCH] Source persistence failed: {e}")
 
-    return {
+    reliability_report: Dict[str, Any] = {}
+    if _CANVAS3_SOURCE_RELIABILITY_ENABLED:
+        try:
+            reliability_report = score_sources(collected_sources)
+            from kuro_backend import intelligence_db as _intelligence_db
+            _intelligence_db.save_source_reliability_log(
+                session_id=str(session_id or ""),
+                payload=reliability_report,
+            )
+        except Exception as e:
+            logger.warning(f"[ADVISOR_RESEARCH] Source reliability scoring failed: {e}")
+
+    payload = {
         "research_intent_detected": True, 
         "research_sources_block": block
     }
+    if reliability_report:
+        payload["source_reliability_report"] = reliability_report
+    return payload
 
 
 # ── T2: Metacognitive Review (Belief Revision) ────────────────────────────────
@@ -1396,9 +1811,9 @@ def metacognitive_review_node(state: KuroState) -> Dict[str, Any]:
         threshold = float(os.getenv("KURO_ALIGNMENT_THRESHOLD", "0.35"))
 
         # ── 2. Evidence Quality (Auto-RAG integration) ───────────────────────────
-        retrieval_grade = state.get("retrieval_grade", "relevant")
+        retrieval_grade = state.get("retrieval_grade", "grounded")
         retry_count = state.get("retrieval_retry_count", 0)
-        evidence_weak = retrieval_grade in ("irrelevant", "ambiguous")
+        evidence_weak = retrieval_grade in ("weak", "contradictory", "stale", "irrelevant")
         evidence_note = ""
         if evidence_weak:
             evidence_note = (
@@ -1541,7 +1956,13 @@ def response_node(state: KuroState) -> Dict[str, Any]:
         # Build system prompt
         master_name = state.get("master_name", "Pantronux")
         custom_persona = state.get("custom_persona", "")
-        system_prompt = get_system_instruction(persona_override=persona_mode, master_name=master_name, custom_persona=custom_persona)
+        system_prompt = get_system_instruction(
+            persona_override=persona_mode,
+            master_name=master_name,
+            custom_persona=custom_persona,
+            username=username,
+            session_id=chat_id or session_id,
+        )
         
         intent = state.get("_intent", "new")
         if intent == "edit":
@@ -1588,21 +2009,38 @@ def response_node(state: KuroState) -> Dict[str, Any]:
         except Exception as _cot_exc:
             logger.debug("[RESPONSE_NODE] cognitive_effort CoT skipped: %s", _cot_exc)
 
+        # Canvas 2 runtime blocks (internal prompt context only).
+        goal_context_block = (state.get("goal_context_block") or "").strip()
+        if goal_context_block:
+            system_prompt += f"\n\n[GOAL_RUNTIME_CONTEXT]\n{goal_context_block}"
+
+        governance_block = (state.get("governance_block") or "").strip()
+        if governance_block:
+            system_prompt += f"\n\n[GOVERNANCE_CONTEXT]\n{governance_block}"
+
+        router_note = (
+            (state.get("cognitive_router_decision") or {}).get("router_note", "")
+            if isinstance(state.get("cognitive_router_decision"), dict)
+            else ""
+        )
+        if router_note:
+            system_prompt += f"\n\n[COGNITIVE_ROUTER_CONTEXT]\n{router_note}"
+
         # ── Anti-Halusinasi Epistemic Pre-Filter ─────────────────────────────
         autorag_notice = state.get("_autorag_notification", "")
         if autorag_notice:
             system_prompt += f"\n\n{autorag_notice}"
 
-        retrieval_grade = state.get("retrieval_grade", "relevant")
-        if retrieval_grade in ("irrelevant", "ambiguous"):
+        retrieval_grade = state.get("retrieval_grade", "grounded")
+        if retrieval_grade in ("weak", "contradictory", "stale", "irrelevant"):
             # Dedup: skip if metacognitive already emitted evidence note
             mc_flag = state.get("metacognitive_flag", False)
             mc_score = state.get("alignment_score", 1.0)
             if not (mc_flag and mc_score < 0.35):
                 system_prompt += (
                     "\n\n⚠️ EPISTEMIC CAUTION: Memory retrieval quality is POOR. "
-                    "You MUST label every factual claim with [VERIFIED: search], "
-                    "[INFERRED], or [SPECULATIVE]. DO NOT fabricate specific "
+                    "Keep uncertainty natural-language only; never expose internal tags. "
+                    "Do NOT fabricate specific "
                     "numbers, dates, filenames, or function names without a "
                     "verifiable source."
                 )
@@ -1775,57 +2213,195 @@ def response_node(state: KuroState) -> Dict[str, Any]:
 
 
 
-        # ── Anti-Halusinasi Epistemic Post-Filter ────────────────────────────
+        confidence_score = 1.0
+        # ── Anti-Hallucination Epistemic Post-Filter (Canvas 1) ─────────────
         if response_text:
             try:
-                from kuro_backend.epistemic_filter import epistemic_filter as ef
-
-                retrieval_grade = state.get("retrieval_grade", "relevant")
+                retrieval_grade = state.get("retrieval_grade", "grounded")
                 has_memory = bool(state.get("mem0_retrieved_memories"))
+                evidence_items = state.get("mem0_retrieved_memories") or []
+                if _EPISTEMIC_V2_ENABLED:
+                    annotation = epistemic_engine.annotate(
+                        response_text,
+                        retrieval_grade=retrieval_grade,
+                        has_memory=has_memory,
+                        evidence_items=evidence_items,
+                    )
+                    confidence_score = float(annotation.get("confidence_score", 1.0) or 1.0)
+                    response_text = str(annotation.get("user_safe_text", response_text))
+                    try:
+                        from kuro_backend import intelligence_db
 
-                # Step 1: Internally label claims for hard-rule checking & audit
-                labeled = ef.label_claims_in_response(
+                        intelligence_db.save_epistemic_claims(
+                            session_id=str(session_id),
+                            message_id=str(chat_id or ""),
+                            claims=[
+                                {
+                                    "text": c.text,
+                                    "source_type": c.source_type,
+                                    "confidence": c.confidence,
+                                    "contradiction_score": c.contradiction_score,
+                                    "visibility": c.visibility,
+                                }
+                                for c in (annotation.get("claims") or [])
+                            ],
+                        )
+                    except Exception as exc:
+                        logger.debug("[EPISTEMIC] save_epistemic_claims skipped: %s", exc)
+                else:
+                    from kuro_backend.epistemic_filter import epistemic_filter as ef
+                    labeled = ef.label_claims_in_response(
+                        response_text,
+                        retrieval_grade=retrieval_grade,
+                        has_memory=has_memory,
+                        evidence_items=evidence_items,
+                    )
+                    violation = ef.check_hard_rules(labeled)
+                    if violation:
+                        logger.warning("[EPISTEMIC] Hard rule violation: %s", violation)
+                    density = ef.count_claim_density(labeled)
+                    logger.info("[EPISTEMIC] Claim density: %s", density)
+                    labeled = ef.inject_disclaimer_if_needed(labeled)
+                    response_text = ef.strip_labels(labeled)
+
+                # Final hard gate regardless of v1/v2 engine.
+                response_text = response_sanitizer.sanitize_user_output(
                     response_text,
-                    retrieval_grade=retrieval_grade,
-                    has_memory=has_memory,
+                    fallback="Maaf, saya belum punya cukup bukti yang ter-grounding untuk merespons ini dengan aman.",
                 )
-
-                # Step 2: Check hard rules against labeled version
-                violation = ef.check_hard_rules(labeled)
-                if violation:
-                    logger.warning("[EPISTEMIC] Hard rule violation: %s", violation)
-
-                # Step 3: Count claim density for audit logging
-                density = ef.count_claim_density(labeled)
-                logger.info("[EPISTEMIC] Claim density: %s", density)
-
-                # Step 4: Inject disclaimer if speculative/unknown claims exist
-                #         (disclaimer IS user-facing — not an internal tag)
-                labeled = ef.inject_disclaimer_if_needed(labeled)
-
-                # Step 5: Strip all internal tags from the final user-facing text
-                #         Tags like [VERIFIED: memory], [INFERRED], [SPECULATIVE]
-                #         are used for internal audit only — not shown in chat stream.
-                response_text = ef.strip_labels(labeled)
-
             except Exception as _ep_exc:
                 logger.warning("[EPISTEMIC] Post-filter skipped: %s", _ep_exc)
+                response_text = response_sanitizer.sanitize_user_output(
+                    response_text,
+                    fallback="Maaf, saya belum punya cukup bukti yang ter-grounding untuk merespons ini dengan aman.",
+                )
+
+        identity_status: Dict[str, Any] = {}
+        constitution_checks: Dict[str, Any] = {}
+        autonomy_status: Dict[str, Any] = {}
+        operational_eval_snapshot: Dict[str, Any] = {}
+        memory_canonicalization_result: Dict[str, Any] = {}
+        degraded_mode_active = False
+        failure_recovery_status: Dict[str, Any] = {}
+
+        if _CANVAS3_COGNITIVE_BUDGET_ENABLED:
+            try:
+                cognitive_budget = evaluate_budget(state)
+                if hasattr(memory_manager, "append_cognitive_budget_log"):
+                    memory_manager.append_cognitive_budget_log(
+                        username=str(state.get("username", "Pantronux")),
+                        session_id=str(state.get("_session_id", "")),
+                        blocked=bool(cognitive_budget.get("blocked", False)),
+                        budget=cognitive_budget,
+                    )
+            except Exception as exc:
+                logger.debug("[CANVAS3][BUDGET] budget log skipped: %s", exc)
+
+        if _CANVAS3_IDENTITY_CORE_ENABLED and response_text:
+            try:
+                identity_status = evaluate_identity_alignment(response_text)
+                if hasattr(memory_manager, "append_identity_core_log"):
+                    memory_manager.append_identity_core_log(
+                        username=str(state.get("username", "Pantronux")),
+                        session_id=str(state.get("_session_id", "")),
+                        identity_score=float(identity_status.get("identity_score", 0.0) or 0.0),
+                        drift_detected=bool(identity_status.get("drift_detected", False)),
+                        payload=identity_status,
+                    )
+            except Exception as exc:
+                logger.debug("[CANVAS3][IDENTITY] check skipped: %s", exc)
+
+        if _CANVAS3_CONSTITUTION_ENABLED and response_text:
+            try:
+                constitution_checks = check_constitution(response_text=response_text)
+                from kuro_backend import intelligence_db
+                intelligence_db.save_constitution_audit_log(
+                    session_id=str(state.get("_session_id", "")),
+                    payload=constitution_checks,
+                )
+                if not constitution_checks.get("passed", True):
+                    degraded_mode_active = True
+                    response_text = (
+                        "Saya akan menjawab secara lebih konservatif sesuai prinsip grounding. "
+                        "Maaf atas potensi ketidakpastian pada jawaban sebelumnya.\n\n"
+                        + response_text
+                    )
+            except Exception as exc:
+                logger.debug("[CANVAS3][CONSTITUTION] check skipped: %s", exc)
+
+        if _CANVAS3_AUTONOMY_BOUNDARIES_ENABLED:
+            try:
+                autonomy_status = evaluate_autonomy_boundaries(state)
+                if hasattr(memory_manager, "append_autonomy_boundary_log"):
+                    memory_manager.append_autonomy_boundary_log(
+                        username=str(state.get("username", "Pantronux")),
+                        session_id=str(state.get("_session_id", "")),
+                        passed=bool(autonomy_status.get("passed", True)),
+                        violations=list(autonomy_status.get("violations", [])),
+                    )
+                if not autonomy_status.get("passed", True):
+                    degraded_mode_active = True
+                    response_text = (
+                        "Permintaan ini dibatasi oleh operational boundaries demi keamanan runtime. "
+                        "Silakan berikan instruksi yang lebih spesifik dan aman."
+                    )
+            except Exception as exc:
+                logger.debug("[CANVAS3][BOUNDARY] check skipped: %s", exc)
+
+        if _CANVAS3_EVALUATION_RUNTIME_ENABLED and response_text:
+            try:
+                operational_eval_snapshot = run_regression_snapshot(state, response_text)
+                from kuro_backend import intelligence_db
+                intelligence_db.save_evaluation_runtime_log(
+                    session_id=str(state.get("_session_id", "")),
+                    payload=operational_eval_snapshot,
+                )
+            except Exception as exc:
+                logger.debug("[CANVAS3][EVAL] snapshot skipped: %s", exc)
+
+        if _CANVAS3_MEMORY_CANONICALIZATION_ENABLED and response_text:
+            try:
+                from kuro_backend.memory_canonicalization import canonicalize_memory_payload
+                memory_canonicalization_result = canonicalize_memory_payload(
+                    user_input=user_input,
+                    final_response=response_text,
+                )
+            except Exception as exc:
+                logger.debug("[CANVAS3][MEM_CANON] response snapshot skipped: %s", exc)
 
         # Single consolidated persist path (short-term + enqueue memory_write + mem0_extract).
         # memory_extraction_node still runs as a dedupe/guardian, but mem0 fingerprint dedupe
         # in memory_coordinator prevents double-store.
         username = state.get("username", "Pantronux")
         chat_id = state.get("chat_id")
-        msg_count_before = final_state.get("message_count_before", 0)
+        msg_count_before = state.get("message_count_before", 0)
         _persist_short_term_and_enqueue_writes(user_input, response_text, persona_mode, username, chat_id=chat_id, message_count_before=msg_count_before)
+        try:
+            persona_runtime.upsert_runtime_state(
+                username=username,
+                session_id=str(chat_id or session_id),
+                verbosity=min(1.0, max(0.1, len(response_text) / 2400.0)),
+                interaction_depth=min(1.0, max(0.1, len(user_input) / 1200.0)),
+            )
+        except Exception as exc:
+            logger.debug("[PERSONA_RUNTIME] state update skipped: %s", exc)
 
         logger.info("[RESPONSE] Generated response (%s chars)", len(response_text))
         
         if span:
             span.set_attribute("response_node.response_length", len(response_text))
+            span.set_attribute("response_node.confidence_score", confidence_score)
         
         return {
             "final_response": response_text,
+            "confidence_score": confidence_score,
+            "identity_core_status": identity_status,
+            "constitution_checks": constitution_checks,
+            "autonomy_boundary_status": autonomy_status,
+            "memory_canonicalization_result": memory_canonicalization_result,
+            "operational_eval_snapshot": operational_eval_snapshot,
+            "degraded_mode_active": degraded_mode_active,
+            "failure_recovery_status": failure_recovery_status,
         }
 
 
@@ -1894,6 +2470,7 @@ def tool_node(state: KuroState) -> Dict[str, Any]:
     with observability.trace_node("tool_node", trace_attrs) as span:
         try:
             genai_client = _get_genai_client()
+            incoming_tool_budget_status = state.get("tool_budget_status") or {}
 
             router_tools = [
                 generate_excel_report,
@@ -2017,6 +2594,16 @@ def tool_node(state: KuroState) -> Dict[str, Any]:
             
             # Execute tool
             tool_result = _execute_tool(tool_name, args)
+            updated_budget = incoming_tool_budget_status
+            if _CANVAS3_TOOL_GOVERNANCE_ENABLED:
+                try:
+                    updated_budget = consume_tool_budget(incoming_tool_budget_status)
+                    log_tool_budget(
+                        session_id=str(state.get("_session_id", "")),
+                        payload=updated_budget,
+                    )
+                except Exception as exc:
+                    logger.debug("[CANVAS3][TOOL_NODE] budget consume skipped: %s", exc)
             
             if span:
                 span.set_attribute("tool_node.tool_name", tool_name)
@@ -2026,6 +2613,7 @@ def tool_node(state: KuroState) -> Dict[str, Any]:
             
             return {
                 "tool_execution_result": tool_result,
+                "tool_budget_status": updated_budget,
                 "next_step": "response_node"  # After tool, go to response to inform user
             }
             
@@ -2102,12 +2690,23 @@ def route_after_metacognitive(state: KuroState) -> str:
     T2 Exit Gate:
     - metacognitive_flag → reflective_response_node (realignment message)
     - next_step==tool_node → tool_node
-    - default → response_node
+    - default → strategic_planning_node (Canvas 2 path) or response_node
     """
     if state.get("metacognitive_flag"):
         return "reflective_response_node"
     next_step = state.get("next_step", "response_node")
     if next_step == "tool_node":
+        if _CANVAS3_TOOL_GOVERNANCE_ENABLED:
+            return "tool_governance_node"
+        return "tool_node"
+    if _CANVAS2_ANY_RUNTIME_ENABLED:
+        return "strategic_planning_node"
+    return "response_node"
+
+
+def route_after_tool_governance(state: KuroState) -> str:
+    decision = (state.get("tool_governance_decision") or {}).get("decision", "tool_allowed")
+    if decision == "tool_allowed":
         return "tool_node"
     return "response_node"
 
@@ -2119,10 +2718,9 @@ def route_after_metacognitive(state: KuroState) -> str:
 
 def route_after_transform(state: KuroState) -> str:
     """Route after transform to bound the loop."""
-    from langgraph.graph import END
     retry_count = state.get("retrieval_retry_count", 0)
     if retry_count >= _RAG_MAX_RETRIES:
-        return "__end__"
+        return "attention_filter_node"
     return "memory_retrieval_node"
 
 def build_kuro_graph() -> StateGraph:
@@ -2161,6 +2759,16 @@ def build_kuro_graph() -> StateGraph:
     graph_builder.add_node("response_node", response_node)
     graph_builder.add_node("memory_extraction_node", memory_extraction_node)
     graph_builder.add_node("advisor_research_node", advisor_research_node)
+    graph_builder.add_node("goal_runtime_node", goal_runtime_node)
+    graph_builder.add_node("governance_gate_node", governance_gate_node)
+    graph_builder.add_node("cognitive_router_node", cognitive_router_node)
+    graph_builder.add_node("strategic_planning_node", strategic_planning_node)
+    graph_builder.add_node("consensus_node", consensus_node)
+    graph_builder.add_node("memory_authority_node", memory_authority_node)
+    graph_builder.add_node("reflection_loop_node", reflection_loop_node)
+    graph_builder.add_node("cognitive_state_update_node", cognitive_state_update_node)
+    graph_builder.add_node("runtime_mode_node", runtime_mode_node)
+    graph_builder.add_node("tool_governance_node", tool_governance_node)
 
     # ── Auto-RAG nodes (V1.0.0) ───────────────────────────────────────────────
     graph_builder.add_node("retrieval_grader_node", retrieval_grader_node)
@@ -2195,12 +2803,16 @@ def build_kuro_graph() -> StateGraph:
         route_after_transform,
         {
             "memory_retrieval_node": "memory_retrieval_node",
-            "__end__": END,
+            "attention_filter_node": "attention_filter_node",
         },
     )
 
     # ── Natural Agency pipeline ───────────────────────────────────────────────
-    graph_builder.add_edge("attention_filter_node", "advisor_research_node")
+    graph_builder.add_edge("attention_filter_node", "goal_runtime_node")
+    graph_builder.add_edge("goal_runtime_node", "governance_gate_node")
+    graph_builder.add_edge("governance_gate_node", "cognitive_router_node")
+    graph_builder.add_edge("cognitive_router_node", "runtime_mode_node")
+    graph_builder.add_edge("runtime_mode_node", "advisor_research_node")
     graph_builder.add_edge("advisor_research_node", "executive_monitor_node")
 
     graph_builder.add_conditional_edges(
@@ -2218,13 +2830,28 @@ def build_kuro_graph() -> StateGraph:
             "reflective_response_node": "reflective_response_node",
             "tool_node": "tool_node",
             "response_node": "response_node",
+            "strategic_planning_node": "strategic_planning_node",
+            "tool_governance_node": "tool_governance_node",
+        },
+    )
+    graph_builder.add_conditional_edges(
+        "tool_governance_node",
+        route_after_tool_governance,
+        {
+            "tool_node": "tool_node",
+            "response_node": "response_node",
         },
     )
 
     # ── Tail edges ────────────────────────────────────────────────────────────
     graph_builder.add_edge("reflective_response_node", "memory_extraction_node")
     graph_builder.add_edge("tool_node", "response_node")
-    graph_builder.add_edge("response_node", "memory_extraction_node")
+    graph_builder.add_edge("strategic_planning_node", "consensus_node")
+    graph_builder.add_edge("consensus_node", "memory_authority_node")
+    graph_builder.add_edge("memory_authority_node", "response_node")
+    graph_builder.add_edge("response_node", "reflection_loop_node")
+    graph_builder.add_edge("reflection_loop_node", "cognitive_state_update_node")
+    graph_builder.add_edge("cognitive_state_update_node", "memory_extraction_node")
     graph_builder.add_edge("memory_extraction_node", END)
 
     graph = graph_builder.compile(checkpointer=checkpointer)
@@ -2411,7 +3038,13 @@ async def process_chat_with_graph_stream(
             if ref_block:
                 prefix = f"{message}\n\n{ref_block}"
             full_message = f"{prefix}{memory_injection}"
-            system_prompt = get_system_instruction(persona_override=persona_mode, master_name=master_name, custom_persona=custom_persona)
+            system_prompt = get_system_instruction(
+                persona_override=persona_mode,
+                master_name=master_name,
+                custom_persona=custom_persona,
+                username=username,
+                session_id=chat_id or session_id,
+            )
 
             # Re-evaluate reflection node logic for fastpath
             intent = reflection_node({"user_input": message}).get("_intent", "new")
@@ -2445,19 +3078,61 @@ async def process_chat_with_graph_stream(
             response_acc: List[str] = []
             stream_llm_started = time.perf_counter()
             async for live_chunk in _stream_direct_llm_chunks(system_prompt, full_message, persona_mode=persona_mode):
-                response_acc.append(live_chunk)
+                safe_chunk = live_chunk
+                if _STREAM_SANITIZER_ENABLED:
+                    safe_chunk = sanitize_stream_chunk(safe_chunk)
+                if not safe_chunk:
+                    continue
+                response_acc.append(safe_chunk)
                 emitted += 1
-                yield live_chunk
+                yield safe_chunk
             if stream_metrics is not None:
                 stream_metrics["llm_stream_ms"] = round((time.perf_counter() - stream_llm_started) * 1000, 2)
                 stream_metrics["sse_chunk_count"] = float(emitted)
 
-            response_text = "".join(response_acc).strip()
+            response_text = response_sanitizer.sanitize_user_output("".join(response_acc).strip())
             if not response_text:
                 response_text = "Maaf, Pantronux. Respons model kosong setelah streaming."
                 yield response_text
                 emitted += 1
+            if _EPISTEMIC_V2_ENABLED:
+                fast_grade = "partial" if mem0_block else "weak"
+                try:
+                    annotation = epistemic_engine.annotate(
+                        response_text,
+                        retrieval_grade=fast_grade,
+                        has_memory=bool(mem0_block),
+                        evidence_items=ctx.get("recent_messages") or [],
+                    )
+                    response_text = str(annotation.get("user_safe_text", response_text))
+                    from kuro_backend import intelligence_db
+
+                    intelligence_db.save_epistemic_claims(
+                        session_id=str(session_id),
+                        message_id=str(chat_id or ""),
+                        claims=[
+                            {
+                                "text": c.text,
+                                "source_type": c.source_type,
+                                "confidence": c.confidence,
+                                "contradiction_score": c.contradiction_score,
+                                "visibility": c.visibility,
+                            }
+                            for c in (annotation.get("claims") or [])
+                        ],
+                    )
+                except Exception as exc:
+                    logger.debug("[EPISTEMIC_FASTPATH] annotate skipped: %s", exc)
             _persist_short_term_and_enqueue_writes(message, response_text, persona_mode, username, chat_id=chat_id, message_count_before=msg_count_before)
+            try:
+                persona_runtime.upsert_runtime_state(
+                    username=username,
+                    session_id=str(chat_id or session_id),
+                    verbosity=min(1.0, max(0.1, len(response_text) / 2400.0)),
+                    interaction_depth=min(1.0, max(0.1, len(message) / 1200.0)),
+                )
+            except Exception as exc:
+                logger.debug("[PERSONA_RUNTIME] fastpath state update skipped: %s", exc)
 
             # chat_context trigger: check if context should be regenerated
             if chat_id:
@@ -2525,7 +3200,12 @@ async def process_chat_with_graph_stream(
             "metacognitive_flag": False,
             "joint_goal_block": "",
             # Auto-RAG defaults (V1.0.0)
-            "retrieval_grade": "relevant",
+            "retrieval_grade": "grounded",
+            "retrieval_quality_score": 0.0,
+            "evidence_density": 0.0,
+            "freshness_score": 0.0,
+            "contradiction_score": 0.0,
+            "confidence_score": 1.0,
             "retrieval_retry_count": 0,
             "rewritten_query": "",
             # Anti-Halusinasi defaults
@@ -2533,6 +3213,34 @@ async def process_chat_with_graph_stream(
             "epistemic_labels": {},
             "research_sources_block": "",
             "research_intent_detected": False,
+            # Canvas 2 defaults
+            "active_goals": [],
+            "goal_context_block": "",
+            "goal_priority_score": 0.0,
+            "goal_decision_trace": [],
+            "goal_execution_plan": [],
+            "governance_status": {},
+            "governance_block": "",
+            "cognitive_state": {},
+            "cognitive_router_decision": {},
+            "consensus_result": {},
+            "memory_authority_result": {},
+            "reflection_summary": {},
+            # Canvas 3 defaults
+            "runtime_mode": _RUNTIME_MODE_DEFAULT,
+            "tool_governance_decision": {},
+            "tool_risk_profile": {},
+            "tool_budget_status": {},
+            "cognitive_budget": {},
+            "budget_enforcement_trace": [],
+            "failure_recovery_status": {},
+            "degraded_mode_active": False,
+            "identity_core_status": {},
+            "constitution_checks": {},
+            "source_reliability_report": {},
+            "autonomy_boundary_status": {},
+            "memory_canonicalization_result": {},
+            "operational_eval_snapshot": {},
             "username": username,
             "custom_persona": custom_persona,
             "_intent": "new",
@@ -2558,6 +3266,8 @@ async def process_chat_with_graph_stream(
         )
 
         response_text = raw_model_response
+        if _STREAM_SANITIZER_ENABLED:
+            response_text = response_sanitizer.sanitize_user_output(response_text)
         if stream_metrics is not None:
             stream_metrics["guardrail_output_ms"] = 0.0
         if response_text is None:
@@ -2577,6 +3287,10 @@ async def process_chat_with_graph_stream(
             else:
                 chunk_iter = _iter_sse_text_chunks(response_text)
             for i, chunk in enumerate(chunk_iter):
+                if _STREAM_SANITIZER_ENABLED:
+                    chunk = sanitize_stream_chunk(chunk)
+                    if not chunk:
+                        continue
                 full_response.append(chunk)
                 yield chunk
                 if i == 0 and not head:
@@ -2783,12 +3497,45 @@ def process_chat_with_graph(
             "metacognitive_flag": False,
             "joint_goal_block": "",
             # Auto-RAG defaults (V1.0.0)
-            "retrieval_grade": "relevant",
+            "retrieval_grade": "grounded",
+            "retrieval_quality_score": 0.0,
+            "evidence_density": 0.0,
+            "freshness_score": 0.0,
+            "contradiction_score": 0.0,
+            "confidence_score": 1.0,
             "retrieval_retry_count": 0,
             "rewritten_query": "",
             # Anti-Halusinasi defaults
             "_autorag_notification": "",
             "epistemic_labels": {},
+            # Canvas 2 defaults
+            "active_goals": [],
+            "goal_context_block": "",
+            "goal_priority_score": 0.0,
+            "goal_decision_trace": [],
+            "goal_execution_plan": [],
+            "governance_status": {},
+            "governance_block": "",
+            "cognitive_state": {},
+            "cognitive_router_decision": {},
+            "consensus_result": {},
+            "memory_authority_result": {},
+            "reflection_summary": {},
+            # Canvas 3 defaults
+            "runtime_mode": _RUNTIME_MODE_DEFAULT,
+            "tool_governance_decision": {},
+            "tool_risk_profile": {},
+            "tool_budget_status": {},
+            "cognitive_budget": {},
+            "budget_enforcement_trace": [],
+            "failure_recovery_status": {},
+            "degraded_mode_active": False,
+            "identity_core_status": {},
+            "constitution_checks": {},
+            "source_reliability_report": {},
+            "autonomy_boundary_status": {},
+            "memory_canonicalization_result": {},
+            "operational_eval_snapshot": {},
             "_intent": "new",
         }
 

@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kuro AI - Ingestion Logs</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/ingestion_center.css">
+</head>
+<body class="ingestion-shell">
+    <main class="ingestion-page analytics-page">
+        <aside class="ingestion-rail">
+            <h1>Sovereign Knowledge</h1>
+            <p class="subtitle">Admin Ingestion Logs Center</p>
+            <nav class="ingestion-nav">
+                <a href="/">Chat</a>
+                <a href="/intelligence">Intelligence</a>
+                <a href="/ingestion">Ingestion Center</a>
+                <a href="/ingestion/analytics">Ingestion Analytics</a>
+                <a href="/ingestion/logs" class="active">Ingestion Logs</a>
+            </nav>
+            <section class="panel">
+                <h2>Log Scope</h2>
+                <p class="muted">Monitor failed ingestion jobs and track duplicate dataset entries from repeated uploads.</p>
+            </section>
+        </aside>
+        <section class="ingestion-main">
+            <section class="grid-two">
+                <section class="panel">
+                    <h2>Failed Jobs</h2>
+                    <div id="failedJobs" class="job-list"></div>
+                </section>
+                <section class="panel">
+                    <h2>Failed Datasets</h2>
+                    <div id="failedDatasets" class="chunk-list"></div>
+                </section>
+            </section>
+            <section class="panel">
+                <h2>Duplicate Dataset Names</h2>
+                <div id="duplicateDatasets" class="chunk-list"></div>
+            </section>
+            <section class="panel">
+                <h2>Recent Jobs</h2>
+                <div id="recentJobs" class="job-list"></div>
+            </section>
+        </section>
+    </main>
+    <script src="/static/js/ingestion_logs.js"></script>
+</body>
+</html>

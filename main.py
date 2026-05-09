@@ -17,7 +17,7 @@ import time
 import uuid
 import re
 import psutil
-from enum import Enum
+from pathlib import Path
 import uvicorn
 from typing import Any, Dict, Optional, List
 from datetime import date, datetime, timedelta
@@ -28,6 +28,7 @@ from fastapi import (
     UploadFile,
     File,
     Form,
+    BackgroundTasks,
     Request,
     Depends,
     HTTPException,
@@ -99,6 +100,14 @@ from kuro_backend import backup_manager
 from kuro_backend import persona_history_admin
 from kuro_backend import version as kuro_version
 from kuro_backend import proactive_greeting
+from kuro_backend.ingestion_center import chroma_inspector, ingestion_manager, ingestion_registry
+from kuro_backend.export_engine import export_manager
+from kuro_backend.intelligence.stream_safety import sanitize_stream_chunk
+from kuro_backend.export_engine.export_models import (
+    ExportFormat as UniversalExportFormat,
+    ExportRequest as UniversalExportRequest,
+    ExportStatus as UniversalExportStatus,
+)
 from kuro_backend.logger_setup import setup_logging
 
 # --- Logging Setup with Centralized Config ---
@@ -150,11 +159,6 @@ class ChatSessionUpdate(BaseModel):
 
 class MessageEditRequest(BaseModel):
     new_content: str = Field(..., min_length=1, max_length=32000)
-
-
-class ExportFormat(str, Enum):
-    markdown = "md"
-    text = "txt"
 
 
 class NewChatSession(BaseModel):
@@ -218,6 +222,74 @@ def require_admin_user(request: Request) -> Dict[str, str]:
     return user
 
 
+def _build_system_status_backup_payload() -> Optional[Dict[str, Any]]:
+    """Return additive backup status metadata for the System Status modal."""
+    try:
+        last_backup = intelligence_db.get_last_backup_status()
+    except Exception as exc:
+        logger.warning("[BACKUP] get_last_backup_status failed: %s", exc)
+        return None
+
+    if last_backup is None:
+        return None
+
+    try:
+        backup_root = Path(settings.KURO_BACKUP_DIR).expanduser()
+        if not backup_root.is_absolute():
+            backup_root = Path(settings.WORKING_DIR).joinpath(backup_root).resolve()
+        backup_dir_size_mb = sum(
+            f.stat().st_size for f in backup_root.rglob("*") if f.is_file()
+        ) / (1024 ** 2) if backup_root.exists() else 0.0
+        daily_root = backup_root / "daily"
+        pre_migration_root = backup_root / "pre_migration"
+        backup_count_daily = sum(1 for p in daily_root.iterdir() if p.is_dir()) if daily_root.exists() else 0
+        backup_count_pre_migration = sum(1 for p in pre_migration_root.iterdir() if p.is_file()) if pre_migration_root.exists() else 0
+    except Exception as exc:
+        logger.warning("[BACKUP] backup directory stats failed: %s", exc)
+        backup_dir_size_mb = 0.0
+        backup_count_daily = 0
+        backup_count_pre_migration = 0
+
+    next_backup_at = None
+    try:
+        if _reminder_scheduler:
+            job = _reminder_scheduler.get_job("nightly_backup")
+            if job and job.next_run_time:
+                next_backup_at = job.next_run_time.strftime("%Y-%m-%d %H:%M:%S")
+    except Exception as exc:
+        logger.warning("[BACKUP] next nightly backup lookup failed: %s", exc)
+
+    return {
+        "last_backup_at": last_backup.get("completed_at"),
+        "last_backup_status": last_backup.get("status"),
+        "last_backup_type": last_backup.get("backup_type"),
+        "files_backed_up": last_backup.get("files_backed_up", 0),
+        "total_size_mb": round(
+            float(last_backup.get("total_size_bytes", 0) or 0) / (1024 ** 2),
+            1,
+        ),
+        "duration_seconds": float(last_backup.get("duration_seconds", 0.0) or 0.0),
+        "retain_days": settings.KURO_BACKUP_RETAIN_DAYS,
+        "backup_dir_size_mb": round(backup_dir_size_mb, 1),
+        "backup_count_daily": backup_count_daily,
+        "backup_count_pre_migration": backup_count_pre_migration,
+        "assets_covered": [
+            "kuro_chat_history.db",
+            "kuro_short_term.db",
+            "kuro_auth.db",
+            "kuro_finances.db",
+            "kuro_intelligence.db",
+            "master_profile.json",
+            "kuro_memory.json",
+            "kuro_compliance.db",
+            "phoenix_data/phoenix.db",
+            "logs/",
+        ],
+        "next_backup_at": next_backup_at,
+        "error_message": last_backup.get("error_message"),
+    }
+
+
 def api_success(
     data: Any = None, trace_id: Optional[str] = None, **extra: Any
 ) -> Dict[str, Any]:
@@ -244,6 +316,120 @@ def api_error(
     return payload
 
 
+def _detect_export_suggestions(
+    persona: Optional[str],
+    response_text: str,
+    chat_id: Optional[str],
+    assistant_message_id: Optional[int] = None,
+) -> List[Dict[str, Any]]:
+    """Suggest structured exports based on persona and response shape."""
+    resolved_persona = memory_manager.normalize_persona(persona)
+
+    text = (response_text or "").strip()
+    if not text or not chat_id:
+        return []
+
+    lowered = text.lower()
+    export_target = "selected_messages" if assistant_message_id else "chat_session"
+    message_ids = [assistant_message_id] if assistant_message_id else []
+
+    def _suggest(fmt: str, title: str, reason: str) -> Dict[str, Any]:
+        return {
+            "target": export_target,
+            "format": fmt,
+            "chat_id": chat_id,
+            "message_ids": message_ids,
+            "title": title,
+            "reason": reason,
+            "persona": resolved_persona,
+        }
+
+    suggestions: List[Dict[str, Any]] = []
+    has_table = "|" in text and "---" in text
+    qa_markers = (
+        "test case",
+        "test cases",
+        "test scenario",
+        "acceptance criteria",
+        "expected result",
+        "precondition",
+        "steps to reproduce",
+    )
+    has_qa_shape = any(marker in lowered for marker in qa_markers) or has_table
+    report_markers = (
+        "executive summary",
+        "recommendation",
+        "roadmap",
+        "analysis",
+        "briefing",
+        "findings",
+    )
+    has_report_shape = any(marker in lowered for marker in report_markers)
+    data_markers = ("table", "matrix", "dataset", "rows", "columns", "spreadsheet")
+    has_data_shape = has_table or any(marker in lowered for marker in data_markers)
+
+    if resolved_persona == "auditor" and has_qa_shape:
+        suggestions.append(
+            _suggest(
+                "xlsx",
+                "Export Test Case to Excel",
+                "Auditor detected structured QA test cases suitable for spreadsheet export.",
+            )
+        )
+
+    if resolved_persona == "advisor":
+        if has_report_shape:
+            suggestions.append(
+                _suggest(
+                    "pdf",
+                    "Export Report to PDF",
+                    "Advisor output looks like a formal report suitable for PDF export.",
+                )
+            )
+            suggestions.append(
+                _suggest(
+                    "docx",
+                    "Export Report to Word",
+                    "Advisor output looks editable and suitable for DOCX export.",
+                )
+            )
+        if has_data_shape:
+            suggestions.append(
+                _suggest(
+                    "xlsx",
+                    "Export Analysis to Excel",
+                    "Advisor output contains structured analysis suitable for Excel export.",
+                )
+            )
+
+    if resolved_persona == "chancellor" and has_data_shape:
+        suggestions.append(
+            _suggest(
+                "xlsx",
+                "Export Financial Table to Excel",
+                "Chancellor output contains structured financial data suitable for Excel.",
+            )
+        )
+        suggestions.append(
+            _suggest(
+                "csv",
+                "Export Financial Data to CSV",
+                "Chancellor output contains structured financial data suitable for CSV.",
+            )
+        )
+
+    # Deduplicate by format while preserving order.
+    deduped: List[Dict[str, Any]] = []
+    seen_formats = set()
+    for item in suggestions:
+        fmt = item.get("format")
+        if fmt in seen_formats:
+            continue
+        seen_formats.add(fmt)
+        deduped.append(item)
+    return deduped
+
+
 def _resolve_chat_session_id(request: Request, form_chat_id: str = None) -> str:
     if form_chat_id and _CHAT_SESSION_PATTERN.match(form_chat_id):
         return form_chat_id
@@ -253,8 +439,47 @@ def _resolve_chat_session_id(request: Request, form_chat_id: str = None) -> str:
     return f"fallback_{request.client.host}_default"
 
 
+def _as_env_bool(value: Optional[str], default: bool = False) -> bool:
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _mount_playground_router_if_enabled(
+    target_app: FastAPI,
+    enabled_override: Optional[bool] = None,
+) -> bool:
+    api_enabled = (
+        enabled_override
+        if enabled_override is not None
+        else _as_env_bool(os.getenv("KURO_PLAYGROUND_API_ENABLED"), False)
+    )
+    if not api_enabled:
+        return False
+    try:
+        from playground_runtime.api import create_playground_router
+        from playground_runtime.config import get_settings as get_playground_settings
+        from playground_runtime.service import PlaygroundRuntimeService
+
+        playground_settings = get_playground_settings()
+        playground_service = PlaygroundRuntimeService(settings=playground_settings)
+        target_app.state.playground_service = playground_service
+        target_app.include_router(
+            create_playground_router(
+                service=playground_service,
+                admin_dependency=require_admin_user,
+            )
+        )
+        logger.info("[KPR] Playground router mounted at /api/playground")
+        return True
+    except Exception as exc:
+        logger.exception("[KPR] Failed to mount playground router: %s", exc)
+        return False
+
+
 # --- FastAPI App ---
 app = FastAPI(title="Kuro AI Web Dashboard")
+_mount_playground_router_if_enabled(app)
 
 
 @app.on_event("startup")
@@ -809,6 +1034,7 @@ async def index(request: Request):
             "username": username,
             "display_name": user_info.get("display_name", username),
             "role": user_info.get("role", "User"),
+            "is_admin": username == os.getenv("ADMIN_USERNAME", "Pantronux"),
             "restricted_persona": user_info.get("restricted_persona") or "",
             "master_name": user_info.get("master_name", f"Master {username}"),
         },
@@ -833,6 +1059,7 @@ async def chat_page(request: Request):
             "username": username,
             "display_name": user_info.get("display_name", username),
             "role": user_info.get("role", "User"),
+            "is_admin": username == os.getenv("ADMIN_USERNAME", "Pantronux"),
             "restricted_persona": user_info.get("restricted_persona") or "",
             "master_name": user_info.get("master_name", f"Master {username}"),
         },
@@ -1210,7 +1437,7 @@ async def chat_endpoint(
         )
 
         # Save AI response to chat history
-        chat_history.add_message(
+        assistant_message_id = chat_history.add_message(
             "web",
             "assistant",
             response,
@@ -1220,11 +1447,27 @@ async def chat_endpoint(
             username=username,
             chat_id=session_scope,
         )
+        export_suggestions = _detect_export_suggestions(
+            resolved_persona, response, session_scope, assistant_message_id
+        )
+        if assistant_message_id and export_suggestions:
+            chat_history.update_message_export_suggestions(
+                assistant_message_id, export_suggestions
+            )
 
         return api_success(
-            data={"response": response},
+            data={
+                "response": response,
+                "export_suggestion": export_suggestions[0] if export_suggestions else None,
+                "export_suggestions": export_suggestions,
+            },
             trace_id=trace_id,
             response=response,  # backward compatibility for current frontend
+            meta={
+                "trace_id": trace_id,
+                "export_suggestion": export_suggestions[0] if export_suggestions else None,
+                "export_suggestions": export_suggestions,
+            },
         )
 
     except Exception as e:
@@ -1489,20 +1732,23 @@ async def chat_stream_endpoint(
                 username=username,
                 chat_id=session_scope,
             ):
-                full_response.append(chunk)
+                safe_chunk = sanitize_stream_chunk(chunk)
+                if not safe_chunk:
+                    continue
+                full_response.append(safe_chunk)
                 if first_chunk_ms is None:
                     first_chunk_ms = round(
                         (time.perf_counter() - request_started) * 1000, 2
                     )
                 # SSE: UI accepts `text` (preferred) or `chunk`; ensure_ascii=False for Indonesian / markdown
                 payload = json.dumps(
-                    {"text": chunk, "chunk": chunk}, ensure_ascii=False
+                    {"text": safe_chunk, "chunk": safe_chunk}, ensure_ascii=False
                 )
                 yield f"event: chunk\ndata: {payload}\n\n"
 
             # Send completion event
             response_text = "".join(full_response)
-            chat_history.add_message(
+            assistant_message_id = chat_history.add_message(
                 "web",
                 "assistant",
                 response_text,
@@ -1512,6 +1758,13 @@ async def chat_stream_endpoint(
                 username=username,
                 chat_id=session_scope,
             )
+            export_suggestions = _detect_export_suggestions(
+                resolved_persona, response_text, session_scope, assistant_message_id
+            )
+            if assistant_message_id and export_suggestions:
+                chat_history.update_message_export_suggestions(
+                    assistant_message_id, export_suggestions
+                )
             total_ms = round((time.perf_counter() - request_started) * 1000, 2)
             observability.record_latency_metric("chat_stream_total_ms", total_ms)
             if first_chunk_ms is not None:
@@ -1546,6 +1799,8 @@ async def chat_stream_endpoint(
                     "ttfb_ms": first_chunk_ms,
                     "total_ms": total_ms,
                     "timings": stream_metrics,
+                    "export_suggestion": export_suggestions[0] if export_suggestions else None,
+                    "export_suggestions": export_suggestions,
                 },
             )
             yield f"event: complete\ndata: {json.dumps(complete_payload, ensure_ascii=False)}\n\n"
@@ -1579,12 +1834,17 @@ async def cancel_chat_stream(request: Request, request_id: str):
 
 @app.get("/api/system-status")
 async def system_status(request: Request):
+    """Get real-time system status with additive backup metadata."""
     token = get_token_from_cookie(request)
     user = validate_token(token)
     if not user or user.get("username") != os.getenv("ADMIN_USERNAME", "Pantronux"):
         raise HTTPException(status_code=403, detail="Forbidden")
-    """Get real-time system status."""
-    return api_success(data=tools.get_system_status())
+    return api_success(
+        data={
+            "system_health_report": tools.get_system_status(),
+            "backup": _build_system_status_backup_payload(),
+        }
+    )
 
 
 @app.get("/api/log-storage")
@@ -2139,53 +2399,134 @@ async def search_in_chat(request: Request, chat_id: str, q: str = Query(...)):
 
 
 @app.get("/api/chats/{chat_id}/export")
-async def export_chat(request: Request, chat_id: str, format: ExportFormat = ExportFormat.markdown):
-    """Export a chat session as a file download."""
+async def export_chat(request: Request, chat_id: str, format: str = Query("md")):
+    """Export a chat session as a file download via the universal export engine."""
+    token = get_token_from_cookie(request)
+    user = validate_token(token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    if format not in (UniversalExportFormat.MD.value, UniversalExportFormat.TXT.value):
+        raise HTTPException(status_code=400, detail="Legacy route only supports md or txt")
+
+    export_request = UniversalExportRequest(
+        target="chat_session",
+        format=format,
+        chat_id=chat_id,
+    )
+    content, _, media_type = export_manager.export_sync(export_request, user["username"])
+    return StreamingResponse(
+        iter([content]),
+        media_type=media_type,
+        headers={
+            "Content-Disposition": f'attachment; filename="kuro_chat_{chat_id[:8]}.{format}"'
+        },
+    )
+
+
+@app.get("/api/export/history")
+async def export_history(request: Request, limit: int = 20):
+    """List recent export jobs for the current user."""
     token = get_token_from_cookie(request)
     user = validate_token(token)
     if not user:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    session = chat_history.get_session(chat_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Chat session not found")
+    jobs = intelligence_db.list_export_jobs(user["username"], limit=limit)
+    return api_success(data=jobs)
 
-    messages = chat_history.get_history(chat_id=chat_id, limit=9999, username=user["username"])
 
-    title = session.get("title", "New Chat")
-    persona = session.get("persona", "consultant")
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+@app.post("/api/export")
+async def create_export(
+    request: Request,
+    export_request: UniversalExportRequest,
+    background_tasks: BackgroundTasks,
+):
+    """Create a synchronous or asynchronous export."""
+    token = get_token_from_cookie(request)
+    user = validate_token(token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
-    if format == ExportFormat.markdown:
-        content = f"# {title}\n"
-        content += f"**Exported**: {timestamp}\n"
-        content += f"**Persona**: {persona}\n"
-        content += "---\n\n"
-
-        for msg in messages:
-            role_label = "User" if msg["role"] == "user" else f"Kuro ({persona})"
-            content += f"**[{msg['timestamp']}] {role_label}**:\n{msg['content']}\n\n"
-
+    if export_request.format in {
+        UniversalExportFormat.MD,
+        UniversalExportFormat.TXT,
+        UniversalExportFormat.JSON,
+        UniversalExportFormat.CSV,
+        UniversalExportFormat.XLSX,
+        UniversalExportFormat.DOCX,
+    }:
+        content, filename, media_type = export_manager.export_sync(
+            export_request, user["username"]
+        )
         return StreamingResponse(
             iter([content]),
-            media_type="text/markdown",
-            headers={"Content-Disposition": f'attachment; filename="kuro_chat_{chat_id[:8]}.md"'}
+            media_type=media_type,
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
-    else:
-        content = f"Chat: {title}\n"
-        content += f"Exported: {timestamp}\n"
-        content += f"Persona: {persona}\n"
-        content += "="*40 + "\n\n"
 
-        for msg in messages:
-            role_label = "User" if msg["role"] == "user" else "Kuro"
-            content += f"[{msg['timestamp']}] {role_label}: {msg['content']}\n\n"
+    job_id = export_manager.create_async_pdf_job(export_request, user["username"])
+    background_tasks.add_task(export_manager.process_export_job, job_id)
+    return JSONResponse(
+        status_code=202,
+        content={
+            "status": "accepted",
+            "job_id": job_id,
+            "export_format": export_request.format.value,
+            "target": export_request.target.value,
+        },
+    )
 
-        return StreamingResponse(
-            iter([content]),
-            media_type="text/plain",
-            headers={"Content-Disposition": f'attachment; filename="kuro_chat_{chat_id[:8]}.txt"'}
-        )
+
+@app.get("/api/export/{job_id}")
+async def get_export_status(request: Request, job_id: int):
+    """Return export job metadata for the current owner."""
+    token = get_token_from_cookie(request)
+    user = validate_token(token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    job = intelligence_db.get_export_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Export job not found")
+    if job.get("username") != user["username"]:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    payload = {
+        "id": job["id"],
+        "status": job["status"],
+        "file_size": job.get("file_size"),
+        "created_at": job.get("created_at"),
+        "completed_at": job.get("completed_at"),
+        "error_message": job.get("error_message"),
+    }
+    if job.get("status") == UniversalExportStatus.COMPLETED.value:
+        payload["download_url"] = f"/api/export/{job_id}/download"
+    return payload
+
+
+@app.get("/api/export/{job_id}/download")
+async def download_export(request: Request, job_id: int):
+    """Download a completed export file."""
+    token = get_token_from_cookie(request)
+    user = validate_token(token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    job = intelligence_db.get_export_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Export job not found")
+    if job.get("username") != user["username"]:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if job.get("status") != UniversalExportStatus.COMPLETED.value:
+        raise HTTPException(status_code=409, detail="Export job is not completed")
+    if not job.get("file_path") or not os.path.exists(job["file_path"]):
+        raise HTTPException(status_code=404, detail="Export file not found")
+
+    return FileResponse(
+        job["file_path"],
+        media_type="application/pdf",
+        filename=os.path.basename(job["file_path"]),
+    )
 
 
 # --- Intelligence Hub Routes ---
@@ -2245,6 +2586,233 @@ async def intelligence_dashboard():
     return FileResponse(os.path.join(WEB_DIR, "templates", "intelligence.html"))
 
 
+@app.get("/ingestion", response_class=HTMLResponse)
+async def ingestion_dashboard(request: Request):
+    require_admin_user(request)
+    return FileResponse(os.path.join(WEB_DIR, "templates", "ingestion_center.html"))
+
+
+@app.get("/ingestion/analytics", response_class=HTMLResponse)
+async def ingestion_analytics_dashboard(request: Request):
+    require_admin_user(request)
+    return FileResponse(os.path.join(WEB_DIR, "templates", "ingestion_analytics.html"))
+
+
+@app.get("/ingestion/logs", response_class=HTMLResponse)
+async def ingestion_logs_dashboard(request: Request):
+    require_admin_user(request)
+    return FileResponse(os.path.join(WEB_DIR, "templates", "ingestion_logs.html"))
+
+
+class OrphanSourceRecoveryRequest(BaseModel):
+    filenames: List[str] = Field(default_factory=list)
+    category: str = "recovered"
+    tags: str = "recovered,orphan-source"
+    memory_scope: str = "chroma_only"
+
+
+@app.get("/api/ingestion/datasets")
+async def list_ingestion_datasets(request: Request, active_only: bool = Query(False)):
+    user = require_admin_user(request)
+    return ingestion_manager.get_dashboard_snapshot(owner_username=user["username"], active_only=active_only)
+
+
+@app.get("/api/ingestion/datasets/{dataset_uuid}")
+async def get_ingestion_dataset(request: Request, dataset_uuid: str):
+    require_admin_user(request)
+    payload = ingestion_manager.get_dataset_detail(dataset_uuid)
+    if payload.get("status") == "error":
+        raise HTTPException(status_code=404, detail=payload["message"])
+    return payload
+
+
+@app.get("/api/ingestion/datasets/{dataset_uuid}/chunks")
+async def get_ingestion_chunks(request: Request, dataset_uuid: str):
+    require_admin_user(request)
+    dataset = ingestion_registry.get_dataset(dataset_uuid)
+    if dataset is None:
+        raise HTTPException(status_code=404, detail="Dataset not found.")
+    return {"status": "success", "data": ingestion_registry.list_chunks(dataset_uuid)}
+
+
+@app.get("/api/ingestion/datasets/{dataset_uuid}/lineage")
+async def get_ingestion_lineage(request: Request, dataset_uuid: str):
+    require_admin_user(request)
+    dataset = ingestion_registry.get_dataset(dataset_uuid)
+    if dataset is None:
+        raise HTTPException(status_code=404, detail="Dataset not found.")
+    return {"status": "success", "data": ingestion_registry.list_lineage(dataset_uuid)}
+
+
+@app.get("/api/ingestion/jobs")
+async def list_ingestion_jobs(request: Request, limit: int = Query(25, ge=1, le=200)):
+    require_admin_user(request)
+    return {"status": "success", "data": ingestion_registry.list_jobs(limit=limit)}
+
+
+@app.get("/api/ingestion/search")
+async def search_ingestion_datasets(request: Request, q: str = Query(..., min_length=1)):
+    user = require_admin_user(request)
+    return ingestion_manager.search_datasets(q, owner_username=user["username"])
+
+
+@app.get("/api/ingestion/analytics/overview")
+async def ingestion_analytics_overview(request: Request):
+    require_admin_user(request)
+    return ingestion_manager.get_analytics_overview()
+
+
+@app.get("/api/ingestion/analytics/retrieval")
+async def ingestion_analytics_retrieval(request: Request):
+    require_admin_user(request)
+    overview = ingestion_manager.get_analytics_overview()
+    return {"status": "success", "data": overview["data"]["retrieval"]}
+
+
+@app.get("/api/ingestion/logs")
+async def ingestion_logs_overview(
+    request: Request,
+    job_limit: int = Query(100, ge=1, le=500),
+    failed_limit: int = Query(50, ge=1, le=200),
+):
+    user = require_admin_user(request)
+    return ingestion_manager.get_logs_overview(
+        username=user["username"],
+        job_limit=job_limit,
+        failed_limit=failed_limit,
+    )
+
+
+@app.get("/api/ingestion/chroma/health")
+async def ingestion_chroma_health(request: Request):
+    require_admin_user(request)
+    return {"status": "success", "data": chroma_inspector.get_collection_health()}
+
+
+@app.get("/api/ingestion/graph/{dataset_uuid}")
+async def ingestion_graph(request: Request, dataset_uuid: str):
+    require_admin_user(request)
+    detail = ingestion_manager.get_dataset_detail(dataset_uuid)
+    if detail.get("status") == "error":
+        raise HTTPException(status_code=404, detail=detail["message"])
+    dataset = detail["data"]["dataset"]
+    chunks = detail["data"]["chunks"]
+    nodes = [
+        {
+            "id": f"dataset:{dataset_uuid}",
+            "label": dataset.get("dataset_name", dataset_uuid),
+            "type": "dataset",
+            "meta": {"status": dataset.get("ingestion_status", "")},
+        }
+    ]
+    edges = []
+    for chunk in chunks:
+        chunk_node_id = f"chunk:{chunk['id']}"
+        nodes.append(
+            {
+                "id": chunk_node_id,
+                "label": f"Chunk {chunk['chunk_index']}",
+                "type": "chunk",
+                "meta": {"preview": chunk.get("preview_text", ""), "score": chunk.get("retrieval_count", 0)},
+            }
+        )
+        edges.append({"source": f"dataset:{dataset_uuid}", "target": chunk_node_id, "type": "contains", "weight": 1.0})
+        try:
+            entities = json.loads(chunk.get("entity_json") or "[]")
+        except Exception:
+            entities = []
+        for entity in entities:
+            entity_id = f"entity:{dataset_uuid}:{entity}"
+            if not any(node["id"] == entity_id for node in nodes):
+                nodes.append({"id": entity_id, "label": entity, "type": "entity", "meta": {}})
+            edges.append({"source": chunk_node_id, "target": entity_id, "type": "mentions", "weight": 0.5})
+    return {"status": "success", "data": {"nodes": nodes, "edges": edges}}
+
+
+@app.post("/api/ingestion/upload")
+async def upload_ingestion_dataset(
+    background_tasks: BackgroundTasks,
+    request: Request,
+    file: UploadFile = File(...),
+    category: str = Form("general"),
+    tags: str = Form(""),
+    memory_scope: str = Form("chroma_only"),
+    source_type: str = Form(""),
+):
+    user = require_admin_user(request)
+    payload = ingestion_manager.create_dataset_from_upload(
+        file=file,
+        username=user["username"],
+        category=category,
+        tags=tags,
+        memory_scope=memory_scope,
+        source_type=source_type or None,
+    )
+    job = payload.get("data", {}).get("job")
+    if job is not None:
+        ingestion_manager.schedule_ingestion_job(background_tasks, job["id"])
+    return JSONResponse(status_code=202, content=payload)
+
+
+@app.post("/api/ingestion/datasets/{dataset_uuid}/reindex")
+async def reindex_ingestion_dataset(background_tasks: BackgroundTasks, request: Request, dataset_uuid: str):
+    user = require_admin_user(request)
+    payload = ingestion_manager.reindex_dataset(dataset_uuid, user["username"])
+    if payload.get("status") == "error":
+        raise HTTPException(status_code=404, detail=payload["message"])
+    job = payload.get("data", {}).get("job")
+    if job is not None:
+        ingestion_manager.schedule_ingestion_job(background_tasks, job["id"])
+    return JSONResponse(status_code=202, content=payload)
+
+
+@app.get("/api/ingestion/orphan-sources")
+async def list_ingestion_orphan_sources(request: Request):
+    user = require_admin_user(request)
+    return ingestion_manager.discover_orphan_source_files(user["username"])
+
+
+@app.post("/api/ingestion/orphan-sources/reingest")
+async def recover_ingestion_orphan_sources(
+    background_tasks: BackgroundTasks,
+    request: Request,
+    payload: OrphanSourceRecoveryRequest,
+):
+    user = require_admin_user(request)
+    result = ingestion_manager.recover_orphan_source_files(
+        username=user["username"],
+        filenames=payload.filenames,
+        category=payload.category,
+        tags=payload.tags,
+        memory_scope=payload.memory_scope,
+    )
+    for row in result.get("data", {}).get("jobs", []):
+        ingestion_manager.schedule_ingestion_job(background_tasks, row["job"]["id"])
+    return JSONResponse(status_code=202, content=result)
+
+
+@app.post("/api/ingestion/datasets/{dataset_uuid}/archive")
+async def archive_ingestion_dataset(request: Request, dataset_uuid: str):
+    user = require_admin_user(request)
+    return ingestion_manager.archive_dataset(dataset_uuid, user["username"])
+
+
+@app.post("/api/ingestion/datasets/{dataset_uuid}/delete")
+async def delete_ingestion_dataset(request: Request, dataset_uuid: str):
+    user = require_admin_user(request)
+    payload = ingestion_manager.delete_dataset(dataset_uuid, user["username"])
+    if payload.get("status") == "error":
+        raise HTTPException(status_code=404, detail=payload["message"])
+    return payload
+
+
+@app.post("/api/ingestion/chroma/cleanup-orphans")
+async def cleanup_ingestion_orphans(request: Request):
+    require_admin_user(request)
+    orphans = chroma_inspector.find_orphan_chunks()
+    return {"status": "success", "data": {"orphan_count": len(orphans), "orphans": orphans}}
+
+
 @app.post("/api/read-file")
 async def read_file(request: Request, file_path: str = Form("")):
     """Read a file using universal parser."""
@@ -2302,6 +2870,34 @@ async def tutorial_content():
         return {"status": "success", "markdown": content}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+
+@app.get("/playground/tutorial", response_class=HTMLResponse)
+async def playground_tutorial_frontend(request: Request):
+    """Serve the private Playground tutorial frontend."""
+    require_admin_user(request)
+    return FileResponse(os.path.join(WEB_DIR, "templates", "playground_tutorial.html"))
+
+
+@app.get("/api/playground/tutorial/content")
+async def playground_tutorial_content(request: Request):
+    """Return the raw markdown content of SYSTEM_MAP_PLAYGROUND.md."""
+    require_admin_user(request)
+    try:
+        map_path = os.path.join(BASE_DIR, "playground_runtime", "SYSTEM_MAP_PLAYGROUND.md")
+        if not os.path.exists(map_path):
+            return JSONResponse(
+                status_code=404,
+                content={"status": "error", "message": "SYSTEM_MAP_PLAYGROUND.md not found"},
+            )
+        with open(map_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        return {"status": "success", "markdown": content}
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "message": str(e)},
+        )
 
 
 # --- Compliance Routes ---
@@ -3342,7 +3938,7 @@ def get_log_storage_usage() -> Dict:
 
         total_size = 0
         log_count = 0
-        breakdown = {}
+        breakdown = []
 
         # 1. Scan System Logs (Active)
         if os.path.exists(system_dir):
@@ -3350,9 +3946,17 @@ def get_log_storage_usage() -> Dict:
                 fp = os.path.join(system_dir, f)
                 if os.path.isfile(fp) and f.endswith(".log"):
                     size = os.path.getsize(fp)
+                    modified_ts = os.path.getmtime(fp)
                     total_size += size
                     log_count += 1
-                    breakdown[f] = size / (1024 * 1024)
+                    breakdown.append(
+                        {
+                            "name": f,
+                            "size_mb": size / (1024 * 1024),
+                            "modified_at": datetime.fromtimestamp(modified_ts).strftime("%Y-%m-%d %H:%M:%S"),
+                            "modified_ts": modified_ts,
+                        }
+                    )
 
         # 2. Scan Archive Logs (Rotated)
         if os.path.exists(archive_dir):
@@ -3361,6 +3965,10 @@ def get_log_storage_usage() -> Dict:
                 if os.path.isfile(fp):
                     total_size += os.path.getsize(fp)
                     log_count += 1
+
+        breakdown.sort(key=lambda item: item["modified_ts"], reverse=True)
+        for item in breakdown:
+            item.pop("modified_ts", None)
 
         return {
             "total_size_mb": total_size / (1024 * 1024),

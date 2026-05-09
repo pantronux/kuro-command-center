@@ -1,4 +1,4 @@
-# Kuro AI V1.0.0 Beta 5 "Sovereign Chat" — SYSTEM_MAP
+# Kuro AI V1.1.0 Beta 1 "Sovereign Chat" — SYSTEM_MAP
 
 > Authoritative navigation map for the repository. Traced function-by-function
 > from the true entrypoint (`main.py`) outward. Only source code under version
@@ -36,7 +36,7 @@ Kuro AI is your **Intelligent Personal Sovereign**—a sophisticated digital com
   system (recent chat → short-term summary → long-term semantic + SSoT),
   and proactive sentinels (CVE, fitness) into one cohesive assistant accessible
   from a web dashboard and Telegram.
-- **V1.0.0 Beta 5 Focus**: Sovereign Chat upgrade featuring persistent session management, message-level control (Edit, Regenerate, Bookmark), background auto-titling, and in-session search.
+- **V1.1.0 Beta 1 Focus**: Canvas 3 operational maturity layer with tool governance runtime, cognitive budget controls, runtime modes, memory canonicalization flow, identity/constitution safeguards, autonomy boundaries, source reliability scoring, and evaluation runtime telemetry (all feature-flagged safe-by-default).
 - **Tech stack**:
   - Backend: FastAPI, LangGraph, `google-genai` (Gemini),
     APScheduler, SQLite, ChromaDB, Mem0 (via `perpetual_memory.py`),
@@ -138,6 +138,19 @@ Kuro AI is your **Intelligent Personal Sovereign**—a sophisticated digital com
     - `/api/evaluation/summary`: Administrator-only summary endpoint providing aggregated performance metrics.
 - **Semantic Cache Invalidation (Item 6)**: Mandatory `invalidate_tag(username)` trigger added to `memory_coordinator.py` successful write paths to prevent stale data retrieval after memory updates.
 
+### V1.0.0 Beta 4 Architecture Notes ("Sovereign Intelligence")
+
+- **Cognitive Agent Model**: Transitions personas from shallow declarations to deep cognitive agents with reasoning protocols.
+- **Autonomous Dissertation Research**:
+    - `advisor_research_node`: Implements proactive research grounding for the `advisor` persona.
+    - Automatically fires `serper_scholar` and `serper_news` based on extracted research claims without user instruction.
+    - Controlled by `KURO_ADVISOR_AUTO_SEARCH` and `KURO_ADVISOR_MAX_SERPER_CALLS`.
+- **Source Provenance Tracking**:
+    - `research_sources` table in `kuro_intelligence.db`: Tracks title, link, snippet, and academic metadata (year, citations) for all auto-retrieved materials.
+    - Evidence trail persisted in `research_ledger.source_provenance` as JSON metadata.
+- **Enhanced Serper Integration**: `serper_scholar` and `serper_news` registered as Gemini-callable tools with normalized academic metadata.
+- **Cognitive Effort "Research" Tier**: New effort level that triggers extended CoT reasoning and autonomous retrieval for dissertation-grade queries.
+
 ### V1.0.0 Beta 5 Architecture Notes ("Sovereign Chat")
 
 - **Sovereign Control Toolbar**: Injected dynamic toolbars into chat bubbles for message-level interaction (Copy, Edit, Regenerate, Bookmark).
@@ -168,18 +181,83 @@ Kuro AI is your **Intelligent Personal Sovereign**—a sophisticated digital com
   paths and runtime JSON state into `tmp_path`, preventing the test suite from
   mutating production `*.db` files.
 
-### V1.0.0 Beta 4 Architecture Notes ("Sovereign Intelligence")
+### V1.0.0 Beta 6 Architecture Notes ("Sovereign Chat")
 
-- **Cognitive Agent Model**: Transitions personas from shallow declarations to deep cognitive agents with reasoning protocols.
-- **Autonomous Dissertation Research**:
-    - `advisor_research_node`: Implements proactive research grounding for the `advisor` persona.
-    - Automatically fires `serper_scholar` and `serper_news` based on extracted research claims without user instruction.
-    - Controlled by `KURO_ADVISOR_AUTO_SEARCH` and `KURO_ADVISOR_MAX_SERPER_CALLS`.
-- **Source Provenance Tracking**:
-    - `research_sources` table in `kuro_intelligence.db`: Tracks title, link, snippet, and academic metadata (year, citations) for all auto-retrieved materials.
-    - Evidence trail persisted in `research_ledger.source_provenance` as JSON metadata.
-- **Enhanced Serper Integration**: `serper_scholar` and `serper_news` registered as Gemini-callable tools with normalized academic metadata.
-- **Cognitive Effort "Research" Tier**: New effort level that triggers extended CoT reasoning and autonomous retrieval for dissertation-grade queries.
+- **Universal Export Engine**:
+    - `kuro_backend/export_engine/` introduces a renderer-first export subsystem for `chat_session`, `selected_messages`, `intelligence_report`, `compliance_report`, and `market_snapshot`.
+    - Sync export formats: `md`, `txt`, `json`, `csv`, `xlsx`, `docx`.
+    - Async export format: `pdf` with job tracking + download lifecycle.
+- **Export Persistence & Auditability**:
+    - `kuro_backend/intelligence_db.py` now owns `export_jobs` and `export_audit_log`.
+    - Export jobs persist `briefing_date` and `standard` to support Phase 4 targets cleanly.
+- **Persona-Aware Smart Export Suggestions**:
+    - `main.py` now derives export suggestions from persona + output shape and injects them into sync responses and SSE completion metadata.
+    - `chat_history.py` persists per-message `export_suggestions_json`, allowing suggestion buttons to survive page reload and history fetches.
+    - Persona defaults:
+        - `auditor` → `xlsx`
+        - `advisor` → `pdf`, `docx`, `xlsx`
+        - `chancellor` → `xlsx`, `csv`
+- **Message-Scoped QA Export**:
+    - When available, the assistant message ID is captured after persistence and routed into `selected_messages` export so auditor quick actions produce narrow spreadsheet output instead of exporting the whole chat.
+- **Frontend Export UX**:
+    - `web_interface/static/js/app.js` now renders persistent, inline quick-export buttons from export suggestion metadata.
+    - `web_interface/templates/index.html` export modal now exposes all supported chat export formats through the dashboard.
+- **Universal export subsystem**:
+    - `kuro_backend/export_engine/export_manager.py`: Orchestrates sync export (`md`, `txt`, `json`, `csv`, `xlsx`, `docx`) and async PDF job processing.
+    - `kuro_backend/export_engine/export_registry.py`: Registry-based exporter lookup.
+    - `kuro_backend/export_engine/export_security.py`: Ownership validation + payload sanitization before rendering.
+    - `kuro_backend/export_engine/renderers/chat_renderer.py`: Renderer layer for `chat_session` and `selected_messages`.
+    - `kuro_backend/export_engine/renderers/intelligence_renderer.py`: Renderer layer for `intelligence_report`.
+    - `kuro_backend/export_engine/renderers/compliance_renderer.py`: Renderer layer for `compliance_report` (admin-only because DB is global).
+    - `kuro_backend/export_engine/renderers/finance_renderer.py`: Renderer layer for `market_snapshot`.
+    - `kuro_backend/export_engine/exporters/*`: Format writers for Markdown, TXT, JSON, CSV, XLSX, DOCX, and PDF.
+- **Export persistence**:
+    - `kuro_backend/intelligence_db.py` now owns `export_jobs` and `export_audit_log`.
+- **New routes**:
+    - `POST /api/export`
+    - `GET /api/export/history`
+    - `GET /api/export/{job_id}`
+    - `GET /api/export/{job_id}/download`
+- **Backward compatibility**:
+    - `GET /api/chats/{chat_id}/export` remains active for `md` and `txt`, but now delegates into the export engine.
+
+### V1.0.0 Beta 6 Hotfix 1 Extension Notes ("Admin Ingestion Control Center")
+
+- **Admin-only ingestion subsystem**:
+    - `kuro_backend/ingestion_center/`: new package for dataset registry, ingestion orchestration, audit lineage, lifecycle control, and analytics.
+    - Dedicated SQLite store `kuro_ingestion.db` isolates ingestion metadata from chat, intelligence, and short-term memory databases.
+- **Registry-first ingestion flow**:
+    - Uploads are stored under `uploaded_files/{username}/ingestion_center/`.
+    - Pipeline shape: `parse_file() -> clean_text() -> semantic_chunk() -> embed_chunks() -> register_chunks() -> finalize`.
+    - Vector failures degrade to `partially_indexed` without losing dataset, job, or chunk records.
+- **Chroma-owned ingestion vectors**:
+    - Ingestion vectors are written to a dedicated Chroma root under `kuro_chromadb/ingestion_center`.
+    - Existing Mem0-based chat retrieval remains behaviorally unchanged unless provenance is available safely.
+- **Lifecycle and observability**:
+    - New admin routes: `/ingestion`, `/ingestion/analytics`, `/api/ingestion/*`.
+    - Supports upload, reindex, archive, delete, search, chunk explorer, lineage viewer, vector health, orphan inspection, retrieval analytics, and dataset-scoped semantic graph payloads.
+- **Admin navigation gate**:
+    - Sidebar renders ingestion menu entries only for the administrator.
+    - Non-admin users are blocked both at menu visibility and direct route access (`403 Forbidden`).
+
+### V1.1.0 Beta 1 Architecture Notes ("Sovereign Chat")
+
+- **Canvas 3 Operational Maturity layer** introduced with default-safe feature flags (`OFF`) for zero-regression baseline.
+- **Tool Governance Runtime**:
+  - New `kuro_backend/tools/tool_*` governance modules for permission routing, risk scoring, budget checks, and audit trace logging.
+  - New graph node `tool_governance_node` gates tool execution before `tool_node` when enabled.
+- **Runtime Modes + Cognitive Budget**:
+  - `runtime_mode_node` resolves mode profiles (`STRICT`, `BALANCED`, `CREATIVE`, `RESEARCH`, `ENTERPRISE`, `SAFE`).
+  - Cognitive budget telemetry and enforcement trace are recorded for operational predictability.
+- **Memory Canonicalization Pipeline**:
+  - Memory write path now supports canonicalization metadata flow (`validation -> canonical_summary -> conflict handling -> temporal_score -> promotion`).
+  - Canonicalization telemetry persisted to short-term operational logs when enabled.
+- **Identity / Constitution / Boundaries**:
+  - Response-time internal checks for identity drift, constitutional principles, and autonomy boundary violations.
+  - Violations trigger safe degraded messaging while preserving SSE/API contract.
+- **Source Reliability + Evaluation Runtime**:
+  - Advisor research sources can be scored for reliability/trustworthiness before internal audit persistence.
+  - New evaluation runtime snapshot computes hallucination, grounding, persona consistency, memory integrity, multi-model alignment, and governance compliance metrics.
 
 ## Core Logic Flow (Function-Level Flowchart)
 
@@ -195,6 +273,7 @@ flowchart TD
         R1["POST /api/chat\nchat_endpoint"]
         R2["POST /api/chat/stream\nchat_stream_endpoint"]
         R4["WS /ws/dashboard\ndashboard_sync_websocket"]
+        R5["GET/POST /api/ingestion/*\nadmin ingestion routes"]
     end
 
     subgraph Pre[Pre-flight guards]
@@ -226,6 +305,13 @@ flowchart TD
 
     subgraph SSoT[Services / SSoT]
         S5[intelligence_engine + intelligence_db]
+    end
+
+    subgraph Ingest[Admin Ingestion Center]
+        I1[ingestion_manager]
+        I2[ingestion_pipeline]
+        I3[ingestion_registry]
+        I4[chroma_inspector + retrieval_analytics]
     end
 
     subgraph Exec[Execution & Tools]
@@ -263,6 +349,10 @@ flowchart TD
     B3 --> O3
     R4 --> O2
     O2 --> F1
+    U1 --> R5
+    R5 --> I1 --> I2 --> I3
+    I2 --> I4
+    I1 --> O2
 
     %% Epistemic layer integration
     B3 -->|"response path"| E1
@@ -280,6 +370,9 @@ Side-branches not drawn on the trunk but reachable from the same
 `tool_node` / scheduler layer:
 - **Intelligence briefings** — `/api/intelligence/*` and the daily scheduler
   → `intelligence_engine` → `serper_tool` + `intelligence_db`.
+- **Admin ingestion center** — `/api/ingestion/*` and `/ingestion*`
+  → `ingestion_manager` → `ingestion_pipeline` → `ingestion_registry`
+  + `chroma_inspector` / `retrieval_analytics`.
 - **Dreaming / CVE + fiscal sentinels** — `dreaming_worker.run_dreaming_cycle`
   → `proactive_events.publish` → `telegram_notifier` (CVE + `fiscal_alert`).
 - **Proactive greeting** — `proactive_greeting.maybe_send` on first
@@ -299,7 +392,7 @@ artefacts are excluded — see **Exclusions** at the bottom of this section.
 ├── INTEGRATION_HARDENING_DETAILS.md
 ├── SYSTEM_MAP.md                # this file
 ├── kuro_backend/
-│   ├── version.py               # V1.0.0 "Sovereign Cat" single source of truth
+│   ├── version.py               # V1.1.0 Beta 1 "Sovereign Chat" single source of truth
 │   ├── config.py                # env keys -> typed Settings
 │   ├── personas.py              # persona prompts + Anti-Halusinasi epistemic layer
 │   ├── core.py                  # non-graph Gemini fallback
@@ -334,6 +427,21 @@ artefacts are excluded — see **Exclusions** at the bottom of this section.
 │   ├── compliance_db.py
 │   ├── daily_habits_db.py       # [PURGED in V7.1]
 │   ├── intelligence_db.py
+│   ├── ingestion_center/        # admin ingestion registry + lifecycle subsystem
+│   │   ├── __init__.py
+│   │   ├── ingestion_manager.py
+│   │   ├── ingestion_pipeline.py
+│   │   ├── ingestion_registry.py
+│   │   ├── ingestion_audit.py
+│   │   ├── ingestion_security.py
+│   │   ├── ingestion_scheduler.py
+│   │   ├── chunking_engine.py
+│   │   ├── embedding_manager.py
+│   │   ├── semantic_registry.py
+│   │   ├── retrieval_analytics.py
+│   │   ├── chroma_inspector.py
+│   │   ├── renderers/
+│   │   └── schemas/
 │   ├── reminder_db.py           # [PURGED in V7.1]
 │   ├── agency/                  # V7.2 Natural Agency sub-package
 │   │   ├── __init__.py
@@ -356,10 +464,14 @@ artefacts are excluded — see **Exclusions** at the bottom of this section.
 │   │   ├── index.html           # dashboard + avatar
 │   │   ├── login.html
 │   │   ├── intelligence.html
+│   │   ├── ingestion_center.html
+│   │   ├── ingestion_analytics.html
 │   │   └── compliance.html
 │   └── static/
 │       ├── js/
-│       │   └── app.js           # WS client, UI modes
+│       │   ├── app.js           # WS client, UI modes
+│       │   ├── ingestion_center.js
+│       │   └── semantic_graph.js
 │       ├── css/                 # dashboard styles
 │       └── vendor/
 ├── openclaw_skills/
@@ -377,6 +489,10 @@ artefacts are excluded — see **Exclusions** at the bottom of this section.
 │       └── README.md
 ├── maintenance/
 │   ├── clean_duplicate_chat_history.py
+│   ├── cleanup_orphan_chunks.py
+│   ├── ingest_dataset.py
+│   ├── rebuild_embeddings.py
+│   ├── reindex_dataset.py
 │   └── rebuild_compliance_base.py
 ├── scripts/
 │   ├── migrate_persona_consultant_advisor.py
@@ -396,6 +512,12 @@ artefacts are excluded — see **Exclusions** at the bottom of this section.
 │   ├── test_market_openclaw_tools.py
 │   ├── test_market_sentinel.py
 │   ├── test_memory_coordinator_contract.py
+│   ├── test_ingestion_api.py
+│   ├── test_ingestion_chroma_health.py
+│   ├── test_ingestion_db_schema.py
+│   ├── test_ingestion_graph.py
+│   ├── test_ingestion_lifecycle.py
+│   ├── test_ingestion_search.py
 │   ├── test_persona_context_budget.py
 │   ├── test_personas_english.py
 │   ├── test_proactive_events.py
@@ -434,6 +556,7 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
   `/api/login`, `/api/chat`, `/api/chat/stream`,
   `/ws/dashboard`, `/api/compliance*`,
   `/api/intelligence*`, `/api/finances/*`, `/api/persona*`, `/api/observability/*`,
+  `/ingestion`, `/ingestion/analytics`, `/api/ingestion/*`,
   `/api/evaluation/summary` (**Beta 3** — Admin-only aggregated quality metrics),
   `/api/backup/status`, `/api/backup/run`, `/api/backup/history`,
   `/api/system-status`, `/api/health`. Also wires three APScheduler
@@ -670,6 +793,12 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
   `log_backup_complete`, `get_backup_history`, `get_last_backup_status`.
   **Tables**: `intelligence_briefings`, `research_sources`, `backup_log`
   (→ `kuro_intelligence.db`).
+- [`kuro_backend/ingestion_center/ingestion_registry.py`](kuro_backend/ingestion_center/ingestion_registry.py) —
+  *public*: `init_db`, `create_dataset`, `update_dataset`, `list_datasets`,
+  `replace_chunks`, `create_job`, `update_job`, `create_lineage`,
+  `create_retrieval_event`, `search_datasets`, `get_totals`.
+  **Tables**: `ingested_datasets`, `dataset_chunks`, `ingestion_jobs`,
+  `retrieval_analytics`, `dataset_lineage` (→ `kuro_ingestion.db`).
 - [`kuro_backend/reminder_db.py`](kuro_backend/reminder_db.py) —
   *public*: `init_reminder_db`. Schema for `reminders` lives in
   `services/core_service.py` (→ `kuro_reminders.db`).
@@ -688,8 +817,11 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
 ### Frontend
 - [`web_interface/templates/index.html`](web_interface/templates/index.html)
   — dashboard shell: avatar (`/profile/kuro_avatar.png`), WebSocket status ticker, chat pane,
-  favicon links, `V1.0.0 Beta 5` sidebar badge, Chancellor persona option, market chips bar.
+  favicon links, `V1.1.0 Beta 1` sidebar badge, Chancellor persona option, market chips bar,
+  and admin-only sidebar entries for `Ingestion Center` / `Ingestion Analytics`.
 - [`web_interface/templates/intelligence.html`](web_interface/templates/intelligence.html),
+  [`ingestion_center.html`](web_interface/templates/ingestion_center.html),
+  [`ingestion_analytics.html`](web_interface/templates/ingestion_analytics.html),
   [`market.html`](web_interface/templates/market.html),
   [`compliance.html`](web_interface/templates/compliance.html),
   [`login.html`](web_interface/templates/login.html) — secondary pages,
@@ -699,6 +831,10 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
   `kuroEnsureTicker`, `kuroRenderStatusTicker`, `kuroRenderSentinelTicker`,
   `kuroSetAvatarSpeaking`, `kuroConnectDashboardWS`, `kuroStartMarketHudPoll`, `kuroMarketHudChipLine`,
   `kuroHandleGreeting`, `kuroRestoreUIMode`, `sendMessage`, `handleFiles`.
+- [`web_interface/static/js/ingestion_center.js`](web_interface/static/js/ingestion_center.js) —
+  dataset registry UI, upload form, polling for jobs, detail drawer, and lifecycle actions.
+- [`web_interface/static/js/semantic_graph.js`](web_interface/static/js/semantic_graph.js) —
+  analytics page loader for retrieval health, orphan view, and dataset-scoped SVG semantic graph.
 - [`web_interface/static/js/live2d_manager.js`](web_interface/static/js/live2d_manager.js) — [PURGED].
 
 ### Ops / CLI / Tests
@@ -706,7 +842,9 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
   by `execution/openclaw_bridge.py`: `harvest_gemini_share` and
   `vulnerability_scan` (each ships its own `README.md`).
 - [`maintenance/`](maintenance/) — ad-hoc data repair:
-  `clean_duplicate_chat_history.py`, `rebuild_compliance_base.py`.
+  `clean_duplicate_chat_history.py`, `rebuild_compliance_base.py`,
+  `ingest_dataset.py`, `rebuild_embeddings.py`, `cleanup_orphan_chunks.py`,
+  `reindex_dataset.py`.
 - [`scripts/`](scripts/) — one-shot migrations & smokes:
   `migrate_persona_consultant_advisor.py`, `purge_mem0_junk.py`,
   `smoke_mem0_store.py`, `smoke_test_openclaw.py`,
@@ -716,7 +854,8 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
   grounding, sync revisions), branding/HTML, English personas, UI router,
   dreaming worker, CVE sentinel, fiscal shortcuts, finance_db,
   proactive events/greeting, upload hashing, version,
-  persona budget, **chat isolation (Beta 2)**).
+  persona budget, **chat isolation (Beta 2)**, and the admin ingestion
+  center (`test_ingestion_*`).
 
 ## Data & Config
 

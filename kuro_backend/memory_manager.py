@@ -452,6 +452,186 @@ def _init_short_term_db_locked():
         )
     """)
 
+    # Canvas 1 V2: adaptive persona runtime state.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS persona_runtime_state (
+            username TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            formality REAL NOT NULL DEFAULT 0.55,
+            verbosity REAL NOT NULL DEFAULT 0.50,
+            challenge_level REAL NOT NULL DEFAULT 0.50,
+            interaction_depth REAL NOT NULL DEFAULT 0.50,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (username, session_id)
+        )
+    """)
+
+    # Canvas 1 V2: long-term memory integrity telemetry.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS memory_integrity_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            memory_id TEXT NOT NULL,
+            integrity_score REAL NOT NULL,
+            drift_detected INTEGER NOT NULL DEFAULT 0,
+            contradiction_detected INTEGER NOT NULL DEFAULT 0,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_memory_integrity_created "
+        "ON memory_integrity_log(created_at DESC)"
+    )
+
+    # Canvas 2 — Goal runtime persistence.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS goal_registry (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL DEFAULT 'Pantronux',
+            goal_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            priority REAL NOT NULL DEFAULT 0.5,
+            status TEXT NOT NULL DEFAULT 'active',
+            source TEXT NOT NULL DEFAULT 'runtime',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(username, goal_id)
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS goal_execution_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL DEFAULT 'Pantronux',
+            goal_id TEXT NOT NULL,
+            step_id TEXT NOT NULL,
+            status TEXT NOT NULL,
+            note TEXT DEFAULT '',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS subgoal_status (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL DEFAULT 'Pantronux',
+            goal_id TEXT NOT NULL,
+            subgoal_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(username, goal_id, subgoal_id)
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS goal_reflection_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL DEFAULT 'Pantronux',
+            goal_id TEXT NOT NULL,
+            decision_quality REAL NOT NULL DEFAULT 0.0,
+            drift_detected INTEGER NOT NULL DEFAULT 0,
+            recommendation TEXT DEFAULT '',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS cognitive_state_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL DEFAULT 'Pantronux',
+            session_id TEXT NOT NULL DEFAULT '',
+            strategic_focus REAL NOT NULL DEFAULT 0.0,
+            uncertainty_pressure REAL NOT NULL DEFAULT 0.0,
+            cognitive_load REAL NOT NULL DEFAULT 0.0,
+            topic_persistence REAL NOT NULL DEFAULT 0.0,
+            confidence_stability REAL NOT NULL DEFAULT 0.0,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS governance_audit_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL DEFAULT 'Pantronux',
+            action TEXT NOT NULL,
+            risk_label TEXT NOT NULL DEFAULT 'low',
+            payload_json TEXT NOT NULL DEFAULT '{}',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS tenant_runtime_state (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL DEFAULT 'Pantronux',
+            tenant_id TEXT NOT NULL,
+            workspace_scope TEXT NOT NULL,
+            isolation_mode TEXT NOT NULL DEFAULT 'strict_user_scope',
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(username, tenant_id)
+        )
+    """)
+
+    # Canvas 3 — operational maturity telemetry.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS runtime_mode_state (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL DEFAULT 'Pantronux',
+            session_id TEXT NOT NULL DEFAULT '',
+            runtime_mode TEXT NOT NULL DEFAULT 'BALANCED',
+            profile_json TEXT NOT NULL DEFAULT '{}',
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS cognitive_budget_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL DEFAULT 'Pantronux',
+            session_id TEXT NOT NULL DEFAULT '',
+            blocked INTEGER NOT NULL DEFAULT 0,
+            budget_json TEXT NOT NULL DEFAULT '{}',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS failure_recovery_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL DEFAULT 'Pantronux',
+            session_id TEXT NOT NULL DEFAULT '',
+            recovery_strategy TEXT NOT NULL DEFAULT 'none',
+            reason TEXT NOT NULL DEFAULT '',
+            payload_json TEXT NOT NULL DEFAULT '{}',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS identity_core_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL DEFAULT 'Pantronux',
+            session_id TEXT NOT NULL DEFAULT '',
+            identity_score REAL NOT NULL DEFAULT 0.0,
+            drift_detected INTEGER NOT NULL DEFAULT 0,
+            payload_json TEXT NOT NULL DEFAULT '{}',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS autonomy_boundary_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL DEFAULT 'Pantronux',
+            session_id TEXT NOT NULL DEFAULT '',
+            passed INTEGER NOT NULL DEFAULT 1,
+            violations_json TEXT NOT NULL DEFAULT '[]',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS memory_canonicalization_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL DEFAULT 'Pantronux',
+            session_id TEXT NOT NULL DEFAULT '',
+            promoted INTEGER NOT NULL DEFAULT 0,
+            temporal_score REAL NOT NULL DEFAULT 0.0,
+            canonical_summary TEXT NOT NULL DEFAULT '',
+            payload_json TEXT NOT NULL DEFAULT '{}',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     conn.commit()
     conn.close()
     logger.info("Short-term memory database initialized.")
@@ -1340,6 +1520,207 @@ def get_pending_mem0_write_failures() -> List[Dict]:
     except Exception as e:
         logger.error(f"Failed to retrieve Mem0 write failures: {e}")
         return []
+
+
+def append_memory_integrity_log(
+    *,
+    memory_id: str,
+    integrity_score: float,
+    drift_detected: int = 0,
+    contradiction_detected: int = 0,
+) -> None:
+    """Append one memory integrity telemetry row (internal-only)."""
+    try:
+        conn = _get_short_term_conn()
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO memory_integrity_log (memory_id, integrity_score, drift_detected, contradiction_detected) "
+            "VALUES (?, ?, ?, ?)",
+            (
+                str(memory_id),
+                float(integrity_score),
+                int(drift_detected),
+                int(contradiction_detected),
+            ),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.warning(f"[MEMORY_INTEGRITY] append failed memory_id={memory_id}: {e}")
+
+
+def append_governance_audit_log(
+    *,
+    username: str,
+    action: str,
+    risk_label: str,
+    payload: Dict,
+) -> None:
+    """Append one governance audit row (Canvas 2, additive-only)."""
+    try:
+        conn = _get_short_term_conn()
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO governance_audit_log (username, action, risk_label, payload_json) VALUES (?, ?, ?, ?)",
+            (
+                str(username or "Pantronux"),
+                str(action or "allow"),
+                str(risk_label or "low"),
+                json.dumps(payload or {}, ensure_ascii=False),
+            ),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.warning(f"[GOVERNANCE] append audit failed user={username}: {e}")
+
+
+def append_runtime_mode_state(
+    *,
+    username: str,
+    session_id: str,
+    runtime_mode: str,
+    profile: Dict,
+) -> None:
+    try:
+        conn = _get_short_term_conn()
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO runtime_mode_state (username, session_id, runtime_mode, profile_json) VALUES (?, ?, ?, ?)",
+            (str(username or "Pantronux"), str(session_id or ""), str(runtime_mode or "BALANCED"), json.dumps(profile or {}, ensure_ascii=False)),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.warning(f"[RUNTIME_MODE] append failed user={username}: {e}")
+
+
+def append_cognitive_budget_log(
+    *,
+    username: str,
+    session_id: str,
+    blocked: bool,
+    budget: Dict,
+) -> None:
+    try:
+        conn = _get_short_term_conn()
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO cognitive_budget_log (username, session_id, blocked, budget_json) VALUES (?, ?, ?, ?)",
+            (str(username or "Pantronux"), str(session_id or ""), 1 if bool(blocked) else 0, json.dumps(budget or {}, ensure_ascii=False)),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.warning(f"[COG_BUDGET] append failed user={username}: {e}")
+
+
+def append_failure_recovery_log(
+    *,
+    username: str,
+    session_id: str,
+    recovery_strategy: str,
+    reason: str,
+    payload: Dict,
+) -> None:
+    try:
+        conn = _get_short_term_conn()
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO failure_recovery_log (username, session_id, recovery_strategy, reason, payload_json) VALUES (?, ?, ?, ?, ?)",
+            (
+                str(username or "Pantronux"),
+                str(session_id or ""),
+                str(recovery_strategy or "none"),
+                str(reason or ""),
+                json.dumps(payload or {}, ensure_ascii=False),
+            ),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.warning(f"[FAIL_RECOVERY] append failed user={username}: {e}")
+
+
+def append_identity_core_log(
+    *,
+    username: str,
+    session_id: str,
+    identity_score: float,
+    drift_detected: bool,
+    payload: Dict,
+) -> None:
+    try:
+        conn = _get_short_term_conn()
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO identity_core_log (username, session_id, identity_score, drift_detected, payload_json) VALUES (?, ?, ?, ?, ?)",
+            (
+                str(username or "Pantronux"),
+                str(session_id or ""),
+                float(identity_score),
+                1 if bool(drift_detected) else 0,
+                json.dumps(payload or {}, ensure_ascii=False),
+            ),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.warning(f"[IDENTITY_CORE] append failed user={username}: {e}")
+
+
+def append_autonomy_boundary_log(
+    *,
+    username: str,
+    session_id: str,
+    passed: bool,
+    violations: List[str],
+) -> None:
+    try:
+        conn = _get_short_term_conn()
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO autonomy_boundary_log (username, session_id, passed, violations_json) VALUES (?, ?, ?, ?)",
+            (
+                str(username or "Pantronux"),
+                str(session_id or ""),
+                1 if bool(passed) else 0,
+                json.dumps(list(violations or []), ensure_ascii=False),
+            ),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.warning(f"[AUTONOMY_BOUNDARY] append failed user={username}: {e}")
+
+
+def append_memory_canonicalization_log(
+    *,
+    username: str,
+    session_id: str,
+    promoted: bool,
+    temporal_score: float,
+    canonical_summary: str,
+    payload: Dict,
+) -> None:
+    try:
+        conn = _get_short_term_conn()
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO memory_canonicalization_log (username, session_id, promoted, temporal_score, canonical_summary, payload_json) VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                str(username or "Pantronux"),
+                str(session_id or ""),
+                1 if bool(promoted) else 0,
+                float(temporal_score),
+                str(canonical_summary or ""),
+                json.dumps(payload or {}, ensure_ascii=False),
+            ),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.warning(f"[MEM_CANON] append failed user={username}: {e}")
 
 
 

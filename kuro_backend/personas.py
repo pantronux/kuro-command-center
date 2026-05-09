@@ -22,6 +22,10 @@ import os
 from dataclasses import dataclass
 from typing import Final, Mapping
 
+from kuro_backend.cognition_profiles import COGNITION_LAYERS
+from kuro_backend.expertise_profiles import EXPERTISE_LAYERS
+from kuro_backend import tone_engine, persona_runtime
+
 PERSONA_INSTRUCTIONS: Final[dict[str, str]] = {
     "consultant": (
         "You are Kuro, a technical advisor specialized in IT Security, GRC (Governance, Risk, and Compliance), "
@@ -179,7 +183,7 @@ _HARD_RULES_ANTI_HALLUCINATION: Final[str] = (
     "without a source label.\n"
     "2. DO NOT confirm the existence of files, functions, or code modules "
     "that are not visible in the active context or SYSTEM_MAP.\n"
-    "3. If retrieval_grade from AutoRAG is 'irrelevant' or 'ambiguous', "
+    "3. If retrieval_grade from AutoRAG is 'weak', 'contradictory', 'stale', or 'irrelevant', "
     "you MUST notify the Master before answering: 'Context from memory was "
     "not found. The following response is parametric — accuracy is not guaranteed.'\n"
     "4. On technical domains (code, architecture, CVE), use explicit "
@@ -193,8 +197,8 @@ _HARD_RULES_ANTI_HALLUCINATION: Final[str] = (
 
 _AUTORAG_NOTIFICATION_RULE: Final[str] = (
     "\n\nAUTORAG NOTIFICATION RULE:\n"
-    "If the [RETRIEVAL QUALITY] block in your context shows 'irrelevant' or "
-    "'ambiguous', you MUST begin your response with an explicit notification:\n"
+    "If the [RETRIEVAL QUALITY] block in your context shows 'weak', "
+    "'contradictory', 'stale', or 'irrelevant', you MUST begin your response with an explicit notification:\n"
     "'⚠️ AutoRAG Notice: Long-term memory retrieval returned low-quality results "
     "for this query. The following response may rely on parametric knowledge "
     "[SPECULATIVE]. Verify before acting on specific claims.'"
@@ -489,19 +493,28 @@ def build_autorag_notification_block(
     """Return a formatted AutoRAG warning block when retrieval quality is poor.
 
     Args:
-        retrieval_grade: One of "relevant", "ambiguous", "irrelevant"
+        retrieval_grade: One of
+            "grounded" | "partial" | "weak" | "contradictory" | "stale" | "irrelevant"
         retry_count: Number of retrieval retries attempted
 
     Returns:
         Formatted warning string, or empty string if grade is "relevant"
     """
-    if retrieval_grade == "relevant":
+    if retrieval_grade == "grounded":
         return ""
 
+    risk_map = {
+        "partial": "partial evidence coverage",
+        "weak": "weak retrieval evidence",
+        "contradictory": "conflicting retrieval evidence",
+        "stale": "stale retrieval context",
+        "irrelevant": "irrelevant retrieval context",
+    }
+    risk_reason = risk_map.get(retrieval_grade, "uncertain retrieval quality")
     return (
         f"\n\n[RETRIEVAL QUALITY: {retrieval_grade.upper()}]\n"
         f"⚠️ AutoRAG Notice: Long-term memory retrieval returned "
-        f"'{retrieval_grade}' quality results after {retry_count} "
+        f"'{retrieval_grade}' quality results ({risk_reason}) after {retry_count} "
         f"attempt(s). The following response may rely on parametric "
         f"knowledge [SPECULATIVE]. Verify before acting on specific claims."
     )
@@ -516,6 +529,8 @@ def build_system_instruction(
     variant: str = "core",
     master_name: str = "Pantronux",
     custom_persona: str = "",
+    username: str = "Pantronux",
+    session_id: str | None = None,
 ) -> str:
     """
     Build full system prompt for a persona.
@@ -539,6 +554,15 @@ def build_system_instruction(
     if custom_persona and custom_persona.strip():
         persona_text += f"\n\n[USER_CUSTOM_INSTRUCTIONS]\n{custom_persona.strip()}"
 
+    runtime_hint = persona_runtime.build_runtime_hint(username, session_id)
+    layered_hint = (
+        "\n\n[PERSONA_COMPOSITION]\n"
+        f"- cognition_layer: {COGNITION_LAYERS.get(persona_key, COGNITION_LAYERS['consultant'])}\n"
+        f"- tone_layer: {tone_engine.get_tone_layer(persona_key)}\n"
+        f"- expertise_layer: {EXPERTISE_LAYERS.get(persona_key, EXPERTISE_LAYERS['consultant'])}\n"
+        f"- interaction_layer: {tone_engine.get_interaction_layer(persona_key)}"
+    )
+
     header = (
         f"\n\n[CURRENT_TIME: {current_time}] "
         f"[CURRENT_DATE: {current_date}] "
@@ -559,8 +583,9 @@ def build_system_instruction(
             
         return (
             persona_text + header + ssot_tail
+            + layered_hint + runtime_hint
             + cot_block + _EPISTEMIC_TAIL
         )
 
     tail = _CORE_COMMON_TAIL
-    return persona_text + header + ssot_tail + tail + _EPISTEMIC_TAIL
+    return persona_text + header + ssot_tail + layered_hint + runtime_hint + tail + _EPISTEMIC_TAIL

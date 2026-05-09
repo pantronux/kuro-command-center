@@ -145,6 +145,92 @@ def _init_db_locked():
             CREATE INDEX IF NOT EXISTS idx_research_sources_username ON research_sources(username, retrieved_at DESC)
         """)
 
+        # Canvas 1 V2: internal epistemic claim audit table.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS epistemic_claims (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT,
+                message_id TEXT,
+                claim_text TEXT NOT NULL,
+                source_type TEXT NOT NULL,
+                confidence REAL NOT NULL DEFAULT 0.0,
+                contradiction_score REAL NOT NULL DEFAULT 0.0,
+                visibility TEXT NOT NULL DEFAULT 'internal',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_epistemic_claims_session
+            ON epistemic_claims(session_id, created_at DESC)
+        """)
+
+        # Canvas 1 V2: retrieval quality telemetry.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS retrieval_quality_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT,
+                retrieval_grade TEXT NOT NULL,
+                confidence REAL NOT NULL DEFAULT 0.0,
+                evidence_density REAL NOT NULL DEFAULT 0.0,
+                freshness_score REAL NOT NULL DEFAULT 0.0,
+                contradiction_score REAL NOT NULL DEFAULT 0.0,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_retrieval_quality_session
+            ON retrieval_quality_log(session_id, created_at DESC)
+        """)
+
+        # Canvas 2 — multi-model / consensus telemetry.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS consensus_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT,
+                selected_role TEXT NOT NULL DEFAULT '',
+                consensus_score REAL NOT NULL DEFAULT 0.0,
+                consensus_label TEXT NOT NULL DEFAULT '',
+                payload_json TEXT NOT NULL DEFAULT '{}',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_consensus_session
+            ON consensus_log(session_id, created_at DESC)
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS memory_authority_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT,
+                domain TEXT NOT NULL DEFAULT '',
+                confidence REAL NOT NULL DEFAULT 0.0,
+                source_models TEXT NOT NULL DEFAULT '[]',
+                canonical_summary TEXT NOT NULL DEFAULT '',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS model_router_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT,
+                selected_role TEXT NOT NULL DEFAULT '',
+                router_note TEXT NOT NULL DEFAULT '',
+                payload_json TEXT NOT NULL DEFAULT '{}',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS openai_model_placeholder_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT,
+                status TEXT NOT NULL DEFAULT 'placeholder',
+                mode TEXT NOT NULL DEFAULT 'stub',
+                api_key_present INTEGER NOT NULL DEFAULT 0,
+                payload_json TEXT NOT NULL DEFAULT '{}',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
         cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS backup_log (
@@ -173,6 +259,132 @@ def _init_db_locked():
             """
             CREATE INDEX IF NOT EXISTS idx_backup_log_type_status
             ON backup_log(backup_type, status)
+            """
+        )
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS export_jobs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL,
+                export_type TEXT NOT NULL,
+                export_format TEXT NOT NULL,
+                status TEXT NOT NULL,
+                source_chat_id TEXT,
+                source_message_ids TEXT,
+                briefing_date TEXT,
+                standard TEXT,
+                created_at TEXT NOT NULL,
+                completed_at TEXT,
+                file_path TEXT,
+                file_size INTEGER,
+                checksum_sha256 TEXT,
+                error_message TEXT
+            )
+            """
+        )
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS export_audit_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL,
+                action TEXT NOT NULL,
+                export_job_id INTEGER,
+                metadata_json TEXT,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        cursor.execute("PRAGMA table_info(export_jobs)")
+        export_job_cols = [row["name"] for row in cursor.fetchall()]
+        if export_job_cols and "briefing_date" not in export_job_cols:
+            cursor.execute("ALTER TABLE export_jobs ADD COLUMN briefing_date TEXT")
+        if export_job_cols and "standard" not in export_job_cols:
+            cursor.execute("ALTER TABLE export_jobs ADD COLUMN standard TEXT")
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_export_jobs_user_created
+            ON export_jobs(username, created_at DESC)
+            """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_export_jobs_status
+            ON export_jobs(status)
+            """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_export_audit_user_created
+            ON export_audit_log(username, created_at DESC)
+            """
+        )
+
+        # Canvas 3 — operational maturity telemetry.
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS tool_trace_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT,
+                payload_json TEXT NOT NULL DEFAULT '{}',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS tool_budget_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT,
+                blocked INTEGER NOT NULL DEFAULT 0,
+                payload_json TEXT NOT NULL DEFAULT '{}',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS tool_risk_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT,
+                tool_name TEXT NOT NULL DEFAULT '',
+                composite_risk REAL NOT NULL DEFAULT 0.0,
+                payload_json TEXT NOT NULL DEFAULT '{}',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS source_reliability_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT,
+                credibility_score REAL NOT NULL DEFAULT 0.0,
+                trustworthiness REAL NOT NULL DEFAULT 0.0,
+                payload_json TEXT NOT NULL DEFAULT '{}',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS constitution_audit_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT,
+                passed INTEGER NOT NULL DEFAULT 1,
+                violations_json TEXT NOT NULL DEFAULT '[]',
+                payload_json TEXT NOT NULL DEFAULT '{}',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS evaluation_runtime_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT,
+                payload_json TEXT NOT NULL DEFAULT '{}',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
             """
         )
 
@@ -211,6 +423,275 @@ def save_research_sources(session_id: str, username: str, chat_id: Optional[str]
         logger.info(f"[INTELLIGENCE] {len(sources)} research sources saved for {username} in session {session_id}")
     except Exception as e:
         logger.error(f"Failed to save research sources: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+
+def save_epistemic_claims(session_id: str, message_id: str, claims: List[Dict]) -> None:
+    if not claims:
+        return
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        rows = []
+        for c in claims:
+            rows.append(
+                (
+                    session_id,
+                    message_id,
+                    c.get("text", ""),
+                    c.get("source_type", "unknown"),
+                    float(c.get("confidence", 0.0) or 0.0),
+                    float(c.get("contradiction_score", 0.0) or 0.0),
+                    c.get("visibility", "internal"),
+                )
+            )
+        cursor.executemany(
+            """
+            INSERT INTO epistemic_claims
+                (session_id, message_id, claim_text, source_type, confidence, contradiction_score, visibility)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            rows,
+        )
+        conn.commit()
+    except Exception as e:
+        logger.warning(f"Failed to save epistemic claims: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+
+def save_retrieval_quality_log(
+    *,
+    session_id: str,
+    retrieval_grade: str,
+    confidence: float,
+    evidence_density: float,
+    freshness_score: float,
+    contradiction_score: float,
+) -> None:
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO retrieval_quality_log
+                (session_id, retrieval_grade, confidence, evidence_density, freshness_score, contradiction_score)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                session_id,
+                retrieval_grade,
+                float(confidence),
+                float(evidence_density),
+                float(freshness_score),
+                float(contradiction_score),
+            ),
+        )
+        conn.commit()
+    except Exception as e:
+        logger.warning(f"Failed to save retrieval quality log: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+
+def save_model_router_log(*, session_id: str, selected_role: str, router_note: str, payload: Dict) -> None:
+    conn = None
+    try:
+        conn = _get_connection()
+        c = conn.cursor()
+        c.execute(
+            "INSERT INTO model_router_log (session_id, selected_role, router_note, payload_json) VALUES (?, ?, ?, ?)",
+            (session_id, selected_role, router_note, json.dumps(payload or {}, ensure_ascii=False)),
+        )
+        conn.commit()
+    except Exception as e:
+        logger.warning(f"Failed to save model router log: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+
+def save_consensus_log(*, session_id: str, selected_role: str, consensus_score: float, consensus_label: str, payload: Dict) -> None:
+    conn = None
+    try:
+        conn = _get_connection()
+        c = conn.cursor()
+        c.execute(
+            "INSERT INTO consensus_log (session_id, selected_role, consensus_score, consensus_label, payload_json) VALUES (?, ?, ?, ?, ?)",
+            (session_id, selected_role, float(consensus_score), consensus_label, json.dumps(payload or {}, ensure_ascii=False)),
+        )
+        conn.commit()
+    except Exception as e:
+        logger.warning(f"Failed to save consensus log: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+
+def save_memory_authority_log(*, session_id: str, payload: Dict) -> None:
+    conn = None
+    try:
+        conn = _get_connection()
+        c = conn.cursor()
+        c.execute(
+            "INSERT INTO memory_authority_log (session_id, domain, confidence, source_models, canonical_summary) VALUES (?, ?, ?, ?, ?)",
+            (
+                session_id,
+                str(payload.get("domain", "")),
+                float(payload.get("confidence", 0.0) or 0.0),
+                json.dumps(payload.get("source_models", []), ensure_ascii=False),
+                str(payload.get("canonical_summary", "")),
+            ),
+        )
+        conn.commit()
+    except Exception as e:
+        logger.warning(f"Failed to save memory authority log: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+
+def save_openai_model_placeholder_log(*, session_id: str, payload: Dict) -> None:
+    conn = None
+    try:
+        conn = _get_connection()
+        c = conn.cursor()
+        c.execute(
+            "INSERT INTO openai_model_placeholder_log (session_id, status, mode, api_key_present, payload_json) VALUES (?, ?, ?, ?, ?)",
+            (
+                session_id,
+                str(payload.get("status", "placeholder")),
+                str(payload.get("mode", "stub")),
+                1 if bool(payload.get("api_key_present", False)) else 0,
+                json.dumps(payload or {}, ensure_ascii=False),
+            ),
+        )
+        conn.commit()
+    except Exception as e:
+        logger.warning(f"Failed to save OpenAI Model placeholder log: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+
+def save_tool_trace_log(*, session_id: str, payload: Dict) -> None:
+    conn = None
+    try:
+        conn = _get_connection()
+        c = conn.cursor()
+        c.execute(
+            "INSERT INTO tool_trace_log (session_id, payload_json) VALUES (?, ?)",
+            (session_id, json.dumps(payload or {}, ensure_ascii=False)),
+        )
+        conn.commit()
+    except Exception as e:
+        logger.warning(f"Failed to save tool trace log: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+
+def save_tool_budget_log(*, session_id: str, payload: Dict) -> None:
+    conn = None
+    try:
+        conn = _get_connection()
+        c = conn.cursor()
+        c.execute(
+            "INSERT INTO tool_budget_log (session_id, blocked, payload_json) VALUES (?, ?, ?)",
+            (
+                session_id,
+                1 if bool((payload or {}).get("blocked", False)) else 0,
+                json.dumps(payload or {}, ensure_ascii=False),
+            ),
+        )
+        conn.commit()
+    except Exception as e:
+        logger.warning(f"Failed to save tool budget log: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+
+def save_tool_risk_log(*, session_id: str, tool_name: str, composite_risk: float, payload: Dict) -> None:
+    conn = None
+    try:
+        conn = _get_connection()
+        c = conn.cursor()
+        c.execute(
+            "INSERT INTO tool_risk_log (session_id, tool_name, composite_risk, payload_json) VALUES (?, ?, ?, ?)",
+            (session_id, tool_name, float(composite_risk), json.dumps(payload or {}, ensure_ascii=False)),
+        )
+        conn.commit()
+    except Exception as e:
+        logger.warning(f"Failed to save tool risk log: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+
+def save_source_reliability_log(*, session_id: str, payload: Dict) -> None:
+    conn = None
+    try:
+        conn = _get_connection()
+        c = conn.cursor()
+        c.execute(
+            "INSERT INTO source_reliability_log (session_id, credibility_score, trustworthiness, payload_json) VALUES (?, ?, ?, ?)",
+            (
+                session_id,
+                float((payload or {}).get("credibility_score", 0.0) or 0.0),
+                float((payload or {}).get("retrieval_trustworthiness", 0.0) or 0.0),
+                json.dumps(payload or {}, ensure_ascii=False),
+            ),
+        )
+        conn.commit()
+    except Exception as e:
+        logger.warning(f"Failed to save source reliability log: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+
+def save_constitution_audit_log(*, session_id: str, payload: Dict) -> None:
+    conn = None
+    try:
+        conn = _get_connection()
+        c = conn.cursor()
+        violations = (payload or {}).get("violations", [])
+        c.execute(
+            "INSERT INTO constitution_audit_log (session_id, passed, violations_json, payload_json) VALUES (?, ?, ?, ?)",
+            (
+                session_id,
+                1 if not violations else 0,
+                json.dumps(violations or [], ensure_ascii=False),
+                json.dumps(payload or {}, ensure_ascii=False),
+            ),
+        )
+        conn.commit()
+    except Exception as e:
+        logger.warning(f"Failed to save constitution audit log: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+
+def save_evaluation_runtime_log(*, session_id: str, payload: Dict) -> None:
+    conn = None
+    try:
+        conn = _get_connection()
+        c = conn.cursor()
+        c.execute(
+            "INSERT INTO evaluation_runtime_log (session_id, payload_json) VALUES (?, ?)",
+            (session_id, json.dumps(payload or {}, ensure_ascii=False)),
+        )
+        conn.commit()
+    except Exception as e:
+        logger.warning(f"Failed to save evaluation runtime log: {e}")
     finally:
         if conn:
             conn.close()
@@ -464,6 +945,184 @@ def get_last_backup_status() -> Optional[Dict]:
     """Return the most recent backup audit row."""
     rows = get_backup_history(limit=1)
     return rows[0] if rows else None
+
+
+def create_export_job(
+    username: str,
+    export_type: str,
+    export_format: str,
+    source_chat_id: Optional[str],
+    source_message_ids: List[int] | None = None,
+    briefing_date: Optional[str] = None,
+    standard: Optional[str] = None,
+) -> int:
+    """Insert a new export job row and return its ID."""
+    init_db()
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO export_jobs (
+                username, export_type, export_format, status, source_chat_id,
+                source_message_ids, briefing_date, standard, created_at
+            ) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """,
+            (
+                username,
+                export_type,
+                export_format,
+                source_chat_id,
+                json.dumps(source_message_ids or []),
+                briefing_date,
+                standard,
+            ),
+        )
+        conn.commit()
+        return int(cursor.lastrowid)
+    finally:
+        if conn:
+            conn.close()
+
+
+def mark_export_job_running(job_id: int) -> None:
+    """Mark an export job as running."""
+    init_db()
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE export_jobs SET status = 'running' WHERE id = ?",
+            (job_id,),
+        )
+        conn.commit()
+    finally:
+        if conn:
+            conn.close()
+
+
+def mark_export_job_completed(
+    job_id: int,
+    file_path: str,
+    file_size: int,
+    checksum_sha256: str,
+) -> None:
+    """Finalize a completed export job."""
+    init_db()
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            UPDATE export_jobs
+            SET status = 'completed', completed_at = CURRENT_TIMESTAMP, file_path = ?,
+                file_size = ?, checksum_sha256 = ?, error_message = NULL
+            WHERE id = ?
+            """,
+            (file_path, file_size, checksum_sha256, job_id),
+        )
+        conn.commit()
+    finally:
+        if conn:
+            conn.close()
+
+
+def mark_export_job_failed(job_id: int, error_message: str) -> None:
+    """Finalize a failed export job."""
+    init_db()
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            UPDATE export_jobs
+            SET status = 'failed', completed_at = CURRENT_TIMESTAMP, error_message = ?
+            WHERE id = ?
+            """,
+            (error_message, job_id),
+        )
+        conn.commit()
+    finally:
+        if conn:
+            conn.close()
+
+
+def get_export_job(job_id: int) -> Optional[Dict]:
+    """Return a single export job row."""
+    init_db()
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM export_jobs WHERE id = ?", (job_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    except Exception as e:
+        logger.error("Failed to get export job: %s", e)
+        return None
+    finally:
+        if conn:
+            conn.close()
+
+
+def list_export_jobs(username: str, limit: int = 20) -> List[Dict]:
+    """Return recent export jobs for a user."""
+    init_db()
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT * FROM export_jobs
+            WHERE username = ?
+            ORDER BY created_at DESC, id DESC
+            LIMIT ?
+            """,
+            (username, limit),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+    except Exception as e:
+        logger.error("Failed to list export jobs: %s", e)
+        return []
+    finally:
+        if conn:
+            conn.close()
+
+
+def log_export_audit(
+    username: str,
+    action: str,
+    export_job_id: Optional[int],
+    metadata: Dict,
+) -> None:
+    """Insert an export audit row."""
+    init_db()
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO export_audit_log (
+                username, action, export_job_id, metadata_json, created_at
+            ) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """,
+            (
+                username,
+                action,
+                export_job_id,
+                json.dumps(metadata or {}, ensure_ascii=False),
+            ),
+        )
+        conn.commit()
+    finally:
+        if conn:
+            conn.close()
 
 # Initialize on import
 init_db()

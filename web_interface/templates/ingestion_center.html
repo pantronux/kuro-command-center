@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kuro AI - Ingestion Center</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/ingestion_center.css">
+</head>
+<body class="ingestion-shell">
+    <main class="ingestion-page">
+        <aside class="ingestion-rail">
+            <h1>Sovereign Knowledge</h1>
+            <p class="subtitle">Admin Ingestion Control Center</p>
+            <nav class="ingestion-nav">
+                <a href="/">Chat</a>
+                <a href="/intelligence">Intelligence</a>
+                <a href="/ingestion" class="active">Ingestion Center</a>
+                <a href="/ingestion/analytics">Ingestion Analytics</a>
+                <a href="/ingestion/logs">Ingestion Logs</a>
+            </nav>
+            <section class="panel">
+                <h2>Totals</h2>
+                <div id="summaryCards" class="summary-list"></div>
+            </section>
+            <section class="panel">
+                <h2>Upload Dataset</h2>
+                <form id="uploadForm">
+                    <input type="file" name="file" required>
+                    <input type="text" name="category" placeholder="Category" value="general">
+                    <input type="text" name="tags" placeholder="tag-a, tag-b">
+                    <input type="text" name="memory_scope" value="chroma_only">
+                    <button type="submit">Upload</button>
+                </form>
+                <p id="uploadStatus" class="muted"></p>
+                <div id="activeJobProgress" class="progress-shell hidden">
+                    <div class="progress-labels">
+                        <strong id="activeJobLabel">Waiting for job...</strong>
+                        <span id="activeJobPercent">0%</span>
+                    </div>
+                    <div class="progress-bar"><span id="activeJobBar"></span></div>
+                </div>
+            </section>
+            <section class="panel">
+                <div class="toolbar">
+                    <h2>Orphan Source Recovery</h2>
+                    <button id="scanOrphansButton" type="button">Scan</button>
+                </div>
+                <p id="orphanStatus" class="muted">Scan source folder to find files that never made it into the registry.</p>
+                <div class="toolbar compact">
+                    <button id="recoverAllOrphansButton" type="button">Re-ingest All</button>
+                </div>
+                <div id="orphanList" class="orphan-list"></div>
+            </section>
+        </aside>
+        <section class="ingestion-main">
+            <section class="panel">
+                <div class="toolbar">
+                    <h2>Dataset Registry</h2>
+                    <input id="searchInput" type="search" placeholder="Search dataset, filename, tag, chunk">
+                </div>
+                <div class="table-wrap">
+                    <table class="ingestion-table">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Status</th>
+                                <th>Category</th>
+                                <th>Chunks</th>
+                                <th>Embeddings</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="datasetTableBody"></tbody>
+                    </table>
+                </div>
+            </section>
+            <section class="grid-two">
+                <section class="panel">
+                    <h2>Ingestion Jobs</h2>
+                    <div id="jobList" class="job-list"></div>
+                </section>
+                <section class="panel">
+                    <h2>Dataset Detail</h2>
+                    <div id="datasetDetail" class="detail-block">Select a dataset.</div>
+                </section>
+            </section>
+            <section class="panel">
+                <h2>Chunk Explorer</h2>
+                <div id="chunkExplorer" class="chunk-list"></div>
+            </section>
+        </section>
+    </main>
+    <script src="/static/js/ingestion_center.js"></script>
+</body>
+</html>

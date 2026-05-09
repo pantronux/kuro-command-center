@@ -1,11 +1,108 @@
+## [V1.1.0 Beta 1] — "Sovereign Chat" — 2026-05-09
+
+### New Features
+- **Canvas 3 Operational Maturity Layer**: Added enterprise-safe runtime controls on top of Canvas 1+2 with default-safe flags (`OFF`).
+- **Tool Governance Runtime**: Added policy/risk/budget guard modules under `kuro_backend/tools/` (`tool_policy_engine`, `tool_capability_registry`, `tool_risk_scoring`, `tool_execution_guard`, `tool_budget_manager`, `tool_trace_logger`).
+- **Runtime Modes**: Added independent runtime mode profiles (`STRICT`, `BALANCED`, `CREATIVE`, `RESEARCH`, `ENTERPRISE`, `SAFE`) decoupled from persona selection.
+- **Failure Recovery Runtime**: Added recovery classification and degraded-safe payload handling for guarded runtime fallbacks.
+- **Identity + Constitution + Boundary Checks**: Added internal response-time checks for identity drift, constitutional guardrails, and autonomy boundary violations.
+- **Source Reliability Engine**: Added scoring for advisor research evidence quality (credibility, trustworthiness, freshness).
+- **Evaluation Runtime Harness**: Added `kuro_backend/evaluation_runtime/` snapshot suite for hallucination, grounding, persona consistency, memory integrity, multi-model alignment, and governance compliance.
+
+### Architecture & Backend
+- **LangGraph integrations**:
+  - Added `runtime_mode_node` and `tool_governance_node` to the runtime graph.
+  - Added `tool_governance` routing gate before `tool_node` when Canvas 3 governance flag is enabled.
+  - Preserved stable fallback behavior when Canvas 3 flags are disabled.
+- **Memory canonicalization integration**:
+  - Added canonicalization metadata pipeline in memory write/read flow (`memory_coordinator`) with additive telemetry.
+- **Operational telemetry tables**:
+  - `kuro_short_term.db`: `runtime_mode_state`, `cognitive_budget_log`, `failure_recovery_log`, `identity_core_log`, `autonomy_boundary_log`, `memory_canonicalization_log`.
+  - `kuro_intelligence.db`: `tool_trace_log`, `tool_budget_log`, `tool_risk_log`, `source_reliability_log`, `constitution_audit_log`, `evaluation_runtime_log`.
+
+### Versioning
+- **Version bump**:
+  - `kuro_backend/version.py` → `1.1.0-beta.1`
+  - `VERSION_LABEL` → `V1.1.0 Beta 1`
+  - Codename remains **Sovereign Chat**
+- **Strict sync updates**:
+  - Updated active user-facing version markers in `SYSTEM_MAP.md`, `web_interface/templates/index.html`, `web_interface/templates/login.html`, and `web_interface/templates/tutorial.html`.
+  - Updated `tests/test_version.py` expectations for the new SSOT.
+
+### Testing & Verification
+- Added Canvas 3 automated tests:
+  - `test_canvas3_tool_governance.py`
+  - `test_canvas3_memory_canonicalization.py`
+  - `test_canvas3_cognitive_budget.py`
+  - `test_canvas3_failure_recovery.py`
+  - `test_canvas3_runtime_modes.py`
+  - `test_canvas3_identity_constitution.py`
+  - `test_canvas3_source_reliability.py`
+  - `test_canvas3_autonomy_boundaries.py`
+  - `test_canvas3_evaluation_runtime.py`
+- Preserved regression stability gates for SSE contract and Canvas 1/2 safety.
+
+## [V1.0.0 Beta 6] — "Sovereign Chat" — 2026-05-08
+
+### New Features
+- **Universal Export Engine**: Added a modular export subsystem supporting `chat_session`, `selected_messages`, `intelligence_report`, `compliance_report`, and `market_snapshot`.
+- **Multi-Format Export**: Added synchronous export support for `md`, `txt`, `json`, `csv`, `xlsx`, and `docx`, plus asynchronous PDF job generation with download history and audit tracking.
+- **Phase 4 Export Targets**: Intelligence briefings, market snapshots, and admin-gated compliance reports can now be exported through the same registry-based pipeline.
+- **Smart Export Suggestions**: Kuro now proactively suggests export actions based on persona + output shape:
+  - `auditor` → `xlsx`
+  - `advisor` → `pdf`, `docx`, `xlsx`
+  - `chancellor` → `xlsx`, `csv`
+- **Persistent Suggestion Recall**: Export suggestions are stored per assistant message and re-render after page refresh or history reload.
+
+### Architecture & Backend
+- **New export package**: Added `kuro_backend/export_engine/` with typed models, registry lookup, security validation, renderer layer, and format-specific exporters.
+- **Export persistence in intelligence DB**: Added `export_jobs` and `export_audit_log` plus support columns for `briefing_date` and `standard`.
+- **Renderer-first export flow**: Implemented `Renderer -> Payload -> Exporter` pattern for chat, intelligence, compliance, and market domains.
+- **Message-level export suggestions**: `chat_history.py` now persists `export_suggestions_json` for assistant messages; `main.py` injects suggestion metadata into synchronous and SSE chat responses.
+- **Admin-only compliance export gate**: Compliance export is restricted to `ADMIN_USERNAME` because `kuro_compliance.db` is global and not user-scoped.
+
+### Frontend & UX
+- **Export modal upgrade**: Chat export modal now supports `md`, `txt`, `json`, `csv`, `xlsx`, `docx`, and `pdf`.
+- **Quick export actions in chat bubbles**: Suggested exports render as inline action buttons directly in AI responses and remain available after history reload.
+- **Precise QA export action**: Auditor suggestions now export `selected_messages` when the assistant message ID is available, rather than exporting the whole chat session.
+
+### API & Routes
+- **New export APIs**:
+  - `POST /api/export`
+  - `GET /api/export/history`
+  - `GET /api/export/{job_id}`
+  - `GET /api/export/{job_id}/download`
+- **Backward compatibility preserved**: `GET /api/chats/{chat_id}/export` remains active for legacy `md` and `txt` downloads, but now delegates into the export engine.
+
+### Testing & Verification
+- **New automated coverage**: Added export engine, export route, and SSE contract tests for chat, intelligence, market, compliance, and persona-aware smart export suggestions.
+- **Regression coverage maintained**: Chat session behavior, PDF jobs, message-level export suggestions, and history persistence remain verified under the test suite.
+
 ## [V1.0.0 Beta 5 Hotfix 2] — "Telegram Concurrency & Docs" — 2026-05-08
+
+### New Features
+- **Admin Ingestion Control Center**: Added an admin-only ingestion subsystem for dataset lifecycle management, semantic chunk visibility, vector health inspection, lineage tracking, and registry-first ingestion workflows.
+- **Admin Knowledge Pages**: Added `/ingestion` and `/ingestion/analytics` as dedicated admin dashboards for dataset registry, ingestion jobs, chunk explorer, Chroma health, orphan inspection, retrieval analytics, and semantic graph visualization.
+- **Admin Sidebar Gate**: Added `Ingestion Center` and `Ingestion Analytics` to the main dashboard sidebar for administrators only; non-admin users do not see the menu and remain blocked from direct URL access.
+
+### Architecture & Backend
+- **New ingestion package**: Added `kuro_backend/ingestion_center/` with dedicated modules for DB registry, pipeline orchestration, security, chunking, vector storage, audit lineage, analytics, Chroma inspection, renderers, and typed schemas.
+- **Dedicated ingestion database**: Added `kuro_ingestion.db` with tables `ingested_datasets`, `dataset_chunks`, `ingestion_jobs`, `retrieval_analytics`, and `dataset_lineage`, plus indexes for lifecycle, lookup, and admin search workloads.
+- **Registry-first ingestion pipeline**: Implemented `parse -> clean -> chunk -> embed -> register -> finalize` flow where dataset metadata persists even when vector writes degrade, resulting in `partially_indexed` rather than silent loss.
+- **Chroma-isolated vector adapter**: Added a deterministic ingestion-owned vector path under `kuro_chromadb/ingestion_center`, isolated from the existing Mem0 chat-memory path.
+- **Lifecycle APIs**: Added upload, reindex, archive, delete, search, graph, analytics, and orphan-cleanup routes under `/api/ingestion/*`.
+
+### Frontend & Tooling
+- **New templates and assets**: Added `web_interface/templates/ingestion_center.html`, `ingestion_analytics.html`, `static/js/ingestion_center.js`, `static/js/semantic_graph.js`, and `static/css/ingestion_center.css`.
+- **Maintenance scripts**: Added `maintenance/ingest_dataset.py`, `rebuild_embeddings.py`, `cleanup_orphan_chunks.py`, and `reindex_dataset.py` for operator workflows outside the dashboard.
+- **Test coverage**: Added ingestion-focused automated tests covering schema bootstrap, API auth, lifecycle actions, search, graph payload, and deterministic Chroma health degradation handling.
 
 ### Critical Fixes
 - **Telegram Concurrency Guard**: Implemented `_acquire_bot_lock` using a PID lock file (`.kuro_telegram.lock`) with `fcntl.flock` to prevent multiple polling instances and resolve `getUpdates` conflicts.
 - **Bot Startup Safety**: Added `atexit` cleanup for the lock file and enforced process exit if another instance is detected.
 
 ### Documentation
-- **SYSTEM_MAP Update**: Corrected the Telegram service description to reflect full inbound/outbound support via the LangGraph core.
+- **SYSTEM_MAP Update**: Corrected the Telegram service description to reflect full inbound/outbound support via the LangGraph core, and synchronized the new Admin Ingestion Control Center subsystem into the architecture map.
 
 ## [V1.0.0 Beta 5 Hotfix 1] — "Sovereign Shield" — 2026-05-08
 
