@@ -1,0 +1,108 @@
+# Technical Debt Register (Pre-V2)
+
+## TODO / FIXME / HACK / NOQA
+- No explicit TODO/FIXME/HACK/NOQA markers found by static scan.
+
+## Functions Longer Than 100 Lines
+- `kuro_backend/langgraph_core.py:1999` `response_node` — 505 lines
+- `main.py:1545` `chat_stream_endpoint` — 406 lines
+- `kuro_backend/langgraph_core.py:3068` `process_chat_with_graph_stream` — 397 lines
+- `kuro_backend/intelligence_db.py:59` `_init_db_locked` — 392 lines
+- `main.py:1555` `event_generator` — 386 lines
+- `kuro_backend/memory_manager.py:315` `_init_short_term_db_locked` — 340 lines
+- `kuro_backend/chat_history.py:64` `_init_db_locked` — 322 lines
+- `main.py:1280` `chat_endpoint` — 262 lines
+- `main.py:3875` `start_reminder_scheduler` — 255 lines
+- `kuro_backend/finance_db.py:110` `_init_db_locked` — 242 lines
+- `kuro_backend/langgraph_core.py:2544` `tool_node` — 180 lines
+- `kuro_backend/tools/base_tools.py:1598` `summarize_document` — 173 lines
+- `kuro_backend/langgraph_core.py:1625` `advisor_research_node` — 160 lines
+- `kuro_backend/core.py:140` `process_chat` — 158 lines
+- `kuro_backend/backup_manager.py:162` `_run_backup_job` — 157 lines
+- `kuro_backend/langgraph_core.py:3565` `process_chat_with_graph` — 156 lines
+- `kuro_backend/memory_coordinator.py:1172` `build_context_for_llm` — 154 lines
+- `kuro_backend/tools/base_tools.py:1229` `summarize_pdf` — 154 lines
+- `kuro_backend/tools/base_tools.py:1871` `advanced_execution_tool` — 141 lines
+- `kuro_backend/langgraph_core.py:1482` `executive_monitor_node` — 139 lines
+- `kuro_backend/langgraph_core.py:2856` `build_kuro_graph` — 134 lines
+- `kuro_backend/dreaming_worker.py:1210` `run_dreaming_cycle` — 127 lines
+- `kuro_backend/ingestion_center/ingestion_registry.py:55` `_init_db_locked` — 127 lines
+- `kuro_backend/tools/base_tools.py:595` `smart_read` — 126 lines
+- `kuro_backend/memory_coordinator.py:1029` `_retrieve_ingestion_evidence` — 122 lines
+- `main.py:3731` `hardware_sentinel_check` — 120 lines
+- `kuro_backend/memory_manager.py:1452` `expand_query` — 117 lines
+- `kuro_backend/memory_coordinator.py:1576` `execute_mem0_extract_task` — 115 lines
+- `main.py:346` `_detect_export_suggestions` — 112 lines
+- `kuro_backend/memory_coordinator.py:867` `generate_chat_context` — 103 lines
+- `kuro_backend/langgraph_core.py:1789` `metacognitive_review_node` — 101 lines
+- `kuro_backend/price_ticker_worker.py:42` `run_price_update` — 101 lines
+
+## Bare `except` / `except ...: pass`
+- `main.py:236` except with pass
+- `main.py:1242` except with pass
+- `main.py:3204` except with pass
+- `main.py:3849` except with pass
+- `main.py:4170` bare except + pass
+- `kuro_backend/agency/joint_goal_store.py:193` bare except + pass
+- `kuro_backend/chat_history.py:477` bare except
+- `kuro_backend/chat_history.py:487` bare except + pass
+- `kuro_backend/dashboard_broadcast.py:48` except with pass
+- `kuro_backend/dreaming_worker.py:721` except with pass
+- `kuro_backend/dreaming_worker.py:1205` except with pass
+- `kuro_backend/dreaming_worker.py:1331` except with pass
+- `kuro_backend/execution/openclaw_bridge.py:510` except with pass
+- `kuro_backend/ingestion_center/embedding_manager.py:64` except with pass
+- `kuro_backend/ingestion_center/ingestion_manager.py:38` except with pass
+- `kuro_backend/intelligence_engine.py:403` bare except + pass
+- `kuro_backend/langgraph_core.py:1455` except with pass
+- `kuro_backend/langgraph_core.py:1471` except with pass
+- `kuro_backend/memory_coordinator.py:193` except with pass
+- `kuro_backend/memory_coordinator.py:209` except with pass
+- `kuro_backend/memory_coordinator.py:1459` except with pass
+- `kuro_backend/memory_coordinator.py:1478` except with pass
+- `kuro_backend/memory_coordinator.py:1503` except with pass
+- `kuro_backend/memory_coordinator.py:1474` except with pass
+- `kuro_backend/memory_coordinator.py:1489` except with pass
+- `kuro_backend/memory_coordinator.py:1664` except with pass
+- `kuro_backend/memory_coordinator.py:1653` except with pass
+- `kuro_backend/memory_coordinator.py:1661` except with pass
+- `kuro_backend/memory_coordinator.py:1675` except with pass
+- `kuro_backend/memory_manager.py:294` except with pass
+- `kuro_backend/memory_manager.py:1101` except with pass
+- `kuro_backend/memory_manager.py:1397` except with pass
+- `kuro_backend/memory_manager.py:88` except with pass
+- `kuro_backend/memory_manager.py:97` except with pass
+- `kuro_backend/memory_manager.py:383` except with pass
+- `kuro_backend/memory_manager.py:1105` except with pass
+- `kuro_backend/perpetual_memory.py:146` except with pass
+- `kuro_backend/perpetual_memory.py:155` except with pass
+- `kuro_backend/price_ticker_worker.py:93` except with pass
+- `kuro_backend/semantic_cache.py:141` except with pass
+- `kuro_backend/services/core_service.py:101` except with pass
+- `kuro_backend/tools/base_tools.py:895` except with pass
+- `kuro_backend/tools/base_tools.py:1131` except with pass
+- `kuro_backend/tools/base_tools.py:358` except with pass
+- `kuro_backend/tools/base_tools.py:878` except with pass
+- `kuro_backend/tools/base_tools.py:103` except with pass
+- `kuro_backend/tools/base_tools.py:798` except with pass
+- `tests/test_chat_isolation.py:172` except with pass
+- `tests/test_chat_isolation.py:203` except with pass
+
+## `print()` Used Instead of Logger
+- `tests/test_chat_isolation.py:75` print("PASS: Chat history isolation verified")
+- `tests/test_chat_isolation.py:120` print("PASS: Short-term isolation verified")
+- `tests/test_chat_isolation.py:156` print("PASS: get_short_term_with_ids isolation verified")
+- `tests/test_chat_isolation.py:187` print("PASS: Session context functions verified")
+- `tests/test_chat_isolation.py:223` print("PASS: Session message count verified")
+- `tests/test_chat_isolation.py:244` print("PASS: get_default_chat_id verified")
+- `tests/test_chat_isolation.py:277` print("PASS: record_uploaded_file_integrity with chat_id verified")
+- `tests/test_chat_isolation.py:296` print(f"PASS: build_referent_grounding_block with chat_id returned: {block is not None}")
+- `tests/test_chat_isolation.py:304` print("=" * 60)
+- `tests/test_chat_isolation.py:305` print("  Kuro AI — Chat Isolation Verification Tests")
+- `tests/test_chat_isolation.py:306` print("=" * 60)
+- `tests/test_chat_isolation.py:307` print()
+- `tests/test_chat_isolation.py:326` print(f"  ✅ {name}")
+- `tests/test_chat_isolation.py:329` print(f"  ❌ {name}: {e}")
+- `tests/test_chat_isolation.py:331` print()
+- `tests/test_chat_isolation.py:332` print(f"  Results: {passed} passed, {failed} failed")
+- `tests/test_chat_isolation.py:333` print("=" * 60)

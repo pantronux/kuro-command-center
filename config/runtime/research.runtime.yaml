@@ -1,0 +1,17 @@
+runtime_id: research
+display_name: Research Playground
+version: 1
+memory_namespace: kuro.research
+retrieval_scope:
+  - research_sources
+  - research_notes
+prompt_stack:
+  - system.research.base
+tools:
+  - web_search
+  - citation_parser
+structured_output_contract: null
+allowed_providers:
+  - gemini
+fallback_provider: gemini
+vocabulary_sanitization: true

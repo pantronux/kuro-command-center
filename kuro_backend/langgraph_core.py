@@ -85,6 +85,7 @@ from kuro_backend.tools.tool_trace_logger import (
     log_tool_trace,
 )
 from kuro_backend.tools.tool_budget_manager import consume_tool_budget
+from kuro_backend.runtime.runtime_context import resolve_runtime_context
 
 logger = logging.getLogger(__name__)
 logger.propagate = False  # Prevent double-reporting to root logger
@@ -335,7 +336,23 @@ def _execute_post_response_task(task: Dict[str, Any]) -> None:
         user_input = task.get("user_input", "")
         final_response = task.get("final_response", "")
         username = task.get("username", "Pantronux")
-        memory_coordinator.execute_mem0_extract_task(user_input, final_response, username)
+        runtime_id = task.get("runtime_id")
+        chat_id = str(task.get("chat_id", "") or "")
+        trace_id = str(task.get("trace_id", "") or "")
+        ctx = None
+        if runtime_id is not None:
+            ctx = resolve_runtime_context(
+                str(runtime_id),
+                username=username,
+                chat_id=chat_id,
+                trace_id=trace_id,
+            )
+        memory_coordinator.execute_mem0_extract_task(
+            user_input,
+            final_response,
+            username,
+            ctx=ctx,
+        )
     else:
         logger.warning("[POST_RESPONSE_WORKER] Unknown task kind=%s", kind)
 
@@ -571,6 +588,8 @@ class KuroState(TypedDict):
     _trace_id: str
     _intent: str
     chat_id: Optional[str]  # Active chat session ID for isolation
+    runtime_id: str
+    runtime_namespace: str
     # --- Natural Agency fields (V1.0.0) ---
     _intent_category: str
     inhibited: bool
@@ -827,16 +846,47 @@ def memory_retrieval_node(state: KuroState) -> Dict[str, Any]:
     session_id = state.get("_session_id", "unknown")
     username = state.get("username", "Pantronux")
     user_input = state.get("user_input", "")
-    trace_attrs = {"persona": state.get("persona_mode", "unknown"), "username": username, "chat_id": state.get("chat_id", "")}
-    
+    runtime_id = state.get("runtime_id", "sovereign")
+    trace_attrs = {
+        "persona": state.get("persona_mode", "unknown"),
+        "username": username,
+        "chat_id": state.get("chat_id", ""),
+    }
+
     with observability.trace_node("memory_retrieval_node", trace_attrs) as span:
         try:
+            ctx = resolve_runtime_context(
+                runtime_id,
+                username=username,
+                chat_id=str(state.get("chat_id", "") or ""),
+                trace_id=str(state.get("_trace_id", "") or ""),
+            )
+            state_runtime_namespace = str(
+                state.get("runtime_namespace", ctx.memory_namespace)
+            )
             # Check for prefetched memories first (optimization)
             raw_memories = memory_coordinator.take_prefetched_mem0(session_id)
             if not raw_memories:
                 effective_query = state.get("search_query", user_input)
-                raw_memories = memory_coordinator.safe_mem0_retrieve(effective_query, limit=5, username=username)
-            
+                raw_memories = memory_coordinator.safe_mem0_retrieve(
+                    effective_query,
+                    limit=5,
+                    username=username,
+                    ctx=ctx,
+                )
+            elif isinstance(raw_memories, list):
+                raw_memories = memory_coordinator._filter_mem0_results_by_runtime(
+                    raw_memories,
+                    runtime_id=ctx.runtime_id,
+                    runtime_namespace=state_runtime_namespace,
+                )
+            if isinstance(raw_memories, list):
+                raw_memories = memory_coordinator._filter_mem0_results_by_runtime(
+                    raw_memories,
+                    runtime_id=ctx.runtime_id,
+                    runtime_namespace=state_runtime_namespace,
+                )
+
             memories = []
             if raw_memories:
                 for m in raw_memories:
@@ -927,6 +977,13 @@ Status:"""
                     "user_input": user_input,
                     "final_response": final_response,
                     "username": username,
+                    "runtime_id": state.get("runtime_id", "sovereign"),
+                    "runtime_namespace": state.get(
+                        "runtime_namespace",
+                        "kuro.sovereign",
+                    ),
+                    "chat_id": state.get("chat_id", ""),
+                    "trace_id": state.get("_trace_id", ""),
                 }
             )
             logger.info("[MEM0_EXTRACTION] Triggering Mem0 extraction (Task Completed successfully).")
@@ -2628,6 +2685,33 @@ def tool_node(state: KuroState) -> Dict[str, Any]:
                     "next_step": "response_node",
                 }
 
+            runtime_ctx = resolve_runtime_context(
+                state.get("runtime_id", "sovereign"),
+                username=state.get("username", "Pantronux"),
+                chat_id=str(state.get("chat_id", "") or ""),
+                trace_id=str(state.get("_trace_id", "") or ""),
+            )
+            from kuro_backend.runtime.boundary_guard import (
+                BoundaryViolationError,
+                assert_tool_access,
+            )
+
+            try:
+                assert_tool_access(runtime_ctx, tool_name)
+            except BoundaryViolationError as exc:
+                logger.warning("[TOOL_NODE] Boundary violation: %s", exc)
+                if span is not None:
+                    span.set_attribute("tool_node.boundary_violation", True)
+                    span.set_attribute("tool_node.tool_name", tool_name)
+                return {
+                    "tool_execution_result": {
+                        "status": "forbidden",
+                        "tool": tool_name,
+                        "message": str(exc),
+                    },
+                    "next_step": "response_node",
+                }
+
             # Check for HITL interrupt (file write/delete operations)
             action = args.get("action", "")
 
@@ -3076,6 +3160,8 @@ async def process_chat_with_graph_stream(
     master_name: str = "Pantronux",
     username: str = "Pantronux",
     chat_id: Optional[str] = None,
+    runtime_id: Optional[str] = None,
+    runtime_namespace: Optional[str] = None,
 ) -> AsyncGenerator[str, None]:
     """
     V5.5 STREAMING: Graph runs in asyncio.to_thread (sync stream) so the event loop can serve SSE.
@@ -3093,6 +3179,10 @@ async def process_chat_with_graph_stream(
         session_id = str(uuid.uuid4())
     full_response = []
     response_text = ""
+    resolved_runtime_id = str(runtime_id or "sovereign")
+    resolved_runtime_namespace = str(
+        runtime_namespace or f"kuro.{resolved_runtime_id}"
+    )
 
     # Capture initial message count for title generation trigger
     msg_count_before = 0
@@ -3296,12 +3386,18 @@ async def process_chat_with_graph_stream(
                     task_success = True
 
                 if task_success:
-                    _enqueue_post_response_task({
-                        "kind": "mem0_extract",
-                        "user_input": message,
-                        "final_response": response_text,
-                        "username": username,
-                    })
+                    _enqueue_post_response_task(
+                        {
+                            "kind": "mem0_extract",
+                            "user_input": message,
+                            "final_response": response_text,
+                            "username": username,
+                            "runtime_id": resolved_runtime_id,
+                            "runtime_namespace": resolved_runtime_namespace,
+                            "chat_id": chat_id or "",
+                            "trace_id": trace_id,
+                        }
+                    )
 
             # P3.1 — cache the fastpath response for near-duplicate queries.
             try:
@@ -3333,6 +3429,8 @@ async def process_chat_with_graph_stream(
             "username": username,
             "custom_persona": custom_persona,
             "chat_id": chat_id,
+            "runtime_id": resolved_runtime_id,
+            "runtime_namespace": resolved_runtime_namespace,
             "_session_id": session_id,
             "_approval_scope": approval_scope,
             "_trace_id": trace_id,
@@ -3572,6 +3670,8 @@ def process_chat_with_graph(
     master_name: str = "Pantronux",
     username: str = "Pantronux",
     chat_id: Optional[str] = None,
+    runtime_id: Optional[str] = None,
+    runtime_namespace: Optional[str] = None,
 ) -> str:
     """
     Process chat message using LangGraph state machine.
@@ -3587,6 +3687,10 @@ def process_chat_with_graph(
     # Generate unique session ID for observability
     if session_id is None:
         session_id = str(uuid.uuid4())
+    resolved_runtime_id = str(runtime_id or "sovereign")
+    resolved_runtime_namespace = str(
+        runtime_namespace or f"kuro.{resolved_runtime_id}"
+    )
     
     try:
         approval_response = _maybe_handle_pending_approval(message, approval_scope)
@@ -3632,6 +3736,8 @@ def process_chat_with_graph(
             "username": username,
             "custom_persona": custom_persona,
             "chat_id": chat_id,
+            "runtime_id": resolved_runtime_id,
+            "runtime_namespace": resolved_runtime_namespace,
             "_approval_scope": approval_scope,
             "_trace_id": trace_id,
             # Natural Agency defaults (V1.0.0)

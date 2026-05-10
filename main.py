@@ -101,6 +101,8 @@ from kuro_backend import backup_manager
 from kuro_backend import persona_history_admin
 from kuro_backend import version as kuro_version
 from kuro_backend import proactive_greeting
+from kuro_backend.runtime.runtime_context import resolve_runtime_context
+from kuro_backend.runtime.runtime_registry import RuntimeRegistry
 from kuro_backend.ingestion_center import chroma_inspector, ingestion_manager, ingestion_registry
 from kuro_backend.export_engine import export_manager
 from kuro_backend.intelligence.stream_safety import sanitize_stream_chunk
@@ -236,6 +238,15 @@ def validate_token(token: str) -> Optional[Dict]:
     except JWTError:
         pass
     return None
+
+
+def validate_token_dependency(request: Request) -> Dict[str, str]:
+    """FastAPI dependency wrapper around cookie-based token validation."""
+    token = get_token_from_cookie(request)
+    user = validate_token(token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return user
 
 
 def require_admin_user(request: Request) -> Dict[str, str]:
@@ -513,6 +524,10 @@ _mount_playground_router_if_enabled(app)
 async def _register_dashboard_sync_loop():
     """Enable cross-thread revision bumps to schedule WebSocket REFRESH_NOW."""
     core_data.register_main_event_loop(asyncio.get_running_loop())
+    try:
+        RuntimeRegistry.load_all()
+    except Exception as exc:
+        logger.error("Failed to load runtime registry at startup: %s", exc)
     # --- Header Doc ---
     # Purpose: Startup environment safety checks for required/optional integrations.
     # Caller: FastAPI startup lifecycle.
@@ -1283,6 +1298,7 @@ async def chat_endpoint(
     files: list[UploadFile] = File([]),
     persona: str = Form(None),
     chat_id: str = Form(None),
+    runtime_id: Optional[str] = Query(default=None),
 ):
     """Handle chat requests from the web interface with vision and file reading support. (Non-streaming fallback)"""
     try:
@@ -1321,9 +1337,23 @@ async def chat_endpoint(
         ):
             chat_id = str(uuid.uuid4())
             is_new_session = True
-            chat_history.create_session(chat_id, username, resolved_persona, "New Chat")
 
         session_scope = _resolve_chat_session_id(request, chat_id)
+        requested_runtime_id = runtime_id or request.query_params.get("runtime_id")
+        ctx = resolve_runtime_context(
+            requested_runtime_id,
+            username=username,
+            chat_id=session_scope,
+            trace_id=trace_id,
+        )
+        if is_new_session:
+            chat_history.create_session(
+                chat_id,
+                username,
+                resolved_persona,
+                "New Chat",
+                runtime_id=ctx.runtime_id,
+            )
 
         # UI mode router gate — intercept "Kuro, mode riset" style commands
         # before hitting the LangGraph core. When the cleaned remainder is
@@ -1500,6 +1530,8 @@ async def chat_endpoint(
             master_name=master_name,
             username=username,
             chat_id=session_scope,
+            runtime_id=ctx.runtime_id,
+            runtime_namespace=ctx.memory_namespace,
         )
 
         # Save AI response to chat history
@@ -1548,6 +1580,7 @@ async def chat_stream_endpoint(
     files: list[UploadFile] = File([]),
     persona: str = Form(None),
     chat_id: str = Form(None),
+    runtime_id: Optional[str] = Query(default=None),
 ):
     """V6.0 STREAMING: Handle chat requests with Server-Sent Events (SSE) streaming."""
     from fastapi.responses import StreamingResponse
@@ -1597,13 +1630,25 @@ async def chat_stream_endpoint(
             ):
                 resolved_chat_id = str(uuid.uuid4())
                 is_new_session = True
-                chat_history.create_session(
-                    resolved_chat_id, username, resolved_persona, "New Chat"
-                )
             else:
                 resolved_chat_id = str(chat_id).strip()
 
             session_scope = _resolve_chat_session_id(request, resolved_chat_id)
+            requested_runtime_id = runtime_id or request.query_params.get("runtime_id")
+            ctx = resolve_runtime_context(
+                requested_runtime_id,
+                username=username,
+                chat_id=session_scope,
+                trace_id=trace_id,
+            )
+            if is_new_session:
+                chat_history.create_session(
+                    resolved_chat_id,
+                    username,
+                    resolved_persona,
+                    "New Chat",
+                    runtime_id=ctx.runtime_id,
+                )
 
             sse_buffer = _sse_buffers.setdefault(session_scope, deque(maxlen=10))
             next_event_id = int(_sse_event_counters.get(session_scope, 0))
@@ -1835,6 +1880,8 @@ async def chat_stream_endpoint(
                 master_name=master_name,
                 username=username,
                 chat_id=session_scope,
+                runtime_id=ctx.runtime_id,
+                runtime_namespace=ctx.memory_namespace,
             ):
                 safe_chunk = sanitize_stream_chunk(chunk)
                 if not safe_chunk:
@@ -1959,6 +2006,41 @@ async def cancel_chat_stream(request: Request, request_id: str):
     # the client just aborting the fetch handles it. This endpoint just acknowledges the client's intent to stop.
     logger.info(f"Stream {request_id} cancelled by client.")
     return {"status": "success", "message": "Stream cancelled"}
+
+
+@app.get("/api/runtimes")
+async def list_public_runtimes():
+    """Public-safe runtime list (no internal topology fields)."""
+    return [
+        {
+            "runtime_id": r.runtime_id,
+            "display_name": r.display_name,
+            "version": r.version,
+        }
+        for r in RuntimeRegistry.list_runtimes(include_stubs=False)
+    ]
+
+
+@app.get("/api/admin/runtimes/{runtime_id}")
+async def get_admin_runtime_config(
+    runtime_id: str,
+    token_data: Dict[str, str] = Depends(validate_token_dependency),
+):
+    """Admin-only full runtime configuration view."""
+    if token_data.get("username") != os.getenv("ADMIN_USERNAME", "Pantronux"):
+        raise HTTPException(status_code=403, detail="Admin only")
+    runtime_cfg = RuntimeRegistry.get(runtime_id)
+    return runtime_cfg.model_dump()
+
+
+@app.get("/api/admin/boundary-violations")
+async def get_boundary_violations(
+    limit: int = 100,
+    token_data: Dict[str, str] = Depends(validate_token_dependency),
+):
+    if token_data.get("username") != os.getenv("ADMIN_USERNAME", "Pantronux"):
+        raise HTTPException(status_code=403, detail="Admin only")
+    return intelligence_db.get_recent_boundary_violations(limit=limit)
 
 @app.get("/api/system-status")
 async def system_status(request: Request):

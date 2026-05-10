@@ -1,0 +1,17 @@
+runtime_id: compliance
+display_name: Compliance Runtime
+version: 1
+memory_namespace: kuro.compliance
+retrieval_scope:
+  - compliance_evidence
+  - compliance_regulations
+prompt_stack:
+  - system.compliance.base
+tools:
+  - control_mapper
+  - evidence_tracker
+structured_output_contract: compliance_output_v1
+allowed_providers:
+  - gemini
+fallback_provider: gemini
+vocabulary_sanitization: true

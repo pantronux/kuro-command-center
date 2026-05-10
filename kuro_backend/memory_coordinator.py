@@ -68,7 +68,9 @@ _INGESTION_BRIDGE_MAX_CHARS = int(getattr(settings, "KURO_INGESTION_BRIDGE_MAX_C
 _INGESTION_BRIDGE_MIN_SCORE = float(getattr(settings, "KURO_INGESTION_BRIDGE_MIN_SCORE", 0.28))
 _MEM0_USER_LOCKS: Dict[str, threading.Lock] = {}
 _MEM0_QUEUE_DEDUP: set[str] = set()
-_MEM0_PENDING_QUEUE: Dict[str, "collections.deque[tuple[str, str, str]]"] = collections.defaultdict(collections.deque)
+_MEM0_PENDING_QUEUE: Dict[str, "collections.deque[tuple[str, str, str, Any]]"] = (
+    collections.defaultdict(collections.deque)
+)
 _MEM0_QUEUE_LOCK = threading.Lock()
 _user_locks: dict[str, asyncio.Lock] = {}
 
@@ -1432,12 +1434,44 @@ def take_prefetched_mem0(
         return []
 
 
+def _filter_mem0_results_by_runtime(
+    results: List[Dict[str, Any]],
+    runtime_id: str,
+    runtime_namespace: str,
+) -> List[Dict[str, Any]]:
+    """
+    Filter Mem0 retrieval results to runtime-compatible rows.
+    Legacy rows without runtime metadata are kept only for sovereign runtime.
+    """
+    filtered: List[Dict[str, Any]] = []
+    for item in results:
+        metadata = item.get("metadata", {}) if isinstance(item, dict) else {}
+        if not isinstance(metadata, dict):
+            metadata = {}
+        mem_runtime = str(metadata.get("runtime_id", "") or "").strip()
+        mem_ns = str(metadata.get("runtime_namespace", "") or "").strip()
+
+        # Legacy records without runtime metadata remain visible only to sovereign.
+        if not mem_runtime and not mem_ns:
+            if runtime_id == "sovereign":
+                filtered.append(item)
+            continue
+
+        if mem_runtime and mem_runtime == runtime_id:
+            filtered.append(item)
+            continue
+        if mem_ns and mem_ns == runtime_namespace:
+            filtered.append(item)
+    return filtered
+
+
 def safe_mem0_retrieve(
     user_input: str,
     *,
     limit: int = 5,
     timeout_s: float = _MEM0_DEFAULT_TIMEOUT_SEC,
     username: str = "Pantronux",
+    ctx: "RuntimeContext | None" = None,
 ) -> List[Dict[str, Any]]:
     """
     Hard-timeout Mem0 retrieval. Returns `[]` on timeout or any exception so
@@ -1445,6 +1479,10 @@ def safe_mem0_retrieve(
     """
     if not user_input:
         return []
+    if ctx is not None:
+        from kuro_backend.runtime.boundary_guard import assert_memory_access
+
+        assert_memory_access(ctx, ctx.config.memory_namespace)
     from kuro_backend import perpetual_memory
     started = time.perf_counter()
 
@@ -1504,6 +1542,13 @@ def safe_mem0_retrieve(
         pass
     _trace_memory_layer("mem0", "retrieve", ok=True)
     if isinstance(result, list):
+        if ctx is not None:
+            filtered = _filter_mem0_results_by_runtime(
+                result,
+                runtime_id=ctx.runtime_id,
+                runtime_namespace=ctx.config.memory_namespace,
+            )
+            return filtered
         return result
     logger.warning("[MEMORY_COORD] mem0 retrieve returned non-list %s; coercing", type(result))
     return []
@@ -1573,7 +1618,12 @@ def execute_memory_write_task(
         )
 
 
-def execute_mem0_extract_task(user_input: str, final_response: str, username: str = "Pantronux") -> None:
+def execute_mem0_extract_task(
+    user_input: str,
+    final_response: str,
+    username: str = "Pantronux",
+    ctx: "RuntimeContext | None" = None,
+) -> None:
     """Mem0 extract+store with dedupe (graph + fast path may enqueue similar payloads)."""
     from kuro_backend import perpetual_memory, memory_manager
     import time
@@ -1583,6 +1633,10 @@ def execute_mem0_extract_task(user_input: str, final_response: str, username: st
     if _mem0_should_skip_duplicate(fp):
         logger.info("[MEMORY_COORD] mem0_extract skipped duplicate fp=%s...", fp[:12])
         return
+    if ctx is not None:
+        from kuro_backend.runtime.boundary_guard import assert_memory_access
+
+        assert_memory_access(ctx, ctx.config.memory_namespace)
     dedup_key = f"{username}:{hash((final_response or '')[:64])}"
     user_lock = _get_mem0_user_lock(username)
     if not user_lock.acquire(blocking=False):
@@ -1591,7 +1645,9 @@ def execute_mem0_extract_task(user_input: str, final_response: str, username: st
                 logger.info("[MEMORY_COORD] mem0_enqueue skipped duplicate key=%s", dedup_key)
                 return
             _MEM0_QUEUE_DEDUP.add(dedup_key)
-            _MEM0_PENDING_QUEUE[username].append((user_input, final_response, dedup_key))
+            _MEM0_PENDING_QUEUE[username].append(
+                (user_input, final_response, dedup_key, ctx)
+            )
         logger.info("[MEMORY_COORD] mem0 task queued for user=%s depth=%d", username, len(_MEM0_PENDING_QUEUE[username]))
         return
 
@@ -1611,8 +1667,33 @@ def execute_mem0_extract_task(user_input: str, final_response: str, username: st
                     username,
                 )
                 if memories_to_store and isinstance(memories_to_store, list):
+                    runtime_id = "sovereign"
+                    runtime_namespace = "kuro.sovereign"
+                    if ctx is not None:
+                        runtime_id = str(ctx.runtime_id or runtime_id)
+                        runtime_namespace = str(
+                            ctx.config.memory_namespace or runtime_namespace
+                        )
+                    tagged_memories_to_store: List[Any] = []
+                    for mem in memories_to_store:
+                        if isinstance(mem, dict):
+                            meta = mem.get("metadata", {})
+                            if not isinstance(meta, dict):
+                                meta = {"metadata_raw": str(meta)}
+                            meta = dict(meta)
+                            meta["runtime_id"] = runtime_id
+                            meta["runtime_namespace"] = runtime_namespace
+                            tagged = dict(mem)
+                            tagged["metadata"] = meta
+                            tagged_memories_to_store.append(tagged)
+                        else:
+                            tagged_memories_to_store.append(mem)
+
                     def _mem0_store() -> None:
-                        perpetual_memory.perpetual_memory.store_memories(memories_to_store, username)
+                        perpetual_memory.perpetual_memory.store_memories(
+                            tagged_memories_to_store,
+                            username,
+                        )
 
                     try:
                         from kuro_backend import semantic_cache
@@ -1645,7 +1726,12 @@ def execute_mem0_extract_task(user_input: str, final_response: str, username: st
                             semantic_cache.invalidate_tag(username)
                         except Exception as inner_sc_err:
                             logger.warning("[MEMORY_COORD] Failed to invalidate semantic cache: %s", inner_sc_err)
-                    logger.info("[MEMORY_COORD] mem0_extract stored n=%s for user %s", len(memories_to_store), username)
+                    logger.info(
+                        "[MEMORY_COORD] mem0_extract stored n=%s for user %s runtime=%s",
+                        len(tagged_memories_to_store),
+                        username,
+                        runtime_id,
+                    )
                     try:
                         from kuro_backend import observability
 
@@ -1685,9 +1771,19 @@ def execute_mem0_extract_task(user_input: str, final_response: str, username: st
             with _MEM0_QUEUE_LOCK:
                 if not _MEM0_PENDING_QUEUE[username]:
                     break
-                queued_user_input, queued_final_response, queued_key = _MEM0_PENDING_QUEUE[username].popleft()
+                (
+                    queued_user_input,
+                    queued_final_response,
+                    queued_key,
+                    queued_ctx,
+                ) = _MEM0_PENDING_QUEUE[username].popleft()
                 _MEM0_QUEUE_DEDUP.discard(queued_key)
-            execute_mem0_extract_task(queued_user_input, queued_final_response, username=username)
+            execute_mem0_extract_task(
+                queued_user_input,
+                queued_final_response,
+                username=username,
+                ctx=queued_ctx,
+            )
 
 
 
