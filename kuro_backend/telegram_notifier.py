@@ -20,8 +20,11 @@ Side Effects: HTTPS call to api.telegram.org; logs redacted request/response.
 """
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import os
+import random
 import time
 from typing import Final, Optional
 
@@ -31,6 +34,8 @@ logger.propagate = False
 _TELEGRAM_API_BASE: Final[str] = "https://api.telegram.org"
 _DEFAULT_TIMEOUT_S: Final[float] = 10.0
 _MAX_TEXT_CHARS: Final[int] = 4000  # well under Telegram's 4096 hard limit
+_TELEGRAM_MAX_LEN: Final[int] = 4000
+_TELEGRAM_TRUNC_SUFFIX: Final[str] = "\\n\\n📊 <i>Lihat laporan lengkap di Dashboard Kuro.</i>"
 
 
 _INCONSISTENCY_TEMPLATE: Final[str] = (
@@ -58,11 +63,103 @@ def _resolve_credentials() -> tuple[Optional[str], Optional[str]]:
     return (token or None), (chat_id or None)
 
 
+def _resolve_chat_targets(chat_id: Optional[str]) -> list[str]:
+    """Normalize chat-id targets from explicit value or env list."""
+    _, configured = _resolve_credentials()
+    raw = (chat_id or configured or "").strip()
+    if not raw:
+        return []
+    if "," in raw:
+        return [part.strip() for part in raw.split(",") if part.strip()]
+    return [raw]
+
+
 def _truncate(text: str) -> str:
     if not text:
         return ""
     # Ensure it's under Telegram's hard limit
     return text if len(text) <= 4000 else text[:3990] + "...[truncated]"
+
+
+def _sanitize_for_telegram_limit(text: str) -> str:
+    if not text:
+        return ""
+    if len(text) <= 4096:
+        return text
+    trimmed = text[:_TELEGRAM_MAX_LEN] + _TELEGRAM_TRUNC_SUFFIX
+    logger.warning(
+        "Telegram message truncated from %s to %s chars",
+        len(text),
+        len(trimmed),
+    )
+    return trimmed
+
+
+def _post_to_telegram_sync(payload: dict, timeout_s: float = _DEFAULT_TIMEOUT_S):
+    import requests
+
+    token, _ = _resolve_credentials()
+    if not token:
+        raise RuntimeError("TELEGRAM_TOKEN is not configured")
+    url = f"{_TELEGRAM_API_BASE}/bot{token}/sendMessage"
+    return requests.post(url, json=payload, timeout=timeout_s)
+
+
+async def _post_to_telegram(payload: dict, timeout_s: float = _DEFAULT_TIMEOUT_S):
+    return await asyncio.to_thread(_post_to_telegram_sync, payload, timeout_s)
+
+
+async def send_message_with_retry(
+    text: str,
+    chat_id: str = None,
+    max_attempts: int = 3,
+) -> bool:
+    """Retrying async Telegram sender with DLQ fallback on terminal failure."""
+    if not text or not _is_telegram_enabled():
+        return False
+    targets = _resolve_chat_targets(chat_id)
+    if not targets:
+        logger.warning("[TELEGRAM] missing TELEGRAM_CHAT_ID")
+        return False
+
+    from kuro_backend import intelligence_db
+
+    sent_all = True
+    for target in targets:
+        payload = {
+            "chat_id": target,
+            "text": _sanitize_for_telegram_limit(text),
+            "parse_mode": "HTML",
+        }
+        last_error = None
+        for attempt in range(max(1, int(max_attempts))):
+            try:
+                resp = await _post_to_telegram(payload)
+                if 200 <= int(resp.status_code) < 300:
+                    last_error = None
+                    break
+                body = await asyncio.to_thread(lambda: resp.text)
+                last_error = f"HTTP {resp.status_code}: {body}"
+            except Exception as exc:
+                last_error = str(exc)
+            delay = (2 ** attempt) + random.uniform(0, 0.5)
+            await asyncio.sleep(delay)
+
+        if last_error is not None:
+            sent_all = False
+            try:
+                intelligence_db.log_failed_notification(
+                    payload_json=json.dumps(payload, ensure_ascii=False),
+                    error_message=last_error,
+                )
+            except Exception as db_exc:
+                logger.warning("[TELEGRAM] failed to enqueue DLQ row: %s", db_exc)
+            logger.error(
+                "Telegram send failed after %s attempts: %s",
+                max_attempts,
+                last_error,
+            )
+    return sent_all
 
 
 def send_message(
@@ -73,11 +170,7 @@ def send_message(
     dry_run: bool = False,
     timeout_s: float = _DEFAULT_TIMEOUT_S,
 ) -> bool:
-    """Send ``text`` to the configured Telegram chat.
-
-    Returns:
-        True on HTTP 2xx, False otherwise (including config missing or dry_run).
-    """
+    """Compatibility wrapper over async retry sender."""
     if not text:
         return False
     if dry_run:
@@ -87,63 +180,22 @@ def send_message(
         logger.info("[TELEGRAM] disabled via KURO_DREAMING_TELEGRAM_ENABLED")
         return False
 
-    token, chat_ids = _resolve_credentials()
-    if not token or not chat_ids:
+    token, _ = _resolve_credentials()
+    if not token:
         logger.warning("[TELEGRAM] missing TELEGRAM_TOKEN / TELEGRAM_CHAT_ID")
         return False
 
+    _ = parse_mode  # parse mode is fixed to HTML in retry sender.
+    _ = disable_notification  # preserved for signature compatibility.
+    _ = timeout_s
     try:
-        import requests
-    except ImportError:
-        logger.error("[TELEGRAM] requests library not installed")
-        return False
-
-    all_success = True
-    url = f"{_TELEGRAM_API_BASE}/bot{token}/sendMessage"
-
-    for cid in chat_ids:
-        payload: dict = {
-            "chat_id": cid,
-            "text": _truncate(text),
-            "disable_notification": bool(disable_notification),
-        }
-        if parse_mode:
-            payload["parse_mode"] = parse_mode
-
-        success_for_cid = False
-        for attempt in (1, 2, 3):
-            try:
-                resp = requests.post(url, json=payload, timeout=timeout_s)
-            except Exception as exc:
-                logger.warning("[TELEGRAM] attempt=%d network error: %s", attempt, exc)
-                if attempt < 3:
-                    time.sleep(0.5 * attempt)
-                    continue
-                break
-
-            status = resp.status_code
-            if 200 <= status < 300:
-                success_for_cid = True
-                break
-
-            if status == 429:
-                retry_after = int(resp.headers.get("retry-after", 5))
-                logger.warning("[TELEGRAM] 429 Too Many Requests, sleeping %d s", retry_after)
-                time.sleep(retry_after)
-                continue
-
-            if 500 <= status < 600 and attempt < 3:
-                logger.warning("[TELEGRAM] attempt=%d 5xx (%d), retrying once", attempt, status)
-                time.sleep(0.5)
-                continue
-
-            logger.warning("[TELEGRAM] failed status=%d body=%.200s", status, resp.text)
-            break
-
-        if not success_for_cid:
-            all_success = False
-
-    return all_success
+        running_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        running_loop = None
+    if running_loop and running_loop.is_running():
+        asyncio.create_task(send_message_with_retry(text))
+        return True
+    return asyncio.run(send_message_with_retry(text))
 
 
 def send_dream_inconsistency(
@@ -179,4 +231,5 @@ def send_dream_inconsistency(
 __all__ = [
     "send_dream_inconsistency",
     "send_message",
+    "send_message_with_retry",
 ]

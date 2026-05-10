@@ -17,6 +17,7 @@ import time
 import uuid
 import re
 import psutil
+from collections import defaultdict, deque
 from pathlib import Path
 import uvicorn
 from typing import Any, Dict, Optional, List
@@ -151,6 +152,32 @@ FAIKHIRA_MASTER_NAME = os.getenv("FAIKHIRA_MASTER_NAME", "Master Faikhira")
 COOKIE_NAME = "kuro_access_token"
 CHAT_SESSION_HEADER = "X-Chat-Session"
 _CHAT_SESSION_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{8,128}$")
+_sse_buffers: dict[str, deque] = {}
+_sse_event_counters: dict[str, int] = {}
+_tg_rate_buckets: dict[str, dict] = defaultdict(
+    lambda: {
+        "tokens": float(getattr(settings, "KURO_TELEGRAM_RATE_LIMIT_PER_MIN", 10)),
+        "last_refill": time.time(),
+    }
+)
+_tg_inbound_queue: asyncio.Queue = asyncio.Queue(
+    maxsize=int(getattr(settings, "KURO_TELEGRAM_QUEUE_MAXSIZE", 50))
+)
+_telegram_polling_shutdown = threading.Event()
+
+
+def _check_telegram_rate_limit(chat_id: str, limit_per_min: int) -> bool:
+    """Token-bucket limiter for inbound Telegram messages per chat_id."""
+    bucket = _tg_rate_buckets[str(chat_id)]
+    now = time.time()
+    elapsed = now - float(bucket.get("last_refill", now))
+    refill = elapsed * (float(limit_per_min) / 60.0)
+    bucket["tokens"] = min(float(limit_per_min), float(bucket.get("tokens", 0.0)) + refill)
+    bucket["last_refill"] = now
+    if float(bucket["tokens"]) >= 1.0:
+        bucket["tokens"] -= 1.0
+        return True
+    return False
 
 
 class ChatSessionUpdate(BaseModel):
@@ -486,6 +513,25 @@ _mount_playground_router_if_enabled(app)
 async def _register_dashboard_sync_loop():
     """Enable cross-thread revision bumps to schedule WebSocket REFRESH_NOW."""
     core_data.register_main_event_loop(asyncio.get_running_loop())
+    # --- Header Doc ---
+    # Purpose: Startup environment safety checks for required/optional integrations.
+    # Caller: FastAPI startup lifecycle.
+    # Dependencies: os.getenv, module logger.
+    # Main Functions: required var CRITICAL logs + optional var WARNING logs.
+    # Side Effects: Emits startup diagnostics into runtime logs.
+    required_vars = ["GEMINI_API_KEY", "TELEGRAM_TOKEN", "TELEGRAM_CHAT_ID"]
+    optional_vars_with_warnings = {
+        "NEWSAPI_API_KEY": "Market news data will be unavailable. Market Sentinel running in price-only mode.",
+        "SERPER_API_KEY": "Web search fallover will be disabled.",
+        "METACULUS_API_TOKEN": "Prediction market scan will use demo mode.",
+        "NVD_API_KEY": "NVD CVE feed running without auth (rate-limited).",
+    }
+    for var in required_vars:
+        if not os.getenv(var):
+            logger.critical("STARTUP: Required env var %s is not set. System may fail.", var)
+    for var, msg in optional_vars_with_warnings.items():
+        if not os.getenv(var):
+            logger.warning("STARTUP: Optional env var %s not set — %s", var, msg)
 
     # Clear stale dreaming leases
     try:
@@ -518,6 +564,12 @@ async def _register_dashboard_sync_loop():
                     logger.error(f"Failed to replay mem0 write failure: {e}")
     except Exception as e:
         logger.error(f"Error during mem0_write_failures replay: {e}")
+
+
+@app.on_event("shutdown")
+async def _shutdown_runtime_flags():
+    """Set shutdown flags so background loops can exit gracefully."""
+    _telegram_polling_shutdown.set()
 
 
 def _ws_token_from_cookie(ws: WebSocket) -> Optional[str]:
@@ -1066,6 +1118,20 @@ async def chat_page(request: Request):
     )
 
 
+@app.get("/api/me")
+async def get_current_user(request: Request):
+    """Return authenticated username + admin flag for frontend RBAC guards."""
+    token = get_token_from_cookie(request)
+    token_data = validate_token(token)
+    if not token_data:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    username = token_data.get("username", "")
+    return {
+        "username": username,
+        "is_admin": username == os.getenv("ADMIN_USERNAME", "Pantronux"),
+    }
+
+
 @app.get("/api/history")
 async def get_chat_history(
     request: Request,
@@ -1493,6 +1559,11 @@ async def chat_stream_endpoint(
         request_id = trace_id
         first_chunk_ms = None
         stream_metrics: Dict[str, Any] = {}
+        last_event_id_raw = request.headers.get("Last-Event-ID")
+        try:
+            last_event_id = int(last_event_id_raw) if last_event_id_raw is not None else None
+        except (TypeError, ValueError):
+            last_event_id = None
         try:
             # Resolve user context
             token = get_token_from_cookie(request)
@@ -1534,11 +1605,34 @@ async def chat_stream_endpoint(
 
             session_scope = _resolve_chat_session_id(request, resolved_chat_id)
 
+            sse_buffer = _sse_buffers.setdefault(session_scope, deque(maxlen=10))
+            next_event_id = int(_sse_event_counters.get(session_scope, 0))
+
+            def _next_sse_id() -> int:
+                nonlocal next_event_id
+                next_event_id += 1
+                _sse_event_counters[session_scope] = next_event_id
+                return next_event_id
+
+            def _buffered_event(event_name: Optional[str], data_str: str) -> str:
+                event_id = _next_sse_id()
+                if event_name:
+                    frame = f"id: {event_id}\nevent: {event_name}\ndata: {data_str}\n\n"
+                else:
+                    frame = f"id: {event_id}\ndata: {data_str}\n\n"
+                sse_buffer.append({"id": event_id, "data": frame})
+                return frame
+
+            if last_event_id is not None:
+                for buffered in list(sse_buffer):
+                    if int(buffered.get("id", 0)) > last_event_id:
+                        yield str(buffered.get("data", ""))
+
             meta_payload = {"trace_id": trace_id, "phase": "started"}
             if is_new_session:
                 meta_payload["chat_id"] = session_scope
 
-            yield f"event: meta\ndata: {json.dumps(meta_payload, ensure_ascii=False)}\n\n"
+            yield _buffered_event("meta", json.dumps(meta_payload, ensure_ascii=False))
 
             # UI mode router gate — broadcast the UI command and short-
             # circuit the SSE stream when the user's message is purely a
@@ -1570,17 +1664,27 @@ async def chat_stream_endpoint(
                         username=username,
                     )
                     yield (
-                        "event: meta\n"
-                        f"data: {json.dumps({'ui_command': mode_envelope['command']}, ensure_ascii=False)}\n\n"
+                        _buffered_event(
+                            "meta",
+                            json.dumps({"ui_command": mode_envelope["command"]}, ensure_ascii=False),
+                        )
                     )
-                    yield (
-                        "event: chunk\n"
-                        f"data: {json.dumps({'text': ack, 'chunk': ack}, ensure_ascii=False)}\n\n"
+                    yield _buffered_event(
+                        "chunk",
+                        json.dumps({"text": ack, "chunk": ack}, ensure_ascii=False),
                     )
-                    yield (
-                        "event: complete\n"
-                        f"data: {json.dumps({'trace_id': trace_id, 'response': ack, 'ui_command': mode_envelope['command']}, ensure_ascii=False)}\n\n"
+                    yield _buffered_event(
+                        "complete",
+                        json.dumps(
+                            {
+                                "trace_id": trace_id,
+                                "response": ack,
+                                "ui_command": mode_envelope["command"],
+                            },
+                            ensure_ascii=False,
+                        ),
                     )
+                    yield _buffered_event(None, "[DONE]")
                     return
                 if mode_envelope:
                     user_message = mode_envelope["cleaned_text"] or user_message
@@ -1744,7 +1848,7 @@ async def chat_stream_endpoint(
                 payload = json.dumps(
                     {"text": safe_chunk, "chunk": safe_chunk}, ensure_ascii=False
                 )
-                yield f"event: chunk\ndata: {payload}\n\n"
+                yield _buffered_event("chunk", payload)
 
             # Send completion event
             response_text = "".join(full_response)
@@ -1803,13 +1907,37 @@ async def chat_stream_endpoint(
                     "export_suggestions": export_suggestions,
                 },
             )
-            yield f"event: complete\ndata: {json.dumps(complete_payload, ensure_ascii=False)}\n\n"
-            yield "data: [DONE]\n\n"
+            yield _buffered_event("complete", json.dumps(complete_payload, ensure_ascii=False))
+            yield _buffered_event(None, "[DONE]")
 
         except Exception as e:
             logger.exception(f"Error in streaming endpoint: {e}")
-            yield f"event: error\ndata: {json.dumps(api_error(f'Maaf, {master_name} — ' + str(e), trace_id=trace_id), ensure_ascii=False)}\n\n"
-            yield "data: [DONE]\n\n"
+            error_payload = json.dumps(
+                api_error(f"Maaf, {master_name} — " + str(e), trace_id=trace_id),
+                ensure_ascii=False,
+            )
+            if "session_scope" in locals():
+                # Buffer error + completion only when a session context has been established.
+                sse_buffer = _sse_buffers.setdefault(session_scope, deque(maxlen=10))
+                next_event_id = int(_sse_event_counters.get(session_scope, 0))
+
+                def _next_sse_id_err() -> int:
+                    nonlocal next_event_id
+                    next_event_id += 1
+                    _sse_event_counters[session_scope] = next_event_id
+                    return next_event_id
+
+                event_id = _next_sse_id_err()
+                frame = f"id: {event_id}\nevent: error\ndata: {error_payload}\n\n"
+                sse_buffer.append({"id": event_id, "data": frame})
+                yield frame
+                done_id = _next_sse_id_err()
+                done_frame = f"id: {done_id}\ndata: [DONE]\n\n"
+                sse_buffer.append({"id": done_id, "data": done_frame})
+                yield done_frame
+            else:
+                yield f"event: error\ndata: {error_payload}\n\n"
+                yield "data: [DONE]\n\n"
 
     return StreamingResponse(
         event_generator(),
@@ -2165,6 +2293,41 @@ async def compliance_search(query: str):
     )
 
 
+# --- Legacy 410 API Routes (Reminders / Habits purged) ---
+def _legacy_module_gone_response(module_name: str) -> JSONResponse:
+    return JSONResponse(
+        status_code=410,
+        content={
+            "status": "disabled",
+            "message": f"{module_name} module purged in KURO V1.0.0",
+        },
+    )
+
+
+@app.api_route(
+    "/api/reminders",
+    methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+)
+@app.api_route(
+    "/api/reminders/{legacy_path:path}",
+    methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+)
+async def reminders_legacy_gone(legacy_path: str = ""):
+    return _legacy_module_gone_response("Reminders")
+
+
+@app.api_route(
+    "/api/habits",
+    methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+)
+@app.api_route(
+    "/api/habits/{legacy_path:path}",
+    methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+)
+async def habits_legacy_gone(legacy_path: str = ""):
+    return _legacy_module_gone_response("Habits")
+
+
 # --- Chat Session Management ---
 @app.get("/api/chats")
 async def get_chats(request: Request, persona: str = None, limit: int = 50, offset: int = 0):
@@ -2210,6 +2373,29 @@ async def create_chat(request: Request, session_data: NewChatSession):
         return api_error("Gagal membuat sesi chat baru.")
 
 
+@app.get("/api/chats/{chat_id}/messages")
+async def get_chat_messages_page(
+    request: Request,
+    chat_id: str,
+    limit: int = Query(default=50, ge=1, le=200),
+    before_id: Optional[int] = Query(default=None),
+):
+    """Cursor-paginated message history for one chat session."""
+    token = get_token_from_cookie(request)
+    user = validate_token(token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    username = user.get("username")
+
+    page = chat_history.get_history_page(
+        chat_id=chat_id,
+        username=username,
+        limit=limit,
+        before_id=before_id,
+    )
+    return api_success(data=page, **page)
+
+
 @app.put("/api/chats/{chat_id}")
 async def update_chat_title(request: Request, chat_id: str, update: ChatSessionUpdate):
     """Update chat session title."""
@@ -2228,8 +2414,10 @@ async def update_chat_title(request: Request, chat_id: str, update: ChatSessionU
 async def delete_chat(request: Request, chat_id: str):
     """Delete a chat session and its history."""
     token = get_token_from_cookie(request)
-    if not validate_token(token):
+    user = validate_token(token)
+    if not user:
         raise HTTPException(status_code=401, detail="Unauthorized")
+    username = user.get("username")
 
     # Beta 5: Block deletion of pinned sessions
     session = chat_history.get_session(chat_id)
@@ -2239,7 +2427,14 @@ async def delete_chat(request: Request, chat_id: str):
             detail="Cannot delete a pinned session. Unpin it first."
         )
 
-    success = chat_history.delete_session(chat_id)
+    success = chat_history.delete_session(chat_id, username=username)
+    if success:
+        try:
+            from kuro_backend import semantic_cache
+
+            semantic_cache.invalidate_tag(username)
+        except Exception as cache_exc:
+            logger.debug("[CHAT] semantic cache invalidate after delete skipped: %s", cache_exc)
     if success:
         return api_success(message="Sesi chat dihapus.")
     else:
@@ -2588,18 +2783,30 @@ async def intelligence_dashboard():
 
 @app.get("/ingestion", response_class=HTMLResponse)
 async def ingestion_dashboard(request: Request):
+    token = get_token_from_cookie(request)
+    user = validate_token(token)
+    if user and user.get("username") != os.getenv("ADMIN_USERNAME", "Pantronux"):
+        return RedirectResponse(url="/", status_code=302)
     require_admin_user(request)
     return FileResponse(os.path.join(WEB_DIR, "templates", "ingestion_center.html"))
 
 
 @app.get("/ingestion/analytics", response_class=HTMLResponse)
 async def ingestion_analytics_dashboard(request: Request):
+    token = get_token_from_cookie(request)
+    user = validate_token(token)
+    if user and user.get("username") != os.getenv("ADMIN_USERNAME", "Pantronux"):
+        return RedirectResponse(url="/", status_code=302)
     require_admin_user(request)
     return FileResponse(os.path.join(WEB_DIR, "templates", "ingestion_analytics.html"))
 
 
 @app.get("/ingestion/logs", response_class=HTMLResponse)
 async def ingestion_logs_dashboard(request: Request):
+    token = get_token_from_cookie(request)
+    user = validate_token(token)
+    if user and user.get("username") != os.getenv("ADMIN_USERNAME", "Pantronux"):
+        return RedirectResponse(url="/", status_code=302)
     require_admin_user(request)
     return FileResponse(os.path.join(WEB_DIR, "templates", "ingestion_logs.html"))
 
@@ -3215,7 +3422,8 @@ async def market_hud(request: Request):
     username = user.get("username")
     raw = await run_db(finance_db.get_market_hud_items, username)
     items = [MarketHudChip.model_validate(x).model_dump(mode="json") for x in raw]
-    return {"status": "success", "items": items}
+    news_available = bool(os.getenv("NEWSAPI_API_KEY"))
+    return {"status": "success", "items": items, "news_available": news_available}
 
 
 # --- Market Sentinel (V2) Routes ---
@@ -3322,6 +3530,26 @@ async def api_sentinel_price_update(request: Request):
         asyncio.to_thread(price_ticker_worker.run_price_update, username)
     )
     return {"status": "success", "message": "Price update triggered in background."}
+
+
+@app.get("/api/openclaw/skills")
+async def list_openclaw_skills(request: Request):
+    """Admin-only OpenClaw skill introspection endpoint."""
+    require_admin_user(request)
+    try:
+        from kuro_backend.execution import openclaw_bridge
+
+        skills = await openclaw_bridge.list_available_skills()
+        return {
+            "skills": skills,
+            "circuit_breaker_state": openclaw_bridge.get_circuit_state(),
+        }
+    except Exception as exc:
+        return {
+            "skills": [],
+            "error": str(exc),
+            "circuit_breaker_state": "unknown",
+        }
 
 
 @app.get("/api/market/brief")
@@ -3625,6 +3853,7 @@ def hardware_sentinel_check():
 # --- Background Scheduler ---
 _reminder_scheduler = None
 _evaluation_scheduler = None
+_openclaw_last_open_alert_at = 0.0
 
 
 def start_evaluation_scheduler():
@@ -3663,6 +3892,74 @@ def start_reminder_scheduler():
             result.get("total_size_mb", 0.0),
             result.get("duration_seconds", 0.0),
         )
+
+    def run_research_ledger_prune_job():
+        try:
+            result = memory_manager.prune_research_ledger(
+                retention_days=90,
+                archive_retention_days=365,
+            )
+            logger.info("[LEDGER] Weekly prune complete: %s", result)
+        except Exception as exc:
+            logger.warning("[LEDGER] Weekly prune failed: %s", exc)
+
+    def run_openclaw_circuit_open_alert_job():
+        global _openclaw_last_open_alert_at
+        try:
+            from kuro_backend.execution import openclaw_bridge
+            metrics = openclaw_bridge.get_circuit_metrics()
+            if metrics.get("circuit_breaker_state") != "open":
+                return
+            opened_at = float(metrics.get("opened_at_monotonic") or 0.0)
+            if opened_at <= 0.0:
+                return
+            elapsed = time.monotonic() - opened_at
+            if elapsed < 1800:
+                return
+            if (time.monotonic() - _openclaw_last_open_alert_at) < 1800:
+                return
+            _openclaw_last_open_alert_at = time.monotonic()
+            from kuro_backend import telegram_notifier
+
+            asyncio.run(
+                telegram_notifier.send_message_with_retry(
+                    "⚠️ OpenClaw circuit breaker has remained OPEN for >30 minutes. Please inspect bridge/service health."
+                )
+            )
+        except Exception as exc:
+            logger.debug("[OPENCLAW] Circuit-open alert check skipped: %s", exc)
+
+    def run_retry_failed_telegram_notifications_job():
+        async def _runner():
+            try:
+                from kuro_backend import telegram_notifier
+
+                pending = intelligence_db.get_pending_failed_notifications(max_attempts=5)
+                for notif in pending:
+                    try:
+                        payload = json.loads(notif["payload_json"])
+                    except Exception:
+                        intelligence_db.mark_notification_dead(int(notif.get("id", 0)))
+                        continue
+                    success = await telegram_notifier.send_message_with_retry(
+                        payload.get("text", ""),
+                        payload.get("chat_id"),
+                        max_attempts=1,
+                    )
+                    if success:
+                        intelligence_db.update_notification_attempt(
+                            int(notif["id"]), error_message=None, success=True
+                        )
+                    else:
+                        intelligence_db.update_notification_attempt(
+                            int(notif["id"]), error_message="retry failed", success=False
+                        )
+                        if int(notif.get("attempt_count", 0)) + 1 >= 5:
+                            intelligence_db.mark_notification_dead(int(notif["id"]))
+            except Exception as exc:
+                logger.warning("[TELEGRAM] retry failed-notification job error: %s", exc)
+
+        asyncio.run(_runner())
 
     # Daily intelligence briefing at 08:00 AM
     _reminder_scheduler.add_job(
@@ -3798,6 +4095,35 @@ def start_reminder_scheduler():
         max_instances=1,
         coalesce=True,
     )
+    _reminder_scheduler.add_job(
+        run_research_ledger_prune_job,
+        "cron",
+        day_of_week="sun",
+        hour=3,
+        minute=0,
+        id="weekly_research_ledger_prune",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+    _reminder_scheduler.add_job(
+        run_openclaw_circuit_open_alert_job,
+        "interval",
+        minutes=5,
+        id="openclaw_circuit_open_alert",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+    _reminder_scheduler.add_job(
+        run_retry_failed_telegram_notifications_job,
+        "interval",
+        minutes=30,
+        id="retry_failed_telegram_notifications",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
 
     _reminder_scheduler.start()
     logger.info("Intelligence scheduler started.")
@@ -3852,12 +4178,12 @@ def send_daily_intelligence_briefing():
                     telegram_message = format_telegram_message(
                         briefing, display_name=display_name
                     )
-                    telegram_notifier.send_message(telegram_message)
+                    asyncio.run(telegram_notifier.send_message_with_retry(telegram_message))
 
                     # Message 2: Stock Recommendations
                     stock_message = format_stock_telegram_message(briefing)
                     if stock_message:
-                        telegram_notifier.send_message(stock_message)
+                        asyncio.run(telegram_notifier.send_message_with_retry(stock_message))
 
                     logger.info(
                         f"[INTELLIGENCE] Daily briefing sent to Telegram for {username}"
@@ -4025,8 +4351,32 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    inbound_chat_id = str(update.effective_chat.id)
     message_text = update.message.text
     logger.info(f"Received message from Pantronux: {message_text}")
+
+    if not _check_telegram_rate_limit(
+        inbound_chat_id,
+        int(getattr(settings, "KURO_TELEGRAM_RATE_LIMIT_PER_MIN", 10)),
+    ):
+        try:
+            _tg_inbound_queue.put_nowait(
+                {
+                    "chat_id": inbound_chat_id,
+                    "text": message_text,
+                    "received_at": datetime.utcnow().isoformat(),
+                }
+            )
+            await context.bot.send_message(
+                chat_id=inbound_chat_id,
+                text="Kuro sedang memproses antrian. Pesan kamu akan segera dibalas.",
+            )
+        except asyncio.QueueFull:
+            await context.bot.send_message(
+                chat_id=inbound_chat_id,
+                text="Antrian penuh. Coba lagi dalam beberapa menit.",
+            )
+        return
 
     await context.bot.send_chat_action(
         chat_id=update.effective_chat.id, action="typing"
@@ -4144,11 +4494,21 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
 
 
 def run_bot_with_recovery():
-    """Runs the Telegram bot with automatic recovery on network failures."""
+    """Runs Telegram in polling mode with retry/backoff and shutdown flag support.
+
+    Inbound mechanism note:
+    - Kuro currently uses long polling (`python-telegram-bot` `run_polling`),
+      not webhook mode.
+    - `_telegram_polling_shutdown` is set during app/process shutdown so polling
+      restart attempts stop cleanly instead of spinning during termination.
+    """
     max_retries = 5
     retry_delay = 5
 
     for attempt in range(max_retries):
+        if _telegram_polling_shutdown.is_set():
+            logger.info("Telegram polling shutdown flag set; exiting polling loop.")
+            break
         try:
             logger.info(
                 f"Starting Telegram bot polling... (Attempt {attempt + 1}/{max_retries})"
@@ -4264,8 +4624,6 @@ if __name__ == "__main__":
     logger.info(f"Memory stats: {memory_manager.get_memory_stats()}")
     logger.info(f"Web Dashboard: http://0.0.0.0:8000 (Authentication Required)")
     logger.info(f"Login Page: http://0.0.0.0:8000/login")
-    logger.info(f"Reminder Dashboard: http://0.0.0.0:8000/reminders")
-    logger.info(f"Habits Dashboard: http://0.0.0.0:8000/habits")
 
     # Initialize databases
     auth_db.init_auth_db()
@@ -4274,6 +4632,7 @@ if __name__ == "__main__":
 
     def signal_handler(sig, frame):
         logger.info("Received interrupt signal. Shutting down gracefully...")
+        _telegram_polling_shutdown.set()
         if _reminder_scheduler:
             _reminder_scheduler.shutdown()
         if _evaluation_scheduler:

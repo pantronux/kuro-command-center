@@ -20,12 +20,22 @@ import re
 import json
 import time
 import threading
+import gzip
+import traceback
+from glob import glob
+from pathlib import Path
 
 _kuro_memory_lock = threading.Lock()
 from typing import List, Dict, Optional, Any
 from datetime import datetime
 from mem0 import Memory
 from kuro_backend.config import settings
+from pydantic import BaseModel, Field, ValidationError
+
+try:
+    from pydantic import RootModel
+except Exception:  # pragma: no cover - compatibility fallback
+    RootModel = None
 
 # Cooldown ladder (seconds) after embedding/API failure. Keeps client alive but rate-limited
 # so a single 404 from gemini-embedding doesn't kill Mem0 until process restart.
@@ -33,6 +43,35 @@ _MEM0_COOLDOWN_LADDER = (60.0, 300.0, 900.0)
 
 logger = logging.getLogger(__name__)
 logger.propagate = False  # Prevent double-reporting to root logger
+
+if RootModel is not None:
+    class KuroMemorySchema(RootModel[List[Dict[str, Any]]]):
+        """Canonical kuro_memory.json schema (top-level JSON array)."""
+
+        root: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+    def _schema_from_raw(raw: Any) -> "KuroMemorySchema":
+        return KuroMemorySchema.model_validate(raw)
+
+
+    def _schema_to_raw(schema: "KuroMemorySchema") -> List[Dict[str, Any]]:
+        return list(schema.root or [])
+else:  # pragma: no cover - pydantic v1 fallback path
+    class KuroMemorySchema(BaseModel):
+        """Compatibility schema wrapper when RootModel is unavailable."""
+
+        entries: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+    def _schema_from_raw(raw: Any) -> "KuroMemorySchema":
+        if isinstance(raw, list):
+            return KuroMemorySchema.parse_obj({"entries": raw})
+        return KuroMemorySchema.parse_obj(raw)
+
+
+    def _schema_to_raw(schema: "KuroMemorySchema") -> List[Dict[str, Any]]:
+        return list(getattr(schema, "entries", []) or [])
 
 
 def _ensure_json_serializable(value: Any) -> Any:
@@ -606,6 +645,90 @@ class PerpetualMemory:
         except Exception as e:
             logger.error(f"[MEM0] Failed to get all memories: {e}")
             return []
+
+
+def _resolve_kuro_memory_path(path: Optional[str | Path] = None) -> Path:
+    """Resolve the kuro_memory.json path with runtime-safe defaults."""
+    if path:
+        resolved = Path(path).expanduser()
+        return resolved if resolved.is_absolute() else Path(settings.WORKING_DIR).joinpath(resolved).resolve()
+    return Path(settings.WORKING_DIR).joinpath("kuro_memory.json").resolve()
+
+
+def _list_kuro_memory_backups() -> List[Path]:
+    """Return candidate backup files newest-first."""
+    candidates: List[Path] = []
+    try:
+        from kuro_backend import backup_manager
+
+        backup_root = backup_manager.get_backup_dir()
+        candidates.extend(Path(p) for p in glob(str(backup_root / "**" / "kuro_memory*.gz"), recursive=True))
+    except Exception:
+        fallback = Path(settings.WORKING_DIR).joinpath("backups")
+        candidates.extend(Path(p) for p in glob(str(fallback / "**" / "kuro_memory*.gz"), recursive=True))
+
+    existing = [p for p in candidates if p.exists() and p.is_file()]
+    existing.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    return existing
+
+
+def _load_schema_from_backup() -> Optional[KuroMemorySchema]:
+    """Try loading schema from the latest backup archive."""
+    for backup_path in _list_kuro_memory_backups():
+        try:
+            with gzip.open(backup_path, "rt", encoding="utf-8") as fh:
+                raw = json.load(fh)
+            schema = _schema_from_raw(raw)
+            logger.warning("[PERPETUAL_MEMORY] Restored kuro_memory from backup: %s", backup_path)
+            return schema
+        except Exception:
+            logger.warning(
+                "[PERPETUAL_MEMORY] Backup restore candidate failed for %s\n%s",
+                backup_path,
+                traceback.format_exc(),
+            )
+    return None
+
+
+def load_kuro_memory_schema(path: Optional[str | Path] = None) -> KuroMemorySchema:
+    """Load and validate kuro_memory.json with backup fallback recovery."""
+    target = _resolve_kuro_memory_path(path)
+    with _kuro_memory_lock:
+        try:
+            if not target.exists():
+                return _schema_from_raw([])
+            raw = json.loads(target.read_text(encoding="utf-8"))
+            return _schema_from_raw(raw)
+        except (ValidationError, json.JSONDecodeError):
+            logger.error(
+                "[PERPETUAL_MEMORY] Invalid kuro_memory.json at %s\n%s",
+                target,
+                traceback.format_exc(),
+            )
+        except Exception:
+            logger.error(
+                "[PERPETUAL_MEMORY] Failed to load kuro_memory.json at %s\n%s",
+                target,
+                traceback.format_exc(),
+            )
+
+        recovered = _load_schema_from_backup()
+        if recovered is not None:
+            return recovered
+        logger.critical(
+            "[PERPETUAL_MEMORY] kuro_memory recovery failed. Initializing empty schema."
+        )
+        return _schema_from_raw([])
+
+
+def write_kuro_memory_schema(schema: KuroMemorySchema, path: Optional[str | Path] = None) -> None:
+    """Write schema to disk atomically using tmp+rename semantics."""
+    target = _resolve_kuro_memory_path(path)
+    tmp_path = target.with_suffix(".json.tmp")
+    payload = json.dumps(_schema_to_raw(schema), ensure_ascii=False, indent=2)
+    with _kuro_memory_lock:
+        tmp_path.write_text(payload, encoding="utf-8")
+        tmp_path.replace(target)
 
 
 # Global instance

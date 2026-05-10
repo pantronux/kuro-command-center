@@ -32,6 +32,8 @@ class Settings:
     # -----------------------------------------------------------------
     KURO_CHAT_CONTEXT_REFRESH_THRESHOLD: int = int(os.getenv("KURO_CHAT_CONTEXT_REFRESH_THRESHOLD", "20"))
     KURO_CHAT_CONTEXT_MODEL: str = os.getenv("KURO_CHAT_CONTEXT_MODEL", CLASSIFIER_MODEL)
+    KURO_NODE_TIMEOUT_S: int = int(os.getenv("KURO_NODE_TIMEOUT_S", "60"))
+    KURO_ADVISOR_NODE_TIMEOUT_S: int = int(os.getenv("KURO_ADVISOR_NODE_TIMEOUT_S", "120"))
     KURO_EPISTEMIC_V2_ENABLED: bool = os.getenv(
         "KURO_EPISTEMIC_V2_ENABLED", "true"
     ).strip().lower() in ("1", "true", "yes", "on")
@@ -100,7 +102,7 @@ class Settings:
     KURO_CANVAS3_MAX_REFLECTION_DEPTH: int = int(os.getenv("KURO_CANVAS3_MAX_REFLECTION_DEPTH", "2"))
     KURO_CANVAS3_MAX_CONSENSUS_ROUNDS: int = int(os.getenv("KURO_CANVAS3_MAX_CONSENSUS_ROUNDS", "3"))
     KURO_CANVAS3_MAX_RETRIEVAL_EXPANSION: int = int(os.getenv("KURO_CANVAS3_MAX_RETRIEVAL_EXPANSION", "5"))
-    KURO_DB_BUSY_TIMEOUT_MS: int = int(os.getenv("KURO_DB_BUSY_TIMEOUT_MS", "30000"))
+    KURO_DB_BUSY_TIMEOUT_MS: int = int(os.getenv("KURO_DB_BUSY_TIMEOUT_MS", "5000"))
 
     """
     Loads environment variables from the .env file.
@@ -113,6 +115,9 @@ class Settings:
     MODEL_NAME: str = os.getenv("MODEL_NAME", PRIMARY_MODEL)
     TELEGRAM_TOKEN: str = os.getenv("TELEGRAM_TOKEN")
     TELEGRAM_CHAT_ID: str = os.getenv("TELEGRAM_CHAT_ID")
+    TELEGRAM_WEBHOOK_SECRET: str = os.getenv("TELEGRAM_WEBHOOK_SECRET", "")
+    KURO_TELEGRAM_RATE_LIMIT_PER_MIN: int = int(os.getenv("KURO_TELEGRAM_RATE_LIMIT_PER_MIN", "10"))
+    KURO_TELEGRAM_QUEUE_MAXSIZE: int = int(os.getenv("KURO_TELEGRAM_QUEUE_MAXSIZE", "50"))
     WORKING_DIR: str = os.getenv("WORKING_DIR")
     TIMEZONE: str = os.getenv("TIMEZONE", "Asia/Jakarta")
     # Optional Gemini cached content resource (e.g. cachedContents/abc123) for repeated static prompts
@@ -187,6 +192,8 @@ class Settings:
         "KURO_MARKET_SENTINEL_ENABLED", "true",
     ).strip().lower() in ("1", "true", "yes", "on")
     KURO_MARKET_MOVE_PCT: float = float(os.getenv("KURO_MARKET_MOVE_PCT", "3"))
+    KURO_SENTINEL_STALE_THRESHOLD_MIN: int = int(os.getenv("KURO_SENTINEL_STALE_THRESHOLD_MIN", "15"))
+    KURO_SENTINEL_DEDUP_WINDOW_MIN: int = int(os.getenv("KURO_SENTINEL_DEDUP_WINDOW_MIN", "30"))
     KURO_PREDICTION_SCAN_ENABLED: bool = os.getenv(
         "KURO_PREDICTION_SCAN_ENABLED", "true",
     ).strip().lower() in ("1", "true", "yes", "on")

@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   Header Doc ---
-  Purpose: Primary dashboard / chat UI for Kuro AI (Sovereign Chat V1.1.0 Beta 1).
+  Purpose: Primary dashboard / chat UI for Kuro AI (Sovereign Chat V1.2.0 Beta 1).
   Caller: main.py GET "/" (HTMLResponse via Jinja2).
   Dependencies: static/js/app.js, static/css/style.css, Tailwind CDN, Lucide.
   Main Sections: persona picker, chat log, HUD chips bar (market), settings/nav, System Status modal.
@@ -284,7 +284,7 @@
                         <div class="sidebar-text">
                             <h1 class="text-lg font-bold text-gray-800 dark:text-white">Kuro AI</h1>
                             <p class="text-xs text-gray-500 dark:text-gray-400">
-                                <span id="kuroVersionBadge">V1.1.0 Beta 1 Sovereign Chat</span>
+                                <span id="kuroVersionBadge">V1.2.0 Beta 1 Sovereign Chat</span>
                             </p>
                         </div>
                     </div>
@@ -426,18 +426,21 @@
                             Ingestion</p>
                     </div>
                     <a href="/ingestion"
+                        data-admin-only="true"
                         class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-all"
                         title="Ingestion Center">
                         <i data-lucide="database-zap" class="w-5 h-5 flex-shrink-0"></i>
                         <span class="sidebar-text">Ingestion Center</span>
                     </a>
                     <a href="/ingestion/analytics"
+                        data-admin-only="true"
                         class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-all"
                         title="Ingestion Analytics">
                         <i data-lucide="network" class="w-5 h-5 flex-shrink-0"></i>
                         <span class="sidebar-text">Ingestion Analytics</span>
                     </a>
                     <a href="/ingestion/logs"
+                        data-admin-only="true"
                         class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-all"
                         title="Ingestion Logs">
                         <i data-lucide="clipboard-list" class="w-5 h-5 flex-shrink-0"></i>
@@ -452,6 +455,7 @@
                     </div>
 
                     <a href="#" id="navSystemStatus"
+                        data-admin-only="true"
                         class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-all"
                         title="System Status">
                         <i data-lucide="server" class="w-5 h-5 flex-shrink-0"></i>
@@ -922,6 +926,7 @@
 
                 <p class="text-xs text-gray-400 dark:text-gray-500 mt-2 text-center">Kuro AI may make mistakes. Please
                     verify important information.</p>
+                <div id="export-status-container" class="mt-3 space-y-2"></div>
             </div>
         </main>
     </div>

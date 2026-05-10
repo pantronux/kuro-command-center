@@ -8,6 +8,8 @@ Side Effects: DB updates to market_sentinel_stocks, Telegram notifications.
 """
 import logging
 import json
+import hashlib
+import asyncio
 from datetime import datetime
 from typing import List, Dict, Any
 
@@ -15,9 +17,10 @@ from kuro_backend.config import Settings, PRIMARY_MODEL
 from kuro_backend.finance_db import (
     get_all_sentinel_stocks, 
     update_sentinel_stock_analysis,
-    insert_sentinel_scan
+    insert_sentinel_scan,
+    is_snapshot_stale,
 )
-from kuro_backend import telegram_notifier
+from kuro_backend import memory_manager, observability, telegram_notifier
 from kuro_backend.execution.openclaw_bridge import execute_openclaw_skill_blocking
 from google import genai
 from google.genai import types
@@ -134,6 +137,15 @@ def run_triangulation_scan(username: str = "Pantronux") -> bool:
     if not stocks:
         logger.warning("[SENTINEL] No stock data found in DB. Run price update first.")
         return False
+    cfg = Settings()
+    if is_snapshot_stale(cfg.KURO_SENTINEL_STALE_THRESHOLD_MIN, username=username):
+        logger.warning("Market Sentinel: price data is stale, aborting alert publish")
+        asyncio.run(
+            telegram_notifier.send_message_with_retry(
+                f"⚠️ Market Sentinel: Alert aborted — price data is stale (>{cfg.KURO_SENTINEL_STALE_THRESHOLD_MIN}min). Check price_ticker_worker."
+            )
+        )
+        return False
         
     # 2. Fetch qualitative contexts
     macro = fetch_macro_context()
@@ -170,7 +182,26 @@ def run_triangulation_scan(username: str = "Pantronux") -> bool:
     if username == os.getenv("ADMIN_USERNAME", "Pantronux"):
         msg = format_sentinel_telegram(analysis)
         if msg:
-            telegram_notifier.send_message(msg)
+            anchor = next((item for item in analysis if item.get("stock_code")), None)
+            symbol = str((anchor or {}).get("stock_code") or "ALL")
+            direction = str((anchor or {}).get("conclusion") or "HOLD")
+            fingerprint = hashlib.sha256(
+                f"market_sentinel:{symbol}:{direction}".encode("utf-8", errors="ignore")
+            ).hexdigest()[:16]
+            dedup_window = int(getattr(cfg, "KURO_SENTINEL_DEDUP_WINDOW_MIN", 30))
+            if memory_manager.dream_notification_seen_recent(
+                fingerprint, window_minutes=dedup_window
+            ):
+                logger.info("[SENTINEL] duplicate alert suppressed fp=%s", fingerprint)
+                observability.record_sentinel_alert("market_sentinel", suppressed=True)
+            else:
+                memory_manager.mark_dream_notification(
+                    fingerprint=fingerprint,
+                    persona_scope="chancellor",
+                    kind="market_sentinel",
+                )
+                asyncio.run(telegram_notifier.send_message_with_retry(msg))
+                observability.record_sentinel_alert("market_sentinel", suppressed=False)
         
     logger.info("[SENTINEL] Hybrid Triangulation scan complete for %d stocks.", len(analysis))
     return True

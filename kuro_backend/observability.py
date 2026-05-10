@@ -367,6 +367,52 @@ def get_latency_metrics_snapshot() -> Dict[str, Dict[str, float]]:
     return snapshot
 
 
+def record_memory_retrieval_latency(latency_ms: float, username: str, hit: bool):
+    """Track Mem0 retrieval latency and cache-hit style success ratio."""
+    try:
+        record_latency_metric("mem0_retrieval_ms", float(latency_ms))
+        key = f"mem0_retrieval:{username or 'unknown'}"
+        bucket = _latency_metrics.setdefault(
+            key,
+            {"count": 0.0, "sum_ms": 0.0, "min_ms": 0.0, "max_ms": 0.0, "last_ms": 0.0},
+        )
+        bucket["count"] = float(bucket.get("count", 0.0)) + 1.0
+        bucket["sum_ms"] = float(bucket.get("sum_ms", 0.0)) + (1.0 if bool(hit) else 0.0)
+        bucket["last_ms"] = 1.0 if bool(hit) else 0.0
+    except Exception as exc:
+        logger.debug("[OBS] record_memory_retrieval_latency skipped: %s", exc)
+
+
+def record_mem0_write_result(success: bool, username: str):
+    """Track Mem0 write success/failure outcomes per user."""
+    try:
+        key = f"mem0_write:{username or 'unknown'}"
+        bucket = _latency_metrics.setdefault(
+            key,
+            {"count": 0.0, "sum_ms": 0.0, "min_ms": 0.0, "max_ms": 0.0, "last_ms": 0.0},
+        )
+        bucket["count"] = float(bucket.get("count", 0.0)) + 1.0
+        bucket["sum_ms"] = float(bucket.get("sum_ms", 0.0)) + (1.0 if bool(success) else 0.0)
+        bucket["last_ms"] = 1.0 if bool(success) else 0.0
+    except Exception as exc:
+        logger.debug("[OBS] record_mem0_write_result skipped: %s", exc)
+
+
+def record_sentinel_alert(alert_type: str, suppressed: bool):
+    """Track Market Sentinel alert publication and suppression ratio."""
+    try:
+        key = f"sentinel_alert:{str(alert_type or 'unknown')}"
+        bucket = _latency_metrics.setdefault(
+            key,
+            {"count": 0.0, "sum_ms": 0.0, "min_ms": 0.0, "max_ms": 0.0, "last_ms": 0.0},
+        )
+        bucket["count"] = float(bucket.get("count", 0.0)) + 1.0
+        bucket["sum_ms"] = float(bucket.get("sum_ms", 0.0)) + (1.0 if bool(suppressed) else 0.0)
+        bucket["last_ms"] = 1.0 if bool(suppressed) else 0.0
+    except Exception as exc:
+        logger.debug("[OBS] record_sentinel_alert skipped: %s", exc)
+
+
 # ============================================
 # CLIENT DATA TRACKING
 # ============================================

@@ -16,6 +16,12 @@ import os
 import threading
 from datetime import datetime, date, timedelta
 from typing import Dict, Optional
+from kuro_backend.db_utils import (
+    db_retry,
+    get_applied_version,
+    get_connection,
+    record_migration,
+)
 
 logger = logging.getLogger(__name__)
 logger.propagate = False  # Prevent double-reporting to root logger
@@ -39,10 +45,8 @@ LOCKOUT_DURATION_MINUTES = 15
 
 def _get_connection():
     """Get a database connection with row factory."""
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute('PRAGMA journal_mode=WAL')
-    conn.execute('PRAGMA synchronous=NORMAL')
+    conn = get_connection(DB_PATH)
+    conn.execute("PRAGMA synchronous=NORMAL")
     return conn
 
 
@@ -130,6 +134,8 @@ def _init_auth_db_locked():
             )
         """)
 
+        if get_applied_version(conn) < 1:
+            record_migration(conn, 1, "Initial schema baseline")
         conn.commit()
         logger.info("Auth database initialized successfully")
     except Exception as e:
@@ -140,6 +146,7 @@ def _init_auth_db_locked():
             conn.close()
 
 
+@db_retry()
 def record_failed_attempt(username: str, ip_address: str = "", user_agent: str = "") -> int:
     """Record a failed login attempt and return the total count."""
     conn = None
@@ -170,6 +177,7 @@ def record_failed_attempt(username: str, ip_address: str = "", user_agent: str =
             conn.close()
 
 
+@db_retry()
 def clear_failed_attempts(username: str):
     """Clear failed attempts after successful login."""
     conn = None
@@ -226,6 +234,7 @@ def is_account_locked(username: str) -> Dict:
             conn.close()
 
 
+@db_retry()
 def lock_account(username: str):
     """Lock an account after too many failed attempts."""
     conn = None
@@ -248,6 +257,7 @@ def lock_account(username: str):
             conn.close()
 
 
+@db_retry()
 def record_successful_login(username: str, ip_address: str = "", user_agent: str = ""):
     """Record a successful login session."""
     conn = None
@@ -300,6 +310,7 @@ def greeting_sent_within(username: str, cooldown_days: int) -> bool:
             conn.close()
 
 
+@db_retry()
 def record_greeting_sent(username: str) -> None:
     """Upsert today's date as the last greeting for ``username``."""
     if not username:
@@ -382,6 +393,7 @@ def get_user(username: str) -> Optional[Dict]:
         if conn:
             conn.close()
 
+@db_retry()
 def create_user(username: str, password_hash: str, email: str = "", display_name: str = "", role: str = "", master_name: str = "", restricted_persona: str = ""):
     """Create a new user in the database."""
     conn = None
@@ -402,6 +414,7 @@ def create_user(username: str, password_hash: str, email: str = "", display_name
         if conn:
             conn.close()
 
+@db_retry()
 def update_user_profile(username: str, email: str, display_name: str):
     """Update basic user profile information."""
     conn = None
@@ -422,6 +435,7 @@ def update_user_profile(username: str, email: str, display_name: str):
         if conn:
             conn.close()
 
+@db_retry()
 def update_password(username: str, new_password_hash: str):
     """Update user password."""
     conn = None
@@ -438,6 +452,7 @@ def update_password(username: str, new_password_hash: str):
         if conn:
             conn.close()
 
+@db_retry()
 def update_custom_persona(username: str, custom_persona: str):
     """Update user's custom persona instructions."""
     conn = None

@@ -12,7 +12,7 @@ Main Functions: build_kuro_graph(), process_chat_with_graph_stream(), supervisor
 Side Effects: Executes LLM calls; triggers memory writes; manages state persistence.
 """
 import asyncio
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout, as_completed
 import functools
 import hashlib
 import json
@@ -158,6 +158,9 @@ _CANVAS3_SOURCE_RELIABILITY_ENABLED = bool(getattr(settings, "KURO_CANVAS3_SOURC
 _CANVAS3_AUTONOMY_BOUNDARIES_ENABLED = bool(getattr(settings, "KURO_CANVAS3_AUTONOMY_BOUNDARIES_ENABLED", False))
 _CANVAS3_EVALUATION_RUNTIME_ENABLED = bool(getattr(settings, "KURO_CANVAS3_EVALUATION_RUNTIME_ENABLED", False))
 _RUNTIME_MODE_DEFAULT = str(getattr(settings, "KURO_RUNTIME_MODE_DEFAULT", "BALANCED"))
+_NODE_TIMEOUT_S = int(getattr(settings, "KURO_NODE_TIMEOUT_S", 60))
+_ADVISOR_NODE_TIMEOUT_S = int(getattr(settings, "KURO_ADVISOR_NODE_TIMEOUT_S", 120))
+_NODE_TIMEOUT_EXECUTOR = ThreadPoolExecutor(max_workers=8, thread_name_prefix="kuro-node-timeout")
 
 
 @functools.lru_cache(maxsize=1)
@@ -428,21 +431,34 @@ DO NOT use quotes or a period at the end.
 
 Title:"""
 
-    response = await asyncio.to_thread(
-        genai_client.models.generate_content,
-        model=CLASSIFIER_MODEL,
-        contents=prompt,
-        config=genai_types.GenerateContentConfig(
-            temperature=0.7,
-            max_output_tokens=20,
+    try:
+        response = await asyncio.to_thread(
+            genai_client.models.generate_content,
+            model=CLASSIFIER_MODEL,
+            contents=prompt,
+            config=genai_types.GenerateContentConfig(
+                temperature=0.7,
+                max_output_tokens=20,
+            )
         )
-    )
 
-    if response and response.text:
-        new_title = response.text.strip().strip('"').strip("'")
-        if new_title:
-            chat_history.update_session_title(chat_id, new_title)
-            logger.info(f"[TITLE_GEN] Generated title for {chat_id}: {new_title}")
+        if response and response.text:
+            new_title = response.text.strip().strip('"').strip("'")
+            if new_title:
+                chat_history.update_session_title(chat_id, new_title, is_auto_titled=True)
+                logger.info(f"[TITLE_GEN] Generated title for {chat_id}: {new_title}")
+                return
+        raise RuntimeError("empty title response")
+    except Exception as exc:
+        logger.warning(f"Auto-titling failed for chat_id={chat_id}: {exc}")
+        fallback = (first_message[:50] + "...") if len(first_message) > 50 else first_message
+        chat_history.update_session_title(chat_id, fallback, is_auto_titled=False)
+        try:
+            from kuro_backend import intelligence_db
+
+            intelligence_db.add_audit_trail(action="auto_title_failed", details=str(exc))
+        except Exception as audit_exc:
+            logger.debug("[TITLE_GEN] audit log skipped: %s", audit_exc)
 
 
 async def _stream_direct_llm_chunks(
@@ -1985,6 +2001,10 @@ def response_node(state: KuroState) -> Dict[str, Any]:
     Response Generator Node: Synthesizes all state data into final response.
     V5.5: Guardrails validation removed. Direct LLM response is returned.
     """
+    if state.get("node_error"):
+        # Timeout guard path: surface error text directly to stream/output node.
+        return {**state, "final_response": str(state.get("node_error") or "")}
+
     user_input = state.get("user_input", "")
     username = state.get("username", "Pantronux")
     persona_mode = memory_manager.normalize_persona(
@@ -2801,6 +2821,38 @@ def route_after_transform(state: KuroState) -> str:
         return "attention_filter_node"
     return "memory_retrieval_node"
 
+
+def run_node_with_timeout(node_fn, state: KuroState, timeout_s: int) -> Dict[str, Any]:
+    """Execute one graph node with a hard timeout and structured node_error fallback."""
+    try:
+        future = _NODE_TIMEOUT_EXECUTOR.submit(node_fn, state)
+        return future.result(timeout=max(1, int(timeout_s)))
+    except FutureTimeout:
+        node_name = getattr(node_fn, "__name__", "unknown_node")
+        logger.error("Node %s timed out after %ss", node_name, timeout_s)
+        try:
+            from kuro_backend import intelligence_db
+
+            intelligence_db.add_audit_trail(
+                action="node_timeout",
+                details=(
+                    f"node={node_name} timeout={timeout_s}s username={state.get('username')} "
+                    f"chat_id={state.get('chat_id')}"
+                ),
+            )
+        except Exception as exc:
+            logger.debug("[LANGGRAPH] node_timeout audit skipped: %s", exc)
+        return {**state, "node_error": f"Node {node_name} timed out. Please retry."}
+
+
+def _with_node_timeout(node_fn, timeout_s: int):
+    """Wrap a LangGraph node with the timeout guard while preserving metadata."""
+    @functools.wraps(node_fn)
+    def _wrapped(state: KuroState):
+        return run_node_with_timeout(node_fn, state, timeout_s=timeout_s)
+
+    return _wrapped
+
 def build_kuro_graph() -> StateGraph:
     """
     Build the Kuro LangGraph state machine.
@@ -2830,33 +2882,33 @@ def build_kuro_graph() -> StateGraph:
     graph_builder = StateGraph(KuroState)
 
     # ── Core nodes ────────────────────────────────────────────────────────────
-    graph_builder.add_node("reflection_node", reflection_node)
-    graph_builder.add_node("supervisor_node", supervisor_node)
-    graph_builder.add_node("memory_retrieval_node", memory_retrieval_node)
-    graph_builder.add_node("tool_node", tool_node)
-    graph_builder.add_node("response_node", response_node)
-    graph_builder.add_node("memory_extraction_node", memory_extraction_node)
-    graph_builder.add_node("advisor_research_node", advisor_research_node)
-    graph_builder.add_node("goal_runtime_node", goal_runtime_node)
-    graph_builder.add_node("governance_gate_node", governance_gate_node)
-    graph_builder.add_node("cognitive_router_node", cognitive_router_node)
-    graph_builder.add_node("strategic_planning_node", strategic_planning_node)
-    graph_builder.add_node("consensus_node", consensus_node)
-    graph_builder.add_node("memory_authority_node", memory_authority_node)
-    graph_builder.add_node("reflection_loop_node", reflection_loop_node)
-    graph_builder.add_node("cognitive_state_update_node", cognitive_state_update_node)
-    graph_builder.add_node("runtime_mode_node", runtime_mode_node)
-    graph_builder.add_node("tool_governance_node", tool_governance_node)
+    graph_builder.add_node("reflection_node", _with_node_timeout(reflection_node, _NODE_TIMEOUT_S))
+    graph_builder.add_node("supervisor_node", _with_node_timeout(supervisor_node, _NODE_TIMEOUT_S))
+    graph_builder.add_node("memory_retrieval_node", _with_node_timeout(memory_retrieval_node, _NODE_TIMEOUT_S))
+    graph_builder.add_node("tool_node", _with_node_timeout(tool_node, _NODE_TIMEOUT_S))
+    graph_builder.add_node("response_node", _with_node_timeout(response_node, _NODE_TIMEOUT_S))
+    graph_builder.add_node("memory_extraction_node", _with_node_timeout(memory_extraction_node, _NODE_TIMEOUT_S))
+    graph_builder.add_node("advisor_research_node", _with_node_timeout(advisor_research_node, _ADVISOR_NODE_TIMEOUT_S))
+    graph_builder.add_node("goal_runtime_node", _with_node_timeout(goal_runtime_node, _NODE_TIMEOUT_S))
+    graph_builder.add_node("governance_gate_node", _with_node_timeout(governance_gate_node, _NODE_TIMEOUT_S))
+    graph_builder.add_node("cognitive_router_node", _with_node_timeout(cognitive_router_node, _NODE_TIMEOUT_S))
+    graph_builder.add_node("strategic_planning_node", _with_node_timeout(strategic_planning_node, _NODE_TIMEOUT_S))
+    graph_builder.add_node("consensus_node", _with_node_timeout(consensus_node, _NODE_TIMEOUT_S))
+    graph_builder.add_node("memory_authority_node", _with_node_timeout(memory_authority_node, _NODE_TIMEOUT_S))
+    graph_builder.add_node("reflection_loop_node", _with_node_timeout(reflection_loop_node, _NODE_TIMEOUT_S))
+    graph_builder.add_node("cognitive_state_update_node", _with_node_timeout(cognitive_state_update_node, _NODE_TIMEOUT_S))
+    graph_builder.add_node("runtime_mode_node", _with_node_timeout(runtime_mode_node, _NODE_TIMEOUT_S))
+    graph_builder.add_node("tool_governance_node", _with_node_timeout(tool_governance_node, _NODE_TIMEOUT_S))
 
     # ── Auto-RAG nodes (V1.0.0) ───────────────────────────────────────────────
-    graph_builder.add_node("retrieval_grader_node", retrieval_grader_node)
-    graph_builder.add_node("query_transform_node", query_transform_node)
+    graph_builder.add_node("retrieval_grader_node", _with_node_timeout(retrieval_grader_node, _NODE_TIMEOUT_S))
+    graph_builder.add_node("query_transform_node", _with_node_timeout(query_transform_node, _NODE_TIMEOUT_S))
 
     # ── Natural Agency nodes (V1.0.0) ───────────────────────────────────────────
-    graph_builder.add_node("attention_filter_node", attention_filter_node)
-    graph_builder.add_node("executive_monitor_node", executive_monitor_node)
-    graph_builder.add_node("metacognitive_review_node", metacognitive_review_node)
-    graph_builder.add_node("reflective_response_node", reflective_response_node)
+    graph_builder.add_node("attention_filter_node", _with_node_timeout(attention_filter_node, _NODE_TIMEOUT_S))
+    graph_builder.add_node("executive_monitor_node", _with_node_timeout(executive_monitor_node, _NODE_TIMEOUT_S))
+    graph_builder.add_node("metacognitive_review_node", _with_node_timeout(metacognitive_review_node, _NODE_TIMEOUT_S))
+    graph_builder.add_node("reflective_response_node", _with_node_timeout(reflective_response_node, _NODE_TIMEOUT_S))
 
     # ── Edges: entry → retrieval ──────────────────────────────────────────────
     graph_builder.add_edge(START, "reflection_node")
@@ -3678,3 +3730,14 @@ def save_graph_visualization(path: str = "kuro_graph.png") -> None:
     Real rendering requires graphviz/IPython which are optional in prod.
     """
     logger.debug("[LANGGRAPH] save_graph_visualization no-op (target=%s)", path)
+
+
+def export_graph_topology() -> Dict[str, Any]:
+    """Export compiled graph topology for runtime DAG contract tests."""
+    compiled_graph = kuro_graph.get_graph()
+    nodes = [name for name in compiled_graph.nodes.keys() if not str(name).startswith("__")]
+    edges = [
+        (str(edge.source), str(edge.target))
+        for edge in list(compiled_graph.edges)
+    ]
+    return {"nodes": nodes, "edges": edges}

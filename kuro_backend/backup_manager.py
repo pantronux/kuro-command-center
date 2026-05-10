@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import gzip
+import hashlib
 import json
 import logging
 import os
@@ -170,6 +171,8 @@ def _run_backup_job(backup_type: str, label: str = "") -> Dict[str, Any]:
     files_backed_up = 0
     total_size_bytes = 0
     core_successes = 0
+    checksums: Dict[str, str] = {}
+    integrity_failed = False
 
     try:
         from kuro_backend import intelligence_db
@@ -204,11 +207,15 @@ def _run_backup_job(backup_type: str, label: str = "") -> Dict[str, Any]:
             files.append(dest.name)
             files_backed_up += 1
             total_size_bytes += size
+            checksums[dest.name] = _sha256_file(dest)
             if required_core:
                 core_successes += 1
         except FileNotFoundError:
             errors.append(f"missing asset: {relative_path}")
         except Exception as exc:
+            if "Backup integrity check failed" in str(exc):
+                integrity_failed = True
+                logger.critical("[BACKUP] Integrity verification failed for %s: %s", relative_path, exc)
             errors.append(f"backup failed for {relative_path}: {exc}")
 
     for relative_dir in _BACKUP_DAILY_DIRS:
@@ -221,6 +228,7 @@ def _run_backup_job(backup_type: str, label: str = "") -> Dict[str, Any]:
             files.append(dest.name)
             files_backed_up += 1
             total_size_bytes += size
+            checksums[dest.name] = _sha256_file(dest)
         except FileNotFoundError:
             errors.append(f"missing asset: {relative_dir}")
         except Exception as exc:
@@ -251,6 +259,8 @@ def _run_backup_job(backup_type: str, label: str = "") -> Dict[str, Any]:
         status = "partial"
     if core_successes == 0:
         status = "failed"
+    if integrity_failed:
+        status = "failed"
     if log_id is None and intelligence_db is None:
         status = "failed"
 
@@ -267,6 +277,7 @@ def _run_backup_job(backup_type: str, label: str = "") -> Dict[str, Any]:
         "total_size_mb": round(total_size_bytes / (1024 * 1024), 3),
         "duration_seconds": duration_seconds,
         "errors": errors,
+        "checksums": checksums,
     }
     _manifest_path(daily_dir).write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -309,13 +320,16 @@ def _run_backup_job(backup_type: str, label: str = "") -> Dict[str, Any]:
 
 def _notify_failure(manifest: Dict[str, Any]) -> None:
     try:
+        import asyncio
         from kuro_backend import telegram_notifier
 
         first_error = manifest.get("errors", ["unknown error"])[0]
-        telegram_notifier.send_message(
-            "[BACKUP] FAILED\n"
-            f"path={manifest.get('backup_path')}\n"
-            f"error={first_error}"
+        asyncio.run(
+            telegram_notifier.send_message_with_retry(
+                "[BACKUP] FAILED\n"
+                f"path={manifest.get('backup_path')}\n"
+                f"error={first_error}"
+            )
         )
     except Exception as exc:
         logger.warning("Backup failure alert skipped: %s", exc)
@@ -333,7 +347,32 @@ def _vacuum_into(source_db: Path, dest_path: Path) -> int:
         conn.commit()
     finally:
         conn.close()
+    _validate_backup_integrity(dest_path)
     return dest_path.stat().st_size
+
+
+def _sha256_file(path: Path) -> str:
+    """Return SHA-256 hex digest for a file."""
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _validate_backup_integrity(backup_path: Path) -> None:
+    """Validate a sqlite backup file with PRAGMA integrity_check."""
+    verify_conn = sqlite3.connect(str(backup_path))
+    try:
+        result = verify_conn.execute("PRAGMA integrity_check").fetchone()
+    except sqlite3.DatabaseError as exc:
+        raise RuntimeError(f"Backup integrity check failed for {backup_path}: {exc}") from exc
+    finally:
+        verify_conn.close()
+    if not result or result[0] != "ok":
+        raise RuntimeError(
+            f"Backup integrity check failed for {backup_path}: {result[0] if result else 'unknown'}"
+        )
 
 
 def _compress_file(source: Path, dest: Path) -> int:

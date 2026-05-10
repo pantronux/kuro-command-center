@@ -67,6 +67,48 @@ body {
     -moz-osx-font-smoothing: grayscale;
 }
 
+/* --- Loading Skeletons --- */
+.skeleton {
+    background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: 4px;
+}
+
+.dark .skeleton {
+    background: linear-gradient(90deg, #1f2937 25%, #374151 50%, #1f2937 75%);
+    background-size: 200% 100%;
+}
+
+@keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
+
+/* --- Export Job Indicator --- */
+.export-progress-indicator {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    border: 1px solid rgba(16, 185, 129, 0.25);
+    background: rgba(16, 185, 129, 0.08);
+    color: #065f46;
+    font-size: 12px;
+}
+
+.dark .export-progress-indicator {
+    color: #6ee7b7;
+    background: rgba(16, 185, 129, 0.18);
+}
+
+/* --- WS Reconnect State --- */
+#kuroStatusTicker.ws-reconnecting {
+    border-color: rgba(245, 158, 11, 0.75) !important;
+    color: #fcd34d !important;
+}
+
 /* --- Scrollbar Styling (One UI) --- */
 ::-webkit-scrollbar {
     width: 6px;

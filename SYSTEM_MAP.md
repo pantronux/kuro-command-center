@@ -1,4 +1,4 @@
-# Kuro AI V1.1.0 Beta 1 "Sovereign Chat" — SYSTEM_MAP
+# Kuro AI V1.2.0 Beta 1 "Sovereign Chat" — SYSTEM_MAP
 
 > Authoritative navigation map for the repository. Traced function-by-function
 > from the true entrypoint (`main.py`) outward. Only source code under version
@@ -36,7 +36,7 @@ Kuro AI is your **Intelligent Personal Sovereign**—a sophisticated digital com
   system (recent chat → short-term summary → long-term semantic + SSoT),
   and proactive sentinels (CVE, fitness) into one cohesive assistant accessible
   from a web dashboard and Telegram.
-- **V1.1.0 Beta 1 Focus**: Canvas 3 operational maturity layer with tool governance runtime, cognitive budget controls, runtime modes, memory canonicalization flow, identity/constitution safeguards, autonomy boundaries, source reliability scoring, and evaluation runtime telemetry (all feature-flagged safe-by-default).
+- **V1.2.0 Beta 1 Focus**: End-to-end hardening release covering memory consistency, DB resiliency/retry+migration baseline, chat/SSE reliability, Market Sentinel safeguards, Telegram retry+DLQ, UI/RBAC hardening, observability expansion, and topology/contract test coverage.
 - **Tech stack**:
   - Backend: FastAPI, LangGraph, `google-genai` (Gemini),
     APScheduler, SQLite, ChromaDB, Mem0 (via `perpetual_memory.py`),
@@ -261,6 +261,22 @@ Kuro AI is your **Intelligent Personal Sovereign**—a sophisticated digital com
   - Advisor research sources can be scored for reliability/trustworthiness before internal audit persistence.
   - New evaluation runtime snapshot computes hallucination, grounding, persona consistency, memory integrity, multi-model alignment, and governance compliance metrics.
 
+### V1.2.0 Beta 1 Architecture Notes ("Sovereign Chat")
+
+- **Memory/Storage hardening**:
+  - Per-user Mem0 write serialization + dedup queue protection to reduce duplicate writes under concurrent load.
+  - Atomic cache store+invalidate flow and hardened `kuro_memory.json` recovery path with backup fallback.
+  - Shared SQLite utility layer (`db_utils.py`) with busy-timeout, retry/backoff, and migration baseline ledger (`migration_history`).
+- **Chat/streaming hardening**:
+  - Per-node timeout guard in LangGraph runtime with explicit SSE error path and deterministic stream termination.
+  - Cursor pagination for chat history (`before_id`) and resumable SSE delivery via `Last-Event-ID` buffer replay.
+- **Sentinel/Telegram hardening**:
+  - Market HUD freshness checks + atomic snapshot current-version writes + deduplicated alert fingerprinting.
+  - Telegram send retry pipeline with dead-letter queue (`failed_telegram_notifications`) and scheduled retry sweeper.
+- **UI/RBAC + misc hardening**:
+  - Frontend reconnect backoff, robust `authFetch`, draft persistence, export progress polling, and admin nav guarding.
+  - Added topology/export diagnostics (`export_graph_topology`, `/api/openclaw/skills`, `/api/me`) and legacy 410 purge route coverage.
+
 ## Core Logic Flow (Function-Level Flowchart)
 
 ```mermaid
@@ -398,8 +414,9 @@ artefacts are excluded — see **Exclusions** at the bottom of this section.
 ├── INTEGRATION_HARDENING_DETAILS.md
 ├── SYSTEM_MAP.md                # this file
 ├── kuro_backend/
-│   ├── version.py               # V1.1.0 Beta 1 "Sovereign Chat" single source of truth
+│   ├── version.py               # V1.2.0 Beta 1 "Sovereign Chat" single source of truth
 │   ├── config.py                # env keys -> typed Settings
+│   ├── db_utils.py              # shared SQLite connection/retry/migration helpers
 │   ├── personas.py              # persona prompts + Anti-Halusinasi epistemic layer
 │   ├── core.py                  # non-graph Gemini fallback
 │   ├── langgraph_core.py        # graph nodes, streaming, tool dispatch
@@ -419,8 +436,6 @@ artefacts are excluded — see **Exclusions** at the bottom of this section.
 │   ├── file_retention_worker.py  # 180-day retention & AI archival (V1.0)
 │   ├── price_ticker_worker.py   # Quantitative market anchor (V1.0)
 │   ├── epistemic_filter.py      # Anti-Halusinasi claim labeling & hard-rule enforcement (V1.0)
-│   ├── reminder_service.py      # [PURGED in V7.1]
-│   ├── habit_service.py         # [PURGED in V7.1]
 │   ├── fitness_service.py
 │   ├── intelligence_engine.py
 │   ├── persona_history_admin.py
@@ -431,7 +446,6 @@ artefacts are excluded — see **Exclusions** at the bottom of this section.
 │   ├── auth_db.py               # schema only; *.db files excluded
 │   ├── chat_history.py          # schema: uploaded_file_integrity + retention
 │   ├── compliance_db.py
-│   ├── daily_habits_db.py       # [PURGED in V7.1]
 │   ├── intelligence_db.py
 │   ├── ingestion_center/        # admin ingestion registry + lifecycle subsystem
 │   │   ├── __init__.py
@@ -448,7 +462,6 @@ artefacts are excluded — see **Exclusions** at the bottom of this section.
 │   │   ├── chroma_inspector.py
 │   │   ├── renderers/
 │   │   └── schemas/
-│   ├── reminder_db.py           # [PURGED in V7.1]
 │   ├── agency/                  # V7.2 Natural Agency sub-package
 │   │   ├── __init__.py
 │   │   ├── joint_goal_store.py  # SQLite joint commitments (T3 Shared Agency)
@@ -518,6 +531,13 @@ artefacts are excluded — see **Exclusions** at the bottom of this section.
 │   ├── test_market_openclaw_tools.py
 │   ├── test_market_sentinel.py
 │   ├── test_memory_coordinator_contract.py
+│   ├── test_memory_hardening.py
+│   ├── test_db_hardening.py
+│   ├── test_chat_hardening.py
+│   ├── test_market_hardening.py
+│   ├── test_telegram_hardening.py
+│   ├── test_rbac_routes.py
+│   ├── test_langgraph_topology.py
 │   ├── test_ingestion_api.py
 │   ├── test_ingestion_chroma_health.py
 │   ├── test_ingestion_db_schema.py
@@ -653,19 +673,8 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
 ### Feature Services
 - [`kuro_backend/services/core_service.py`](kuro_backend/services/core_service.py)
   — *public*: `init_all_databases`, `register_main_event_loop`,
-  `bump_data_revision`, `get_data_revision`; reminder API (`add_reminder`,
-  `get_pending_reminders`, `get_upcoming_reminders`,
-  `get_reminder_history`, `update_reminder_status`, `mark_notified_10m`,
-  `mark_notified_event`, `mark_completed`, `delete_reminder`,
-  `get_reminders_needing_*_notification`, `get_reminder_stats`); habit API
-  (`add_habit`, `update_habit`, `delete_habit`, `get_all_habits`,
-  `get_todays_habits`, `mark_habit_done/undone`,
-  `toggle_habit_log_for_date`, `reset_all_habits`, `get_completion_stats`,
-  `get_end_of_day_report`, `get_weekly_stats`, `get_monthly_data`,
-  `get_weekly_data`, `get_ai_evaluation`, `save_ai_evaluation`,
-  `get_monthly_report_data`, `get_weekly_report_data`,
-  `fetch_habit_activity_snapshot`); `*_validated` Pydantic-backed
-  counterparts. Also hosts the reminders and habits SQLite schemas.
+  `bump_data_revision`, `get_data_revision`. Owns cross-worker sync revision
+  state in `app_sync_metadata`.
 - [`kuro_backend/services/schemas.py`](kuro_backend/services/schemas.py) —
   *public*: `ReminderRecord`, `ReminderStats`, `HabitRecord`,
   `HabitCompletionStats`, `HabitGridRow`, `MonthlyHabitPayload`,
@@ -673,14 +682,6 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
   `RecurringExpenseRecord`, `ApiUsageDailyRecord`.
 - [`kuro_backend/services/async_adapter.py`](kuro_backend/services/async_adapter.py)
   — *public*: `run_db`, `as_awaitable`.
-- [`kuro_backend/reminder_service.py`](kuro_backend/reminder_service.py) —
-  *public*: facade re-exporting `add_reminder`, `delete_reminder`,
-  `mark_notified_10m/event`, `mark_reminder_completed`, `add_habit`,
-  `update_habit`, `delete_habit`, `mark_habit_done/undone`,
-  `toggle_habit_log_for_date`, `reset_all_habits`, `save_ai_evaluation`,
-  `get_upcoming_reminders`, `get_reminder_history`, `get_reminder_stats`,
-  `get_reminders_needing_*_notification`, `get_pending_reminders`.
-- [`kuro_backend/habit_service.py`](kuro_backend/habit_service.py) — [PURGED].
 - [`kuro_backend/fitness_service.py`](kuro_backend/fitness_service.py) —
   *public*: `check_fitness_anomalies`, `run_fitness_sentinel`.
 - [`kuro_backend/intelligence_engine.py`](kuro_backend/intelligence_engine.py)
@@ -787,17 +788,13 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
   `add_gap_analysis`, `get_compliance_progress`. **Tables**:
   `evidence_matrix`, `audit_trail`, `standards_kb`, `gap_analysis`
   (→ `kuro_compliance.db`).
-- [`kuro_backend/daily_habits_db.py`](kuro_backend/daily_habits_db.py) —
-  *public*: `init_habits_db`. Schemas for `daily_habits`,
-  `completion_history`, `habit_logs`, `ai_evaluations`,
-  `app_sync_metadata` actually live in `services/core_service.py`
-  (→ `kuro_habits.db`).
 - [`kuro_backend/intelligence_db.py`](kuro_backend/intelligence_db.py) —
   *public*: `init_db`, `save_briefing`, `get_briefings`,
   `get_briefing_by_date`, `search_briefings`, `get_total_count`,
   `save_research_sources`, `get_research_sources`, `log_backup_start`,
   `log_backup_complete`, `get_backup_history`, `get_last_backup_status`.
-  **Tables**: `intelligence_briefings`, `research_sources`, `backup_log`
+  **Tables**: `intelligence_briefings`, `research_sources`, `backup_log`,
+  `audit_trail`, `failed_telegram_notifications`, `sentinel_health`
   (→ `kuro_intelligence.db`).
 - [`kuro_backend/ingestion_center/ingestion_registry.py`](kuro_backend/ingestion_center/ingestion_registry.py) —
   *public*: `init_db`, `create_dataset`, `update_dataset`, `list_datasets`,
@@ -806,9 +803,6 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
   `create_retrieval_event`, `search_datasets`, `get_totals`.
   **Tables**: `ingested_datasets`, `dataset_chunks`, `ingestion_jobs`,
   `retrieval_analytics`, `dataset_lineage` (→ `kuro_ingestion.db`).
-- [`kuro_backend/reminder_db.py`](kuro_backend/reminder_db.py) —
-  *public*: `init_reminder_db`. Schema for `reminders` lives in
-  `services/core_service.py` (→ `kuro_reminders.db`).
 - [`kuro_backend/finance_db.py`](kuro_backend/finance_db.py) — *public*:
   `init_db`, `add_budget`, `get_budget`, `list_budgets`,
   `upsert_recurring_expense`, `delete_recurring_expense`,
@@ -820,11 +814,13 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
 - `memory_manager.py` additionally declares `short_term`,
   `short_term_summaries`, `research_ledger`, `dreaming_locks`,
   `dreaming_cycles`, `dream_notifications` in `kuro_short_term.db`.
+- `db_utils.py` additionally declares `migration_history` in every SQLite
+  module that calls `ensure_migration_history(...)`.
 
 ### Frontend
 - [`web_interface/templates/index.html`](web_interface/templates/index.html)
   — dashboard shell: avatar (`/profile/kuro_avatar.png`), WebSocket status ticker, chat pane,
-  favicon links, `V1.1.0 Beta 1` sidebar badge, Chancellor persona option, market chips bar,
+  favicon links, `V1.2.0 Beta 1` sidebar badge, Chancellor persona option, market chips bar,
   and admin-only sidebar entries for `Ingestion Center` / `Ingestion Analytics`.
 - [`web_interface/templates/intelligence.html`](web_interface/templates/intelligence.html),
   [`ingestion_center.html`](web_interface/templates/ingestion_center.html),
@@ -871,11 +867,16 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
   but never committed. Public env keys (values redacted):
   - Gemini / runtime: `GEMINI_API_KEY`, `MODEL_NAME`, `TIMEZONE`,
     `WORKING_DIR`, `GEMINI_CACHED_CONTENT`.
+  - Chat / memory / DB hardening: `KURO_CHAT_CONTEXT_REFRESH_THRESHOLD`,
+    `KURO_CHAT_CONTEXT_MODEL`, `KURO_NODE_TIMEOUT_S`,
+    `KURO_ADVISOR_NODE_TIMEOUT_S`, `KURO_DB_BUSY_TIMEOUT_MS`.
   - Phoenix: `PHOENIX_WORKING_DIR` (default `./phoenix_data`),
     `PHOENIX_SQL_DATABASE_URL` (optional; auto-derived from PHOENIX_WORKING_DIR if unset),
     `KURO_TRACE_SPAN_TIMEOUT_S` (default `120`).
   - Proxmox: `PVE_HOST`, `PVE_PORT`, `PVE_TOKEN_ID`, `PVE_TOKEN_SECRET`.
-  - Telegram: `TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID`.
+  - Telegram: `TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID`,
+    `TELEGRAM_WEBHOOK_SECRET`, `KURO_TELEGRAM_RATE_LIMIT_PER_MIN`,
+    `KURO_TELEGRAM_QUEUE_MAXSIZE`.
   - CVE sentinel: `KURO_CVE_SENTINEL_ENABLED`, `KURO_CVE_MIN_CVSS`,
     `KURO_CVE_MAX_ALERTS_PER_CYCLE`, `KURO_VULN_NMAP_ENABLED`.
   - Proactive: `KURO_PROACTIVE_ENABLED`,
@@ -885,6 +886,8 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
   - Finances / Chancellor: `KURO_FINANCE_TRACKING_ENABLED`,
     `KURO_FINANCE_DB_PATH`, `KURO_FISCAL_DAILY_USD_THRESHOLD`,
     `KURO_FISCAL_SENTINEL_ENABLED`.
+  - Market Sentinel hardening: `KURO_SENTINEL_STALE_THRESHOLD_MIN`,
+    `KURO_SENTINEL_DEDUP_WINDOW_MIN`.
   - Greeting / UI: `KURO_PROACTIVE_GREETING_ENABLED`,
     `KURO_PROACTIVE_GREETING_COOLDOWN_DAYS`,
     `KURO_PROACTIVE_GREETING_LANG`, `KURO_UI_MODE_DEFAULT`.
@@ -933,10 +936,13 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
     `standards_kb(id, standard, clause, …)`,
     `gap_analysis(id, document_name, standard, results, …)`
   - `intelligence_briefings(id, date, summary_text, raw_json, signals)`
+  - `failed_telegram_notifications(id, payload_json, error_message, attempt_count, status, …)`
+  - `sentinel_health(id, service, status, details, created_at)`
   - `backup_log(id, backup_type, status, backup_path, files_backed_up, total_size_bytes, started_at, completed_at, …)`
   - `monthly_budget(id, month, amount_usd, notes, …)`,
     `recurring_expenses(id, label, amount_usd, cadence, next_due, …)`,
     `api_usage_daily(date, model_name, prompt_tokens, completion_tokens, cost_usd, …)`
+  - `migration_history(version, applied_at, description)` (baseline migration ledger across SQLite modules)
 - **Migrations / seeds**: [`maintenance/`](maintenance/) +
   [`scripts/`](scripts/).
 - **Runtime output directories (excluded)**: `uploaded_files/` (user uploads),
@@ -1038,11 +1044,6 @@ semantics, and the presence of both indexes via `PRAGMA index_list`.
 - **`.env` values**: only key names are catalogued above — actual secrets
   (`GEMINI_API_KEY`, `TELEGRAM_TOKEN`, `PVE_TOKEN_SECRET`, Mem0, OpenClaw,
   Serper, NVD…) are never read into this map.
-- **LangGraph topology**: the node list for
-  [`langgraph_core.py`](kuro_backend/langgraph_core.py) reflects its
-  top-level Python symbols, not the compiled DAG (which is assembled
-  lazily inside `build_kuro_graph`). Conditional edges (e.g. approval
-  gating, tool-vs-response routing) only resolve at runtime.
 - **Runtime state files** (`kuro_memory.json`, `master_profile.json`, all
   `*.db` files, `kuro_chromadb/`, `phoenix_data/`) are deliberately excluded; they mutate constantly and
   are never part of the source tree.

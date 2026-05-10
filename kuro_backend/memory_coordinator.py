@@ -18,6 +18,7 @@ Side Effects: Reads + writes across sqlite + Mem0, Mem0 HTTP calls, SSoT revisio
 """
 from __future__ import annotations
 
+import asyncio
 import concurrent.futures
 import collections
 import hashlib
@@ -69,6 +70,14 @@ _MEM0_USER_LOCKS: Dict[str, threading.Lock] = {}
 _MEM0_QUEUE_DEDUP: set[str] = set()
 _MEM0_PENDING_QUEUE: Dict[str, "collections.deque[tuple[str, str, str]]"] = collections.defaultdict(collections.deque)
 _MEM0_QUEUE_LOCK = threading.Lock()
+_user_locks: dict[str, asyncio.Lock] = {}
+
+
+def _get_user_lock(username: str) -> asyncio.Lock:
+    """Compatibility async lock map for per-user async write-serialization."""
+    if username not in _user_locks:
+        _user_locks[username] = asyncio.Lock()
+    return _user_locks[username]
 
 
 def _get_mem0_user_lock(username: str) -> threading.Lock:
@@ -1437,6 +1446,7 @@ def safe_mem0_retrieve(
     if not user_input:
         return []
     from kuro_backend import perpetual_memory
+    started = time.perf_counter()
 
     try:
         future = _MEM0_EXECUTOR.submit(
@@ -1452,13 +1462,46 @@ def safe_mem0_retrieve(
             timeout_s,
             (user_input or "")[:60],
         )
+        latency_ms = (time.perf_counter() - started) * 1000.0
+        try:
+            from kuro_backend import observability
+
+            observability.record_memory_retrieval_latency(
+                latency_ms=latency_ms,
+                username=username,
+                hit=False,
+            )
+        except Exception:
+            pass
         _trace_memory_layer("mem0", "retrieve", ok=False)
         return []
     except Exception as exc:
         logger.warning("[MEMORY_COORD] mem0 retrieve failed: %s", exc)
+        latency_ms = (time.perf_counter() - started) * 1000.0
+        try:
+            from kuro_backend import observability
+
+            observability.record_memory_retrieval_latency(
+                latency_ms=latency_ms,
+                username=username,
+                hit=False,
+            )
+        except Exception:
+            pass
         _trace_memory_layer("mem0", "retrieve", ok=False)
         return []
 
+    latency_ms = (time.perf_counter() - started) * 1000.0
+    try:
+        from kuro_backend import observability
+
+        observability.record_memory_retrieval_latency(
+            latency_ms=latency_ms,
+            username=username,
+            hit=bool(result),
+        )
+    except Exception:
+        pass
     _trace_memory_layer("mem0", "retrieve", ok=True)
     if isinstance(result, list):
         return result
@@ -1568,17 +1611,55 @@ def execute_mem0_extract_task(user_input: str, final_response: str, username: st
                     username,
                 )
                 if memories_to_store and isinstance(memories_to_store, list):
-                    perpetual_memory.perpetual_memory.store_memories(memories_to_store, username)
-                    logger.info("[MEMORY_COORD] mem0_extract stored n=%s for user %s", len(memories_to_store), username)
+                    def _mem0_store() -> None:
+                        perpetual_memory.perpetual_memory.store_memories(memories_to_store, username)
 
-                    # Invalidate semantic cache on write
                     try:
                         from kuro_backend import semantic_cache
-                        semantic_cache.invalidate_tag(username)
+
+                        async def _atomic_mem0_write_and_invalidate() -> None:
+                            async with semantic_cache.atomic_write_and_invalidate(
+                                username=username,
+                                query=user_input,
+                                persona="mem0_extract",
+                                response=final_response,
+                                tags=(username,),
+                                write_callable=_mem0_store,
+                            ):
+                                return
+
+                        try:
+                            running_loop = asyncio.get_running_loop()
+                        except RuntimeError:
+                            running_loop = None
+                        if running_loop and running_loop.is_running():
+                            _mem0_store()
+                            semantic_cache.invalidate_tag(username)
+                        else:
+                            asyncio.run(_atomic_mem0_write_and_invalidate())
                     except Exception as sc_err:
-                        logger.warning("[MEMORY_COORD] Failed to invalidate semantic cache: %s", sc_err)
+                        logger.warning("[MEMORY_COORD] Atomic cache invalidation path failed: %s", sc_err)
+                        _mem0_store()
+                        try:
+                            from kuro_backend import semantic_cache
+                            semantic_cache.invalidate_tag(username)
+                        except Exception as inner_sc_err:
+                            logger.warning("[MEMORY_COORD] Failed to invalidate semantic cache: %s", inner_sc_err)
+                    logger.info("[MEMORY_COORD] mem0_extract stored n=%s for user %s", len(memories_to_store), username)
+                    try:
+                        from kuro_backend import observability
+
+                        observability.record_mem0_write_result(success=True, username=username)
+                    except Exception:
+                        pass
                 else:
                     logger.debug("[MEMORY_COORD] mem0_extract nothing to store")
+                    try:
+                        from kuro_backend import observability
+
+                        observability.record_mem0_write_result(success=True, username=username)
+                    except Exception:
+                        pass
                 return
             except Exception as e:
                 attempt += 1
@@ -1587,6 +1668,12 @@ def execute_mem0_extract_task(user_input: str, final_response: str, username: st
                     time.sleep(2 ** (attempt - 1)) # Exponential backoff: 1s, 2s
                 else:
                     logger.error("[MEMORY_COORD] mem0_extract failed permanently. Writing to mem0_write_failures.")
+                    try:
+                        from kuro_backend import observability
+
+                        observability.record_mem0_write_result(success=False, username=username)
+                    except Exception:
+                        pass
                     try:
                         payload = json.dumps({"user_input": user_input, "final_response": final_response})
                         memory_manager.record_mem0_write_failure(username, payload)

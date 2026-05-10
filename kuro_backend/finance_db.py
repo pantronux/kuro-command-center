@@ -44,6 +44,12 @@ import sqlite3
 import threading
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
+from kuro_backend.db_utils import (
+    db_retry,
+    get_applied_version,
+    get_connection,
+    record_migration,
+)
 
 logger = logging.getLogger(__name__)
 logger.propagate = False
@@ -78,10 +84,7 @@ DB_PATH = _db_path()
 
 
 def _conn() -> sqlite3.Connection:
-    conn = sqlite3.connect(_db_path())
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    return conn
+    return get_connection(_db_path())
 
 
 def init_db() -> None:
@@ -219,6 +222,9 @@ def _init_db_locked() -> None:
                 brief_text TEXT NOT NULL DEFAULT '',
                 last_sentinel_note TEXT NOT NULL DEFAULT '',
                 updated_at TEXT DEFAULT (datetime('now')),
+                fetched_at TEXT DEFAULT (datetime('now')),
+                snapshot_version INTEGER DEFAULT 0,
+                is_current INTEGER DEFAULT 1,
                 UNIQUE(username)
             )
             """
@@ -325,6 +331,16 @@ def _init_db_locked() -> None:
             if "username" not in cols:
                 c.execute(f"ALTER TABLE {tbl} ADD COLUMN username TEXT NOT NULL DEFAULT 'Pantronux'")
                 logger.info("[FINANCE] Added username column to %s", tbl)
+        c.execute("PRAGMA table_info(market_hud_snapshot)")
+        hud_cols = [row["name"] for row in c.fetchall()]
+        if "fetched_at" not in hud_cols:
+            c.execute("ALTER TABLE market_hud_snapshot ADD COLUMN fetched_at TEXT DEFAULT (datetime('now'))")
+        if "snapshot_version" not in hud_cols:
+            c.execute("ALTER TABLE market_hud_snapshot ADD COLUMN snapshot_version INTEGER DEFAULT 0")
+        if "is_current" not in hud_cols:
+            c.execute("ALTER TABLE market_hud_snapshot ADD COLUMN is_current INTEGER DEFAULT 1")
+        if get_applied_version(conn) < 1:
+            record_migration(conn, 1, "Initial schema baseline")
         conn.commit()
         logger.info("[FINANCE] DB initialized at %s", _db_path())
     except Exception as exc:
@@ -335,6 +351,7 @@ def _init_db_locked() -> None:
             conn.close()
 
 
+@db_retry()
 def add_budget(month: str, amount_usd: float, notes: str = "", username: str = "Pantronux") -> int:
     """Insert or replace monthly budget for YYYY-MM for a specific user."""
     init_db()
@@ -386,6 +403,7 @@ def list_budgets(limit: int = 24, username: str = "Pantronux") -> List[Dict[str,
         conn.close()
 
 
+@db_retry()
 def upsert_recurring_expense(
     label: str,
     amount_usd: float,
@@ -430,6 +448,7 @@ def upsert_recurring_expense(
         conn.close()
 
 
+@db_retry()
 def delete_recurring_expense(expense_id: int, username: str = "Pantronux") -> bool:
     init_db()
     conn = _conn()
@@ -459,6 +478,7 @@ def list_recurring_expenses(active_only: bool = True, username: str = "Pantronux
         conn.close()
 
 
+@db_retry()
 def add_api_usage(
     date_str: str,
     model_name: str,
@@ -516,6 +536,7 @@ def get_daily_api_cost_usd(date_str: str, username: str = "Pantronux") -> float:
         conn.close()
 
 
+@db_retry()
 def upsert_watched_symbol(symbol: str, label: str = "", username: str = "Pantronux") -> None:
     """Add or reactivate a watched ticker for a specific user."""
     init_db()
@@ -541,6 +562,7 @@ def upsert_watched_symbol(symbol: str, label: str = "", username: str = "Pantron
         conn.close()
 
 
+@db_retry()
 def delete_watched_symbol(symbol: str, username: str = "Pantronux") -> bool:
     init_db()
     sym = (symbol or "").strip().upper()
@@ -584,6 +606,7 @@ def list_watched_symbols(active_only: bool = True, username: str = "Pantronux") 
         conn.close()
 
 
+@db_retry()
 def apply_watched_price(symbol: str, new_price: float, username: str = "Pantronux") -> Dict[str, Any]:
     """Update last close for a watched symbol for a specific user."""
     init_db()
@@ -635,6 +658,7 @@ def apply_watched_price(symbol: str, new_price: float, username: str = "Pantronu
         conn.close()
 
 
+@db_retry()
 def upsert_financial_goal(
     goal_id: str,
     name: str,
@@ -701,6 +725,7 @@ def list_financial_goals(username: str = "Pantronux") -> List[Dict[str, Any]]:
         conn.close()
 
 
+@db_retry()
 def delete_financial_goal(goal_id: str, username: str = "Pantronux") -> bool:
     init_db()
     gid = (goal_id or "").strip()
@@ -714,6 +739,7 @@ def delete_financial_goal(goal_id: str, username: str = "Pantronux") -> bool:
         conn.close()
 
 
+@db_retry()
 def upsert_prediction_watch(
     slug: str,
     label: str,
@@ -756,6 +782,7 @@ def list_prediction_watch(username: str = "Pantronux") -> List[Dict[str, Any]]:
         conn.close()
 
 
+@db_retry()
 def delete_prediction_watch(slug: str, username: str = "Pantronux") -> bool:
     init_db()
     sl = (slug or "").strip()
@@ -769,25 +796,15 @@ def delete_prediction_watch(slug: str, username: str = "Pantronux") -> bool:
         conn.close()
 
 
+@db_retry()
 def set_market_brief_and_note(brief_text: str, sentinel_note: str = "", username: str = "Pantronux") -> None:
-    init_db()
-    conn = _conn()
-    try:
-        c = conn.cursor()
-        c.execute(
-            """
-            INSERT INTO market_hud_snapshot (username, brief_text, last_sentinel_note, updated_at)
-            VALUES (?, ?, ?, datetime('now'))
-            ON CONFLICT(username) DO UPDATE SET
-                brief_text = excluded.brief_text,
-                last_sentinel_note = excluded.last_sentinel_note,
-                updated_at = datetime('now')
-            """,
-            (username, brief_text or "", sentinel_note or ""),
-        )
-        conn.commit()
-    finally:
-        conn.close()
+    write_hud_snapshot_atomic(
+        {
+            "username": username,
+            "brief_text": brief_text or "",
+            "last_sentinel_note": sentinel_note or "",
+        }
+    )
 
 
 def get_market_brief_parts(username: str = "Pantronux") -> Dict[str, str]:
@@ -796,7 +813,7 @@ def get_market_brief_parts(username: str = "Pantronux") -> Dict[str, str]:
     try:
         c = conn.cursor()
         c.execute(
-            "SELECT brief_text, last_sentinel_note FROM market_hud_snapshot WHERE username = ?",
+            "SELECT brief_text, last_sentinel_note FROM market_hud_snapshot WHERE username = ? AND is_current = 1",
             (username,)
         )
         row = c.fetchone()
@@ -806,6 +823,114 @@ def get_market_brief_parts(username: str = "Pantronux") -> Dict[str, str]:
             "brief_text": str(row["brief_text"] or ""),
             "last_sentinel_note": str(row["last_sentinel_note"] or ""),
         }
+    finally:
+        conn.close()
+
+
+def get_snapshot_freshness(username: str = "Pantronux") -> Optional[datetime]:
+    """Return the latest fetched_at timestamp for market HUD snapshots."""
+    init_db()
+    conn = _conn()
+    try:
+        row = conn.execute(
+            "SELECT MAX(fetched_at) AS latest FROM market_hud_snapshot WHERE username = ?",
+            (username,),
+        ).fetchone()
+        latest = row["latest"] if row else None
+        if not latest:
+            return None
+        parsed = str(latest).replace("T", " ")
+        try:
+            return datetime.strptime(parsed, "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            # Fallback for microseconds/ISO variants.
+            return datetime.fromisoformat(str(latest).replace("Z", ""))
+    except Exception as exc:
+        logger.warning("[FINANCE] get_snapshot_freshness failed: %s", exc)
+        return None
+    finally:
+        conn.close()
+
+
+def is_snapshot_stale(threshold_minutes: int, username: str = "Pantronux") -> bool:
+    """Return True when snapshot data age exceeds threshold minutes."""
+    fetched = get_snapshot_freshness(username=username)
+    if fetched is None:
+        return True
+    delta = datetime.utcnow() - fetched
+    return delta.total_seconds() > max(1, int(threshold_minutes)) * 60
+
+
+@db_retry()
+def write_hud_snapshot_atomic(data: Dict[str, Any]) -> None:
+    """Atomically update current HUD snapshot with version + freshness metadata."""
+    init_db()
+    username = str(data.get("username") or "Pantronux")
+    brief_text = str(data.get("brief_text") or "")
+    sentinel_note = str(data.get("last_sentinel_note") or "")
+
+    conn = _conn()
+    try:
+        c = conn.cursor()
+        c.execute("BEGIN IMMEDIATE")
+        new_version = int(
+            c.execute(
+                "SELECT COALESCE(MAX(snapshot_version), 0) + 1 FROM market_hud_snapshot WHERE username = ?",
+                (username,),
+            ).fetchone()[0]
+        )
+        c.execute(
+            """
+            INSERT INTO market_hud_snapshot
+                (username, brief_text, last_sentinel_note, updated_at, fetched_at, snapshot_version, is_current)
+            VALUES (?, ?, ?, datetime('now'), datetime('now'), ?, 1)
+            ON CONFLICT(username) DO UPDATE SET
+                brief_text = excluded.brief_text,
+                last_sentinel_note = excluded.last_sentinel_note,
+                updated_at = datetime('now'),
+                fetched_at = datetime('now'),
+                snapshot_version = excluded.snapshot_version,
+                is_current = 1
+            """,
+            (username, brief_text, sentinel_note, new_version),
+        )
+        c.execute(
+            "UPDATE market_hud_snapshot SET is_current = 0 WHERE username = ? AND snapshot_version != ?",
+            (username, new_version),
+        )
+        c.execute(
+            "DELETE FROM market_hud_snapshot WHERE fetched_at < datetime('now', '-24 hours') AND is_current = 0"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+@db_retry()
+def touch_market_snapshot_fetched_at(username: str = "Pantronux") -> None:
+    """Refresh fetched_at timestamp to mark price data freshness heartbeat."""
+    init_db()
+    conn = _conn()
+    try:
+        c = conn.cursor()
+        c.execute(
+            "UPDATE market_hud_snapshot SET fetched_at = datetime('now'), updated_at = datetime('now') WHERE username = ?",
+            (username,),
+        )
+        if int(c.rowcount or 0) == 0:
+            c.execute(
+                """
+                INSERT INTO market_hud_snapshot
+                    (username, brief_text, last_sentinel_note, updated_at, fetched_at, snapshot_version, is_current)
+                VALUES (?, '', '', datetime('now'), datetime('now'), 1, 1)
+                ON CONFLICT(username) DO UPDATE SET
+                    fetched_at = datetime('now'),
+                    updated_at = datetime('now'),
+                    is_current = 1
+                """,
+                (username,),
+            )
+        conn.commit()
     finally:
         conn.close()
 
@@ -917,6 +1042,7 @@ def get_last_n_days_spend(n: int = 7, username: str = "Pantronux") -> List[Dict[
         conn.close()
 
 
+@db_retry()
 def insert_sentinel_scan(username: str, scan_timestamp: str, stocks: list[dict]) -> bool:
     """Insert a batch of stock scan results into history."""
     conn = None
@@ -1061,6 +1187,7 @@ def format_ledger_snapshot(username: str = "Pantronux") -> str:
         return "[FINANCES SSoT — ledger unavailable]"
 
 
+@db_retry()
 def upsert_sentinel_stock_price(stock_code, company_name, sector,
                                price_per_share, price_per_lot, price_category,
                                volume_24h, ytd_performance, username="Pantronux") -> bool:
@@ -1098,6 +1225,7 @@ def upsert_sentinel_stock_price(stock_code, company_name, sector,
             conn.close()
 
 
+@db_retry()
 def update_sentinel_stock_analysis(stock_code, projected_roi_1m, projected_roi_1y,
                                   triangulation_summary, conclusion, username="Pantronux") -> bool:
     """Update only LLM-generated columns (ROI, summary, conclusion)."""
@@ -1181,6 +1309,7 @@ def get_sentinel_stock_detail(stock_code, username="Pantronux") -> dict | None:
             conn.close()
 
 
+@db_retry()
 def toggle_pin_stock(username, stock_code) -> dict:
     """Toggle pin/unpin status. Max 3 pins per user."""
     conn = None
@@ -1275,6 +1404,10 @@ __all__ = [
     "delete_prediction_watch",
     "set_market_brief_and_note",
     "get_market_brief_parts",
+    "get_snapshot_freshness",
+    "is_snapshot_stale",
+    "write_hud_snapshot_atomic",
+    "touch_market_snapshot_fetched_at",
     "get_market_hud_items",
     "format_market_snapshot_for_prompt",
     "insert_sentinel_scan",

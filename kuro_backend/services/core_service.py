@@ -19,6 +19,12 @@ from datetime import datetime
 from typing import Any, Dict, Optional
 
 from kuro_backend.tools import PROJECT_ROOT
+from kuro_backend.db_utils import (
+    db_retry,
+    get_applied_version,
+    get_connection,
+    record_migration,
+)
 
 logger = logging.getLogger(__name__)
 logger.propagate = False
@@ -41,9 +47,7 @@ def _current_short_term_db_path() -> str:
     return os.path.abspath(os.getenv("KURO_SHORT_TERM_DB_PATH", SHORT_TERM_DB_PATH))
 
 def _conn_short_term():
-    conn = sqlite3.connect(_current_short_term_db_path(), timeout=30.0)
-    conn.row_factory = sqlite3.Row
-    return conn
+    return get_connection(_current_short_term_db_path())
 
 def register_main_event_loop(loop: asyncio.AbstractEventLoop) -> None:
     """Call once from FastAPI startup so bumps can schedule WebSocket broadcasts."""
@@ -90,8 +94,15 @@ def _ensure_schema(cur: sqlite3.Cursor) -> None:
         "value INTEGER, "
         "updated_at DATETIME DEFAULT (datetime('now')))"
     )
+    try:
+        conn = cur.connection
+        if get_applied_version(conn) < 1:
+            record_migration(conn, 1, "Initial schema baseline")
+    except Exception:
+        pass
     _SCHEMA_READY_FOR = current_path
 
+@db_retry()
 def bump_data_revision() -> None:
     """Increment persisted revision (short_term DB) so all workers share one counter; then push WS."""
     new_val: int

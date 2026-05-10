@@ -322,6 +322,13 @@ def format_telegram_message(briefing: Dict[str, Any], display_name: str = "Pantr
 
 ━━━━━━━━━━━━━━━━━━━━
 _Dikirim otomatis oleh Kuro AI Sovereign_"""
+    original_len = len(message)
+    if original_len > 4096:
+        suffix = "\n\n📊 <i>Lihat laporan lengkap di Dashboard Kuro.</i>"
+        message = message[:4000] + suffix
+        logger.warning(
+            f"Telegram message truncated from {original_len} to {len(message)} chars"
+        )
     return message
 
 
@@ -429,4 +436,3 @@ def run_daily_research(username: str = "Pantronux", force: bool = False) -> Dict
         }, f, ensure_ascii=False, indent=2)
     
     return briefing
-

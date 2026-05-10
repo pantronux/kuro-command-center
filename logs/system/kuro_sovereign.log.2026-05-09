@@ -1,0 +1,716 @@
+2026-05-09 00:00:48 [WARNING] __main__: Network error: httpx.ConnectError: All connection attempts failed
+2026-05-09 00:00:51 [WARNING] __main__: Network error: httpx.ConnectError: All connection attempts failed
+2026-05-09 00:00:54 [WARNING] __main__: Network error: httpx.ConnectError: All connection attempts failed
+2026-05-09 00:00:57 [WARNING] __main__: Network error: httpx.ConnectError: All connection attempts failed
+2026-05-09 00:01:04 [WARNING] __main__: Network error: httpx.ConnectError: All connection attempts failed
+2026-05-09 00:01:11 [WARNING] __main__: Network error: httpx.ConnectError: All connection attempts failed
+2026-05-09 00:01:22 [WARNING] __main__: Network error: httpx.ConnectError: All connection attempts failed
+2026-05-09 00:57:59 [INFO] __main__: Hardware Sentinel Check [off-hours]: CPU=1.0%, RAM=18.6%, Disk=12.9%, Net TX=1847.1MB, RX=1812.3MB
+2026-05-09 01:00:02 [INFO] __main__: [BACKUP] Nightly backup OK - 10 files, 3.5 MB, 2.7s
+2026-05-09 02:00:00 [INFO] kuro_backend.file_retention_worker: [RETENTION] Starting cycle (dry_run=False)
+2026-05-09 02:00:00 [INFO] kuro_backend.file_retention_worker: [RETENTION] Cycle complete: {'total': 0, 'archived': 0, 'failed': 0}
+2026-05-09 02:30:00 [INFO] kuro_backend.evaluation.evaluation_scheduler: Running nightly autonomous evaluation...
+2026-05-09 02:30:00 [ERROR] kuro_backend.evaluation.evaluation_scheduler: Nightly evaluation failed: module 'kuro_backend.intelligence_db' has no attribute '_conn'
+2026-05-09 03:00:00 [INFO] kuro_backend.dreaming_worker: [DREAMING] Starting cycle for user: Faikhira
+2026-05-09 03:00:00 [INFO] kuro_backend.dreaming_worker: [CVE] openclaw non-ok result: None
+2026-05-09 03:00:00 [INFO] kuro_backend.dreaming_worker: [CVE] sentinel: no CVEs above CVSS 7.0
+2026-05-09 03:00:00 [WARNING] kuro_backend.dreaming_worker: [DREAMING] Market sentinel failed for Faikhira: ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint
+2026-05-09 03:00:00 [INFO] kuro_backend.dreaming_worker: [DREAMING] Starting cycle for user: Pantronux
+2026-05-09 03:00:00 [INFO] kuro_backend.dreaming_worker: [CVE] openclaw non-ok result: None
+2026-05-09 03:00:00 [INFO] kuro_backend.dreaming_worker: [CVE] sentinel: no CVEs above CVSS 7.0
+2026-05-09 03:00:00 [WARNING] kuro_backend.dreaming_worker: [DREAMING] Market sentinel failed for Pantronux: ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint
+2026-05-09 04:19:48 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-09 04:21:28 [INFO] telegram.ext.Application: Application is stopping. This might take a moment.
+2026-05-09 04:21:28 [INFO] telegram.ext.Application: Application.stop() complete
+2026-05-09 04:21:28 [INFO] __main__: Starting Telegram bot polling... (Attempt 2/5)
+2026-05-09 04:21:29 [INFO] telegram.ext.Application: Application started
+2026-05-09 04:23:17 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-09 04:23:17 [INFO] __main__: Kuro AI Reborn is starting...
+2026-05-09 04:23:18 [INFO] __main__: Memory stats: {'tier1_short_term': {'type': 'SQLite', 'entries': 15, 'limit': 15}, 'tier2_long_term': {'type': 'Mem0', 'entries': 1}, 'tier3_profile': {'type': 'JSON', 'file': '/home/kuro/projects/kuro/master_profile.json', 'notes': 0}, 'importance_threshold': 7}
+2026-05-09 04:23:18 [INFO] __main__: Web Dashboard: http://0.0.0.0:8000 (Authentication Required)
+2026-05-09 04:23:18 [INFO] __main__: Login Page: http://0.0.0.0:8000/login
+2026-05-09 04:23:18 [INFO] __main__: Reminder Dashboard: http://0.0.0.0:8000/reminders
+2026-05-09 04:23:18 [INFO] __main__: Habits Dashboard: http://0.0.0.0:8000/habits
+2026-05-09 04:23:18 [INFO] __main__: Databases initialized (Auth & Chat History)
+2026-05-09 04:23:18 [INFO] __main__: Price Ticker updates scheduled for all users.
+2026-05-09 04:23:18 [INFO] __main__: Market Sentinel Triangulation scans scheduled for all users.
+2026-05-09 04:23:18 [INFO] __main__: Autonomous dreaming cycle scheduled at 03:00 daily.
+2026-05-09 04:23:18 [INFO] __main__: Intelligence scheduler started.
+2026-05-09 04:23:18 [INFO] __main__: Evaluation Scheduler started.
+2026-05-09 04:23:18 [INFO] __main__: Hardware Sentinel scheduler started.
+2026-05-09 04:23:18 [INFO] phoenix.config: 📋 Ensuring phoenix working directory: /home/kuro/projects/kuro/phoenix_data
+2026-05-09 04:23:18 [INFO] alembic.runtime.migration: Context impl SQLiteImpl.
+2026-05-09 04:23:18 [INFO] alembic.runtime.migration: Will assume transactional DDL.
+2026-05-09 04:23:22 [INFO] __main__: [OBSERVABILITY] Phoenix dashboard available at: http://localhost:6006/
+2026-05-09 04:23:22 [INFO] __main__: [OBSERVABILITY] Auth: DISABLED (local private network)
+2026-05-09 04:23:22 [INFO] __main__: [OBSERVABILITY] Project: Kuro-AI-Audit
+2026-05-09 04:23:22 [INFO] __main__: [OBSERVABILITY] OpenTelemetry instrumentation enabled
+2026-05-09 04:23:22 [INFO] __main__: FastAPI server started in background thread on port 8443
+2026-05-09 04:23:22 [INFO] __main__: HTTPS enabled with mkcert certificates
+2026-05-09 04:23:22 [INFO] __main__: Secure Web Dashboard: https://0.0.0.0:8443
+2026-05-09 04:23:22 [INFO] __main__: Secure Login Page: https://0.0.0.0:8443/login
+2026-05-09 04:23:24 [INFO] __main__: Starting Telegram bot in main thread...
+2026-05-09 04:23:24 [INFO] __main__: Starting Telegram bot polling... (Attempt 1/5)
+2026-05-09 04:23:25 [INFO] telegram.ext.Application: Application started
+2026-05-09 04:23:49 [INFO] __main__: Hardware Sentinel Check [off-hours]: CPU=4.6%, RAM=43.5%, Disk=12.8%, Net TX=1882.0MB, RX=1863.7MB
+2026-05-09 05:01:06 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-09 05:01:10 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-09 05:01:10 [INFO] main: [TITLE_GEN] Generated title for ebd7be9e-b9e3-4740-b6c0-258bdd73d164: New Chat
+2026-05-09 05:01:11 [ERROR] main: Error in streaming endpoint: stream boom
+Traceback (most recent call last):
+  File "/home/kuro/projects/kuro/main.py", line 1684, in event_generator
+    async for chunk in process_chat_with_graph_stream(
+  File "/home/kuro/projects/kuro/tests/test_api_sse_contract.py", line 99, in _fake_stream
+    raise RuntimeError("stream boom")
+RuntimeError: stream boom
+2026-05-09 05:01:11 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-09 05:01:11 [INFO] main: [TITLE_GEN] Generated title for 2582614a-c477-4205-98e2-31cc64bd0205: New Chat
+2026-05-09 05:01:11 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-09 05:01:11 [INFO] main: [TITLE_GEN] Generated title for fc5b801c-c92f-47e6-8881-233b212b048f: New Chat
+2026-05-09 05:01:11 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-09 05:01:11 [INFO] main: [TITLE_GEN] Generated title for 027c6640-fa03-4af4-bfef-917bda149a5b: New Chat
+2026-05-09 05:01:11 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-09 05:01:11 [INFO] main: [TITLE_GEN] Generated title for 8f915d42-dcfb-4fd3-8a63-d137e6c97221: New Chat
+2026-05-09 05:01:12 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-09 05:01:12 [INFO] main: [TITLE_GEN] Generated title for auditor_hist_1: New Chat
+2026-05-09 05:22:49 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-09 05:22:50 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-09 05:22:50 [INFO] main: [TITLE_GEN] Generated title for c5dce2d9-132e-4d30-bc10-e01056452652: New Chat
+2026-05-09 05:22:50 [ERROR] main: Error in streaming endpoint: stream boom
+Traceback (most recent call last):
+  File "/home/kuro/projects/kuro/main.py", line 1684, in event_generator
+    async for chunk in process_chat_with_graph_stream(
+  File "/home/kuro/projects/kuro/tests/test_api_sse_contract.py", line 99, in _fake_stream
+    raise RuntimeError("stream boom")
+RuntimeError: stream boom
+2026-05-09 05:22:50 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-09 05:22:50 [INFO] main: [TITLE_GEN] Generated title for 33497acc-67bc-4e00-ac3d-25feeb0d6539: New Chat
+2026-05-09 05:22:50 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-09 05:22:50 [INFO] main: [TITLE_GEN] Generated title for b92db24f-90e0-484c-b664-c95db168bee9: New Chat
+2026-05-09 05:22:51 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-09 05:22:51 [INFO] main: [TITLE_GEN] Generated title for f005231a-de6c-4093-bff2-9470345101d1: New Chat
+2026-05-09 05:22:51 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-09 05:22:51 [INFO] main: [TITLE_GEN] Generated title for d0c4e4c2-bac0-4a56-b8fd-3add7efb8306: New Chat
+2026-05-09 05:22:51 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-09 05:22:51 [INFO] main: [TITLE_GEN] Generated title for auditor_hist_1: New Chat
+2026-05-09 05:24:00 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-09 05:24:01 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-09 05:24:01 [INFO] main: [TITLE_GEN] Generated title for 2df7496b-d286-467c-91ad-abd245381fac: New Chat
+2026-05-09 05:24:01 [ERROR] main: Error in streaming endpoint: stream boom
+Traceback (most recent call last):
+  File "/home/kuro/projects/kuro/main.py", line 1684, in event_generator
+    async for chunk in process_chat_with_graph_stream(
+  File "/home/kuro/projects/kuro/tests/test_api_sse_contract.py", line 99, in _fake_stream
+    raise RuntimeError("stream boom")
+RuntimeError: stream boom
+2026-05-09 05:24:01 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-09 05:24:01 [INFO] main: [TITLE_GEN] Generated title for 35166f29-c6d3-4765-9376-f552cab1e24e: New Chat
+2026-05-09 05:24:01 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-09 05:24:01 [INFO] main: [TITLE_GEN] Generated title for 615745a4-907d-45f5-b42f-a9e6885ca9f4: New Chat
+2026-05-09 05:24:02 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-09 05:24:02 [INFO] main: [TITLE_GEN] Generated title for df5bd1ea-d8c4-43a0-82ee-5dbc5155f493: New Chat
+2026-05-09 05:24:02 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-09 05:24:02 [INFO] main: [TITLE_GEN] Generated title for 7d29727b-8bde-449b-bf63-5fc6e042c5d1: New Chat
+2026-05-09 05:24:02 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-09 05:24:02 [INFO] main: [TITLE_GEN] Generated title for auditor_hist_1: New Chat
+2026-05-09 05:28:04 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-09 05:29:07 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-09 05:29:34 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-09 05:30:06 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-09 05:30:36 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-09 05:30:52 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-09 05:30:52 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-09 05:30:52 [INFO] main: [TITLE_GEN] Generated title for 131961ca-3bce-4204-a1c8-9f029b4f3786: New Chat
+2026-05-09 05:30:53 [ERROR] main: Error in streaming endpoint: stream boom
+Traceback (most recent call last):
+  File "/home/kuro/projects/kuro/main.py", line 1684, in event_generator
+    async for chunk in process_chat_with_graph_stream(
+  File "/home/kuro/projects/kuro/tests/test_api_sse_contract.py", line 99, in _fake_stream
+    raise RuntimeError("stream boom")
+RuntimeError: stream boom
+2026-05-09 05:30:53 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-09 05:30:53 [INFO] main: [TITLE_GEN] Generated title for b87380c1-128c-4917-896d-9c9409c77913: New Chat
+2026-05-09 05:30:53 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-09 05:30:53 [INFO] main: [TITLE_GEN] Generated title for 72fc575f-c426-465e-a6df-2ceedf1ed84b: New Chat
+2026-05-09 05:30:53 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-09 05:30:53 [INFO] main: [TITLE_GEN] Generated title for 2c923d9e-91c8-42bc-9e30-bfbeb53e6ebe: New Chat
+2026-05-09 05:30:53 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-09 05:30:53 [INFO] main: [TITLE_GEN] Generated title for 3448afb6-173d-4c65-b385-54fbceea761d: New Chat
+2026-05-09 05:30:54 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-09 05:30:54 [INFO] main: [TITLE_GEN] Generated title for auditor_hist_1: New Chat
+2026-05-09 05:33:35 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-09 05:33:36 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-09 05:33:36 [INFO] main: [TITLE_GEN] Generated title for a1e9921f-5977-44ed-ad05-8081e6e19b53: New Chat
+2026-05-09 05:33:36 [ERROR] main: Error in streaming endpoint: stream boom
+Traceback (most recent call last):
+  File "/home/kuro/projects/kuro/main.py", line 1684, in event_generator
+    async for chunk in process_chat_with_graph_stream(
+  File "/home/kuro/projects/kuro/tests/test_api_sse_contract.py", line 99, in _fake_stream
+    raise RuntimeError("stream boom")
+RuntimeError: stream boom
+2026-05-09 05:33:36 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-09 05:33:36 [INFO] main: [TITLE_GEN] Generated title for 18e8034e-0263-4f40-8fd8-6c1ec3064c17: New Chat
+2026-05-09 05:33:37 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-09 05:33:37 [INFO] main: [TITLE_GEN] Generated title for 190633f9-e561-48ae-8e4d-12b57e5cdb22: New Chat
+2026-05-09 05:33:37 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-09 05:33:37 [INFO] main: [TITLE_GEN] Generated title for efe4585d-07a0-453a-8cff-35c6f8887301: New Chat
+2026-05-09 05:33:37 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-09 05:33:37 [INFO] main: [TITLE_GEN] Generated title for 619a8e4e-9ecd-41fa-80e9-6ac4761579a7: New Chat
+2026-05-09 05:33:38 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-09 05:33:38 [INFO] main: [TITLE_GEN] Generated title for auditor_hist_1: New Chat
+2026-05-09 05:34:09 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-09 05:47:34 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-09 05:47:34 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-09 05:47:34 [INFO] main: [TITLE_GEN] Generated title for f8d9eb9a-62bf-4fad-ad99-8d4fd1858daa: New Chat
+2026-05-09 05:47:35 [ERROR] main: Error in streaming endpoint: stream boom
+Traceback (most recent call last):
+  File "/home/kuro/projects/kuro/main.py", line 1684, in event_generator
+    async for chunk in process_chat_with_graph_stream(
+  File "/home/kuro/projects/kuro/tests/test_api_sse_contract.py", line 99, in _fake_stream
+    raise RuntimeError("stream boom")
+RuntimeError: stream boom
+2026-05-09 05:47:35 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-09 05:47:35 [INFO] main: [TITLE_GEN] Generated title for 718bedd4-5068-410f-b1dc-1af061540420: New Chat
+2026-05-09 05:47:35 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-09 05:47:35 [INFO] main: [TITLE_GEN] Generated title for c99be7dc-2812-4663-bbac-c333e18c2875: New Chat
+2026-05-09 05:47:35 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-09 05:47:35 [INFO] main: [TITLE_GEN] Generated title for 31c8d82c-40b1-4e4a-947f-c32d4c919f8b: New Chat
+2026-05-09 05:47:36 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-09 05:47:36 [INFO] main: [TITLE_GEN] Generated title for 08ebee3f-7eb8-42f4-acf0-afbdee3e10aa: New Chat
+2026-05-09 05:47:36 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-09 05:47:36 [INFO] main: [TITLE_GEN] Generated title for auditor_hist_1: New Chat
+2026-05-09 05:59:12 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-09 05:59:18 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-09 05:59:18 [INFO] main: [TITLE_GEN] Generated title for 74218908-b827-464d-b757-b79be8b270ef: New Chat
+2026-05-09 05:59:18 [ERROR] main: Error in streaming endpoint: stream boom
+Traceback (most recent call last):
+  File "/home/kuro/projects/kuro/main.py", line 1684, in event_generator
+    async for chunk in process_chat_with_graph_stream(
+  File "/home/kuro/projects/kuro/tests/test_api_sse_contract.py", line 99, in _fake_stream
+    raise RuntimeError("stream boom")
+RuntimeError: stream boom
+2026-05-09 05:59:18 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-09 05:59:18 [INFO] main: [TITLE_GEN] Generated title for faf80278-4b3d-4a1c-b64c-0395e0a65705: New Chat
+2026-05-09 05:59:18 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-09 05:59:18 [INFO] main: [TITLE_GEN] Generated title for 7ef61b1e-5f4f-41a5-827b-f13bafa115a2: New Chat
+2026-05-09 05:59:19 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-09 05:59:19 [INFO] main: [TITLE_GEN] Generated title for 514127dd-9eab-4a73-8d24-539c375e346d: New Chat
+2026-05-09 05:59:19 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-09 05:59:19 [INFO] main: [TITLE_GEN] Generated title for 2b622748-fccf-44a6-8685-dc12be576e6c: New Chat
+2026-05-09 05:59:19 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-09 05:59:19 [INFO] main: [TITLE_GEN] Generated title for auditor_hist_1: New Chat
+2026-05-09 06:00:11 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-09 06:02:10 [INFO] telegram.ext.Application: Application is stopping. This might take a moment.
+2026-05-09 06:02:10 [INFO] telegram.ext.Application: Application.stop() complete
+2026-05-09 06:02:10 [INFO] __main__: Starting Telegram bot polling... (Attempt 2/5)
+2026-05-09 06:02:11 [INFO] telegram.ext.Application: Application started
+2026-05-09 06:04:00 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-09 06:04:00 [INFO] __main__: Kuro AI Reborn is starting...
+2026-05-09 06:04:01 [INFO] __main__: Memory stats: {'tier1_short_term': {'type': 'SQLite', 'entries': 15, 'limit': 15}, 'tier2_long_term': {'type': 'Mem0', 'entries': 1}, 'tier3_profile': {'type': 'JSON', 'file': '/home/kuro/projects/kuro/master_profile.json', 'notes': 0}, 'importance_threshold': 7}
+2026-05-09 06:04:01 [INFO] __main__: Web Dashboard: http://0.0.0.0:8000 (Authentication Required)
+2026-05-09 06:04:01 [INFO] __main__: Login Page: http://0.0.0.0:8000/login
+2026-05-09 06:04:01 [INFO] __main__: Reminder Dashboard: http://0.0.0.0:8000/reminders
+2026-05-09 06:04:01 [INFO] __main__: Habits Dashboard: http://0.0.0.0:8000/habits
+2026-05-09 06:04:01 [INFO] __main__: Databases initialized (Auth & Chat History)
+2026-05-09 06:04:01 [INFO] __main__: Price Ticker updates scheduled for all users.
+2026-05-09 06:04:01 [INFO] __main__: Market Sentinel Triangulation scans scheduled for all users.
+2026-05-09 06:04:01 [INFO] __main__: Autonomous dreaming cycle scheduled at 03:00 daily.
+2026-05-09 06:04:01 [INFO] __main__: Intelligence scheduler started.
+2026-05-09 06:04:01 [INFO] __main__: Evaluation Scheduler started.
+2026-05-09 06:04:01 [INFO] __main__: Hardware Sentinel scheduler started.
+2026-05-09 06:04:01 [INFO] phoenix.config: 📋 Ensuring phoenix working directory: /home/kuro/projects/kuro/phoenix_data
+2026-05-09 06:04:01 [INFO] alembic.runtime.migration: Context impl SQLiteImpl.
+2026-05-09 06:04:01 [INFO] alembic.runtime.migration: Will assume transactional DDL.
+2026-05-09 06:04:06 [INFO] __main__: [OBSERVABILITY] Phoenix dashboard available at: http://localhost:6006/
+2026-05-09 06:04:06 [INFO] __main__: [OBSERVABILITY] Auth: DISABLED (local private network)
+2026-05-09 06:04:06 [INFO] __main__: [OBSERVABILITY] Project: Kuro-AI-Audit
+2026-05-09 06:04:06 [INFO] __main__: [OBSERVABILITY] OpenTelemetry instrumentation enabled
+2026-05-09 06:04:06 [INFO] __main__: FastAPI server started in background thread on port 8443
+2026-05-09 06:04:06 [INFO] __main__: HTTPS enabled with mkcert certificates
+2026-05-09 06:04:06 [INFO] __main__: Secure Web Dashboard: https://0.0.0.0:8443
+2026-05-09 06:04:06 [INFO] __main__: Secure Login Page: https://0.0.0.0:8443/login
+2026-05-09 06:04:08 [INFO] __main__: Starting Telegram bot in main thread...
+2026-05-09 06:04:08 [INFO] __main__: Starting Telegram bot polling... (Attempt 1/5)
+2026-05-09 06:04:09 [INFO] telegram.ext.Application: Application started
+2026-05-09 06:04:32 [INFO] __main__: Hardware Sentinel Check [off-hours]: CPU=2.6%, RAM=45.3%, Disk=12.9%, Net TX=2064.1MB, RX=2045.1MB
+2026-05-09 06:13:25 [ERROR] kuro_backend.llm_utils: Failed to generate chat title: 'Settings' object has no attribute 'PRIMARY_MODEL'
+2026-05-09 06:13:25 [INFO] __main__: [TITLE_GEN] Generated title for f34d6395-f2ea-4175-8cdd-687c2448f10d: New Chat
+2026-05-09 06:13:25 [INFO] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-05-09 06:13:27 [INFO] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-05-09 06:28:20 [ERROR] kuro_backend.ingestion_center.ingestion_manager: Ingestion job failed job_id=12 dataset_uuid=019385af-79e5-481e-89e1-65016d74d2fd
+Traceback (most recent call last):
+  File "/home/kuro/projects/kuro/kuro_backend/ingestion_center/ingestion_manager.py", line 104, in process_ingestion_job
+    result = run_ingestion(dataset_uuid, username, job_id=job_id)
+  File "/home/kuro/projects/kuro/kuro_backend/ingestion_center/ingestion_pipeline.py", line 79, in run_ingestion
+    raise ValueError("Parsed file produced no ingestible text.")
+ValueError: Parsed file produced no ingestible text.
+2026-05-09 08:26:13 [WARNING] __main__: Network error: httpx.ConnectError: [Errno -3] Temporary failure in name resolution
+2026-05-09 09:05:03 [INFO] __main__: Hardware Sentinel Check [work hours]: CPU=60.8%, RAM=99.7%, Disk=13.1%, Net TX=2271.0MB, RX=2234.3MB
+2026-05-09 09:05:03 [WARNING] __main__: [HARDWARE] RAM usage 99.7% — Master, Kuro's VM memory utilisation has reached 99.7%. Kindly review the active processes.
+2026-05-09 09:05:03 [INFO] kuro_backend.proactive_events: [PROACTIVE] event kind=hardware severity=warning title=RAM usage 99.7%
+2026-05-09 09:07:24 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-09 09:07:25 [INFO] __main__: Kuro AI Reborn is starting...
+2026-05-09 09:07:25 [INFO] __main__: Memory stats: {'tier1_short_term': {'type': 'SQLite', 'entries': 15, 'limit': 15}, 'tier2_long_term': {'type': 'Mem0', 'entries': 1}, 'tier3_profile': {'type': 'JSON', 'file': '/home/kuro/projects/kuro/master_profile.json', 'notes': 0}, 'importance_threshold': 7}
+2026-05-09 09:07:25 [INFO] __main__: Web Dashboard: http://0.0.0.0:8000 (Authentication Required)
+2026-05-09 09:07:25 [INFO] __main__: Login Page: http://0.0.0.0:8000/login
+2026-05-09 09:07:25 [INFO] __main__: Reminder Dashboard: http://0.0.0.0:8000/reminders
+2026-05-09 09:07:25 [INFO] __main__: Habits Dashboard: http://0.0.0.0:8000/habits
+2026-05-09 09:07:25 [INFO] __main__: Databases initialized (Auth & Chat History)
+2026-05-09 09:07:25 [INFO] __main__: Price Ticker updates scheduled for all users.
+2026-05-09 09:07:25 [INFO] __main__: Market Sentinel Triangulation scans scheduled for all users.
+2026-05-09 09:07:25 [INFO] __main__: Autonomous dreaming cycle scheduled at 03:00 daily.
+2026-05-09 09:07:25 [INFO] __main__: Intelligence scheduler started.
+2026-05-09 09:07:25 [INFO] __main__: Evaluation Scheduler started.
+2026-05-09 09:07:25 [INFO] __main__: Hardware Sentinel scheduler started.
+2026-05-09 09:07:25 [INFO] phoenix.config: 📋 Ensuring phoenix working directory: /home/kuro/projects/kuro/phoenix_data
+2026-05-09 09:07:25 [INFO] alembic.runtime.migration: Context impl SQLiteImpl.
+2026-05-09 09:07:25 [INFO] alembic.runtime.migration: Will assume transactional DDL.
+2026-05-09 09:07:30 [INFO] __main__: [OBSERVABILITY] Phoenix dashboard available at: http://localhost:6006/
+2026-05-09 09:07:30 [INFO] __main__: [OBSERVABILITY] Auth: DISABLED (local private network)
+2026-05-09 09:07:30 [INFO] __main__: [OBSERVABILITY] Project: Kuro-AI-Audit
+2026-05-09 09:07:30 [INFO] __main__: [OBSERVABILITY] OpenTelemetry instrumentation enabled
+2026-05-09 09:07:30 [INFO] __main__: FastAPI server started in background thread on port 8443
+2026-05-09 09:07:30 [INFO] __main__: HTTPS enabled with mkcert certificates
+2026-05-09 09:07:30 [INFO] __main__: Secure Web Dashboard: https://0.0.0.0:8443
+2026-05-09 09:07:30 [INFO] __main__: Secure Login Page: https://0.0.0.0:8443/login
+2026-05-09 09:07:32 [INFO] __main__: Starting Telegram bot in main thread...
+2026-05-09 09:07:32 [INFO] __main__: Starting Telegram bot polling... (Attempt 1/5)
+2026-05-09 09:07:36 [INFO] telegram.ext.Application: Application started
+2026-05-09 09:08:26 [INFO] __main__: Hardware Sentinel Check [work hours]: CPU=0.5%, RAM=13.6%, Disk=13.0%, Net TX=0.1MB, RX=0.2MB
+2026-05-09 09:11:06 [INFO] __main__: Unauthenticated access to / from 192.168.18.246, redirecting to /login
+2026-05-09 09:11:12 [INFO] __main__: Successful login: Pantronux from 192.168.18.246
+2026-05-09 09:12:39 [ERROR] kuro_backend.ingestion_center.ingestion_manager: Ingestion job failed job_id=33 dataset_uuid=6ce52b78-6b60-462a-ae0a-69e8a25edecb
+Traceback (most recent call last):
+  File "/home/kuro/projects/kuro/kuro_backend/ingestion_center/ingestion_manager.py", line 101, in process_ingestion_job
+    result = run_reindex(dataset_uuid, username, job_id=job_id)
+  File "/home/kuro/projects/kuro/kuro_backend/ingestion_center/ingestion_pipeline.py", line 118, in run_reindex
+    result = run_ingestion(dataset_uuid, username, job_id=job_id)
+  File "/home/kuro/projects/kuro/kuro_backend/ingestion_center/ingestion_pipeline.py", line 75, in run_ingestion
+    parsed = parse_file(dataset["file_path"], dataset.get("source_type") or "")
+  File "/home/kuro/projects/kuro/kuro_backend/ingestion_center/ingestion_pipeline.py", line 20, in parse_file
+    path = Path(file_path)
+  File "/usr/lib/python3.10/pathlib.py", line 960, in __new__
+    self = cls._from_parts(args)
+  File "/usr/lib/python3.10/pathlib.py", line 594, in _from_parts
+    drv, root, parts = self._parse_args(args)
+  File "/usr/lib/python3.10/pathlib.py", line 578, in _parse_args
+    a = os.fspath(a)
+TypeError: expected str, bytes or os.PathLike object, not NoneType
+2026-05-09 09:12:49 [ERROR] kuro_backend.ingestion_center.ingestion_manager: Ingestion job failed job_id=34 dataset_uuid=019385af-79e5-481e-89e1-65016d74d2fd
+Traceback (most recent call last):
+  File "/home/kuro/projects/kuro/kuro_backend/ingestion_center/ingestion_manager.py", line 101, in process_ingestion_job
+    result = run_reindex(dataset_uuid, username, job_id=job_id)
+  File "/home/kuro/projects/kuro/kuro_backend/ingestion_center/ingestion_pipeline.py", line 118, in run_reindex
+    result = run_ingestion(dataset_uuid, username, job_id=job_id)
+  File "/home/kuro/projects/kuro/kuro_backend/ingestion_center/ingestion_pipeline.py", line 79, in run_ingestion
+    raise ValueError("Parsed file produced no ingestible text.")
+ValueError: Parsed file produced no ingestible text.
+2026-05-09 09:12:58 [ERROR] kuro_backend.ingestion_center.ingestion_manager: Ingestion job failed job_id=35 dataset_uuid=14a141d9-801c-409c-925f-a142ef9945bb
+Traceback (most recent call last):
+  File "/home/kuro/projects/kuro/kuro_backend/ingestion_center/ingestion_manager.py", line 101, in process_ingestion_job
+    result = run_reindex(dataset_uuid, username, job_id=job_id)
+  File "/home/kuro/projects/kuro/kuro_backend/ingestion_center/ingestion_pipeline.py", line 118, in run_reindex
+    result = run_ingestion(dataset_uuid, username, job_id=job_id)
+  File "/home/kuro/projects/kuro/kuro_backend/ingestion_center/ingestion_pipeline.py", line 79, in run_ingestion
+    raise ValueError("Parsed file produced no ingestible text.")
+ValueError: Parsed file produced no ingestible text.
+2026-05-09 09:21:21 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-09 09:55:18 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-09 09:55:18 [INFO] __main__: Kuro AI Reborn is starting...
+2026-05-09 09:55:18 [INFO] __main__: Memory stats: {'tier1_short_term': {'type': 'SQLite', 'entries': 15, 'limit': 15}, 'tier2_long_term': {'type': 'Mem0', 'entries': 1}, 'tier3_profile': {'type': 'JSON', 'file': '/home/kuro/projects/kuro/master_profile.json', 'notes': 0}, 'importance_threshold': 7}
+2026-05-09 09:55:18 [INFO] __main__: Web Dashboard: http://0.0.0.0:8000 (Authentication Required)
+2026-05-09 09:55:18 [INFO] __main__: Login Page: http://0.0.0.0:8000/login
+2026-05-09 09:55:18 [INFO] __main__: Reminder Dashboard: http://0.0.0.0:8000/reminders
+2026-05-09 09:55:18 [INFO] __main__: Habits Dashboard: http://0.0.0.0:8000/habits
+2026-05-09 09:55:18 [INFO] __main__: Databases initialized (Auth & Chat History)
+2026-05-09 09:55:18 [INFO] __main__: Price Ticker updates scheduled for all users.
+2026-05-09 09:55:18 [INFO] __main__: Market Sentinel Triangulation scans scheduled for all users.
+2026-05-09 09:55:18 [INFO] __main__: Autonomous dreaming cycle scheduled at 03:00 daily.
+2026-05-09 09:55:18 [INFO] __main__: Intelligence scheduler started.
+2026-05-09 09:55:18 [INFO] __main__: Evaluation Scheduler started.
+2026-05-09 09:55:18 [INFO] __main__: Hardware Sentinel scheduler started.
+2026-05-09 09:55:18 [INFO] phoenix.config: 📋 Ensuring phoenix working directory: /home/kuro/projects/kuro/phoenix_data
+2026-05-09 09:55:19 [INFO] alembic.runtime.migration: Context impl SQLiteImpl.
+2026-05-09 09:55:19 [INFO] alembic.runtime.migration: Will assume transactional DDL.
+2026-05-09 09:55:23 [INFO] __main__: [OBSERVABILITY] Phoenix dashboard available at: http://localhost:6006/
+2026-05-09 09:55:23 [INFO] __main__: [OBSERVABILITY] Auth: DISABLED (local private network)
+2026-05-09 09:55:23 [INFO] __main__: [OBSERVABILITY] Project: Kuro-AI-Audit
+2026-05-09 09:55:23 [INFO] __main__: [OBSERVABILITY] OpenTelemetry instrumentation enabled
+2026-05-09 09:55:23 [INFO] __main__: FastAPI server started in background thread on port 8443
+2026-05-09 09:55:23 [INFO] __main__: HTTPS enabled with mkcert certificates
+2026-05-09 09:55:23 [INFO] __main__: Secure Web Dashboard: https://0.0.0.0:8443
+2026-05-09 09:55:23 [INFO] __main__: Secure Login Page: https://0.0.0.0:8443/login
+2026-05-09 09:55:25 [INFO] __main__: Starting Telegram bot in main thread...
+2026-05-09 09:55:25 [INFO] __main__: Starting Telegram bot polling... (Attempt 1/5)
+2026-05-09 09:55:26 [INFO] telegram.ext.Application: Application started
+2026-05-09 09:55:50 [INFO] __main__: Hardware Sentinel Check [work hours]: CPU=58.3%, RAM=15.0%, Disk=13.1%, Net TX=0.7MB, RX=0.2MB
+2026-05-09 10:11:09 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-09 10:24:16 [INFO] __main__: Successful login: Faikhira from 192.168.18.246
+2026-05-09 10:24:52 [INFO] __main__: Successful login: Pantronux from 192.168.18.246
+2026-05-09 10:25:02 [INFO] __main__: Successful login: Faikhira from 192.168.18.246
+2026-05-09 10:27:38 [INFO] __main__: Successful login: Pantronux from 192.168.18.246
+2026-05-09 10:44:44 [INFO] telegram.ext.Application: Application is stopping. This might take a moment.
+2026-05-09 10:44:44 [INFO] telegram.ext.Application: Application.stop() complete
+2026-05-09 10:44:44 [INFO] __main__: Starting Telegram bot polling... (Attempt 2/5)
+2026-05-09 10:44:45 [INFO] telegram.ext.Application: Application started
+2026-05-09 10:46:33 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-09 10:46:33 [INFO] __main__: Kuro AI Reborn is starting...
+2026-05-09 10:46:34 [INFO] __main__: Memory stats: {'tier1_short_term': {'type': 'SQLite', 'entries': 15, 'limit': 15}, 'tier2_long_term': {'type': 'Mem0', 'entries': 1}, 'tier3_profile': {'type': 'JSON', 'file': '/home/kuro/projects/kuro/master_profile.json', 'notes': 0}, 'importance_threshold': 7}
+2026-05-09 10:46:34 [INFO] __main__: Web Dashboard: http://0.0.0.0:8000 (Authentication Required)
+2026-05-09 10:46:34 [INFO] __main__: Login Page: http://0.0.0.0:8000/login
+2026-05-09 10:46:34 [INFO] __main__: Reminder Dashboard: http://0.0.0.0:8000/reminders
+2026-05-09 10:46:34 [INFO] __main__: Habits Dashboard: http://0.0.0.0:8000/habits
+2026-05-09 10:46:34 [INFO] __main__: Databases initialized (Auth & Chat History)
+2026-05-09 10:46:34 [INFO] __main__: Price Ticker updates scheduled for all users.
+2026-05-09 10:46:34 [INFO] __main__: Market Sentinel Triangulation scans scheduled for all users.
+2026-05-09 10:46:34 [INFO] __main__: Autonomous dreaming cycle scheduled at 03:00 daily.
+2026-05-09 10:46:34 [INFO] __main__: Intelligence scheduler started.
+2026-05-09 10:46:34 [INFO] __main__: Evaluation Scheduler started.
+2026-05-09 10:46:34 [INFO] __main__: Hardware Sentinel scheduler started.
+2026-05-09 10:46:34 [INFO] phoenix.config: 📋 Ensuring phoenix working directory: /home/kuro/projects/kuro/phoenix_data
+2026-05-09 10:46:34 [INFO] alembic.runtime.migration: Context impl SQLiteImpl.
+2026-05-09 10:46:34 [INFO] alembic.runtime.migration: Will assume transactional DDL.
+2026-05-09 10:46:38 [INFO] __main__: [OBSERVABILITY] Phoenix dashboard available at: http://localhost:6006/
+2026-05-09 10:46:38 [INFO] __main__: [OBSERVABILITY] Auth: DISABLED (local private network)
+2026-05-09 10:46:38 [INFO] __main__: [OBSERVABILITY] Project: Kuro-AI-Audit
+2026-05-09 10:46:38 [INFO] __main__: [OBSERVABILITY] OpenTelemetry instrumentation enabled
+2026-05-09 10:46:38 [INFO] __main__: FastAPI server started in background thread on port 8443
+2026-05-09 10:46:38 [INFO] __main__: HTTPS enabled with mkcert certificates
+2026-05-09 10:46:38 [INFO] __main__: Secure Web Dashboard: https://0.0.0.0:8443
+2026-05-09 10:46:38 [INFO] __main__: Secure Login Page: https://0.0.0.0:8443/login
+2026-05-09 10:46:40 [INFO] __main__: Starting Telegram bot in main thread...
+2026-05-09 10:46:40 [INFO] __main__: Starting Telegram bot polling... (Attempt 1/5)
+2026-05-09 10:46:41 [INFO] telegram.ext.Application: Application started
+2026-05-09 10:46:58 [INFO] __main__: Successful login: Pantronux from 192.168.18.246
+2026-05-09 10:47:05 [INFO] __main__: Hardware Sentinel Check [work hours]: CPU=2.6%, RAM=37.2%, Disk=13.1%, Net TX=266.0MB, RX=202.7MB
+2026-05-09 10:51:02 [INFO] telegram.ext.Application: Application is stopping. This might take a moment.
+2026-05-09 10:51:02 [INFO] telegram.ext.Application: Application.stop() complete
+2026-05-09 10:51:02 [INFO] __main__: Starting Telegram bot polling... (Attempt 2/5)
+2026-05-09 10:51:03 [INFO] telegram.ext.Application: Application started
+2026-05-09 10:52:48 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-09 10:52:48 [INFO] __main__: Kuro AI Reborn is starting...
+2026-05-09 10:52:49 [INFO] __main__: Memory stats: {'tier1_short_term': {'type': 'SQLite', 'entries': 15, 'limit': 15}, 'tier2_long_term': {'type': 'Mem0', 'entries': 1}, 'tier3_profile': {'type': 'JSON', 'file': '/home/kuro/projects/kuro/master_profile.json', 'notes': 0}, 'importance_threshold': 7}
+2026-05-09 10:52:49 [INFO] __main__: Web Dashboard: http://0.0.0.0:8000 (Authentication Required)
+2026-05-09 10:52:49 [INFO] __main__: Login Page: http://0.0.0.0:8000/login
+2026-05-09 10:52:49 [INFO] __main__: Reminder Dashboard: http://0.0.0.0:8000/reminders
+2026-05-09 10:52:49 [INFO] __main__: Habits Dashboard: http://0.0.0.0:8000/habits
+2026-05-09 10:52:49 [INFO] __main__: Databases initialized (Auth & Chat History)
+2026-05-09 10:52:49 [INFO] __main__: Price Ticker updates scheduled for all users.
+2026-05-09 10:52:49 [INFO] __main__: Market Sentinel Triangulation scans scheduled for all users.
+2026-05-09 10:52:49 [INFO] __main__: Autonomous dreaming cycle scheduled at 03:00 daily.
+2026-05-09 10:52:49 [INFO] __main__: Intelligence scheduler started.
+2026-05-09 10:52:49 [INFO] __main__: Evaluation Scheduler started.
+2026-05-09 10:52:49 [INFO] __main__: Hardware Sentinel scheduler started.
+2026-05-09 10:52:49 [INFO] phoenix.config: 📋 Ensuring phoenix working directory: /home/kuro/projects/kuro/phoenix_data
+2026-05-09 10:52:49 [INFO] alembic.runtime.migration: Context impl SQLiteImpl.
+2026-05-09 10:52:49 [INFO] alembic.runtime.migration: Will assume transactional DDL.
+2026-05-09 10:52:53 [INFO] __main__: [OBSERVABILITY] Phoenix dashboard available at: http://localhost:6006/
+2026-05-09 10:52:53 [INFO] __main__: [OBSERVABILITY] Auth: DISABLED (local private network)
+2026-05-09 10:52:53 [INFO] __main__: [OBSERVABILITY] Project: Kuro-AI-Audit
+2026-05-09 10:52:53 [INFO] __main__: [OBSERVABILITY] OpenTelemetry instrumentation enabled
+2026-05-09 10:52:53 [INFO] __main__: FastAPI server started in background thread on port 8443
+2026-05-09 10:52:53 [INFO] __main__: HTTPS enabled with mkcert certificates
+2026-05-09 10:52:53 [INFO] __main__: Secure Web Dashboard: https://0.0.0.0:8443
+2026-05-09 10:52:53 [INFO] __main__: Secure Login Page: https://0.0.0.0:8443/login
+2026-05-09 10:52:55 [INFO] __main__: Starting Telegram bot in main thread...
+2026-05-09 10:52:55 [INFO] __main__: Starting Telegram bot polling... (Attempt 1/5)
+2026-05-09 10:52:56 [INFO] telegram.ext.Application: Application started
+2026-05-09 10:53:20 [INFO] __main__: Hardware Sentinel Check [work hours]: CPU=4.6%, RAM=38.4%, Disk=13.1%, Net TX=275.1MB, RX=211.0MB
+2026-05-09 11:09:50 [INFO] telegram.ext.Application: Application is stopping. This might take a moment.
+2026-05-09 11:09:50 [INFO] telegram.ext.Application: Application.stop() complete
+2026-05-09 11:09:50 [INFO] __main__: Starting Telegram bot polling... (Attempt 2/5)
+2026-05-09 11:09:51 [INFO] telegram.ext.Application: Application started
+2026-05-09 11:11:39 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-09 11:11:39 [INFO] __main__: [KPR] Playground router mounted at /api/playground
+2026-05-09 11:11:39 [INFO] __main__: Kuro AI Reborn is starting...
+2026-05-09 11:11:40 [INFO] __main__: Memory stats: {'tier1_short_term': {'type': 'SQLite', 'entries': 15, 'limit': 15}, 'tier2_long_term': {'type': 'Mem0', 'entries': 1}, 'tier3_profile': {'type': 'JSON', 'file': '/home/kuro/projects/kuro/master_profile.json', 'notes': 0}, 'importance_threshold': 7}
+2026-05-09 11:11:40 [INFO] __main__: Web Dashboard: http://0.0.0.0:8000 (Authentication Required)
+2026-05-09 11:11:40 [INFO] __main__: Login Page: http://0.0.0.0:8000/login
+2026-05-09 11:11:40 [INFO] __main__: Reminder Dashboard: http://0.0.0.0:8000/reminders
+2026-05-09 11:11:40 [INFO] __main__: Habits Dashboard: http://0.0.0.0:8000/habits
+2026-05-09 11:11:40 [INFO] __main__: Databases initialized (Auth & Chat History)
+2026-05-09 11:11:40 [INFO] __main__: Price Ticker updates scheduled for all users.
+2026-05-09 11:11:40 [INFO] __main__: Market Sentinel Triangulation scans scheduled for all users.
+2026-05-09 11:11:40 [INFO] __main__: Autonomous dreaming cycle scheduled at 03:00 daily.
+2026-05-09 11:11:40 [INFO] __main__: Intelligence scheduler started.
+2026-05-09 11:11:40 [INFO] __main__: Evaluation Scheduler started.
+2026-05-09 11:11:40 [INFO] __main__: Hardware Sentinel scheduler started.
+2026-05-09 11:11:40 [INFO] phoenix.config: 📋 Ensuring phoenix working directory: /home/kuro/projects/kuro/phoenix_data
+2026-05-09 11:11:40 [INFO] alembic.runtime.migration: Context impl SQLiteImpl.
+2026-05-09 11:11:40 [INFO] alembic.runtime.migration: Will assume transactional DDL.
+2026-05-09 11:11:45 [INFO] __main__: [OBSERVABILITY] Phoenix dashboard available at: http://localhost:6006/
+2026-05-09 11:11:45 [INFO] __main__: [OBSERVABILITY] Auth: DISABLED (local private network)
+2026-05-09 11:11:45 [INFO] __main__: [OBSERVABILITY] Project: Kuro-AI-Audit
+2026-05-09 11:11:45 [INFO] __main__: [OBSERVABILITY] OpenTelemetry instrumentation enabled
+2026-05-09 11:11:45 [INFO] __main__: FastAPI server started in background thread on port 8443
+2026-05-09 11:11:45 [INFO] __main__: HTTPS enabled with mkcert certificates
+2026-05-09 11:11:45 [INFO] __main__: Secure Web Dashboard: https://0.0.0.0:8443
+2026-05-09 11:11:45 [INFO] __main__: Secure Login Page: https://0.0.0.0:8443/login
+2026-05-09 11:11:47 [INFO] __main__: Starting Telegram bot in main thread...
+2026-05-09 11:11:47 [INFO] __main__: Starting Telegram bot polling... (Attempt 1/5)
+2026-05-09 11:11:48 [INFO] telegram.ext.Application: Application started
+2026-05-09 11:12:11 [INFO] __main__: Hardware Sentinel Check [work hours]: CPU=4.1%, RAM=37.5%, Disk=13.1%, Net TX=374.2MB, RX=279.3MB
+2026-05-09 11:14:50 [INFO] telegram.ext.Application: Application is stopping. This might take a moment.
+2026-05-09 11:14:50 [INFO] telegram.ext.Application: Application.stop() complete
+2026-05-09 11:14:50 [INFO] __main__: Starting Telegram bot polling... (Attempt 2/5)
+2026-05-09 11:14:51 [INFO] telegram.ext.Application: Application started
+2026-05-09 11:16:39 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-09 11:16:39 [INFO] __main__: [KPR] Playground router mounted at /api/playground
+2026-05-09 11:16:40 [INFO] __main__: Kuro AI Reborn is starting...
+2026-05-09 11:16:40 [INFO] __main__: Memory stats: {'tier1_short_term': {'type': 'SQLite', 'entries': 15, 'limit': 15}, 'tier2_long_term': {'type': 'Mem0', 'entries': 1}, 'tier3_profile': {'type': 'JSON', 'file': '/home/kuro/projects/kuro/master_profile.json', 'notes': 0}, 'importance_threshold': 7}
+2026-05-09 11:16:40 [INFO] __main__: Web Dashboard: http://0.0.0.0:8000 (Authentication Required)
+2026-05-09 11:16:40 [INFO] __main__: Login Page: http://0.0.0.0:8000/login
+2026-05-09 11:16:40 [INFO] __main__: Reminder Dashboard: http://0.0.0.0:8000/reminders
+2026-05-09 11:16:40 [INFO] __main__: Habits Dashboard: http://0.0.0.0:8000/habits
+2026-05-09 11:16:40 [INFO] __main__: Databases initialized (Auth & Chat History)
+2026-05-09 11:16:40 [INFO] __main__: Price Ticker updates scheduled for all users.
+2026-05-09 11:16:40 [INFO] __main__: Market Sentinel Triangulation scans scheduled for all users.
+2026-05-09 11:16:40 [INFO] __main__: Autonomous dreaming cycle scheduled at 03:00 daily.
+2026-05-09 11:16:40 [INFO] __main__: Intelligence scheduler started.
+2026-05-09 11:16:40 [INFO] __main__: Evaluation Scheduler started.
+2026-05-09 11:16:40 [INFO] __main__: Hardware Sentinel scheduler started.
+2026-05-09 11:16:40 [INFO] phoenix.config: 📋 Ensuring phoenix working directory: /home/kuro/projects/kuro/phoenix_data
+2026-05-09 11:16:40 [INFO] alembic.runtime.migration: Context impl SQLiteImpl.
+2026-05-09 11:16:40 [INFO] alembic.runtime.migration: Will assume transactional DDL.
+2026-05-09 11:16:44 [INFO] __main__: [OBSERVABILITY] Phoenix dashboard available at: http://localhost:6006/
+2026-05-09 11:16:44 [INFO] __main__: [OBSERVABILITY] Auth: DISABLED (local private network)
+2026-05-09 11:16:44 [INFO] __main__: [OBSERVABILITY] Project: Kuro-AI-Audit
+2026-05-09 11:16:44 [INFO] __main__: [OBSERVABILITY] OpenTelemetry instrumentation enabled
+2026-05-09 11:16:44 [INFO] __main__: FastAPI server started in background thread on port 8443
+2026-05-09 11:16:44 [INFO] __main__: HTTPS enabled with mkcert certificates
+2026-05-09 11:16:44 [INFO] __main__: Secure Web Dashboard: https://0.0.0.0:8443
+2026-05-09 11:16:44 [INFO] __main__: Secure Login Page: https://0.0.0.0:8443/login
+2026-05-09 11:16:46 [INFO] __main__: Starting Telegram bot in main thread...
+2026-05-09 11:16:46 [INFO] __main__: Starting Telegram bot polling... (Attempt 1/5)
+2026-05-09 11:16:47 [INFO] telegram.ext.Application: Application started
+2026-05-09 11:17:11 [INFO] __main__: Hardware Sentinel Check [work hours]: CPU=4.0%, RAM=39.7%, Disk=13.1%, Net TX=392.4MB, RX=293.3MB
+2026-05-09 11:33:27 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-09 11:33:28 [INFO] main: [KPR] Playground router mounted at /api/playground
+2026-05-09 11:33:28 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-09 11:33:28 [INFO] main: [KPR] Playground router mounted at /api/playground
+2026-05-09 11:43:16 [INFO] telegram.ext.Application: Application is stopping. This might take a moment.
+2026-05-09 11:43:16 [INFO] telegram.ext.Application: Application.stop() complete
+2026-05-09 11:43:16 [INFO] __main__: Starting Telegram bot polling... (Attempt 2/5)
+2026-05-09 11:43:17 [INFO] telegram.ext.Application: Application started
+2026-05-09 11:45:05 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-09 11:45:05 [INFO] __main__: [KPR] Playground router mounted at /api/playground
+2026-05-09 11:45:05 [INFO] __main__: Kuro AI Reborn is starting...
+2026-05-09 11:45:06 [INFO] __main__: Memory stats: {'tier1_short_term': {'type': 'SQLite', 'entries': 15, 'limit': 15}, 'tier2_long_term': {'type': 'Mem0', 'entries': 1}, 'tier3_profile': {'type': 'JSON', 'file': '/home/kuro/projects/kuro/master_profile.json', 'notes': 0}, 'importance_threshold': 7}
+2026-05-09 11:45:06 [INFO] __main__: Web Dashboard: http://0.0.0.0:8000 (Authentication Required)
+2026-05-09 11:45:06 [INFO] __main__: Login Page: http://0.0.0.0:8000/login
+2026-05-09 11:45:06 [INFO] __main__: Reminder Dashboard: http://0.0.0.0:8000/reminders
+2026-05-09 11:45:06 [INFO] __main__: Habits Dashboard: http://0.0.0.0:8000/habits
+2026-05-09 11:45:06 [INFO] __main__: Databases initialized (Auth & Chat History)
+2026-05-09 11:45:06 [INFO] __main__: Price Ticker updates scheduled for all users.
+2026-05-09 11:45:06 [INFO] __main__: Market Sentinel Triangulation scans scheduled for all users.
+2026-05-09 11:45:06 [INFO] __main__: Autonomous dreaming cycle scheduled at 03:00 daily.
+2026-05-09 11:45:06 [INFO] __main__: Intelligence scheduler started.
+2026-05-09 11:45:06 [INFO] __main__: Evaluation Scheduler started.
+2026-05-09 11:45:06 [INFO] __main__: Hardware Sentinel scheduler started.
+2026-05-09 11:45:06 [INFO] phoenix.config: 📋 Ensuring phoenix working directory: /home/kuro/projects/kuro/phoenix_data
+2026-05-09 11:45:06 [INFO] alembic.runtime.migration: Context impl SQLiteImpl.
+2026-05-09 11:45:06 [INFO] alembic.runtime.migration: Will assume transactional DDL.
+2026-05-09 11:45:10 [INFO] __main__: [OBSERVABILITY] Phoenix dashboard available at: http://localhost:6006/
+2026-05-09 11:45:10 [INFO] __main__: [OBSERVABILITY] Auth: DISABLED (local private network)
+2026-05-09 11:45:10 [INFO] __main__: [OBSERVABILITY] Project: Kuro-AI-Audit
+2026-05-09 11:45:10 [INFO] __main__: [OBSERVABILITY] OpenTelemetry instrumentation enabled
+2026-05-09 11:45:10 [INFO] __main__: FastAPI server started in background thread on port 8443
+2026-05-09 11:45:10 [INFO] __main__: HTTPS enabled with mkcert certificates
+2026-05-09 11:45:10 [INFO] __main__: Secure Web Dashboard: https://0.0.0.0:8443
+2026-05-09 11:45:10 [INFO] __main__: Secure Login Page: https://0.0.0.0:8443/login
+2026-05-09 11:45:12 [INFO] __main__: Starting Telegram bot in main thread...
+2026-05-09 11:45:12 [INFO] __main__: Starting Telegram bot polling... (Attempt 1/5)
+2026-05-09 11:45:13 [INFO] telegram.ext.Application: Application started
+2026-05-09 11:45:37 [INFO] __main__: Hardware Sentinel Check [work hours]: CPU=9.6%, RAM=39.0%, Disk=13.1%, Net TX=466.9MB, RX=353.8MB
+2026-05-09 12:11:59 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-09 12:11:59 [INFO] main: [KPR] Playground router mounted at /api/playground
+2026-05-09 12:11:59 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-09 12:12:00 [INFO] main: [KPR] Playground router mounted at /api/playground
+2026-05-09 12:15:15 [INFO] telegram.ext.Application: Application is stopping. This might take a moment.
+2026-05-09 12:15:15 [INFO] telegram.ext.Application: Application.stop() complete
+2026-05-09 12:15:15 [INFO] __main__: Starting Telegram bot polling... (Attempt 2/5)
+2026-05-09 12:15:16 [INFO] telegram.ext.Application: Application started
+2026-05-09 12:17:01 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-09 12:17:01 [INFO] __main__: [KPR] Playground router mounted at /api/playground
+2026-05-09 12:17:01 [INFO] __main__: Kuro AI Reborn is starting...
+2026-05-09 12:17:02 [INFO] __main__: Memory stats: {'tier1_short_term': {'type': 'SQLite', 'entries': 15, 'limit': 15}, 'tier2_long_term': {'type': 'Mem0', 'entries': 1}, 'tier3_profile': {'type': 'JSON', 'file': '/home/kuro/projects/kuro/master_profile.json', 'notes': 0}, 'importance_threshold': 7}
+2026-05-09 12:17:02 [INFO] __main__: Web Dashboard: http://0.0.0.0:8000 (Authentication Required)
+2026-05-09 12:17:02 [INFO] __main__: Login Page: http://0.0.0.0:8000/login
+2026-05-09 12:17:02 [INFO] __main__: Reminder Dashboard: http://0.0.0.0:8000/reminders
+2026-05-09 12:17:02 [INFO] __main__: Habits Dashboard: http://0.0.0.0:8000/habits
+2026-05-09 12:17:02 [INFO] __main__: Databases initialized (Auth & Chat History)
+2026-05-09 12:17:02 [INFO] __main__: Price Ticker updates scheduled for all users.
+2026-05-09 12:17:02 [INFO] __main__: Market Sentinel Triangulation scans scheduled for all users.
+2026-05-09 12:17:02 [INFO] __main__: Autonomous dreaming cycle scheduled at 03:00 daily.
+2026-05-09 12:17:02 [INFO] __main__: Intelligence scheduler started.
+2026-05-09 12:17:02 [INFO] __main__: Evaluation Scheduler started.
+2026-05-09 12:17:02 [INFO] __main__: Hardware Sentinel scheduler started.
+2026-05-09 12:17:02 [INFO] phoenix.config: 📋 Ensuring phoenix working directory: /home/kuro/projects/kuro/phoenix_data
+2026-05-09 12:17:02 [INFO] alembic.runtime.migration: Context impl SQLiteImpl.
+2026-05-09 12:17:02 [INFO] alembic.runtime.migration: Will assume transactional DDL.
+2026-05-09 12:17:07 [INFO] __main__: [OBSERVABILITY] Phoenix dashboard available at: http://localhost:6006/
+2026-05-09 12:17:07 [INFO] __main__: [OBSERVABILITY] Auth: DISABLED (local private network)
+2026-05-09 12:17:07 [INFO] __main__: [OBSERVABILITY] Project: Kuro-AI-Audit
+2026-05-09 12:17:07 [INFO] __main__: [OBSERVABILITY] OpenTelemetry instrumentation enabled
+2026-05-09 12:17:07 [INFO] __main__: FastAPI server started in background thread on port 8443
+2026-05-09 12:17:07 [INFO] __main__: HTTPS enabled with mkcert certificates
+2026-05-09 12:17:07 [INFO] __main__: Secure Web Dashboard: https://0.0.0.0:8443
+2026-05-09 12:17:07 [INFO] __main__: Secure Login Page: https://0.0.0.0:8443/login
+2026-05-09 12:17:09 [INFO] __main__: Starting Telegram bot in main thread...
+2026-05-09 12:17:09 [INFO] __main__: Starting Telegram bot polling... (Attempt 1/5)
+2026-05-09 12:17:09 [INFO] telegram.ext.Application: Application started
+2026-05-09 12:17:33 [INFO] __main__: Hardware Sentinel Check [work hours]: CPU=11.7%, RAM=39.8%, Disk=13.1%, Net TX=536.9MB, RX=407.5MB
+2026-05-09 14:18:03 [INFO] __main__: Hardware Sentinel Check [work hours]: CPU=2.5%, RAM=14.9%, Disk=13.1%, Net TX=545.0MB, RX=419.3MB
+2026-05-09 15:44:11 [INFO] telegram.ext.Application: Application is stopping. This might take a moment.
+2026-05-09 15:44:11 [INFO] telegram.ext.Application: Application.stop() complete
+2026-05-09 15:44:11 [INFO] __main__: Starting Telegram bot polling... (Attempt 2/5)
+2026-05-09 15:44:12 [INFO] telegram.ext.Application: Application started
+2026-05-09 15:46:00 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-09 15:46:01 [INFO] __main__: [KPR] Playground router mounted at /api/playground
+2026-05-09 15:46:01 [INFO] __main__: Kuro AI Reborn is starting...
+2026-05-09 15:46:01 [INFO] __main__: Memory stats: {'tier1_short_term': {'type': 'SQLite', 'entries': 15, 'limit': 15}, 'tier2_long_term': {'type': 'Mem0', 'entries': 1}, 'tier3_profile': {'type': 'JSON', 'file': '/home/kuro/projects/kuro/master_profile.json', 'notes': 0}, 'importance_threshold': 7}
+2026-05-09 15:46:01 [INFO] __main__: Web Dashboard: http://0.0.0.0:8000 (Authentication Required)
+2026-05-09 15:46:01 [INFO] __main__: Login Page: http://0.0.0.0:8000/login
+2026-05-09 15:46:01 [INFO] __main__: Reminder Dashboard: http://0.0.0.0:8000/reminders
+2026-05-09 15:46:01 [INFO] __main__: Habits Dashboard: http://0.0.0.0:8000/habits
+2026-05-09 15:46:01 [INFO] __main__: Databases initialized (Auth & Chat History)
+2026-05-09 15:46:02 [INFO] __main__: Price Ticker updates scheduled for all users.
+2026-05-09 15:46:02 [INFO] __main__: Market Sentinel Triangulation scans scheduled for all users.
+2026-05-09 15:46:02 [INFO] __main__: Autonomous dreaming cycle scheduled at 03:00 daily.
+2026-05-09 15:46:02 [INFO] __main__: Intelligence scheduler started.
+2026-05-09 15:46:02 [INFO] __main__: Evaluation Scheduler started.
+2026-05-09 15:46:02 [INFO] __main__: Hardware Sentinel scheduler started.
+2026-05-09 15:46:02 [INFO] phoenix.config: 📋 Ensuring phoenix working directory: /home/kuro/projects/kuro/phoenix_data
+2026-05-09 15:46:02 [INFO] alembic.runtime.migration: Context impl SQLiteImpl.
+2026-05-09 15:46:02 [INFO] alembic.runtime.migration: Will assume transactional DDL.
+2026-05-09 15:46:06 [INFO] __main__: [OBSERVABILITY] Phoenix dashboard available at: http://localhost:6006/
+2026-05-09 15:46:06 [INFO] __main__: [OBSERVABILITY] Auth: DISABLED (local private network)
+2026-05-09 15:46:06 [INFO] __main__: [OBSERVABILITY] Project: Kuro-AI-Audit
+2026-05-09 15:46:06 [INFO] __main__: [OBSERVABILITY] OpenTelemetry instrumentation enabled
+2026-05-09 15:46:06 [INFO] __main__: FastAPI server started in background thread on port 8443
+2026-05-09 15:46:06 [INFO] __main__: HTTPS enabled with mkcert certificates
+2026-05-09 15:46:06 [INFO] __main__: Secure Web Dashboard: https://0.0.0.0:8443
+2026-05-09 15:46:06 [INFO] __main__: Secure Login Page: https://0.0.0.0:8443/login
+2026-05-09 15:46:08 [INFO] __main__: Starting Telegram bot in main thread...
+2026-05-09 15:46:08 [INFO] __main__: Starting Telegram bot polling... (Attempt 1/5)
+2026-05-09 15:46:09 [INFO] telegram.ext.Application: Application started
+2026-05-09 15:46:33 [INFO] __main__: Hardware Sentinel Check [work hours]: CPU=10.1%, RAM=36.5%, Disk=13.1%, Net TX=651.4MB, RX=529.3MB
+2026-05-09 16:32:57 [INFO] telegram.ext.Application: Application is stopping. This might take a moment.
+2026-05-09 16:32:57 [INFO] telegram.ext.Application: Application.stop() complete
+2026-05-09 16:32:57 [INFO] __main__: Starting Telegram bot polling... (Attempt 2/5)
+2026-05-09 16:32:58 [INFO] telegram.ext.Application: Application started
+2026-05-09 16:34:46 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-09 16:34:47 [INFO] __main__: [KPR] Playground router mounted at /api/playground
+2026-05-09 16:34:47 [INFO] __main__: Kuro AI Reborn is starting...
+2026-05-09 16:34:47 [INFO] __main__: Memory stats: {'tier1_short_term': {'type': 'SQLite', 'entries': 15, 'limit': 15}, 'tier2_long_term': {'type': 'Mem0', 'entries': 1}, 'tier3_profile': {'type': 'JSON', 'file': '/home/kuro/projects/kuro/master_profile.json', 'notes': 0}, 'importance_threshold': 7}
+2026-05-09 16:34:47 [INFO] __main__: Web Dashboard: http://0.0.0.0:8000 (Authentication Required)
+2026-05-09 16:34:47 [INFO] __main__: Login Page: http://0.0.0.0:8000/login
+2026-05-09 16:34:47 [INFO] __main__: Reminder Dashboard: http://0.0.0.0:8000/reminders
+2026-05-09 16:34:47 [INFO] __main__: Habits Dashboard: http://0.0.0.0:8000/habits
+2026-05-09 16:34:47 [INFO] __main__: Databases initialized (Auth & Chat History)
+2026-05-09 16:34:47 [INFO] __main__: Price Ticker updates scheduled for all users.
+2026-05-09 16:34:47 [INFO] __main__: Market Sentinel Triangulation scans scheduled for all users.
+2026-05-09 16:34:47 [INFO] __main__: Autonomous dreaming cycle scheduled at 03:00 daily.
+2026-05-09 16:34:47 [INFO] __main__: Intelligence scheduler started.
+2026-05-09 16:34:47 [INFO] __main__: Evaluation Scheduler started.
+2026-05-09 16:34:47 [INFO] __main__: Hardware Sentinel scheduler started.
+2026-05-09 16:34:47 [INFO] phoenix.config: 📋 Ensuring phoenix working directory: /home/kuro/projects/kuro/phoenix_data
+2026-05-09 16:34:48 [INFO] alembic.runtime.migration: Context impl SQLiteImpl.
+2026-05-09 16:34:48 [INFO] alembic.runtime.migration: Will assume transactional DDL.
+2026-05-09 16:34:52 [INFO] __main__: [OBSERVABILITY] Phoenix dashboard available at: http://localhost:6006/
+2026-05-09 16:34:52 [INFO] __main__: [OBSERVABILITY] Auth: DISABLED (local private network)
+2026-05-09 16:34:52 [INFO] __main__: [OBSERVABILITY] Project: Kuro-AI-Audit
+2026-05-09 16:34:52 [INFO] __main__: [OBSERVABILITY] OpenTelemetry instrumentation enabled
+2026-05-09 16:34:52 [INFO] __main__: FastAPI server started in background thread on port 8443
+2026-05-09 16:34:52 [INFO] __main__: HTTPS enabled with mkcert certificates
+2026-05-09 16:34:52 [INFO] __main__: Secure Web Dashboard: https://0.0.0.0:8443
+2026-05-09 16:34:52 [INFO] __main__: Secure Login Page: https://0.0.0.0:8443/login
+2026-05-09 16:34:54 [INFO] __main__: Starting Telegram bot in main thread...
+2026-05-09 16:34:54 [INFO] __main__: Starting Telegram bot polling... (Attempt 1/5)
+2026-05-09 16:34:55 [INFO] telegram.ext.Application: Application started
+2026-05-09 16:35:18 [INFO] __main__: Hardware Sentinel Check [off-hours]: CPU=10.2%, RAM=35.9%, Disk=13.1%, Net TX=669.8MB, RX=553.3MB
+2026-05-09 16:45:27 [INFO] __main__: Successful login: Faikhira from 192.168.18.246
+2026-05-09 16:45:39 [INFO] __main__: Successful login: Pantronux from 192.168.18.246
+2026-05-09 17:04:39 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-09 17:04:40 [INFO] main: [KPR] Playground router mounted at /api/playground
+2026-05-09 17:08:38 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-09 17:08:39 [INFO] main: [KPR] Playground router mounted at /api/playground
+2026-05-09 17:11:52 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-09 17:11:52 [INFO] main: [KPR] Playground router mounted at /api/playground
+2026-05-09 17:14:12 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-09 17:14:12 [INFO] main: [KPR] Playground router mounted at /api/playground
+2026-05-09 17:21:44 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-09 17:21:45 [INFO] main: [KPR] Playground router mounted at /api/playground
+2026-05-09 17:25:23 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-09 17:25:24 [INFO] main: [KPR] Playground router mounted at /api/playground
+2026-05-09 17:28:46 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-09 17:28:47 [INFO] main: [KPR] Playground router mounted at /api/playground
+2026-05-09 17:29:47 [INFO] telegram.ext.Application: Application is stopping. This might take a moment.
+2026-05-09 17:29:47 [INFO] telegram.ext.Application: Application.stop() complete
+2026-05-09 17:29:47 [INFO] __main__: Starting Telegram bot polling... (Attempt 2/5)
+2026-05-09 17:29:48 [INFO] telegram.ext.Application: Application started
+2026-05-09 17:31:36 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-09 17:31:37 [INFO] __main__: [KPR] Playground router mounted at /api/playground
+2026-05-09 17:31:37 [INFO] __main__: Kuro AI Reborn is starting...
+2026-05-09 17:31:38 [INFO] __main__: Memory stats: {'tier1_short_term': {'type': 'SQLite', 'entries': 15, 'limit': 15}, 'tier2_long_term': {'type': 'Mem0', 'entries': 1}, 'tier3_profile': {'type': 'JSON', 'file': '/home/kuro/projects/kuro/master_profile.json', 'notes': 0}, 'importance_threshold': 7}
+2026-05-09 17:31:38 [INFO] __main__: Web Dashboard: http://0.0.0.0:8000 (Authentication Required)
+2026-05-09 17:31:38 [INFO] __main__: Login Page: http://0.0.0.0:8000/login
+2026-05-09 17:31:38 [INFO] __main__: Reminder Dashboard: http://0.0.0.0:8000/reminders
+2026-05-09 17:31:38 [INFO] __main__: Habits Dashboard: http://0.0.0.0:8000/habits
+2026-05-09 17:31:38 [INFO] __main__: Databases initialized (Auth & Chat History)
+2026-05-09 17:31:38 [INFO] __main__: Price Ticker updates scheduled for all users.
+2026-05-09 17:31:38 [INFO] __main__: Market Sentinel Triangulation scans scheduled for all users.
+2026-05-09 17:31:38 [INFO] __main__: Autonomous dreaming cycle scheduled at 03:00 daily.
+2026-05-09 17:31:38 [INFO] __main__: Intelligence scheduler started.
+2026-05-09 17:31:38 [INFO] __main__: Evaluation Scheduler started.
+2026-05-09 17:31:38 [INFO] __main__: Hardware Sentinel scheduler started.
+2026-05-09 17:31:38 [INFO] phoenix.config: 📋 Ensuring phoenix working directory: /home/kuro/projects/kuro/phoenix_data
+2026-05-09 17:31:38 [INFO] alembic.runtime.migration: Context impl SQLiteImpl.
+2026-05-09 17:31:38 [INFO] alembic.runtime.migration: Will assume transactional DDL.
+2026-05-09 17:31:42 [INFO] __main__: [OBSERVABILITY] Phoenix dashboard available at: http://localhost:6006/
+2026-05-09 17:31:42 [INFO] __main__: [OBSERVABILITY] Auth: DISABLED (local private network)
+2026-05-09 17:31:42 [INFO] __main__: [OBSERVABILITY] Project: Kuro-AI-Audit
+2026-05-09 17:31:42 [INFO] __main__: [OBSERVABILITY] OpenTelemetry instrumentation enabled
+2026-05-09 17:31:42 [INFO] __main__: FastAPI server started in background thread on port 8443
+2026-05-09 17:31:42 [INFO] __main__: HTTPS enabled with mkcert certificates
+2026-05-09 17:31:42 [INFO] __main__: Secure Web Dashboard: https://0.0.0.0:8443
+2026-05-09 17:31:42 [INFO] __main__: Secure Login Page: https://0.0.0.0:8443/login
+2026-05-09 17:31:44 [INFO] __main__: Starting Telegram bot in main thread...
+2026-05-09 17:31:44 [INFO] __main__: Starting Telegram bot polling... (Attempt 1/5)
+2026-05-09 17:31:45 [INFO] telegram.ext.Application: Application started
+2026-05-09 17:32:09 [INFO] __main__: Hardware Sentinel Check [off-hours]: CPU=2.6%, RAM=34.6%, Disk=13.1%, Net TX=1238.7MB, RX=883.2MB
+2026-05-09 18:11:37 [INFO] telegram.ext.Application: Application is stopping. This might take a moment.
+2026-05-09 18:11:37 [INFO] telegram.ext.Application: Application.stop() complete
+2026-05-09 18:11:37 [INFO] __main__: Starting Telegram bot polling... (Attempt 2/5)
+2026-05-09 18:11:38 [INFO] telegram.ext.Application: Application started
+2026-05-09 18:13:26 [INFO] root: Logging initialized. Logs saved to: /home/kuro/projects/kuro/logs/system/kuro_sovereign.log (Retention: 30 days)
+2026-05-09 18:13:26 [INFO] __main__: [KPR] Playground router mounted at /api/playground
+2026-05-09 18:13:27 [INFO] __main__: Kuro AI Reborn is starting...
+2026-05-09 18:13:27 [INFO] __main__: Memory stats: {'tier1_short_term': {'type': 'SQLite', 'entries': 15, 'limit': 15}, 'tier2_long_term': {'type': 'Mem0', 'entries': 1}, 'tier3_profile': {'type': 'JSON', 'file': '/home/kuro/projects/kuro/master_profile.json', 'notes': 0}, 'importance_threshold': 7}
+2026-05-09 18:13:27 [INFO] __main__: Web Dashboard: http://0.0.0.0:8000 (Authentication Required)
+2026-05-09 18:13:27 [INFO] __main__: Login Page: http://0.0.0.0:8000/login
+2026-05-09 18:13:27 [INFO] __main__: Reminder Dashboard: http://0.0.0.0:8000/reminders
+2026-05-09 18:13:27 [INFO] __main__: Habits Dashboard: http://0.0.0.0:8000/habits
+2026-05-09 18:13:27 [INFO] __main__: Databases initialized (Auth & Chat History)
+2026-05-09 18:13:27 [INFO] __main__: Price Ticker updates scheduled for all users.
+2026-05-09 18:13:27 [INFO] __main__: Market Sentinel Triangulation scans scheduled for all users.
+2026-05-09 18:13:27 [INFO] __main__: Autonomous dreaming cycle scheduled at 03:00 daily.
+2026-05-09 18:13:27 [INFO] __main__: Intelligence scheduler started.
+2026-05-09 18:13:27 [INFO] __main__: Evaluation Scheduler started.
+2026-05-09 18:13:27 [INFO] __main__: Hardware Sentinel scheduler started.
+2026-05-09 18:13:27 [INFO] phoenix.config: 📋 Ensuring phoenix working directory: /home/kuro/projects/kuro/phoenix_data
+2026-05-09 18:13:27 [INFO] alembic.runtime.migration: Context impl SQLiteImpl.
+2026-05-09 18:13:27 [INFO] alembic.runtime.migration: Will assume transactional DDL.
+2026-05-09 18:13:32 [INFO] __main__: [OBSERVABILITY] Phoenix dashboard available at: http://localhost:6006/
+2026-05-09 18:13:32 [INFO] __main__: [OBSERVABILITY] Auth: DISABLED (local private network)
+2026-05-09 18:13:32 [INFO] __main__: [OBSERVABILITY] Project: Kuro-AI-Audit
+2026-05-09 18:13:32 [INFO] __main__: [OBSERVABILITY] OpenTelemetry instrumentation enabled
+2026-05-09 18:13:32 [INFO] __main__: FastAPI server started in background thread on port 8443
+2026-05-09 18:13:32 [INFO] __main__: HTTPS enabled with mkcert certificates
+2026-05-09 18:13:32 [INFO] __main__: Secure Web Dashboard: https://0.0.0.0:8443
+2026-05-09 18:13:32 [INFO] __main__: Secure Login Page: https://0.0.0.0:8443/login
+2026-05-09 18:13:34 [INFO] __main__: Starting Telegram bot in main thread...
+2026-05-09 18:13:34 [INFO] __main__: Starting Telegram bot polling... (Attempt 1/5)
+2026-05-09 18:13:35 [INFO] telegram.ext.Application: Application started
+2026-05-09 18:13:58 [INFO] __main__: Hardware Sentinel Check [off-hours]: CPU=29.7%, RAM=41.1%, Disk=13.1%, Net TX=1562.4MB, RX=1073.7MB
+2026-05-09 22:14:28 [INFO] __main__: Hardware Sentinel Check [off-hours]: CPU=1.0%, RAM=20.7%, Disk=13.1%, Net TX=1782.6MB, RX=1118.1MB

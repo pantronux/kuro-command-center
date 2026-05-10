@@ -10,7 +10,7 @@ import logging
 import yfinance as yf
 from datetime import datetime
 import pytz
-from kuro_backend.finance_db import upsert_sentinel_stock_price
+from kuro_backend.finance_db import touch_market_snapshot_fetched_at, upsert_sentinel_stock_price
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +130,11 @@ def run_price_update(username: str = "Pantronux") -> dict:
                 results["failed"] += 1
                 
         logger.info("[TICKER] Update complete: %d updated, %d failed.", results["updated"], results["failed"])
+        if results["updated"] > 0:
+            try:
+                touch_market_snapshot_fetched_at(username=username)
+            except Exception as exc:
+                logger.warning("[TICKER] Failed to refresh fetched_at heartbeat: %s", exc)
         return results
         
     except Exception as e:

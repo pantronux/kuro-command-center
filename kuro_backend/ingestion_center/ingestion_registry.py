@@ -9,6 +9,12 @@ from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional
 
 from kuro_backend.config import settings
+from kuro_backend.db_utils import (
+    db_retry,
+    get_applied_version,
+    get_connection,
+    record_migration,
+)
 
 logger = logging.getLogger(__name__)
 logger.propagate = False
@@ -29,9 +35,7 @@ def now_iso() -> str:
 
 
 def _get_connection() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
+    conn = get_connection(DB_PATH)
     conn.execute("PRAGMA synchronous=NORMAL")
     return conn
 
@@ -169,6 +173,8 @@ def _init_db_locked() -> None:
         )
         for sql in index_sql:
             cur.execute(sql)
+        if get_applied_version(conn) < 1:
+            record_migration(conn, 1, "Initial schema baseline")
         conn.commit()
     finally:
         if conn:
@@ -179,6 +185,7 @@ def _row_to_dict(row: sqlite3.Row | None) -> Optional[Dict[str, Any]]:
     return dict(row) if row is not None else None
 
 
+@db_retry()
 def execute(sql: str, params: Iterable[Any] = ()) -> None:
     init_db()
     conn = _get_connection()
@@ -209,6 +216,7 @@ def fetch_all(sql: str, params: Iterable[Any] = ()) -> List[Dict[str, Any]]:
         conn.close()
 
 
+@db_retry()
 def create_dataset(payload: Dict[str, Any]) -> Dict[str, Any]:
     init_db()
     now = now_iso()
@@ -267,6 +275,7 @@ def create_dataset(payload: Dict[str, Any]) -> Dict[str, Any]:
         conn.close()
 
 
+@db_retry()
 def update_dataset(dataset_uuid: str, **updates: Any) -> Optional[Dict[str, Any]]:
     if not updates:
         return get_dataset(dataset_uuid)
@@ -325,6 +334,7 @@ def list_active_datasets(
     )
 
 
+@db_retry()
 def replace_chunks(dataset_uuid: str, chunks: List[Dict[str, Any]]) -> int:
     init_db()
     conn = _get_connection()
@@ -374,6 +384,7 @@ def get_chunk_by_dataset_and_index(dataset_uuid: str, chunk_index: int) -> Optio
     )
 
 
+@db_retry()
 def increment_chunk_retrieval_count(chunk_id: int, amount: int = 1) -> None:
     execute(
         "UPDATE dataset_chunks SET retrieval_count = COALESCE(retrieval_count, 0) + ? WHERE id = ?",
@@ -381,6 +392,7 @@ def increment_chunk_retrieval_count(chunk_id: int, amount: int = 1) -> None:
     )
 
 
+@db_retry()
 def update_chunk_vector(dataset_uuid: str, chunk_index: int, vector_id: Optional[str], embedding_status: str) -> None:
     execute(
         """
@@ -392,6 +404,7 @@ def update_chunk_vector(dataset_uuid: str, chunk_index: int, vector_id: Optional
     )
 
 
+@db_retry()
 def update_chunk_orphans(dataset_uuid: str, vector_ids_missing: Iterable[str]) -> int:
     missing = {v for v in vector_ids_missing if v}
     chunks = list_chunks(dataset_uuid)
@@ -407,6 +420,7 @@ def update_chunk_orphans(dataset_uuid: str, vector_ids_missing: Iterable[str]) -
     return count
 
 
+@db_retry()
 def create_job(dataset_uuid: Optional[str], username: str, job_type: str, status: str = "queued") -> Dict[str, Any]:
     init_db()
     stamp = now_iso()
@@ -429,6 +443,7 @@ def create_job(dataset_uuid: Optional[str], username: str, job_type: str, status
         conn.close()
 
 
+@db_retry()
 def update_job(job_id: int, **updates: Any) -> Optional[Dict[str, Any]]:
     if not updates:
         return get_job(job_id)
@@ -439,6 +454,7 @@ def update_job(job_id: int, **updates: Any) -> Optional[Dict[str, Any]]:
     return get_job(job_id)
 
 
+@db_retry()
 def append_job_log(job_id: int, message: str) -> Optional[Dict[str, Any]]:
     job = get_job(job_id)
     if job is None:
@@ -456,6 +472,7 @@ def list_jobs(limit: int = 100) -> List[Dict[str, Any]]:
     return fetch_all("SELECT * FROM ingestion_jobs ORDER BY created_at DESC LIMIT ?", (limit,))
 
 
+@db_retry()
 def create_lineage(dataset_uuid: str, operation_type: str, metadata: Dict[str, Any], parent_dataset_uuid: Optional[str] = None) -> None:
     execute(
         """
@@ -474,6 +491,7 @@ def list_lineage(dataset_uuid: str) -> List[Dict[str, Any]]:
     )
 
 
+@db_retry()
 def create_retrieval_event(payload: Dict[str, Any]) -> None:
     execute(
         """

@@ -23,6 +23,12 @@ from datetime import datetime
 from typing import List, Dict, Optional
 from kuro_backend.config import settings
 from kuro_backend import memory_manager
+from kuro_backend.db_utils import (
+    db_retry,
+    get_applied_version,
+    get_connection,
+    record_migration,
+)
 
 logger = logging.getLogger(__name__)
 logger.propagate = False  # Prevent double-reporting to root logger
@@ -39,9 +45,7 @@ DB_PATH = os.path.join(settings.WORKING_DIR, "kuro_chat_history.db")
 
 def _get_connection():
     """Get a database connection with row factory."""
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
+    conn = get_connection(DB_PATH)
     conn.execute("PRAGMA synchronous=NORMAL")  # Better concurrency
     return conn
 
@@ -154,6 +158,8 @@ def _init_db_locked():
                 cursor.execute("ALTER TABLE chat_sessions ADD COLUMN context_message_count INTEGER DEFAULT 0")
             if "context_updated_at" not in session_cols:
                 cursor.execute("ALTER TABLE chat_sessions ADD COLUMN context_updated_at DATETIME")
+            if "is_auto_titled" not in session_cols:
+                cursor.execute("ALTER TABLE chat_sessions ADD COLUMN is_auto_titled INTEGER DEFAULT 0")
 
         if "archived_at" not in upload_cols:
             cursor.execute("ALTER TABLE uploaded_file_integrity ADD COLUMN archived_at DATETIME")
@@ -247,6 +253,9 @@ def _init_db_locked():
         if "context_updated_at" not in session_cols:
             cursor.execute("ALTER TABLE chat_sessions ADD COLUMN context_updated_at DATETIME")
             logger.info("chat_sessions migration: added context_updated_at column")
+        if "is_auto_titled" not in session_cols:
+            cursor.execute("ALTER TABLE chat_sessions ADD COLUMN is_auto_titled INTEGER DEFAULT 0")
+            logger.info("chat_sessions migration: added is_auto_titled column")
 
         # Migration: Add chat_id to uploaded_file_integrity
         cursor.execute('''
@@ -365,6 +374,8 @@ def _init_db_locked():
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_message_edits_original ON message_edits(original_msg_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_message_edits_chat ON message_edits(chat_id, edited_at DESC)")
 
+        if get_applied_version(conn) < 1:
+            record_migration(conn, 1, "Initial schema baseline")
         conn.commit()
         logger.info(f"Chat history database initialized at {DB_PATH}")
     except Exception as e:
@@ -373,6 +384,7 @@ def _init_db_locked():
         if conn:
             conn.close()
 
+@db_retry()
 def add_message(
     platform: str,
     role: str,
@@ -421,6 +433,7 @@ def get_history(
     persona: Optional[str] = None,
     username: str = "Pantronux",
     chat_id: Optional[str] = None,
+    before_id: Optional[int] = None,
 ) -> List[Dict]:
     """Get recent chat history with pagination and optional filters."""
     conn = None
@@ -442,9 +455,15 @@ def get_history(
         if platform:
             query += " AND platform = ?"
             params.append(platform)
-            
-        query += " ORDER BY timestamp DESC LIMIT ? OFFSET ?"
-        params.extend([limit, offset])
+
+        if before_id is not None:
+            query += " AND id < ?"
+            params.append(int(before_id))
+            query += " ORDER BY id DESC LIMIT ?"
+            params.append(limit)
+        else:
+            query += " ORDER BY id DESC LIMIT ? OFFSET ?"
+            params.extend([limit, offset])
         
         cursor.execute(query, params)
         rows = cursor.fetchall()
@@ -488,13 +507,46 @@ def get_history(
                 ),
             })
         
-        return list(reversed(history))
+        # Backward compatibility:
+        # - Legacy callers of get_history() expect DESC order (newest first).
+        # - Cursor pagination helper get_history_page() needs ASC order when using before_id.
+        if before_id is not None:
+            return list(reversed(history))
+        return history
     except Exception as e:
         logger.error(f"Failed to get chat history: {e}")
         return []
     finally:
         if conn:
             conn.close()
+
+
+def get_history_page(
+    chat_id: str,
+    username: str,
+    limit: int = 50,
+    before_id: Optional[int] = None,
+) -> Dict:
+    """Return cursor-paginated history page with has_more + oldest_id."""
+    page_limit = max(1, int(limit))
+    rows = get_history(
+        limit=page_limit + 1,
+        platform=None,
+        persona=None,
+        username=username,
+        chat_id=chat_id,
+        before_id=before_id,
+    )
+    has_more = len(rows) > page_limit
+    if has_more:
+        # get_history returns ascending order; drop the oldest overflow row.
+        rows = rows[1:]
+    oldest_id = rows[0]["id"] if rows else None
+    return {
+        "messages": rows,
+        "has_more": bool(has_more),
+        "oldest_id": oldest_id,
+    }
 
 def get_total_count(platform: str = None, persona: Optional[str] = None, username: str = "Pantronux") -> int:
     """Get total count of messages for pagination."""
@@ -518,6 +570,7 @@ def get_total_count(platform: str = None, persona: Optional[str] = None, usernam
         if conn:
             conn.close()
 
+@db_retry()
 def clear_history(platform: str = None, username: str = "Pantronux", persona: str = None):
     """Clear chat history for a specific user and optionally a specific platform or persona."""
     conn = None
@@ -546,6 +599,7 @@ def clear_history(platform: str = None, username: str = "Pantronux", persona: st
             conn.close()
 
 
+@db_retry()
 def record_uploaded_file_integrity(
     request_id: Optional[str],
     platform: str,
@@ -710,6 +764,7 @@ def get_expiring_files(days_ahead: int = 0) -> List[Dict]:
             conn.close()
 
 
+@db_retry()
 def mark_file_archived(stored_filename: str, archive_path: str) -> bool:
     """Mark a file as archived in the DB."""
     conn = None
@@ -729,6 +784,7 @@ def mark_file_archived(stored_filename: str, archive_path: str) -> bool:
         if conn:
             conn.close()
 
+@db_retry()
 def create_session(chat_id: str, username: str, persona: str, title: str = "New Chat") -> bool:
     """Create a new chat session."""
     conn = None
@@ -767,16 +823,23 @@ def get_sessions(username: str, persona: str, limit: int = 50, offset: int = 0) 
         if conn:
             conn.close()
 
-def update_session_title(chat_id: str, title: str) -> bool:
+@db_retry()
+def update_session_title(chat_id: str, title: str, is_auto_titled: Optional[bool] = None) -> bool:
     """Update the title of a chat session."""
     conn = None
     try:
         conn = _get_connection()
         cursor = conn.cursor()
-        cursor.execute(
-            "UPDATE chat_sessions SET title = ?, updated_at = CURRENT_TIMESTAMP WHERE chat_id = ?",
-            (title, chat_id)
-        )
+        if is_auto_titled is None:
+            cursor.execute(
+                "UPDATE chat_sessions SET title = ?, updated_at = CURRENT_TIMESTAMP WHERE chat_id = ?",
+                (title, chat_id),
+            )
+        else:
+            cursor.execute(
+                "UPDATE chat_sessions SET title = ?, is_auto_titled = ?, updated_at = CURRENT_TIMESTAMP WHERE chat_id = ?",
+                (title, 1 if is_auto_titled else 0, chat_id),
+            )
         conn.commit()
         return True
     except Exception as e:
@@ -786,21 +849,37 @@ def update_session_title(chat_id: str, title: str) -> bool:
         if conn:
             conn.close()
 
-def delete_session(chat_id: str) -> bool:
+@db_retry()
+def delete_session(chat_id: str, username: Optional[str] = None) -> bool:
     """Delete a chat session and its history."""
     from kuro_backend import memory_manager
     conn = None
     try:
         conn = _get_connection()
         cursor = conn.cursor()
-        # Delete history first
-        cursor.execute("DELETE FROM chat_history WHERE chat_id = ?", (chat_id,))
+        if username:
+            cursor.execute(
+                "DELETE FROM message_edits WHERE chat_id = ? AND username = ?",
+                (chat_id, username),
+            )
+            cursor.execute(
+                "DELETE FROM chat_history WHERE chat_id = ? AND username = ?",
+                (chat_id, username),
+            )
+            cursor.execute(
+                "DELETE FROM uploaded_file_integrity WHERE chat_id = ? AND username = ?",
+                (chat_id, username),
+            )
+            cursor.execute(
+                "DELETE FROM chat_sessions WHERE chat_id = ? AND username = ?",
+                (chat_id, username),
+            )
+        else:
+            cursor.execute("DELETE FROM message_edits WHERE chat_id = ?", (chat_id,))
+            cursor.execute("DELETE FROM chat_history WHERE chat_id = ?", (chat_id,))
+            cursor.execute("DELETE FROM uploaded_file_integrity WHERE chat_id = ?", (chat_id,))
+            cursor.execute("DELETE FROM chat_sessions WHERE chat_id = ?", (chat_id,))
 
-        # Cascade delete uploaded_file_integrity
-        cursor.execute("DELETE FROM uploaded_file_integrity WHERE chat_id = ?", (chat_id,))
-
-        # Delete session
-        cursor.execute("DELETE FROM chat_sessions WHERE chat_id = ?", (chat_id,))
         conn.commit()
 
         # Cascade delete short_term buffer
@@ -817,6 +896,7 @@ def delete_session(chat_id: str) -> bool:
         if conn:
             conn.close()
 
+@db_retry()
 def clear_all_history(username: str) -> bool:
     """Delete ALL chat history and sessions for a user. (Legacy support)"""
     conn = None
@@ -836,6 +916,7 @@ def clear_all_history(username: str) -> bool:
 
 # --- chat_context & session context management ---
 
+@db_retry()
 def update_session_context(chat_id: str, context_summary: str) -> bool:
     """Upsert the context summary for a chat session."""
     conn = None

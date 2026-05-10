@@ -17,6 +17,12 @@ import threading
 from datetime import datetime
 from typing import List, Dict, Optional
 from kuro_backend.config import settings
+from kuro_backend.db_utils import (
+    db_retry,
+    get_applied_version,
+    get_connection,
+    record_migration,
+)
 
 logger = logging.getLogger(__name__)
 logger.propagate = False  # Prevent double-reporting to root logger
@@ -33,9 +39,7 @@ DB_PATH = os.path.join(settings.WORKING_DIR, "kuro_compliance.db")
 
 def _get_connection():
     """Get a database connection with row factory."""
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
+    conn = get_connection(DB_PATH)
     conn.execute("PRAGMA synchronous=NORMAL")  # Better concurrency
     return conn
 
@@ -113,10 +117,13 @@ def _init_db_locked():
         )
     """)
     
+    if get_applied_version(conn) < 1:
+        record_migration(conn, 1, "Initial schema baseline")
     conn.commit()
     conn.close()
     logger.info(f"Compliance database initialized at {DB_PATH}")
 
+@db_retry()
 def add_evidence(file_name: str, file_path: str, category: str, standard: str, clause_id: str = ""):
     """Add a file to the evidence matrix."""
     conn = _get_connection()
@@ -129,6 +136,7 @@ def add_evidence(file_name: str, file_path: str, category: str, standard: str, c
     conn.close()
     logger.info(f"Added evidence: {file_name} for {standard}")
 
+@db_retry()
 def update_evidence_status(evidence_id: int, status: str, finding: str = "", recommendation: str = ""):
     """Update evidence analysis status."""
     conn = _get_connection()
@@ -153,6 +161,7 @@ def get_evidence_matrix(standard: str = None) -> List[Dict]:
     conn.close()
     return [dict(row) for row in rows]
 
+@db_retry()
 def add_audit_trail(action: str, details: str = "", standard: str = ""):
     """Log an action to the audit trail."""
     conn = _get_connection()
@@ -173,6 +182,7 @@ def get_audit_trail(limit: int = 50) -> List[Dict]:
     conn.close()
     return [dict(row) for row in rows]
 
+@db_retry()
 def add_gap_analysis(document_name: str, standard: str, results: List[Dict]):
     """Store gap analysis results."""
     conn = _get_connection()

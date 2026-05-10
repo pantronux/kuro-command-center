@@ -42,6 +42,12 @@ import time
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Tuple
 from kuro_backend.config import settings
+from kuro_backend.db_utils import (
+    db_retry,
+    get_applied_version,
+    get_connection,
+    record_migration,
+)
 
 logger = logging.getLogger(__name__)
 logger.propagate = False  # Prevent double-reporting to root logger
@@ -281,17 +287,10 @@ def _reset_short_term_schema_ready_for_tests():
 
 def _get_short_term_conn():
     """Get SQLite connection for short-term memory."""
-    # Increase busy timeout to reduce transient "database is locked" errors
-    # under concurrent chat + background memory-write workloads.
-    busy_timeout_ms = int(getattr(settings, "KURO_DB_BUSY_TIMEOUT_MS", 30000) or 30000)
-    conn = sqlite3.connect(SHORT_TERM_DB, timeout=max(1.0, busy_timeout_ms / 1000.0))
-    conn.row_factory = sqlite3.Row
+    conn = get_connection(SHORT_TERM_DB)
     try:
-        # WAL improves read/write concurrency for chat history + memory tasks.
-        conn.execute("PRAGMA journal_mode=WAL")
         # NORMAL sync gives better write throughput while keeping WAL durability.
         conn.execute("PRAGMA synchronous=NORMAL")
-        conn.execute(f"PRAGMA busy_timeout={busy_timeout_ms}")
     except Exception:
         # Non-fatal: keep compatibility if pragma cannot be applied.
         pass
@@ -648,6 +647,8 @@ def _init_short_term_db_locked():
         )
     """)
 
+    if get_applied_version(conn) < 1:
+        record_migration(conn, 1, "Initial schema baseline")
     conn.commit()
     conn.close()
     logger.info("Short-term memory database initialized.")
@@ -705,6 +706,7 @@ def get_short_term_summary(persona_scope: str, username: str = "Pantronux") -> O
     return {"last_entry_id": int(row["last_entry_id"]), "summary": str(row["summary"] or "")}
 
 
+@db_retry()
 def upsert_short_term_summary(persona_scope: str, last_entry_id: int, summary: str, username: str = "Pantronux") -> None:
     """Upsert the compressed-history cache for a persona scope."""
     conn = _get_short_term_conn()
@@ -760,6 +762,7 @@ def get_short_term_summary_json(persona_scope: str, username: str = "Pantronux")
     return {"last_entry_id": last_id, "summary_json": data}
 
 
+@db_retry()
 def upsert_short_term_summary_json(
     persona_scope: str,
     last_entry_id: int,
@@ -807,6 +810,7 @@ _LEDGER_KINDS: Tuple[str, ...] = (
 )
 
 
+@db_retry()
 def append_research_ledger(
     persona_scope: str,
     kind: str,
@@ -851,6 +855,7 @@ def append_research_ledger(
         conn.close()
 
 
+@db_retry()
 def append_research_ledger_batch(
     persona_scope: str,
     records: List[Dict],
@@ -1016,6 +1021,7 @@ def query_short_term_latest_timestamp() -> Optional[str]:
 # ---------------------------------------------------------------------------
 # Session File Store (Active Buffer V1.0.0)
 # ---------------------------------------------------------------------------
+@db_retry()
 def upsert_session_file(session_id: str, filename: str, content: str) -> None:
     """Upsert file content for a specific session."""
     conn = _get_short_term_conn()
@@ -1053,6 +1059,7 @@ def get_session_files(session_id: str) -> List[Dict[str, str]]:
 # Autonomous Dreaming — advisory lease, cycle audit, notification dedup
 # ---------------------------------------------------------------------------
 
+@db_retry()
 def acquire_dreaming_lease(name: str, leased_by: str, ttl_seconds: int) -> bool:
     """Try to acquire an advisory lease on ``name`` with ``ttl_seconds`` TTL.
 
@@ -1102,6 +1109,7 @@ def acquire_dreaming_lease(name: str, leased_by: str, ttl_seconds: int) -> bool:
         conn.close()
 
 
+@db_retry()
 def release_dreaming_lease(name: str, leased_by: str) -> None:
     """Release the lease only if we still own it (safe no-op otherwise)."""
     conn = _get_short_term_conn()
@@ -1118,6 +1126,7 @@ def release_dreaming_lease(name: str, leased_by: str) -> None:
         conn.close()
 
 
+@db_retry()
 def insert_dreaming_cycle(status: str = "running") -> int:
     """Insert a new dreaming cycle audit row. Returns the row id."""
     conn = _get_short_term_conn()
@@ -1133,6 +1142,7 @@ def insert_dreaming_cycle(status: str = "running") -> int:
         conn.close()
 
 
+@db_retry()
 def update_dreaming_cycle(
     cycle_id: int,
     *,
@@ -1183,6 +1193,22 @@ def dream_notification_seen(fingerprint: str) -> bool:
         conn.close()
 
 
+def dream_notification_seen_recent(fingerprint: str, window_minutes: int = 30) -> bool:
+    """Return True if fingerprint exists within the deduplication window."""
+    conn = _get_short_term_conn()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT 1 FROM dream_notifications "
+            "WHERE fingerprint = ? AND created_at > datetime('now', ?) LIMIT 1",
+            (fingerprint, f"-{int(window_minutes)} minutes"),
+        )
+        return cursor.fetchone() is not None
+    finally:
+        conn.close()
+
+
+@db_retry()
 def mark_dream_notification(
     fingerprint: str, persona_scope: str, kind: str,
 ) -> None:
@@ -1201,6 +1227,7 @@ def mark_dream_notification(
     finally:
         conn.close()
 
+@db_retry()
 def add_short_term(role: str, content: str, persona_scope: str = None, username: str = "Pantronux", chat_id: Optional[str] = None):
     """Add interaction to short-term buffer, keyed by (persona_scope, username, chat_id)."""
     scope = normalize_persona(persona_scope or get_active_persona(username))
@@ -1227,6 +1254,54 @@ def add_short_term(role: str, content: str, persona_scope: str = None, username:
     
     conn.commit()
     conn.close()
+
+
+@db_retry()
+def delete_short_term_by_chat_id(chat_id: str) -> int:
+    """Delete short-term rows for one chat session. Returns deleted row count."""
+    if not chat_id:
+        return 0
+    conn = _get_short_term_conn()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM short_term WHERE chat_id = ?", (chat_id,))
+        deleted = int(cursor.rowcount or 0)
+        conn.commit()
+        return deleted
+    finally:
+        conn.close()
+
+
+@db_retry()
+def prune_research_ledger(retention_days: int = 90, archive_retention_days: int = 365) -> Dict[str, int]:
+    """Prune aged research-ledger rows with a longer retention for archived file memory."""
+    conn = _get_short_term_conn()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "DELETE FROM research_ledger WHERE created_at < datetime('now', ?)"
+            " AND kind != 'archived_file_memory'",
+            (f"-{int(retention_days)} days",),
+        )
+        primary_deleted = int(cursor.rowcount or 0)
+        cursor.execute(
+            "DELETE FROM research_ledger WHERE created_at < datetime('now', ?)"
+            " AND kind = 'archived_file_memory'",
+            (f"-{int(archive_retention_days)} days",),
+        )
+        archive_deleted = int(cursor.rowcount or 0)
+        conn.commit()
+        logger.info(
+            "[LEDGER] prune completed: deleted=%s archived_deleted=%s",
+            primary_deleted,
+            archive_deleted,
+        )
+        return {
+            "deleted": primary_deleted,
+            "archived_deleted": archive_deleted,
+        }
+    finally:
+        conn.close()
 
 def get_short_term(persona_scope: str = None, username: str = "Pantronux", chat_id: Optional[str] = None) -> List[Dict]:
     """Get recent short-term memory, optionally filtered by chat_id."""
@@ -1496,6 +1571,7 @@ Example:
 # ============================================
 # TIER 2 Recovery: Mem0 Write Failures
 # ============================================
+@db_retry()
 def record_mem0_write_failure(username: str, payload: str):
     """Save a failed Mem0 write for later retry. Payload should be JSON string."""
     try:
@@ -1538,6 +1614,7 @@ def get_pending_mem0_write_failures() -> List[Dict]:
         return []
 
 
+@db_retry()
 def append_memory_integrity_log(
     *,
     memory_id: str,
@@ -1565,6 +1642,7 @@ def append_memory_integrity_log(
         logger.warning(f"[MEMORY_INTEGRITY] append failed memory_id={memory_id}: {e}")
 
 
+@db_retry()
 def append_governance_audit_log(
     *,
     username: str,
@@ -1591,6 +1669,7 @@ def append_governance_audit_log(
         logger.warning(f"[GOVERNANCE] append audit failed user={username}: {e}")
 
 
+@db_retry()
 def append_runtime_mode_state(
     *,
     username: str,
@@ -1611,6 +1690,7 @@ def append_runtime_mode_state(
         logger.warning(f"[RUNTIME_MODE] append failed user={username}: {e}")
 
 
+@db_retry()
 def append_cognitive_budget_log(
     *,
     username: str,

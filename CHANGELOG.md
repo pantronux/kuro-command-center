@@ -1,3 +1,47 @@
+## [V1.2.0 Beta 1] — "Sovereign Chat" — 2026-05-10
+
+### Release Scope
+- Full hardening pass completed across 7 priority areas: memory, storage, chat/streaming, market sentinel, Telegram, UI/RBAC, and misc technical debt.
+- All changes were delivered as additive/compatible upgrades (no intentional public API breakage).
+
+### Key Hardening Areas
+- **Memory**:
+  - Per-user Mem0 write serialization and dedup queue protection.
+  - Atomic semantic cache store/invalidate flow.
+  - `kuro_memory.json` schema validation + backup recovery fallback.
+- **Data/Storage**:
+  - Shared `db_utils.py` with SQLite busy-timeout + retry decorator.
+  - Migration baseline table `migration_history`.
+  - Backup integrity verification + checksum manifest support.
+- **Chat/Streaming**:
+  - Per-node timeout guard in LangGraph pipeline.
+  - Cursor pagination (`before_id`) and paged history API.
+  - SSE resume via `Last-Event-ID` and buffered event replay.
+- **Market Sentinel**:
+  - Snapshot freshness/staleness guard.
+  - Atomic HUD snapshot current-version write model.
+  - Alert deduplication fingerprint window and stale-data publish abort.
+- **Telegram**:
+  - Retry + dead-letter queue (`failed_telegram_notifications`).
+  - Scheduled retry sweeper and inbound rate limiter queue.
+  - Message length safety guard.
+- **UI/RBAC + Misc**:
+  - WS reconnect backoff, draft persistence, export progress polling, global `authFetch` hardening.
+  - `/api/me` and `/api/openclaw/skills` admin diagnostics route.
+  - LangGraph topology export contract and legacy 410 route hardening.
+
+### Versioning
+- `kuro_backend/version.py`:
+  - `VERSION` → `1.2.0-beta.1`
+  - `VERSION_LABEL` → `V1.2.0 Beta 1`
+  - Codename remains **Sovereign Chat**
+- Synchronized active version markers in:
+  - `SYSTEM_MAP.md`
+  - `web_interface/templates/index.html`
+  - `web_interface/templates/login.html`
+  - `web_interface/templates/tutorial.html`
+  - `tests/test_version.py`
+
 ## [V1.1.0 Beta 1] — "Sovereign Chat" — 2026-05-09
 
 ### New Features

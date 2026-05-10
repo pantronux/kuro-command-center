@@ -59,16 +59,29 @@ function logout() {
 // Use currentChatId state variable instead, managed per-chat by SSE meta events.
 
 async function authFetch(url, options = {}) {
-    options.credentials = options.credentials || 'include';
-    options.headers = options.headers || {};
-    const response = await fetch(url, options);
-
-    if (response.status === 401) {
-        window.location.href = '/login';
-        throw new Error('Authentication required');
+    const reqOptions = {
+        ...options,
+        credentials: options.credentials || 'include',
+        headers: {
+            ...(options.headers || {}),
+        },
+    };
+    try {
+        const response = await fetch(url, reqOptions);
+        if (response.status === 401) {
+            window.location.href = '/login';
+            throw new Error('Authentication required');
+        }
+        if (!response.ok && response.status >= 500) {
+            showToast(`Server error (${response.status}). Coba lagi dalam beberapa saat.`, 'error');
+        }
+        return response;
+    } catch (error) {
+        if (error && error.name === 'TypeError') {
+            showToast('Koneksi terputus. Periksa jaringan kamu.', 'error');
+        }
+        throw error;
     }
-
-    return response;
 }
 
 // ============================================
@@ -91,7 +104,46 @@ let isLoadingMore = false;
 let hasMoreMessages = true;
 let scrollAnchorPosition = null;
 let sessionDrafts = {}; // Beta 5: Save unsent drafts per session
+let chatOldestMessageIdBySession = {};
+let chatHasMoreBySession = {};
+let currentUserProfile = {
+    username: getUsername(),
+    is_admin: window.KURO_USER_CONTEXT?.role === 'Administrator',
+};
 const VALID_PERSONAS = ['consultant', 'advisor', 'chill', 'tactical', 'chancellor', 'auditor'];
+
+/**
+ * Persist unsent draft text for a chat session.
+ * Falls back to in-memory cache when sessionStorage is unavailable.
+ * @param {string} chatId
+ * @param {string} text
+ */
+function saveDraft(chatId, text) {
+    if (!chatId) return;
+    try {
+        if (text && text.trim()) {
+            sessionStorage.setItem(`draft_${chatId}`, text);
+        } else {
+            sessionStorage.removeItem(`draft_${chatId}`);
+        }
+    } catch (_) {
+        sessionDrafts[chatId] = text || '';
+    }
+}
+
+/**
+ * Load the saved draft text for a chat session.
+ * @param {string} chatId
+ * @returns {string}
+ */
+function loadDraft(chatId) {
+    if (!chatId) return '';
+    try {
+        return sessionStorage.getItem(`draft_${chatId}`) || sessionDrafts[chatId] || '';
+    } catch (_) {
+        return sessionDrafts[chatId] || '';
+    }
+}
 
 // ============================================
 // DOM Elements
@@ -227,6 +279,7 @@ const elements = {
     exportSubmitBtn: document.getElementById('exportSubmitBtn'),
     exportStatus: document.getElementById('exportStatus'),
     exportDownloadLink: document.getElementById('exportDownloadLink'),
+    exportStatusContainer: document.getElementById('export-status-container'),
     // Chat Sessions & Persona Accordion
     chatDrawer: document.getElementById('chatDrawer'),
     chatSessionsList: document.getElementById('chatSessionsList'),
@@ -248,7 +301,69 @@ const elements = {
 // ============================================
 // Initialize
 // ============================================
-document.addEventListener('DOMContentLoaded', () => {
+/**
+ * Returns true when current authenticated user is admin.
+ * @returns {boolean}
+ */
+function isCurrentUserAdmin() {
+    return !!currentUserProfile?.is_admin;
+}
+
+/**
+ * Load current authenticated profile for frontend RBAC guards.
+ * @returns {Promise<void>}
+ */
+async function fetchCurrentUserProfile() {
+    try {
+        const response = await authFetch('/api/me');
+        if (!response || !response.ok) return;
+        const payload = await response.json();
+        const data = payload?.data || payload || {};
+        currentUserProfile = {
+            username: data.username || currentUserProfile.username,
+            is_admin: Boolean(data.is_admin),
+        };
+    } catch (_) {
+        currentUserProfile = {
+            username: currentUserProfile.username,
+            is_admin: window.KURO_USER_CONTEXT?.role === 'Administrator',
+        };
+    }
+}
+
+/**
+ * Hide admin-only navigation links for non-admin users.
+ */
+function applyAdminVisibilityGuards() {
+    if (isCurrentUserAdmin()) return;
+    document.querySelectorAll('[data-admin-only="true"]').forEach((node) => {
+        node.style.display = 'none';
+    });
+}
+
+/**
+ * Block admin-only navigation attempts and redirect non-admin users.
+ */
+function setupAdminNavigationGuards() {
+    if (isCurrentUserAdmin()) return;
+    const guardedLinks = Array.from(document.querySelectorAll('a[href^="/ingestion"]'));
+    guardedLinks.forEach((link) => {
+        link.addEventListener('click', (event) => {
+            event.preventDefault();
+            showToast('Akses ditolak: halaman ini hanya untuk Administrator.', 'error');
+            window.location.href = '/';
+        });
+    });
+    if (window.location.pathname.startsWith('/ingestion')) {
+        showToast('Akses ditolak: halaman ini hanya untuk Administrator.', 'error');
+        window.location.href = '/';
+    }
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
+    await fetchCurrentUserProfile();
+    applyAdminVisibilityGuards();
+    setupAdminNavigationGuards();
     lucide.createIcons();
 
     marked.setOptions({
@@ -270,6 +385,12 @@ document.addEventListener('DOMContentLoaded', () => {
     kuroRestoreUIMode();
     kuroConnectDashboardWS();
     applyRuntimeMode(runtimeMode);
+    const deniedFlag = new URLSearchParams(window.location.search).get('access_denied');
+    if (deniedFlag === 'admin') {
+        showToast('Akses ditolak: halaman ini hanya untuk Administrator.', 'error');
+        const cleanUrl = `${window.location.pathname}${window.location.hash || ''}`;
+        window.history.replaceState({}, '', cleanUrl);
+    }
     // Show welcome screen on first load
     if (runtimeMode === 'normal') showWelcomeScreen();
 });
@@ -283,6 +404,11 @@ function setupEventListeners() {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
             sendMessage(false);
+        }
+    });
+    elements.messageInput.addEventListener('input', () => {
+        if (currentChatId) {
+            saveDraft(currentChatId, elements.messageInput.value);
         }
     });
 
@@ -342,11 +468,10 @@ function setupEventListeners() {
     // System Status Modal
     elements.navSystemStatus.addEventListener('click', (e) => {
         e.preventDefault();
-        const role = window.KURO_USER_CONTEXT?.role || '';
-        if (role === 'Administrator') {
+        if (isCurrentUserAdmin()) {
             openSystemStatus();
         } else {
-            openAccessDeniedModal();
+            showToast('Akses ditolak: halaman ini hanya untuk Administrator.', 'error');
         }
     });
     elements.closeSystemStatus.addEventListener('click', closeSystemStatus);
@@ -657,7 +782,56 @@ function toggleChatDrawer(force) {
     }
 }
 
+/**
+ * Render lightweight skeleton rows while sessions are loading.
+ */
+function renderSessionSkeleton() {
+    if (!elements.chatSessionsList) return;
+    elements.chatSessionsList.innerHTML = `
+        <div class="space-y-2">
+            ${Array.from({ length: 6 }).map(() => `
+                <div class="skeleton h-10 w-full rounded-xl"></div>
+            `).join('')}
+        </div>
+    `;
+}
+
+/**
+ * Render chat skeleton while history page is loading.
+ */
+function renderHistorySkeleton() {
+    if (!elements.chatContainer) return;
+    elements.chatContainer.innerHTML = `
+        <div class="space-y-3 p-3">
+            ${Array.from({ length: 6 }).map(() => `
+                <div class="skeleton h-16 w-full rounded-2xl"></div>
+            `).join('')}
+        </div>
+    `;
+}
+
+/**
+ * Show or hide a load-earlier indicator on top history fetch.
+ * @param {boolean} isVisible
+ */
+function setLoadEarlierIndicator(isVisible) {
+    if (!elements.scrollLoader) return;
+    if (isVisible) {
+        elements.scrollLoader.innerHTML = `
+            <div class="flex items-center justify-center gap-2 text-xs text-amber-600 dark:text-amber-300">
+                <span class="spinner border-amber-500"></span>
+                <span>Load earlier messages...</span>
+            </div>
+        `;
+        elements.scrollLoader.classList.add('visible');
+        return;
+    }
+    elements.scrollLoader.innerHTML = '<div class="spinner"></div>';
+    elements.scrollLoader.classList.remove('visible');
+}
+
 async function loadChatSessions() {
+    renderSessionSkeleton();
     try {
         const response = await authFetch(`${CONFIG.API_BASE}/chats?persona=${selectedPersona}`);
         const result = await response.json();
@@ -710,7 +884,7 @@ function renderChatSessions() {
 
 function startNewChat() {
     if (currentChatId) {
-        sessionDrafts[currentChatId] = elements.messageInput.value;
+        saveDraft(currentChatId, elements.messageInput.value);
     }
     currentChatId = null;
     chatHistory = [];
@@ -736,23 +910,23 @@ async function selectChatSession(chatId) {
 
     // Save current draft before switching
     if (currentChatId) {
-        sessionDrafts[currentChatId] = elements.messageInput.value;
+        saveDraft(currentChatId, elements.messageInput.value);
     }
     currentChatId = chatId;
     // Restore draft if any
     if (elements.messageInput) {
-        elements.messageInput.value = sessionDrafts[chatId] || '';
+        elements.messageInput.value = loadDraft(chatId);
         elements.messageInput.dispatchEvent(new Event('input'));
     }
     chatOffset = 0;
-    hasMoreMessages = true;
+    hasMoreMessages = chatHasMoreBySession[chatId] !== false;
     chatHistory = [];
 
     if (elements.welcomeScreen) elements.welcomeScreen.classList.add('hidden');
     elements.chatContainer.classList.remove('hidden');
     if (elements.mainInputArea) elements.mainInputArea.classList.remove('hidden');
 
-    elements.chatContainer.innerHTML = '<div class="flex justify-center p-8"><div class="spinner border-emerald-500"></div></div>';
+    renderHistorySkeleton();
 
     renderChatSessions();
     await kuroLoadHistory(true);
@@ -764,6 +938,9 @@ async function deleteChatSession(chatId) {
     try {
         const response = await authFetch(`${CONFIG.API_BASE}/chats/${chatId}`, { method: 'DELETE' });
         if (response.ok) {
+            saveDraft(chatId, '');
+            delete chatOldestMessageIdBySession[chatId];
+            delete chatHasMoreBySession[chatId];
             if (currentChatId === chatId) startNewChat();
             loadChatSessions();
         } else if (response.status === 403) {
@@ -836,7 +1013,7 @@ function handleScroll() {
     if (isLoadingMore || !hasMoreMessages) return;
 
     // Check if scrolled to top (with small threshold)
-    if (elements.chatContainer.scrollTop < 50) {
+    if (elements.chatContainer.scrollTop < 100) {
         loadMoreMessages();
     }
 
@@ -857,58 +1034,92 @@ async function kuroLoadHistory(isInitial = false) {
         hasMoreMessages = true;
         chatHistory = [];
         elements.chatContainer.innerHTML = '';
+        if (currentChatId) {
+            chatOldestMessageIdBySession[currentChatId] = null;
+            chatHasMoreBySession[currentChatId] = true;
+        }
     }
     if (!hasMoreMessages) return;
 
     isLoadingMore = true;
-    elements.scrollLoader.classList.add('visible');
+    setLoadEarlierIndicator(true);
 
     const previousScrollHeight = elements.chatContainer.scrollHeight;
     const previousScrollTop = elements.chatContainer.scrollTop;
 
     try {
-        let url = `${CONFIG.API_BASE}/history?limit=${CONFIG.CHAT_PAGE_SIZE}&offset=${chatOffset}&platform=web&persona=${encodeURIComponent(selectedPersona)}`;
-        if (currentChatId) url += `&chat_id=${currentChatId}`;
-
-        const response = await authFetch(url);
-        const data = await response.json();
-
-        if (data.status === 'success' && data.history.length > 0) {
-            const messages = [...data.history].reverse();
-            chatOffset += data.history.length;
-            hasMoreMessages = data.has_more;
-
-            data.history.forEach(msg => {
-                const role = msg.role === 'user' ? 'user' : 'ai';
-                const attachments = Array.isArray(msg.attachments) ? msg.attachments : (typeof msg.attachments === 'string' ? JSON.parse(msg.attachments) : []);
-                prependMessageToChat(role, msg.content, attachments, msg.id, {
-                    is_edited: msg.is_edited,
-                    is_bookmarked: msg.is_bookmarked,
-                    is_regenerated: msg.is_regenerated,
-                    export_suggestions: msg.export_suggestions || [],
-                });
+        if (currentChatId) {
+            const beforeId = !isInitial ? chatOldestMessageIdBySession[currentChatId] : null;
+            const params = new URLSearchParams({
+                limit: String(CONFIG.CHAT_PAGE_SIZE),
             });
+            if (beforeId) params.set('before_id', String(beforeId));
+            const response = await authFetch(`${CONFIG.API_BASE}/chats/${encodeURIComponent(currentChatId)}/messages?${params.toString()}`);
+            const payload = await response.json();
+            const page = payload?.data || payload || {};
+            const messages = Array.isArray(page.messages) ? page.messages : [];
 
-            if (isInitial) {
-                scrollToBottom();
-            } else {
-                requestAnimationFrame(() => {
-                    const newScrollHeight = elements.chatContainer.scrollHeight;
-                    const heightDifference = newScrollHeight - previousScrollHeight;
-                    elements.chatContainer.scrollTop = previousScrollTop + heightDifference;
+            if (messages.length > 0) {
+                hasMoreMessages = Boolean(page.has_more);
+                chatHasMoreBySession[currentChatId] = hasMoreMessages;
+                chatOldestMessageIdBySession[currentChatId] = page.oldest_id || messages[0]?.id || null;
+
+                [...messages].reverse().forEach((msg) => {
+                    const role = msg.role === 'user' ? 'user' : 'ai';
+                    const attachments = Array.isArray(msg.attachments)
+                        ? msg.attachments
+                        : (typeof msg.attachments === 'string' ? JSON.parse(msg.attachments) : []);
+                    prependMessageToChat(role, msg.content, attachments, msg.id, {
+                        is_edited: msg.is_edited,
+                        is_bookmarked: msg.is_bookmarked,
+                        is_regenerated: msg.is_regenerated,
+                        export_suggestions: msg.export_suggestions || [],
+                    });
                 });
+
+                if (isInitial) {
+                    scrollToBottom();
+                } else {
+                    requestAnimationFrame(() => {
+                        const newScrollHeight = elements.chatContainer.scrollHeight;
+                        const heightDifference = newScrollHeight - previousScrollHeight;
+                        elements.chatContainer.scrollTop = previousScrollTop + heightDifference;
+                    });
+                }
+            } else {
+                hasMoreMessages = false;
+                chatHasMoreBySession[currentChatId] = false;
+                if (isInitial) startNewChat();
             }
         } else {
-            hasMoreMessages = false;
-            if (isInitial) {
-                startNewChat();
+            let url = `${CONFIG.API_BASE}/history?limit=${CONFIG.CHAT_PAGE_SIZE}&offset=${chatOffset}&platform=web&persona=${encodeURIComponent(selectedPersona)}`;
+            const response = await authFetch(url);
+            const data = await response.json();
+            if (data.status === 'success' && data.history.length > 0) {
+                chatOffset += data.history.length;
+                hasMoreMessages = data.has_more;
+                data.history.forEach((msg) => {
+                    const role = msg.role === 'user' ? 'user' : 'ai';
+                    const attachments = Array.isArray(msg.attachments) ? msg.attachments : (typeof msg.attachments === 'string' ? JSON.parse(msg.attachments) : []);
+                    prependMessageToChat(role, msg.content, attachments, msg.id, {
+                        is_edited: msg.is_edited,
+                        is_bookmarked: msg.is_bookmarked,
+                        is_regenerated: msg.is_regenerated,
+                        export_suggestions: msg.export_suggestions || [],
+                    });
+                });
+                if (isInitial) {
+                    scrollToBottom();
+                }
+            } else {
+                hasMoreMessages = false;
             }
         }
     } catch (error) {
         console.error('Failed to load history:', error);
     } finally {
         isLoadingMore = false;
-        elements.scrollLoader.classList.remove('visible');
+        setLoadEarlierIndicator(false);
     }
 }
 
@@ -940,10 +1151,17 @@ const KURO_THEME_CLASSES = ['theme-hud', 'theme-research', 'theme-cinema'];
 const KURO_SENTINEL_IDLE_MS = 30000; // Client-side watchdog: revert to IDLE
 // if backend stops updating.
 let _kuroDashboardWS = null;
-let _kuroDashboardWSBackoff = 1000;
+let _kuroDashboardReconnectTimer = null;
 let _kuroCurrentMode = 'NORMAL_MODE';
 let _kuroLastStatusSnapshot = null;
 let _kuroTickerWatchdog = null;
+const WS_RECONNECT = {
+    delay: 1000,
+    maxDelay: 30000,
+    multiplier: 2,
+    jitter: () => Math.random() * 500,
+    attempts: 0,
+};
 
 function kuroApplyUIMode(command, payload) {
     if (!KURO_UI_MODES.includes(command)) return;
@@ -1041,15 +1259,70 @@ function kuroRenderSentinelTicker(payload) {
     }
 }
 
+/**
+ * Display transient connection state in the status ticker.
+ * @param {string} text
+ * @param {'connected'|'reconnecting'} state
+ */
+function updateConnectionStatus(text, state = 'connected') {
+    const ticker = kuroEnsureTicker();
+    ticker.classList.remove('ws-reconnecting');
+    if (state === 'reconnecting') {
+        ticker.classList.add('ws-reconnecting');
+    }
+    ticker.textContent = text;
+}
 
+/**
+ * Fetch missed proactive events after WS reconnect when endpoint is available.
+ */
+async function fetchMissedProactiveEvents() {
+    try {
+        const response = await authFetch('/api/proactive-events?limit=5');
+        if (!response || !response.ok) return;
+        const payload = await response.json();
+        const events = payload?.data?.events || payload?.events || [];
+        if (!Array.isArray(events) || events.length === 0) return;
+        const newest = events[0];
+        const title = newest?.title || 'Event update';
+        updateConnectionStatus(`Realtime synced: ${title}`.slice(0, 200), 'connected');
+    } catch (_) {
+        // Endpoint is optional; ignore when absent.
+    }
+}
+
+/**
+ * Schedule dashboard WS reconnect with exponential backoff + jitter.
+ */
+function scheduleDashboardReconnect() {
+    if (_kuroDashboardReconnectTimer) return;
+    const delay = Math.min(
+        WS_RECONNECT.delay * Math.pow(WS_RECONNECT.multiplier, WS_RECONNECT.attempts),
+        WS_RECONNECT.maxDelay,
+    ) + WS_RECONNECT.jitter();
+    WS_RECONNECT.attempts += 1;
+    updateConnectionStatus(
+        `⟳ Reconnecting in ${Math.max(1, Math.round(delay / 1000))}s... (attempt ${WS_RECONNECT.attempts})`,
+        'reconnecting',
+    );
+    _kuroDashboardReconnectTimer = setTimeout(() => {
+        _kuroDashboardReconnectTimer = null;
+        kuroConnectDashboardWS();
+    }, delay);
+}
 
 function kuroConnectDashboardWS() {
     try {
-        if (_kuroDashboardWS && _kuroDashboardWS.readyState === WebSocket.OPEN) return;
+        if (_kuroDashboardWS && (_kuroDashboardWS.readyState === WebSocket.OPEN || _kuroDashboardWS.readyState === WebSocket.CONNECTING)) return;
         const proto = location.protocol === 'https:' ? 'wss' : 'ws';
         const ws = new WebSocket(`${proto}://${location.host}/ws/dashboard`);
         _kuroDashboardWS = ws;
-        ws.addEventListener('open', () => { _kuroDashboardWSBackoff = 1000; });
+        ws.addEventListener('open', () => {
+            WS_RECONNECT.attempts = 0;
+            WS_RECONNECT.delay = 1000;
+            updateConnectionStatus('Realtime connected', 'connected');
+            fetchMissedProactiveEvents();
+        });
         ws.addEventListener('message', (evt) => {
             try {
                 const msg = JSON.parse(evt.data);
@@ -1075,13 +1348,12 @@ function kuroConnectDashboardWS() {
         });
         ws.addEventListener('close', () => {
             _kuroDashboardWS = null;
-            setTimeout(() => {
-                kuroConnectDashboardWS();
-                // Send an auth ping immediately after reconnect if possible
-            }, _kuroDashboardWSBackoff);
-            _kuroDashboardWSBackoff = Math.min(_kuroDashboardWSBackoff * 2, 30000);
+            scheduleDashboardReconnect();
         });
-        ws.addEventListener('error', () => { try { ws.close(); } catch (_) { } });
+        ws.addEventListener('error', () => {
+            try { ws.close(); } catch (_) { }
+            scheduleDashboardReconnect();
+        });
     } catch (_) { }
 }
 
@@ -1956,10 +2228,9 @@ async function sendMessage(isFromWelcome = false) {
     // Add user message to chat
     addMessageToChat('user', message, selectedFiles);
 
-    // Clear input and draft
+    // Clear input
     inputElement.value = '';
     inputElement.style.height = 'auto';
-    if (currentChatId) delete sessionDrafts[currentChatId];
 
     // Prepare files for upload
     const filesToSend = [...selectedFiles];
@@ -1996,6 +2267,7 @@ async function sendMessage(isFromWelcome = false) {
     let wasPinnedToBottom = true;
     let streamMeta = null;
     let streamHadError = false;
+    let sendCompleted = false;
 
     const flushStreamingRender = () => {
         if (!pendingRender) return;
@@ -2166,6 +2438,7 @@ async function sendMessage(isFromWelcome = false) {
 
         // Save AI message to internal history
         chatHistory.push({ role: 'assistant', content: botMessage });
+        sendCompleted = !streamHadError;
 
     } catch (error) {
         console.error('Chat error:', error);
@@ -2180,6 +2453,9 @@ async function sendMessage(isFromWelcome = false) {
             addMessageToChat('ai', '<span style="color:red">Connection lost. Please try again.</span>');
         }
     } finally {
+        if (sendCompleted && currentChatId) {
+            saveDraft(currentChatId, '');
+        }
         if (stopBtn) stopBtn.classList.add('hidden');
         isProcessing = false;
         if (elements.sendBtn) elements.sendBtn.disabled = false;
@@ -2613,6 +2889,7 @@ function removeTypingIndicator() {
 // ============================================
 async function loadChatHistory() {
     try {
+        renderHistorySkeleton();
         // Reset pagination state
         chatOffset = 0;
         hasMoreMessages = true;
@@ -3676,12 +3953,24 @@ async function kuroStartMarketHudPoll() {
             const response = await authFetch(`${CONFIG.API_BASE}/market/hud`);
             if (response.ok) {
                 const data = await response.json();
-                if (data.success && data.data && typeof kuroRenderSentinelTicker === 'function') {
-                    // Inject into ticker if we have market chips
+                const payload = data?.data || data || {};
+                const chips = Array.isArray(payload.hud_items)
+                    ? [...payload.hud_items]
+                    : (Array.isArray(payload.items) ? [...payload.items] : []);
+                if (payload.news_available === false) {
+                    chips.push({
+                        id: 'news_na',
+                        label: '📰 News N/A',
+                        kind: 'system',
+                        trend: 'flat',
+                        sentiment: null,
+                    });
+                }
+                if (chips.length > 0 && typeof kuroRenderSentinelTicker === 'function') {
                     kuroRenderSentinelTicker({
                         status: 'ALERT',
                         source: 'MARKET',
-                        market_chips: data.data.hud_items
+                        market_chips: chips,
                     });
                 }
             }
@@ -3975,7 +4264,7 @@ async function submitExportRequest() {
         if (format === 'pdf') {
             const result = await response.json();
             elements.exportStatus.textContent = `PDF export queued. Job #${result.job_id}`;
-            await pollExportJob(result.job_id);
+            showExportProgress(result.job_id);
         } else {
             await downloadBlobResponse(response, `chat_${chatId}.${format}`);
             elements.exportStatus.textContent = 'Export ready. Download started.';
@@ -3990,27 +4279,57 @@ async function submitExportRequest() {
     }
 }
 
-async function pollExportJob(jobId) {
-    const maxAttempts = 40;
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-        await new Promise(resolve => setTimeout(resolve, 1500));
-        const response = await authFetch(`${CONFIG.API_BASE}/export/${jobId}`);
-        const job = await response.json();
+/**
+ * Render and poll export progress for background PDF jobs.
+ * @param {number|string} jobId
+ */
+function showExportProgress(jobId) {
+    const container = elements.exportStatusContainer;
+    if (!container) return;
+    const indicatorId = `export-progress-${jobId}`;
+    const existing = document.getElementById(indicatorId);
+    if (existing) existing.remove();
 
-        if (job.status === 'completed') {
-            elements.exportStatus.textContent = 'PDF export completed.';
-            elements.exportDownloadLink.href = job.download_url;
-            elements.exportDownloadLink.classList.remove('hidden');
-            showNotification('PDF export completed', 'success');
-            return;
-        }
-        if (job.status === 'failed') {
-            throw new Error(job.error_message || 'PDF export failed');
-        }
+    const indicator = document.createElement('div');
+    indicator.id = indicatorId;
+    indicator.className = 'export-progress-indicator';
+    indicator.innerHTML = `<span class="spinner"></span> Generating PDF...`;
+    container.appendChild(indicator);
 
-        elements.exportStatus.textContent = `PDF export ${job.status}...`;
-    }
-    throw new Error('PDF export timed out');
+    const poll = setInterval(async () => {
+        try {
+            const res = await authFetch(`${CONFIG.API_BASE}/export/${jobId}`);
+            if (!res || !res.ok) {
+                indicator.innerHTML = `❌ Export gagal: status ${res?.status || 'unknown'}`;
+                clearInterval(poll);
+                return;
+            }
+            const data = await res.json();
+            const job = data?.data || data || {};
+            const status = job.status || 'queued';
+            if (status === 'completed') {
+                clearInterval(poll);
+                indicator.innerHTML = `✅ PDF ready — <a href="/api/export/${jobId}/download">Download</a>`;
+                elements.exportStatus.textContent = 'PDF export completed.';
+                elements.exportDownloadLink.href = `/api/export/${jobId}/download`;
+                elements.exportDownloadLink.classList.remove('hidden');
+                showToast('Export selesai! Klik untuk download.', 'success');
+            } else if (status === 'failed') {
+                clearInterval(poll);
+                indicator.innerHTML = `❌ Export gagal: ${job.error || job.error_message || 'Unknown error'}`;
+                elements.exportStatus.textContent = indicator.textContent || 'PDF export failed.';
+                elements.exportStatus.className = 'text-sm text-red-500';
+            } else {
+                indicator.innerHTML = `<span class="spinner"></span> Generating PDF... (${status})`;
+                elements.exportStatus.textContent = `PDF export ${status}...`;
+            }
+        } catch (error) {
+            clearInterval(poll);
+            indicator.innerHTML = `❌ Export gagal: ${error.message}`;
+            elements.exportStatus.textContent = `Export failed: ${error.message}`;
+            elements.exportStatus.className = 'text-sm text-red-500';
+        }
+    }, 2000);
 }
 
 async function downloadBlobResponse(response, fallbackFilename) {
@@ -4091,4 +4410,13 @@ function showNotification(message, type = 'success') {
         toast.classList.add('animate-fade-out');
         setTimeout(() => toast.remove(), 500);
     }, 4000);
+}
+
+/**
+ * Non-blocking toast helper used by global fetch/reconnect flows.
+ * @param {string} message
+ * @param {'success'|'error'|'info'} type
+ */
+function showToast(message, type = 'info') {
+    showNotification(message, type);
 }

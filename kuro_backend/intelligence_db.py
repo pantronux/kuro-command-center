@@ -17,6 +17,12 @@ import os
 import threading
 from datetime import datetime
 from typing import List, Dict, Optional
+from kuro_backend.db_utils import (
+    db_retry,
+    get_applied_version,
+    get_connection,
+    record_migration,
+)
 
 logger = logging.getLogger(__name__)
 logger.propagate = False  # Prevent double-reporting to root logger
@@ -34,9 +40,7 @@ def _reset_schema_ready_for_tests() -> None:
 
 def _get_connection():
     """Get a database connection with row factory."""
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
+    conn = get_connection(DB_PATH)
     conn.execute("PRAGMA synchronous=NORMAL")
     return conn
 
@@ -388,6 +392,55 @@ def _init_db_locked():
             """
         )
 
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS audit_trail (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                action TEXT NOT NULL,
+                details TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS failed_telegram_notifications (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                payload_json TEXT NOT NULL,
+                error_message TEXT,
+                attempt_count INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT (datetime('now')),
+                last_attempt_at TEXT,
+                status TEXT DEFAULT 'pending'
+            )
+            """
+        )
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS sentinel_health (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                service TEXT NOT NULL,
+                status TEXT NOT NULL,
+                details TEXT,
+                created_at TEXT DEFAULT (datetime('now'))
+            )
+            """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_failed_tg_status_attempt
+            ON failed_telegram_notifications(status, attempt_count, created_at DESC)
+            """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_sentinel_health_service_created
+            ON sentinel_health(service, created_at DESC)
+            """
+        )
+
+        if get_applied_version(conn) < 1:
+            record_migration(conn, 1, "Initial schema baseline")
         conn.commit()
         logger.info(f"Intelligence briefings database initialized at {DB_PATH}")
     except Exception as e:
@@ -397,6 +450,7 @@ def _init_db_locked():
             conn.close()
 
 
+@db_retry()
 def save_research_sources(session_id: str, username: str, chat_id: Optional[str], sources: List[Dict]) -> None:
     """Save auto-retrieved research sources for provenance tracking."""
     if not sources:
@@ -428,6 +482,7 @@ def save_research_sources(session_id: str, username: str, chat_id: Optional[str]
             conn.close()
 
 
+@db_retry()
 def save_epistemic_claims(session_id: str, message_id: str, claims: List[Dict]) -> None:
     if not claims:
         return
@@ -464,6 +519,7 @@ def save_epistemic_claims(session_id: str, message_id: str, claims: List[Dict]) 
             conn.close()
 
 
+@db_retry()
 def save_retrieval_quality_log(
     *,
     session_id: str,
@@ -500,6 +556,7 @@ def save_retrieval_quality_log(
             conn.close()
 
 
+@db_retry()
 def save_model_router_log(*, session_id: str, selected_role: str, router_note: str, payload: Dict) -> None:
     conn = None
     try:
@@ -517,6 +574,7 @@ def save_model_router_log(*, session_id: str, selected_role: str, router_note: s
             conn.close()
 
 
+@db_retry()
 def save_consensus_log(*, session_id: str, selected_role: str, consensus_score: float, consensus_label: str, payload: Dict) -> None:
     conn = None
     try:
@@ -534,6 +592,7 @@ def save_consensus_log(*, session_id: str, selected_role: str, consensus_score: 
             conn.close()
 
 
+@db_retry()
 def save_memory_authority_log(*, session_id: str, payload: Dict) -> None:
     conn = None
     try:
@@ -557,6 +616,7 @@ def save_memory_authority_log(*, session_id: str, payload: Dict) -> None:
             conn.close()
 
 
+@db_retry()
 def save_openai_model_placeholder_log(*, session_id: str, payload: Dict) -> None:
     conn = None
     try:
@@ -580,6 +640,7 @@ def save_openai_model_placeholder_log(*, session_id: str, payload: Dict) -> None
             conn.close()
 
 
+@db_retry()
 def save_tool_trace_log(*, session_id: str, payload: Dict) -> None:
     conn = None
     try:
@@ -597,6 +658,7 @@ def save_tool_trace_log(*, session_id: str, payload: Dict) -> None:
             conn.close()
 
 
+@db_retry()
 def save_tool_budget_log(*, session_id: str, payload: Dict) -> None:
     conn = None
     try:
@@ -618,6 +680,7 @@ def save_tool_budget_log(*, session_id: str, payload: Dict) -> None:
             conn.close()
 
 
+@db_retry()
 def save_tool_risk_log(*, session_id: str, tool_name: str, composite_risk: float, payload: Dict) -> None:
     conn = None
     try:
@@ -635,6 +698,7 @@ def save_tool_risk_log(*, session_id: str, tool_name: str, composite_risk: float
             conn.close()
 
 
+@db_retry()
 def save_source_reliability_log(*, session_id: str, payload: Dict) -> None:
     conn = None
     try:
@@ -657,6 +721,7 @@ def save_source_reliability_log(*, session_id: str, payload: Dict) -> None:
             conn.close()
 
 
+@db_retry()
 def save_constitution_audit_log(*, session_id: str, payload: Dict) -> None:
     conn = None
     try:
@@ -680,6 +745,7 @@ def save_constitution_audit_log(*, session_id: str, payload: Dict) -> None:
             conn.close()
 
 
+@db_retry()
 def save_evaluation_runtime_log(*, session_id: str, payload: Dict) -> None:
     conn = None
     try:
@@ -733,6 +799,7 @@ def search_sources_by_query(username: str, query_fragment: str) -> List[Dict]:
             conn.close()
 
 
+@db_retry()
 def save_briefing(date: str, summary_text: str, raw_json_data: Dict, experimental_signals: List[str], stock_recommendations: List[Dict] = None, username: str = "Pantronux") -> bool:
     """Save a daily intelligence briefing for a specific user."""
     conn = None
@@ -862,6 +929,7 @@ def get_total_count(username: str = "Pantronux") -> int:
             conn.close()
 
 
+@db_retry()
 def log_backup_start(backup_type: str, backup_path: str) -> int:
     """Insert an audit row for the start of a backup run."""
     init_db()
@@ -885,6 +953,7 @@ def log_backup_start(backup_type: str, backup_path: str) -> int:
             conn.close()
 
 
+@db_retry()
 def log_backup_complete(
     log_id: int,
     status: str,
@@ -947,6 +1016,7 @@ def get_last_backup_status() -> Optional[Dict]:
     return rows[0] if rows else None
 
 
+@db_retry()
 def create_export_job(
     username: str,
     export_type: str,
@@ -986,6 +1056,7 @@ def create_export_job(
             conn.close()
 
 
+@db_retry()
 def mark_export_job_running(job_id: int) -> None:
     """Mark an export job as running."""
     init_db()
@@ -1003,6 +1074,7 @@ def mark_export_job_running(job_id: int) -> None:
             conn.close()
 
 
+@db_retry()
 def mark_export_job_completed(
     job_id: int,
     file_path: str,
@@ -1030,6 +1102,7 @@ def mark_export_job_completed(
             conn.close()
 
 
+@db_retry()
 def mark_export_job_failed(job_id: int, error_message: str) -> None:
     """Finalize a failed export job."""
     init_db()
@@ -1094,6 +1167,7 @@ def list_export_jobs(username: str, limit: int = 20) -> List[Dict]:
             conn.close()
 
 
+@db_retry()
 def log_export_audit(
     username: str,
     action: str,
@@ -1118,6 +1192,122 @@ def log_export_audit(
                 export_job_id,
                 json.dumps(metadata or {}, ensure_ascii=False),
             ),
+        )
+        conn.commit()
+    finally:
+        if conn:
+            conn.close()
+
+
+@db_retry()
+def add_audit_trail(action: str, details: str = "") -> None:
+    """Append one audit trail event for platform-level operational traces."""
+    init_db()
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO audit_trail (action, details) VALUES (?, ?)",
+            (str(action or ""), str(details or "")),
+        )
+        conn.commit()
+    except Exception as exc:
+        logger.warning("Failed to append intelligence audit trail: %s", exc)
+    finally:
+        if conn:
+            conn.close()
+
+
+@db_retry()
+def log_failed_notification(payload_json: str, error_message: str) -> int:
+    """Insert a failed Telegram payload into DLQ and return row id."""
+    init_db()
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO failed_telegram_notifications (
+                payload_json, error_message, attempt_count, status, last_attempt_at
+            ) VALUES (?, ?, 0, 'pending', datetime('now'))
+            """,
+            (payload_json, error_message),
+        )
+        conn.commit()
+        return int(cursor.lastrowid or 0)
+    finally:
+        if conn:
+            conn.close()
+
+
+def get_pending_failed_notifications(max_attempts: int = 5) -> List[Dict]:
+    """Return pending Telegram DLQ rows below retry-attempt cap."""
+    init_db()
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT * FROM failed_telegram_notifications
+            WHERE status = 'pending' AND attempt_count < ?
+            ORDER BY created_at ASC, id ASC
+            """,
+            (int(max_attempts),),
+        )
+        return [dict(r) for r in cursor.fetchall()]
+    finally:
+        if conn:
+            conn.close()
+
+
+@db_retry()
+def update_notification_attempt(notification_id: int, error_message: Optional[str], success: bool = False) -> None:
+    """Update attempt counters after DLQ replay attempt."""
+    init_db()
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        if success:
+            cursor.execute(
+                """
+                UPDATE failed_telegram_notifications
+                SET status = 'sent', error_message = NULL, last_attempt_at = datetime('now')
+                WHERE id = ?
+                """,
+                (int(notification_id),),
+            )
+        else:
+            cursor.execute(
+                """
+                UPDATE failed_telegram_notifications
+                SET attempt_count = attempt_count + 1,
+                    error_message = ?,
+                    last_attempt_at = datetime('now')
+                WHERE id = ?
+                """,
+                (error_message, int(notification_id)),
+            )
+        conn.commit()
+    finally:
+        if conn:
+            conn.close()
+
+
+@db_retry()
+def mark_notification_dead(notification_id: int) -> None:
+    """Mark a DLQ payload as dead after max retries."""
+    init_db()
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE failed_telegram_notifications SET status = 'dead', last_attempt_at = datetime('now') WHERE id = ?",
+            (int(notification_id),),
         )
         conn.commit()
     finally:

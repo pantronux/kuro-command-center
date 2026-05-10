@@ -16,6 +16,7 @@ import os
 import threading
 import time
 import uuid
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 import requests
@@ -37,6 +38,7 @@ _consecutive_unavailable_failures = 0
 _circuit_open = False
 _circuit_opened_at = 0.0
 _half_open_probe_inflight = False
+_circuit_trips_total = 0
 _DANGEROUS_COMMAND_KEYWORDS = (
     "shutdown",
     "poweroff",
@@ -70,10 +72,12 @@ def _normalize_execution_mode(params: Dict[str, Any]) -> str:
 
 
 def _record_availability_failure() -> int:
-    global _consecutive_unavailable_failures, _circuit_open, _circuit_opened_at, _half_open_probe_inflight
+    global _consecutive_unavailable_failures, _circuit_open, _circuit_opened_at, _half_open_probe_inflight, _circuit_trips_total
     with _circuit_breaker_lock:
         _consecutive_unavailable_failures += 1
         if _consecutive_unavailable_failures >= OPENCLAW_CIRCUIT_BREAKER_THRESHOLD:
+            if not _circuit_open:
+                _circuit_trips_total += 1
             _circuit_open = True
             _circuit_opened_at = time.monotonic()
             _half_open_probe_inflight = False
@@ -92,15 +96,19 @@ def _mark_bridge_failure(was_probe: bool) -> int:
 
     Returns current consecutive failure count (post-mutation).
     """
-    global _consecutive_unavailable_failures, _circuit_open, _circuit_opened_at, _half_open_probe_inflight
+    global _consecutive_unavailable_failures, _circuit_open, _circuit_opened_at, _half_open_probe_inflight, _circuit_trips_total
     with _circuit_breaker_lock:
         if was_probe:
             _half_open_probe_inflight = False
+            if not _circuit_open:
+                _circuit_trips_total += 1
             _circuit_open = True
             _circuit_opened_at = time.monotonic()
             return _consecutive_unavailable_failures
         _consecutive_unavailable_failures += 1
         if _consecutive_unavailable_failures >= OPENCLAW_CIRCUIT_BREAKER_THRESHOLD:
+            if not _circuit_open:
+                _circuit_trips_total += 1
             _circuit_open = True
             _circuit_opened_at = time.monotonic()
             _half_open_probe_inflight = False
@@ -151,13 +159,15 @@ def _try_begin_half_open_probe() -> bool:
 
 
 def _finish_half_open_probe(success: bool) -> None:
-    global _half_open_probe_inflight, _circuit_open, _circuit_opened_at
+    global _half_open_probe_inflight, _circuit_open, _circuit_opened_at, _circuit_trips_total
     with _circuit_breaker_lock:
         _half_open_probe_inflight = False
         if success:
             _circuit_open = False
             _circuit_opened_at = 0.0
         else:
+            if not _circuit_open:
+                _circuit_trips_total += 1
             _circuit_open = True
             _circuit_opened_at = time.monotonic()
 
@@ -454,3 +464,63 @@ async def execute_openclaw_skill(
         return _build_exception_response(exc, request_id, bridge, was_probe)
 
     return _handle_bridge_response(result, request_id, was_probe)
+
+
+def get_circuit_state() -> str:
+    """Return current circuit breaker state: closed | open | half-open."""
+    with _circuit_breaker_lock:
+        if _half_open_probe_inflight:
+            return "half-open"
+        if _circuit_open:
+            return "open"
+        return "closed"
+
+
+def get_circuit_metrics() -> Dict[str, Any]:
+    """Expose lightweight circuit breaker metrics for diagnostics."""
+    with _circuit_breaker_lock:
+        if _half_open_probe_inflight:
+            state = "half-open"
+        elif _circuit_open:
+            state = "open"
+        else:
+            state = "closed"
+        return {
+            "circuit_breaker_state": state,
+            "circuit_breaker_trips_total": int(_circuit_trips_total),
+            "consecutive_failures": int(_consecutive_unavailable_failures),
+            "opened_at_monotonic": float(_circuit_opened_at),
+        }
+
+
+async def list_available_skills() -> list[dict]:
+    """List OpenClaw skills from daemon endpoint or local skill directory fallback."""
+    bridge = OpenClawBridgeClient()
+    url = f"{bridge.base_url}/skills"
+    try:
+        response = await asyncio.to_thread(requests.get, url, timeout=bridge.timeout_seconds)
+        if response.ok:
+            payload = response.json()
+            if isinstance(payload, list):
+                return [item if isinstance(item, dict) else {"name": str(item)} for item in payload]
+            if isinstance(payload, dict):
+                skills = payload.get("skills")
+                if isinstance(skills, list):
+                    return [item if isinstance(item, dict) else {"name": str(item)} for item in skills]
+    except Exception:
+        pass
+
+    skill_dir = Path(__file__).resolve().parents[2] / "openclaw_skills"
+    rows: list[dict] = []
+    if skill_dir.exists():
+        for path in sorted(skill_dir.glob("**/*.py")):
+            if path.name.startswith("__"):
+                continue
+            rows.append(
+                {
+                    "name": path.stem,
+                    "path": str(path),
+                    "source": "local_fallback",
+                }
+            )
+    return rows
