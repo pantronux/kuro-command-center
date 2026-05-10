@@ -60,3 +60,11 @@ test_venv3/
 *.db-backup*
 *.db-recovery*
 *.db.corrupted*
+
+# Local runtime artifacts
+.kuro_telegram.lock
+exports/
+
+# Local planning docs (not part of shipped source)
+KuroAI_V2_Codex_Prompts.md
+KuroAI_V2_Codex_Prompts_HARDENED.md
