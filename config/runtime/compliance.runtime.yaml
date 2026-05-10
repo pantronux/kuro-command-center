@@ -1,6 +1,7 @@
 runtime_id: compliance
 display_name: Compliance Runtime
 version: 1
+schema_version: 1
 memory_namespace: kuro.compliance
 retrieval_scope:
   - compliance_evidence
@@ -8,8 +9,7 @@ retrieval_scope:
 prompt_stack:
   - system.compliance.base
 tools:
-  - control_mapper
-  - evidence_tracker
+  - generate_report_template
 structured_output_contract: compliance_output_v1
 allowed_providers:
   - gemini

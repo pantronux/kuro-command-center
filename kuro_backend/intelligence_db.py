@@ -1380,6 +1380,7 @@ def log_boundary_violation(
 
 def get_recent_boundary_violations(limit: int = 100) -> List[Dict]:
     init_db()
+    safe_limit = max(1, min(500, int(limit)))
     conn = None
     try:
         conn = _get_connection()
@@ -1390,7 +1391,7 @@ def get_recent_boundary_violations(limit: int = 100) -> List[Dict]:
             ORDER BY ts DESC, id DESC
             LIMIT ?
             """,
-            (int(limit),),
+            (safe_limit,),
         )
         return [dict(r) for r in cursor.fetchall()]
     finally:

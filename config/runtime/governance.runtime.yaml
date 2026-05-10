@@ -1,6 +1,7 @@
 runtime_id: governance
 display_name: Governance Runtime
 version: 1
+schema_version: 1
 memory_namespace: kuro.governance
 retrieval_scope:
   - governance_controls
@@ -8,8 +9,7 @@ retrieval_scope:
 prompt_stack:
   - system.governance.base
 tools:
-  - policy_checker
-  - audit_mapper
+  - generate_report_template
 structured_output_contract: governance_output_v1
 allowed_providers:
   - gemini

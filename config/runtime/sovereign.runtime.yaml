@@ -1,6 +1,7 @@
 runtime_id: sovereign
 display_name: Sovereign Chat
 version: 1
+schema_version: 1
 memory_namespace: kuro.sovereign
 retrieval_scope:
   - sovereign_chat_history
@@ -8,10 +9,18 @@ retrieval_scope:
 prompt_stack:
   - system.sovereign.base
 tools:
-  - web_search
-  - file_reader
-  - market_analysis
-  - vulnerability_scan
+  - generate_excel_report
+  - manage_files
+  - generate_report_template
+  - advanced_execution_tool
+  - set_monthly_budget_tool
+  - get_budget_tool
+  - add_recurring_expense_tool
+  - list_recurring_expenses_tool
+  - get_daily_api_cost_tool
+  - get_ticker_price_tool
+  - get_market_news_tool
+  - prediction_market_scan_tool
 structured_output_contract: null
 allowed_providers:
   - gemini

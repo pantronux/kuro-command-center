@@ -1,6 +1,7 @@
 runtime_id: research
 display_name: Research Playground
 version: 1
+schema_version: 1
 memory_namespace: kuro.research
 retrieval_scope:
   - research_sources
@@ -8,8 +9,8 @@ retrieval_scope:
 prompt_stack:
   - system.research.base
 tools:
-  - web_search
-  - citation_parser
+  - manage_files
+  - advanced_execution_tool
 structured_output_contract: null
 allowed_providers:
   - gemini

@@ -157,8 +157,16 @@ _MEM0_DEDUPE_TTL_SEC = 300.0
 _FP_LOCK = threading.Lock()
 
 
-def _mem0_fingerprint(user_input: str, final_response: str) -> str:
-    blob = f"{user_input}\n---\n{final_response}"
+def _mem0_fingerprint(
+    user_input: str,
+    final_response: str,
+    runtime_id: str = "",
+    runtime_namespace: str = "",
+) -> str:
+    blob = (
+        f"{runtime_id}\n{runtime_namespace}\n"
+        f"{user_input}\n---\n{final_response}"
+    )
     return hashlib.sha256(blob.encode("utf-8", errors="replace")).hexdigest()
 
 
@@ -1629,7 +1637,19 @@ def execute_mem0_extract_task(
     import time
     import json
 
-    fp = _mem0_fingerprint(user_input, final_response)
+    runtime_id_for_dedup = "sovereign"
+    runtime_namespace_for_dedup = "kuro.sovereign"
+    if ctx is not None:
+        runtime_id_for_dedup = str(ctx.runtime_id or runtime_id_for_dedup)
+        runtime_namespace_for_dedup = str(
+            ctx.config.memory_namespace or runtime_namespace_for_dedup
+        )
+    fp = _mem0_fingerprint(
+        user_input,
+        final_response,
+        runtime_id_for_dedup,
+        runtime_namespace_for_dedup,
+    )
     if _mem0_should_skip_duplicate(fp):
         logger.info("[MEMORY_COORD] mem0_extract skipped duplicate fp=%s...", fp[:12])
         return
@@ -1637,7 +1657,10 @@ def execute_mem0_extract_task(
         from kuro_backend.runtime.boundary_guard import assert_memory_access
 
         assert_memory_access(ctx, ctx.config.memory_namespace)
-    dedup_key = f"{username}:{hash((final_response or '')[:64])}"
+    dedup_key = (
+        f"{username}:{runtime_id_for_dedup}:{runtime_namespace_for_dedup}:"
+        f"{hash((final_response or '')[:64])}"
+    )
     user_lock = _get_mem0_user_lock(username)
     if not user_lock.acquire(blocking=False):
         with _MEM0_QUEUE_LOCK:

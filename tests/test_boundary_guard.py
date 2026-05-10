@@ -41,6 +41,7 @@ if "phoenix" not in sys.modules:
     sys.modules["phoenix"] = fake_phoenix
 
 import main
+from kuro_backend import intelligence_db
 
 
 def _auth_client(monkeypatch, username: str = "Pantronux") -> TestClient:
@@ -120,6 +121,16 @@ def test_tool_not_in_registry_blocked_strict(monkeypatch):
             boundary_guard.assert_tool_access(make_ctx("qa"), "market_analysis")
 
 
+def test_sovereign_legitimate_tools_allowed_in_strict_mode(monkeypatch):
+    monkeypatch.setenv("KURO_V2_STRICT_MODE", "true")
+    from kuro_backend.runtime import boundary_guard
+
+    reload(boundary_guard)
+    ctx = make_ctx("sovereign")
+    for tool_name in ["manage_files", "get_budget_tool", "advanced_execution_tool"]:
+        boundary_guard.assert_tool_access(ctx, tool_name)
+
+
 def test_e2e_strict_mode_safe_failure(monkeypatch):
     monkeypatch.setenv("KURO_V2_STRICT_MODE", "true")
     from kuro_backend.runtime import boundary_guard
@@ -166,3 +177,46 @@ def test_boundary_violations_admin_route_403_non_admin(monkeypatch):
         cookies={main.COOKIE_NAME: "Bearer dummy"},
     )
     assert resp.status_code == 403
+
+
+def test_boundary_violations_limit_query_validation(monkeypatch):
+    client = _auth_client(monkeypatch, username="Pantronux")
+    resp_negative = client.get(
+        "/api/admin/boundary-violations?limit=-5",
+        cookies={main.COOKIE_NAME: "Bearer dummy"},
+    )
+    assert resp_negative.status_code == 422
+
+    resp_huge = client.get(
+        "/api/admin/boundary-violations?limit=99999",
+        cookies={main.COOKIE_NAME: "Bearer dummy"},
+    )
+    assert resp_huge.status_code == 422
+
+
+def test_boundary_violations_db_limit_clamp_defensive():
+    intelligence_db.log_boundary_violation(
+        runtime_id="qa",
+        username="u",
+        resource_type="tool",
+        resource_id="x1",
+        reason="r1",
+    )
+    intelligence_db.log_boundary_violation(
+        runtime_id="qa",
+        username="u",
+        resource_type="tool",
+        resource_id="x2",
+        reason="r2",
+    )
+    intelligence_db.log_boundary_violation(
+        runtime_id="qa",
+        username="u",
+        resource_type="tool",
+        resource_id="x3",
+        reason="r3",
+    )
+    limited_low = intelligence_db.get_recent_boundary_violations(limit=-100)
+    limited_high = intelligence_db.get_recent_boundary_violations(limit=10_000)
+    assert len(limited_low) == 1
+    assert len(limited_high) >= len(limited_low)

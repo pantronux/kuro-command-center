@@ -29,6 +29,7 @@ if "mem0" not in sys.modules:
     sys.modules["mem0"] = fake_mem0
 
 from kuro_backend import chat_history, intelligence_db, memory_coordinator
+from kuro_backend.runtime.runtime_context import resolve_runtime_context
 
 
 def test_mem0_lock_queue_dedup_contract(monkeypatch):
@@ -60,6 +61,45 @@ def test_mem0_lock_queue_dedup_contract(monkeypatch):
         with memory_coordinator._MEM0_QUEUE_LOCK:
             queued = list(memory_coordinator._MEM0_PENDING_QUEUE[username])
         assert len(queued) == 1
+    finally:
+        user_lock.release()
+        with memory_coordinator._MEM0_QUEUE_LOCK:
+            memory_coordinator._MEM0_PENDING_QUEUE[username].clear()
+            memory_coordinator._MEM0_QUEUE_DEDUP.clear()
+
+
+def test_mem0_queue_dedup_scoped_by_runtime(monkeypatch):
+    username = "contract_user_runtime_scope"
+    user_lock = memory_coordinator._get_mem0_user_lock(username)
+
+    with memory_coordinator._MEM0_QUEUE_LOCK:
+        memory_coordinator._MEM0_PENDING_QUEUE[username].clear()
+        memory_coordinator._MEM0_QUEUE_DEDUP.clear()
+    memory_coordinator._MEM0_FINGERPRINTS.clear()
+
+    monkeypatch.setattr(memory_coordinator, "_mem0_should_skip_duplicate", lambda fp: False)
+
+    acquired = user_lock.acquire(blocking=False)
+    assert acquired
+    try:
+        qa_ctx = resolve_runtime_context("qa", username=username)
+        gov_ctx = resolve_runtime_context("governance", username=username)
+        memory_coordinator.execute_mem0_extract_task(
+            "input-a",
+            "same-content-for-dedup",
+            username=username,
+            ctx=qa_ctx,
+        )
+        memory_coordinator.execute_mem0_extract_task(
+            "input-b",
+            "same-content-for-dedup",
+            username=username,
+            ctx=gov_ctx,
+        )
+
+        with memory_coordinator._MEM0_QUEUE_LOCK:
+            queued = list(memory_coordinator._MEM0_PENDING_QUEUE[username])
+        assert len(queued) == 2
     finally:
         user_lock.release()
         with memory_coordinator._MEM0_QUEUE_LOCK:
