@@ -237,6 +237,9 @@ def test_search_fallback_to_serper_when_openclaw_raises(monkeypatch):
 
 
 def test_search_openclaw_happy_path(monkeypatch):
+    # Ensure OpenClaw is treated as enabled so the skill is actually invoked.
+    monkeypatch.setenv("OPENCLAW_ENABLED", "true")
+
     def _ok(skill, payload=None):
         assert skill == "google_search"
         return {
@@ -251,6 +254,7 @@ def test_search_openclaw_happy_path(monkeypatch):
     results, source = _search_with_fallback("anything")
     assert source == "openclaw"
     assert results[0]["title"] == "Hit"
+
 
 
 # ---------------------------------------------------------------------------

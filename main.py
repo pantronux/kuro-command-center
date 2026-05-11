@@ -4023,6 +4023,9 @@ def start_reminder_scheduler():
         global _openclaw_last_open_alert_at
         try:
             from kuro_backend.execution import openclaw_bridge
+            # Never alert when OpenClaw is intentionally disabled.
+            if not openclaw_bridge.is_openclaw_enabled():
+                return
             metrics = openclaw_bridge.get_circuit_metrics()
             if metrics.get("circuit_breaker_state") != "open":
                 return
@@ -4044,6 +4047,7 @@ def start_reminder_scheduler():
             )
         except Exception as exc:
             logger.debug("[OPENCLAW] Circuit-open alert check skipped: %s", exc)
+
 
     def run_retry_failed_telegram_notifications_job():
         async def _runner():

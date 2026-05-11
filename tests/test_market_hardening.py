@@ -117,6 +117,9 @@ def test_market_alert_dedup_suppresses_second_publish(tmp_path, monkeypatch):
 
 
 def test_openclaw_circuit_transitions_to_open_and_half_open(monkeypatch):
+    # Explicitly enable so circuit breaker transitions can be tested
+    # regardless of the .env default (OPENCLAW_ENABLED=false).
+    monkeypatch.setenv("OPENCLAW_ENABLED", "true")
     openclaw_bridge._reset_circuit_breaker()
 
     def _raise_conn(*args, **kwargs):
@@ -133,3 +136,4 @@ def test_openclaw_circuit_transitions_to_open_and_half_open(monkeypatch):
     monkeypatch.setattr(openclaw_bridge.time, "monotonic", lambda: opened_at + openclaw_bridge.OPENCLAW_CIRCUIT_BREAKER_COOLDOWN_SECONDS + 1)
     assert openclaw_bridge._try_begin_half_open_probe() is True
     assert openclaw_bridge.get_circuit_state() == "half-open"
+
