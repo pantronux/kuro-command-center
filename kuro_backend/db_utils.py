@@ -89,7 +89,28 @@ def record_migration(conn: sqlite3.Connection, version: int, description: str) -
     conn.commit()
 
 
+def add_column_if_missing(
+    conn: sqlite3.Connection,
+    table: str,
+    column_name: str,
+    column_sql: str,
+) -> None:
+    """
+    Safely add a column to a SQLite table only if it does not already exist.
+    Uses PRAGMA table_info instead of ALTER TABLE IF NOT EXISTS.
+    Idempotent: safe to call multiple times.
+    """
+    existing_cols = [
+        row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
+    ]
+    if column_name not in existing_cols:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column_name} {column_sql}")
+        conn.commit()
+        logger.info("Added column %s to %s", column_name, table)
+
+
 __all__ = [
+    "add_column_if_missing",
     "db_retry",
     "ensure_migration_history",
     "get_applied_version",

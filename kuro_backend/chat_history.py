@@ -24,6 +24,7 @@ from typing import List, Dict, Optional
 from kuro_backend.config import settings
 from kuro_backend import memory_manager
 from kuro_backend.db_utils import (
+    add_column_if_missing,
     db_retry,
     get_applied_version,
     get_connection,
@@ -373,6 +374,17 @@ def _init_db_locked():
         """)
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_message_edits_original ON message_edits(original_msg_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_message_edits_chat ON message_edits(chat_id, edited_at DESC)")
+
+        # V2 runtime migration: chat_sessions.runtime_id
+        add_column_if_missing(
+            conn,
+            "chat_sessions",
+            "runtime_id",
+            "TEXT DEFAULT 'sovereign'",
+        )
+        cursor.execute(
+            "UPDATE chat_sessions SET runtime_id='sovereign' WHERE runtime_id IS NULL"
+        )
 
         if get_applied_version(conn) < 1:
             record_migration(conn, 1, "Initial schema baseline")
@@ -785,15 +797,21 @@ def mark_file_archived(stored_filename: str, archive_path: str) -> bool:
             conn.close()
 
 @db_retry()
-def create_session(chat_id: str, username: str, persona: str, title: str = "New Chat") -> bool:
+def create_session(
+    chat_id: str,
+    username: str,
+    persona: str,
+    title: str = "New Chat",
+    runtime_id: str = "sovereign",
+) -> bool:
     """Create a new chat session."""
     conn = None
     try:
         conn = _get_connection()
         cursor = conn.cursor()
         cursor.execute(
-            "INSERT INTO chat_sessions (chat_id, username, persona, title) VALUES (?, ?, ?, ?)",
-            (chat_id, username, persona, title)
+            "INSERT INTO chat_sessions (chat_id, username, persona, title, runtime_id) VALUES (?, ?, ?, ?, ?)",
+            (chat_id, username, persona, title, runtime_id),
         )
         conn.commit()
         return True

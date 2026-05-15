@@ -1,0 +1,203 @@
+# Pre-V2 Migration File Inventory
+Generated: 2026-05-10 15:59:48
+Git commit: 88f08b5f1f023a4154f752ebffdcc80f554ef0c1
+
+## Database Files
+- `kuro_auth.db` — 65536 bytes
+- `kuro_backend/kuro_short_term.db` — 16384 bytes
+- `kuro_chat_history.db` — 811008 bytes
+- `kuro_chromadb/chroma.sqlite3` — 8888320 bytes
+- `kuro_chromadb/ingestion_center/chroma.sqlite3` — 35627008 bytes
+- `kuro_compliance.db` — 53248 bytes
+- `kuro_compliance_chroma/chroma.sqlite3` — 52015104 bytes
+- `kuro_finances.db` — 241664 bytes
+- `kuro_ingestion.db` — 6721536 bytes
+- `kuro_intelligence.db` — 1130496 bytes
+- `kuro_playground.db` — 376832 bytes
+- `kuro_short_term.db` — 630784 bytes
+- `phoenix_data/phoenix.db` — 33181696 bytes
+
+## Config Files
+- `.env`
+- `maintenance/venv/lib/python3.10/site-packages/numpy/_core/lib/npy-pkg-config/mlib.ini`
+- `maintenance/venv/lib/python3.10/site-packages/numpy/_core/lib/npy-pkg-config/npymath.ini`
+- `maintenance/venv/lib/python3.10/site-packages/numpy/typing/tests/data/mypy.ini`
+- `venv/lib/python3.10/site-packages/examples/deployment/gliner_server/pyproject.toml`
+- `venv/lib/python3.10/site-packages/langchain_google_genai/data/profile_augmentations.toml`
+- `venv/lib/python3.10/site-packages/litellm/mypy.ini`
+- `venv/lib/python3.10/site-packages/nemoguardrails/examples/deployment/gliner_server/pyproject.toml`
+- `venv/lib/python3.10/site-packages/numpy/_core/lib/npy-pkg-config/mlib.ini`
+- `venv/lib/python3.10/site-packages/numpy/_core/lib/npy-pkg-config/npymath.ini`
+- `venv/lib/python3.10/site-packages/numpy/typing/tests/data/mypy.ini`
+- `venv/lib/python3.10/site-packages/pandas/pyproject.toml`
+- `venv/lib/python3.10/site-packages/phoenix/db/alembic.ini`
+
+## Python Modules (kuro_backend/)
+- `kuro_backend/agency/__init__.py` — 15 lines
+- `kuro_backend/agency/cognitive_effort.py` — 127 lines
+- `kuro_backend/agency/joint_goal_store.py` — 204 lines
+- `kuro_backend/auth_db.py` — 484 lines
+- `kuro_backend/autonomy_boundaries.py` — 25 lines
+- `kuro_backend/backup_manager.py` — 490 lines
+- `kuro_backend/chat_history.py` — 1280 lines
+- `kuro_backend/cognition_profiles.py` — 10 lines
+- `kuro_backend/cognitive_budget_engine.py` — 43 lines
+- `kuro_backend/cognitive_router/__init__.py` — 7 lines
+- `kuro_backend/cognitive_router/capability_matrix.py` — 16 lines
+- `kuro_backend/cognitive_router/cognition_roles.py` — 5 lines
+- `kuro_backend/cognitive_router/consensus_engine.py` — 12 lines
+- `kuro_backend/cognitive_router/fallback_strategy.py` — 11 lines
+- `kuro_backend/cognitive_router/memory_authority.py` — 13 lines
+- `kuro_backend/cognitive_router/model_router.py` — 26 lines
+- `kuro_backend/cognitive_router/openai_model_adapter.py` — 34 lines
+- `kuro_backend/cognitive_router/routing_policy.py` — 16 lines
+- `kuro_backend/compliance_db.py` — 242 lines
+- `kuro_backend/config.py` — 264 lines
+- `kuro_backend/constitution_engine.py` — 27 lines
+- `kuro_backend/contradiction_memory_guard.py` — 9 lines
+- `kuro_backend/core.py` — 297 lines
+- `kuro_backend/dashboard_broadcast.py` — 164 lines
+- `kuro_backend/db_utils.py` — 98 lines
+- `kuro_backend/dreaming_worker.py` — 1412 lines
+- `kuro_backend/embedding_cache.py` — 120 lines
+- `kuro_backend/epistemic_filter.py` — 114 lines
+- `kuro_backend/evaluation/__init__.py` — 1 lines
+- `kuro_backend/evaluation/autonomous_evaluator.py` — 108 lines
+- `kuro_backend/evaluation/dataset_builder.py` — 33 lines
+- `kuro_backend/evaluation/evaluation_scheduler.py` — 12 lines
+- `kuro_backend/evaluation_runtime/__init__.py` — 1 lines
+- `kuro_backend/evaluation_runtime/governance_compliance_test.py` — 9 lines
+- `kuro_backend/evaluation_runtime/grounding_score.py` — 10 lines
+- `kuro_backend/evaluation_runtime/hallucination_benchmark.py` — 13 lines
+- `kuro_backend/evaluation_runtime/memory_integrity_benchmark.py` — 8 lines
+- `kuro_backend/evaluation_runtime/multi_model_alignment.py` — 8 lines
+- `kuro_backend/evaluation_runtime/persona_consistency.py` — 9 lines
+- `kuro_backend/evaluation_runtime/regression_suite.py` — 21 lines
+- `kuro_backend/execution/openclaw_bridge.py` — 526 lines
+- `kuro_backend/execution/service.py` — 32 lines
+- `kuro_backend/expertise_profiles.py` — 10 lines
+- `kuro_backend/export_engine/__init__.py` — 25 lines
+- `kuro_backend/export_engine/export_manager.py` — 161 lines
+- `kuro_backend/export_engine/export_models.py` — 63 lines
+- `kuro_backend/export_engine/export_registry.py` — 30 lines
+- `kuro_backend/export_engine/export_security.py` — 58 lines
+- `kuro_backend/export_engine/exporters/__init__.py` — 19 lines
+- `kuro_backend/export_engine/exporters/base_exporter.py` — 14 lines
+- `kuro_backend/export_engine/exporters/csv_exporter.py` — 40 lines
+- `kuro_backend/export_engine/exporters/docx_exporter.py` — 36 lines
+- `kuro_backend/export_engine/exporters/json_exporter.py` — 14 lines
+- `kuro_backend/export_engine/exporters/markdown_exporter.py` — 34 lines
+- `kuro_backend/export_engine/exporters/pdf_exporter.py` — 47 lines
+- `kuro_backend/export_engine/exporters/txt_exporter.py` — 28 lines
+- `kuro_backend/export_engine/exporters/xlsx_exporter.py` — 57 lines
+- `kuro_backend/export_engine/renderers/__init__.py` — 12 lines
+- `kuro_backend/export_engine/renderers/chat_renderer.py` — 94 lines
+- `kuro_backend/export_engine/renderers/compliance_renderer.py` — 88 lines
+- `kuro_backend/export_engine/renderers/finance_renderer.py` — 84 lines
+- `kuro_backend/export_engine/renderers/intelligence_renderer.py` — 77 lines
+- `kuro_backend/failure_recovery_engine.py` — 23 lines
+- `kuro_backend/file_retention_worker.py` — 168 lines
+- `kuro_backend/finance_db.py` — 1424 lines
+- `kuro_backend/fitness_service.py` — 237 lines
+- `kuro_backend/goals/__init__.py` — 13 lines
+- `kuro_backend/goals/cognitive_state_engine.py` — 17 lines
+- `kuro_backend/goals/decision_engine.py` — 16 lines
+- `kuro_backend/goals/execution_tracker.py` — 15 lines
+- `kuro_backend/goals/goal_engine.py` — 34 lines
+- `kuro_backend/goals/goal_registry.py` — 24 lines
+- `kuro_backend/goals/priority_resolver.py` — 19 lines
+- `kuro_backend/goals/progress_evaluator.py` — 14 lines
+- `kuro_backend/goals/reflection_engine.py` — 12 lines
+- `kuro_backend/goals/strategic_planner.py` — 20 lines
+- `kuro_backend/goals/subgoal_graph.py` — 15 lines
+- `kuro_backend/goals/utility_engine.py` — 27 lines
+- `kuro_backend/governance/__init__.py` — 6 lines
+- `kuro_backend/governance/ai_risk_classifier.py` — 19 lines
+- `kuro_backend/governance/compliance_router.py` — 11 lines
+- `kuro_backend/governance/explainability_engine.py` — 9 lines
+- `kuro_backend/governance/governance_audit.py` — 12 lines
+- `kuro_backend/governance/pii_guard.py` — 11 lines
+- `kuro_backend/governance/policy_engine.py` — 19 lines
+- `kuro_backend/governance/retention_manager.py` — 11 lines
+- `kuro_backend/governance/tenant_runtime.py` — 11 lines
+- `kuro_backend/identity_core.py` — 22 lines
+- `kuro_backend/ingestion_center/__init__.py` — 9 lines
+- `kuro_backend/ingestion_center/chroma_inspector.py` — 50 lines
+- `kuro_backend/ingestion_center/chunking_engine.py` — 66 lines
+- `kuro_backend/ingestion_center/embedding_manager.py` — 153 lines
+- `kuro_backend/ingestion_center/ingestion_audit.py` — 19 lines
+- `kuro_backend/ingestion_center/ingestion_manager.py` — 481 lines
+- `kuro_backend/ingestion_center/ingestion_pipeline.py` — 120 lines
+- `kuro_backend/ingestion_center/ingestion_registry.py` — 578 lines
+- `kuro_backend/ingestion_center/ingestion_scheduler.py` — 18 lines
+- `kuro_backend/ingestion_center/ingestion_security.py` — 69 lines
+- `kuro_backend/ingestion_center/renderers/__init__.py` — 5 lines
+- `kuro_backend/ingestion_center/renderers/analytics_renderer.py` — 7 lines
+- `kuro_backend/ingestion_center/renderers/chunk_renderer.py` — 11 lines
+- `kuro_backend/ingestion_center/renderers/dataset_renderer.py` — 11 lines
+- `kuro_backend/ingestion_center/retrieval_analytics.py` — 43 lines
+- `kuro_backend/ingestion_center/schemas/__init__.py` — 15 lines
+- `kuro_backend/ingestion_center/schemas/analytics_models.py` — 50 lines
+- `kuro_backend/ingestion_center/schemas/ingestion_models.py` — 111 lines
+- `kuro_backend/ingestion_center/semantic_registry.py` — 24 lines
+- `kuro_backend/intelligence/__init__.py` — 14 lines
+- `kuro_backend/intelligence/confidence_engine.py` — 47 lines
+- `kuro_backend/intelligence/contradiction_detector.py` — 36 lines
+- `kuro_backend/intelligence/epistemic_engine.py` — 93 lines
+- `kuro_backend/intelligence/grounding_validator.py` — 33 lines
+- `kuro_backend/intelligence/provenance_tracker.py` — 21 lines
+- `kuro_backend/intelligence/response_sanitizer.py` — 121 lines
+- `kuro_backend/intelligence/retrieval_quality.py` — 69 lines
+- `kuro_backend/intelligence/stream_safety.py` — 28 lines
+- `kuro_backend/intelligence/uncertainty_renderer.py` — 11 lines
+- `kuro_backend/intelligence_db.py` — 1318 lines
+- `kuro_backend/intelligence_engine.py` — 438 lines
+- `kuro_backend/langgraph_core.py` — 3743 lines
+- `kuro_backend/llm_utils.py` — 84 lines
+- `kuro_backend/logger_setup.py` — 76 lines
+- `kuro_backend/market_sentinel.py` — 219 lines
+- `kuro_backend/memory_canonicalization.py` — 28 lines
+- `kuro_backend/memory_coordinator.py` — 1958 lines
+- `kuro_backend/memory_manager.py` — 1827 lines
+- `kuro_backend/memory_validation.py` — 16 lines
+- `kuro_backend/observability.py` — 491 lines
+- `kuro_backend/perpetual_memory.py` — 740 lines
+- `kuro_backend/persona_history_admin.py` — 259 lines
+- `kuro_backend/persona_profiles.py` — 14 lines
+- `kuro_backend/persona_runtime.py` — 112 lines
+- `kuro_backend/personas.py` — 591 lines
+- `kuro_backend/price_ticker_worker.py` — 148 lines
+- `kuro_backend/pricing.py` — 67 lines
+- `kuro_backend/proactive_events.py` — 214 lines
+- `kuro_backend/proactive_greeting.py` — 122 lines
+- `kuro_backend/runtime_modes.py` — 36 lines
+- `kuro_backend/semantic_cache.py` — 246 lines
+- `kuro_backend/semantic_integrity.py` — 14 lines
+- `kuro_backend/serper_tool.py` — 153 lines
+- `kuro_backend/services/__init__.py` — 13 lines
+- `kuro_backend/services/async_adapter.py` — 45 lines
+- `kuro_backend/services/core_service.py` — 163 lines
+- `kuro_backend/services/schemas.py` — 112 lines
+- `kuro_backend/source_reliability_engine.py` — 31 lines
+- `kuro_backend/ssot_shortcuts.py` — 212 lines
+- `kuro_backend/telegram_notifier.py` — 235 lines
+- `kuro_backend/temporal_weighting.py` — 20 lines
+- `kuro_backend/token_budget.py` — 321 lines
+- `kuro_backend/tone_engine.py` — 27 lines
+- `kuro_backend/tools/__init__.py` — 51 lines
+- `kuro_backend/tools/base_tools.py` — 2047 lines
+- `kuro_backend/tools/system_tools.py` — 197 lines
+- `kuro_backend/tools/tool_budget_manager.py` — 33 lines
+- `kuro_backend/tools/tool_capability_registry.py` — 39 lines
+- `kuro_backend/tools/tool_execution_guard.py` — 56 lines
+- `kuro_backend/tools/tool_policy_engine.py` — 22 lines
+- `kuro_backend/tools/tool_risk_scoring.py` — 50 lines
+- `kuro_backend/tools/tool_trace_logger.py` — 26 lines
+- `kuro_backend/ui_mode_router.py` — 166 lines
+- `kuro_backend/version.py` — 36 lines
+
+## Notes
+- This file is generated pre-migration as a rollback reference.
+- Restore from backups/pre-v2/ if migration needs full rollback.
+- KURO_V2_STRICT_MODE=false is the default rollback switch for behavior-level rollback.
+- For schema rollback: restore .db files from backups/pre-v2/.

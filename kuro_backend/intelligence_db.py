@@ -438,6 +438,33 @@ def _init_db_locked():
             ON sentinel_health(service, created_at DESC)
             """
         )
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS boundary_violations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                runtime_id TEXT NOT NULL,
+                username TEXT NOT NULL,
+                resource_type TEXT NOT NULL,
+                resource_id TEXT NOT NULL,
+                reason TEXT,
+                strict_mode INTEGER DEFAULT 0,
+                trace_id TEXT DEFAULT '',
+                ts TEXT DEFAULT (datetime('now'))
+            )
+            """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_boundary_violations_ts
+            ON boundary_violations(ts DESC)
+            """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_boundary_violations_runtime_user
+            ON boundary_violations(runtime_id, username, ts DESC)
+            """
+        )
 
         if get_applied_version(conn) < 1:
             record_migration(conn, 1, "Initial schema baseline")
@@ -1310,6 +1337,63 @@ def mark_notification_dead(notification_id: int) -> None:
             (int(notification_id),),
         )
         conn.commit()
+    finally:
+        if conn:
+            conn.close()
+
+
+@db_retry()
+def log_boundary_violation(
+    runtime_id: str,
+    username: str,
+    resource_type: str,
+    resource_id: str,
+    reason: str,
+    strict_mode: bool = False,
+    trace_id: str = "",
+) -> None:
+    init_db()
+    conn = None
+    try:
+        conn = _get_connection()
+        conn.execute(
+            """
+            INSERT INTO boundary_violations
+                (runtime_id, username, resource_type, resource_id, reason, strict_mode, trace_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                runtime_id,
+                username,
+                resource_type,
+                resource_id,
+                reason,
+                1 if strict_mode else 0,
+                trace_id,
+            ),
+        )
+        conn.commit()
+    finally:
+        if conn:
+            conn.close()
+
+
+def get_recent_boundary_violations(limit: int = 100) -> List[Dict]:
+    init_db()
+    safe_limit = max(1, min(500, int(limit)))
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT * FROM boundary_violations
+            ORDER BY ts DESC, id DESC
+            LIMIT ?
+            """,
+            (safe_limit,),
+        )
+        return [dict(r) for r in cursor.fetchall()]
     finally:
         if conn:
             conn.close()

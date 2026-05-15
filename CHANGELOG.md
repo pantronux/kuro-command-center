@@ -1,3 +1,35 @@
+## [PARTIAL][V2.0.0 Beta 1] — "Runtime Migration (Prompt -1..2)" — 2026-05-10
+
+### Status
+- **Partial execution only**: Implementasi baru selesai sampai Prompt `2` (belum full V2 end-to-end).
+- **Scope completed**:
+  - Prompt `-1`: safety preparation (branch/tag, backup DB, pre-migration inventory, baseline validation).
+  - Prompt `0`: architecture baseline docs + directory skeleton + runtime config scaffold.
+  - Prompt `1`: runtime registry/context + `runtime_id` injection + runtime routes + migration helper.
+  - Prompt `2`: boundary guard + boundary violation logging + admin violation route + integration tests.
+- **Scope not completed yet**:
+  - Prompt `3+` (memory stratification, structured output engine, provider router, QA runtime, final observability/evaluation phases).
+
+### Key Additions (Partial V2)
+- **Runtime Namespace Layer**:
+  - Added `kuro_backend/runtime/runtime_registry.py` and `runtime_context.py`.
+  - Added public-safe runtime discovery route: `GET /api/runtimes`.
+  - Added admin runtime detail route: `GET /api/admin/runtimes/{runtime_id}`.
+- **Boundary Isolation Layer**:
+  - Added `kuro_backend/runtime/boundary_guard.py` with audit vs strict mode (`KURO_V2_STRICT_MODE`).
+  - Added boundary violations table + query route:
+    - DB: `boundary_violations` (`kuro_intelligence.db`)
+    - API: `GET /api/admin/boundary-violations`
+- **State & Migration Hardening**:
+  - Added `add_column_if_missing()` in `kuro_backend/db_utils.py` (PRAGMA-based idempotent migration).
+  - Added `chat_sessions.runtime_id` migration/backfill in `kuro_backend/chat_history.py`.
+  - Added runtime primitives (`runtime_id`, `runtime_namespace`) to LangGraph state flow; no complex runtime object is persisted to graph state.
+
+### Verification Snapshot (Partial)
+- Compile gate: `python3 -m compileall kuro_backend` ✅
+- Test gate: `pytest tests/ -x --tb=short` ✅
+- Legacy smoke (mocked): `/api/chat/stream` tanpa `runtime_id` tetap berhasil ✅
+
 ## [V1.2.0 Beta 1] — "Sovereign Chat" — 2026-05-10
 
 ### Release Scope

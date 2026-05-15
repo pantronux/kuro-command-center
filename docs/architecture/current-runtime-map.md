@@ -1,0 +1,571 @@
+# Current Runtime Map (Pre-V2)
+
+## Python Modules in `kuro_backend/`
+- `kuro_backend/agency/__init__.py`: Package root for the Natural Agency tier. Re-exports key helpers for convenience.
+- `kuro_backend/agency/cognitive_effort.py`: Maps intent_category + input signals to an effort level string.
+- `kuro_backend/agency/joint_goal_store.py`: CRUD for joint dissertation commitments (T3 Shared Agency tier).
+- `kuro_backend/auth_db.py`: Track failed-login attempts + lockouts for dashboard auth.
+- `kuro_backend/autonomy_boundaries.py`: Module implementation details.
+- `kuro_backend/backup_manager.py`: Centralized backup/snapshot orchestration for critical runtime data.
+- `kuro_backend/chat_history.py`: Cross-channel chat history persistence (Web + Telegram) in SQLite.
+- `kuro_backend/cognition_profiles.py`: Module implementation details.
+- `kuro_backend/cognitive_budget_engine.py`: Module implementation details.
+- `kuro_backend/cognitive_router/__init__.py`: Canvas 2 cognitive router package.
+- `kuro_backend/cognitive_router/capability_matrix.py`: Module implementation details.
+- `kuro_backend/cognitive_router/cognition_roles.py`: Module implementation details.
+- `kuro_backend/cognitive_router/consensus_engine.py`: Module implementation details.
+- `kuro_backend/cognitive_router/fallback_strategy.py`: Module implementation details.
+- `kuro_backend/cognitive_router/memory_authority.py`: Module implementation details.
+- `kuro_backend/cognitive_router/model_router.py`: Module implementation details.
+- `kuro_backend/cognitive_router/openai_model_adapter.py`: Module implementation details.
+- `kuro_backend/cognitive_router/routing_policy.py`: Module implementation details.
+- `kuro_backend/compliance_db.py`: Persistent compliance / audit SSoT (controls, findings, evidence).
+- `kuro_backend/config.py`: Single source of truth for environment-driven runtime configuration.
+- `kuro_backend/constitution_engine.py`: Module implementation details.
+- `kuro_backend/contradiction_memory_guard.py`: Module implementation details.
+- `kuro_backend/core.py`: Legacy single-shot Gemini chat path + generation-config factory (non-LangGraph).
+- `kuro_backend/dashboard_broadcast.py`: WebSocket fan-out hub for dashboard UI commands + revision pings.
+- `kuro_backend/db_utils.py`: Shared SQLite connection utilities and retry decorator for DB modules.
+- `kuro_backend/dreaming_worker.py`: Nightly reflection / CVE / fitness / fiscal / market sentinels + intel briefings.
+- `kuro_backend/embedding_cache.py`: LRU+TTL cache in front of Gemini embedding API.
+- `kuro_backend/epistemic_filter.py`: Compatibility facade for the legacy label-based epistemic filter.
+- `kuro_backend/evaluation/__init__.py`: Evaluation module for Kuro AI.
+- `kuro_backend/evaluation/autonomous_evaluator.py`: Evaluates reasoning nodes for groundedness and goal alignment.
+- `kuro_backend/evaluation/dataset_builder.py`: Module implementation details.
+- `kuro_backend/evaluation/evaluation_scheduler.py`: Module implementation details.
+- `kuro_backend/evaluation_runtime/__init__.py`: Canvas 3 evaluation runtime package.
+- `kuro_backend/evaluation_runtime/governance_compliance_test.py`: Module implementation details.
+- `kuro_backend/evaluation_runtime/grounding_score.py`: Module implementation details.
+- `kuro_backend/evaluation_runtime/hallucination_benchmark.py`: Module implementation details.
+- `kuro_backend/evaluation_runtime/memory_integrity_benchmark.py`: Module implementation details.
+- `kuro_backend/evaluation_runtime/multi_model_alignment.py`: Module implementation details.
+- `kuro_backend/evaluation_runtime/persona_consistency.py`: Module implementation details.
+- `kuro_backend/evaluation_runtime/regression_suite.py`: Module implementation details.
+- `kuro_backend/execution/openclaw_bridge.py`: HTTP client + circuit breaker to the OpenClaw external execution daemon.
+- `kuro_backend/execution/service.py`: Thin sync facade around openclaw_bridge for tool-side callers.
+- `kuro_backend/expertise_profiles.py`: Module implementation details.
+- `kuro_backend/export_engine/__init__.py`: Module implementation details.
+- `kuro_backend/export_engine/export_manager.py`: Module implementation details.
+- `kuro_backend/export_engine/export_models.py`: Module implementation details.
+- `kuro_backend/export_engine/export_registry.py`: Module implementation details.
+- `kuro_backend/export_engine/export_security.py`: Module implementation details.
+- `kuro_backend/export_engine/exporters/__init__.py`: Module implementation details.
+- `kuro_backend/export_engine/exporters/base_exporter.py`: Module implementation details.
+- `kuro_backend/export_engine/exporters/csv_exporter.py`: Module implementation details.
+- `kuro_backend/export_engine/exporters/docx_exporter.py`: Module implementation details.
+- `kuro_backend/export_engine/exporters/json_exporter.py`: Module implementation details.
+- `kuro_backend/export_engine/exporters/markdown_exporter.py`: Module implementation details.
+- `kuro_backend/export_engine/exporters/pdf_exporter.py`: Module implementation details.
+- `kuro_backend/export_engine/exporters/txt_exporter.py`: Module implementation details.
+- `kuro_backend/export_engine/exporters/xlsx_exporter.py`: Module implementation details.
+- `kuro_backend/export_engine/renderers/__init__.py`: Module implementation details.
+- `kuro_backend/export_engine/renderers/chat_renderer.py`: Module implementation details.
+- `kuro_backend/export_engine/renderers/compliance_renderer.py`: Module implementation details.
+- `kuro_backend/export_engine/renderers/finance_renderer.py`: Module implementation details.
+- `kuro_backend/export_engine/renderers/intelligence_renderer.py`: Module implementation details.
+- `kuro_backend/failure_recovery_engine.py`: Module implementation details.
+- `kuro_backend/file_retention_worker.py`: Module implementation details.
+- `kuro_backend/finance_db.py`: Chancellor SSoT — budgets, recurring expenses, daily API spend,
+- `kuro_backend/fitness_service.py`: Fitness anomaly sentinel (wearable JSON drop -> proactive_events).
+- `kuro_backend/goals/__init__.py`: Canvas 2 goal runtime package.
+- `kuro_backend/goals/cognitive_state_engine.py`: Module implementation details.
+- `kuro_backend/goals/decision_engine.py`: Module implementation details.
+- `kuro_backend/goals/execution_tracker.py`: Module implementation details.
+- `kuro_backend/goals/goal_engine.py`: Module implementation details.
+- `kuro_backend/goals/goal_registry.py`: Module implementation details.
+- `kuro_backend/goals/priority_resolver.py`: Module implementation details.
+- `kuro_backend/goals/progress_evaluator.py`: Module implementation details.
+- `kuro_backend/goals/reflection_engine.py`: Module implementation details.
+- `kuro_backend/goals/strategic_planner.py`: Module implementation details.
+- `kuro_backend/goals/subgoal_graph.py`: Module implementation details.
+- `kuro_backend/goals/utility_engine.py`: Module implementation details.
+- `kuro_backend/governance/__init__.py`: Canvas 2 governance runtime package.
+- `kuro_backend/governance/ai_risk_classifier.py`: Module implementation details.
+- `kuro_backend/governance/compliance_router.py`: Module implementation details.
+- `kuro_backend/governance/explainability_engine.py`: Module implementation details.
+- `kuro_backend/governance/governance_audit.py`: Module implementation details.
+- `kuro_backend/governance/pii_guard.py`: Module implementation details.
+- `kuro_backend/governance/policy_engine.py`: Module implementation details.
+- `kuro_backend/governance/retention_manager.py`: Module implementation details.
+- `kuro_backend/governance/tenant_runtime.py`: Module implementation details.
+- `kuro_backend/identity_core.py`: Module implementation details.
+- `kuro_backend/ingestion_center/__init__.py`: Module implementation details.
+- `kuro_backend/ingestion_center/chroma_inspector.py`: Module implementation details.
+- `kuro_backend/ingestion_center/chunking_engine.py`: Module implementation details.
+- `kuro_backend/ingestion_center/embedding_manager.py`: Module implementation details.
+- `kuro_backend/ingestion_center/ingestion_audit.py`: Module implementation details.
+- `kuro_backend/ingestion_center/ingestion_manager.py`: Module implementation details.
+- `kuro_backend/ingestion_center/ingestion_pipeline.py`: Module implementation details.
+- `kuro_backend/ingestion_center/ingestion_registry.py`: Module implementation details.
+- `kuro_backend/ingestion_center/ingestion_scheduler.py`: Module implementation details.
+- `kuro_backend/ingestion_center/ingestion_security.py`: Module implementation details.
+- `kuro_backend/ingestion_center/renderers/__init__.py`: Module implementation details.
+- `kuro_backend/ingestion_center/renderers/analytics_renderer.py`: Module implementation details.
+- `kuro_backend/ingestion_center/renderers/chunk_renderer.py`: Module implementation details.
+- `kuro_backend/ingestion_center/renderers/dataset_renderer.py`: Module implementation details.
+- `kuro_backend/ingestion_center/retrieval_analytics.py`: Module implementation details.
+- `kuro_backend/ingestion_center/schemas/__init__.py`: Module implementation details.
+- `kuro_backend/ingestion_center/schemas/analytics_models.py`: Module implementation details.
+- `kuro_backend/ingestion_center/schemas/ingestion_models.py`: Module implementation details.
+- `kuro_backend/ingestion_center/semantic_registry.py`: Module implementation details.
+- `kuro_backend/intelligence/__init__.py`: Canvas 1 intelligence package: internal grounding, epistemics, and sanitization.
+- `kuro_backend/intelligence/confidence_engine.py`: Module implementation details.
+- `kuro_backend/intelligence/contradiction_detector.py`: Module implementation details.
+- `kuro_backend/intelligence/epistemic_engine.py`: Module implementation details.
+- `kuro_backend/intelligence/grounding_validator.py`: Module implementation details.
+- `kuro_backend/intelligence/provenance_tracker.py`: Module implementation details.
+- `kuro_backend/intelligence/response_sanitizer.py`: Module implementation details.
+- `kuro_backend/intelligence/retrieval_quality.py`: Module implementation details.
+- `kuro_backend/intelligence/stream_safety.py`: Module implementation details.
+- `kuro_backend/intelligence/uncertainty_renderer.py`: Module implementation details.
+- `kuro_backend/intelligence_db.py`: Persistent store for daily intel briefings + topic watchlist.
+- `kuro_backend/intelligence_engine.py`: Nightly autonomous intelligence gathering + Gemini synthesis -> intelligence_db.
+- `kuro_backend/langgraph_core.py`: Orchestrates the core reasoning graph and node execution.
+- `kuro_backend/llm_utils.py`: Module implementation details.
+- `kuro_backend/logger_setup.py`: Module implementation details.
+- `kuro_backend/market_sentinel.py`: Hybrid Market Sentinel (Qualitative Triangulator).
+- `kuro_backend/memory_canonicalization.py`: Module implementation details.
+- `kuro_backend/memory_coordinator.py`: Central memory-read orchestration + post-response write fan-out across all memory tiers.
+- `kuro_backend/memory_manager.py`: Three-tier cognitive memory orchestration (short-term SQLite, semantic Mem0, master-profile JSON).
+- `kuro_backend/memory_validation.py`: Module implementation details.
+- `kuro_backend/observability.py`: OpenTelemetry tracing + Phoenix integration + token/cost accounting.
+- `kuro_backend/perpetual_memory.py`: Mem0-backed perpetual personal-memory layer with cooldown ladder and privacy filter.
+- `kuro_backend/persona_history_admin.py`: CLI + programmatic admin helpers to inspect / purge persona chat history buckets.
+- `kuro_backend/persona_profiles.py`: Module implementation details.
+- `kuro_backend/persona_runtime.py`: Module implementation details.
+- `kuro_backend/personas.py`: Canonical persona system prompts + SSoT addendums used everywhere.
+- `kuro_backend/price_ticker_worker.py`: Quantitative price data anchor via yfinance for IDX/BEI stocks.
+- `kuro_backend/pricing.py`: Deterministic cost estimator for observability + fiscal sentinel.
+- `kuro_backend/proactive_events.py`: Single entry point for anomaly / alert publication (dedup + severity).
+- `kuro_backend/proactive_greeting.py`: One-per-day personalized greeting push to the dashboard UI on connect.
+- `kuro_backend/runtime_modes.py`: Module implementation details.
+- `kuro_backend/semantic_cache.py`: Semantic (embedding-similarity) response cache gated by SSoT revision token.
+- `kuro_backend/semantic_integrity.py`: Module implementation details.
+- `kuro_backend/serper_tool.py`: Serper.dev HTTP client for general-purpose and news search.
+- `kuro_backend/services/__init__.py`: Package-level re-export of the services layer entry points.
+- `kuro_backend/services/async_adapter.py`: Typed bridge to run synchronous SSoT writers off the FastAPI event loop.
+- `kuro_backend/services/core_service.py`: Persisted sync revision management + cross-DB initialization orchestration.
+- `kuro_backend/services/schemas.py`: Wire-level data contracts for API routes, services, and Gemini tool outputs.
+- `kuro_backend/source_reliability_engine.py`: Module implementation details.
+- `kuro_backend/ssot_shortcuts.py`: Deterministic LLM-bypass router for high-confidence finance queries.
+- `kuro_backend/telegram_notifier.py`: Resilient outbound Telegram notifier (bot token + chat id) for proactive events.
+- `kuro_backend/temporal_weighting.py`: Module implementation details.
+- `kuro_backend/token_budget.py`: Per-section token budgeting + trim policy for assembled LLM prompts.
+- `kuro_backend/tone_engine.py`: Module implementation details.
+- `kuro_backend/tools/__init__.py`: Public tool surface for Gemini tool-calling (re-export from base_tools).
+- `kuro_backend/tools/base_tools.py`: All Gemini-callable tools (filesystem, system inspection, finance, market, OpenClaw advanced execution).
+- `kuro_backend/tools/system_tools.py`: Secondary system-level tools (Excel exports, file management, audit templates).
+- `kuro_backend/tools/tool_budget_manager.py`: Module implementation details.
+- `kuro_backend/tools/tool_capability_registry.py`: Module implementation details.
+- `kuro_backend/tools/tool_execution_guard.py`: Module implementation details.
+- `kuro_backend/tools/tool_policy_engine.py`: Module implementation details.
+- `kuro_backend/tools/tool_risk_scoring.py`: Module implementation details.
+- `kuro_backend/tools/tool_trace_logger.py`: Module implementation details.
+- `kuro_backend/ui_mode_router.py`: Zero-cost keyword router for chat-initiated UI mode commands.
+- `kuro_backend/version.py`: Canonical version metadata for the whole stack.
+
+## APScheduler Jobs (schedule + target)
+- `main.py` -> `hardware_sentinel_check` (trigger=unknown)
+- `main.py` -> `run_evaluation_batch_job` (trigger=unknown, hour=2)
+- `main.py` -> `send_daily_intelligence_briefing` (trigger=unknown, hour=8)
+- `main.py` -> `run_all_price_updates` (trigger=unknown, day_of_week="mon-fri")
+- `main.py` -> `run_all_sentinel_scans` (trigger=unknown, day_of_week="mon-fri")
+- `main.py` -> `dreaming_worker.run_dreaming_cycle` (trigger=unknown, hour=dreaming_cron_hour)
+- `main.py` -> `fitness_service.run_fitness_sentinel` (trigger=unknown)
+- `main.py` -> `file_retention_worker.run_retention_cycle` (trigger=unknown, hour=2)
+- `main.py` -> `run_nightly_backup_job` (trigger=unknown, hour=1)
+- `main.py` -> `run_research_ledger_prune_job` (trigger=unknown, day_of_week="sun")
+- `main.py` -> `run_openclaw_circuit_open_alert_job` (trigger=unknown)
+- `main.py` -> `run_retry_failed_telegram_notifications_job` (trigger=unknown)
+
+## FastAPI Routes Grouped by Prefix
+- `/`
+  - `GET /`
+- `/api/auth`
+  - `GET /api/auth/stats`
+  - `GET /api/auth/verify`
+  - `POST /api/auth/logout`
+- `/api/backup`
+  - `GET /api/backup/history`
+  - `GET /api/backup/status`
+  - `POST /api/backup/run`
+- `/api/chat`
+  - `DELETE /api/chat/stream/{request_id}`
+  - `GET /api/chat/search`
+  - `POST /api/chat`
+  - `POST /api/chat/stream`
+- `/api/chats`
+  - `DELETE /api/chats/{chat_id}`
+  - `GET /api/chats`
+  - `GET /api/chats/{chat_id}/bookmarks`
+  - `GET /api/chats/{chat_id}/export`
+  - `GET /api/chats/{chat_id}/messages`
+  - `GET /api/chats/{chat_id}/search`
+  - `POST /api/chats`
+  - `POST /api/chats/{chat_id}/messages/{msg_id}/bookmark`
+  - `POST /api/chats/{chat_id}/messages/{msg_id}/regenerate`
+  - `POST /api/chats/{chat_id}/pin`
+  - `POST /api/chats/{chat_id}/unpin`
+  - `PUT /api/chats/{chat_id}`
+  - `PUT /api/chats/{chat_id}/messages/{msg_id}/edit`
+- `/api/compliance`
+  - `GET /api/compliance/audit-trail`
+  - `GET /api/compliance/evidence`
+  - `GET /api/compliance/progress/{standard}`
+  - `GET /api/compliance/search`
+  - `GET /api/compliance/stats`
+  - `POST /api/compliance/analyze`
+  - `POST /api/compliance/ingest`
+- `/api/dashboard`
+  - `GET /api/dashboard/data-revision`
+- `/api/evaluation`
+  - `GET /api/evaluation/summary`
+- `/api/export`
+  - `GET /api/export/history`
+  - `GET /api/export/{job_id}`
+  - `GET /api/export/{job_id}/download`
+  - `POST /api/export`
+- `/api/finances`
+  - `DELETE /api/finances/expenses/{expense_id}`
+  - `GET /api/finances/api-usage`
+  - `GET /api/finances/budget`
+  - `GET /api/finances/expenses`
+  - `POST /api/finances/budget`
+  - `POST /api/finances/expenses`
+- `/api/health`
+  - `GET /api/health`
+- `/api/history`
+  - `DELETE /api/history`
+  - `GET /api/history`
+- `/api/index-path`
+  - `POST /api/index-path`
+- `/api/ingestion`
+  - `GET /api/ingestion/analytics/overview`
+  - `GET /api/ingestion/analytics/retrieval`
+  - `GET /api/ingestion/chroma/health`
+  - `GET /api/ingestion/datasets`
+  - `GET /api/ingestion/datasets/{dataset_uuid}`
+  - `GET /api/ingestion/datasets/{dataset_uuid}/chunks`
+  - `GET /api/ingestion/datasets/{dataset_uuid}/lineage`
+  - `GET /api/ingestion/graph/{dataset_uuid}`
+  - `GET /api/ingestion/jobs`
+  - `GET /api/ingestion/logs`
+  - `GET /api/ingestion/orphan-sources`
+  - `GET /api/ingestion/search`
+  - `POST /api/ingestion/chroma/cleanup-orphans`
+  - `POST /api/ingestion/datasets/{dataset_uuid}/archive`
+  - `POST /api/ingestion/datasets/{dataset_uuid}/delete`
+  - `POST /api/ingestion/datasets/{dataset_uuid}/reindex`
+  - `POST /api/ingestion/orphan-sources/reingest`
+  - `POST /api/ingestion/upload`
+- `/api/intelligence`
+  - `GET /api/intelligence/history`
+  - `GET /api/intelligence/latest`
+  - `GET /api/intelligence/run`
+- `/api/list-files`
+  - `GET /api/list-files`
+- `/api/log-storage`
+  - `GET /api/log-storage`
+- `/api/login`
+  - `POST /api/login`
+- `/api/market`
+  - `DELETE /api/market/watch/{symbol}`
+  - `GET /api/market/brief`
+  - `GET /api/market/hud`
+  - `GET /api/market/watch`
+  - `POST /api/market/watch`
+- `/api/me`
+  - `GET /api/me`
+- `/api/memory`
+  - `GET /api/memory/stats`
+  - `POST /api/memory/reindex`
+- `/api/observability`
+  - `GET /api/observability/cleanup`
+  - `GET /api/observability/latency`
+  - `GET /api/observability/status`
+  - `GET /api/observability/tokens`
+- `/api/openclaw`
+  - `GET /api/openclaw/skills`
+- `/api/persona`
+  - `GET /api/persona`
+  - `GET /api/persona/history/preview`
+  - `GET /api/persona/history/stats`
+  - `POST /api/persona`
+  - `POST /api/persona/history/override`
+  - `POST /api/persona/history/reclassify`
+  - `POST /api/persona/history/restore`
+- `/api/playground`
+  - `GET /api/playground/tutorial/content`
+- `/api/proxmox-status`
+  - `GET /api/proxmox-status`
+- `/api/read-file`
+  - `POST /api/read-file`
+- `/api/sentinel`
+  - `GET /api/sentinel/latest`
+  - `GET /api/sentinel/pins`
+  - `GET /api/sentinel/stock/{code}`
+  - `GET /api/sentinel/stocks`
+  - `POST /api/sentinel/pins/{code}`
+  - `POST /api/sentinel/price-update`
+  - `POST /api/sentinel/run`
+- `/api/system-analysis`
+  - `GET /api/system-analysis`
+- `/api/system-status`
+  - `GET /api/system-status`
+- `/api/tutorial`
+  - `GET /api/tutorial/content`
+- `/api/user`
+  - `POST /api/user/change-password`
+  - `POST /api/user/update`
+  - `POST /api/user/update-persona`
+- `/api/version`
+  - `GET /api/version`
+- `/chat`
+  - `GET /chat`
+- `/compliance`
+  - `GET /compliance`
+- `/ingestion`
+  - `GET /ingestion`
+  - `GET /ingestion/analytics`
+  - `GET /ingestion/logs`
+- `/intelligence`
+  - `GET /intelligence`
+- `/login`
+  - `GET /login`
+- `/market`
+  - `GET /market`
+- `/observability`
+  - `GET /observability`
+- `/playground`
+  - `GET /playground/tutorial`
+- `/profile`
+  - `GET /profile`
+- `/tutorial`
+  - `GET /tutorial`
+
+## SQLite Databases and Primary Tables
+- `kuro_auth.db`: account_lockouts, failed_attempts, login_sessions, migration_history, proactive_greetings, users
+- `kuro_chat_history.db`: chat_history, chat_sessions, message_edits, migration_history, uploaded_file_integrity
+- `kuro_compliance.db`: audit_trail, evidence_matrix, gap_analysis, migration_history, standards_kb
+- `kuro_finances.db`: api_usage_daily, financial_goals, market_hud_snapshot, market_sentinel_history, market_sentinel_stocks, monthly_budget, prediction_watch, recurring_expenses, user_pinned_stocks, watched_symbols
+- `kuro_ingestion.db`: dataset_chunks, dataset_lineage, ingested_datasets, ingestion_jobs, retrieval_analytics
+- `kuro_intelligence.db`: audit_trail, backup_log, consensus_log, constitution_audit_log, epistemic_claims, epistemic_log, evaluation_runtime_log, export_audit_log, export_jobs, failed_telegram_notifications, intelligence_briefings, memory_authority_log ...
+- `kuro_playground.db`: artifact_integrity, canonical_traces, chain_of_custody, dataset_executions, epistemic_diffs, evidence_snapshots, feature_flag_snapshots, forensic_reports, hallucination_records, model_executions, ontology_entities, ontology_graphs ...
+- `kuro_short_term.db`: autonomy_boundary_log, cognitive_budget_log, cognitive_state_log, dream_notifications, dreaming_cycles, dreaming_locks, failure_recovery_log, goal_execution_log, goal_reflection_log, goal_registry, governance_audit_log, identity_core_log ...
+
+## External API Dependencies
+- **Gemini API**: google.genai / GEMINI_API_KEY
+- **Telegram Bot API**: python-telegram-bot / TELEGRAM_TOKEN
+- **Serper API**: SERPER_API_KEY
+- **NewsAPI**: NEWSAPI_API_KEY
+- **NVD API**: NVD_API_KEY
+- **Metaculus API**: METACULUS_API_TOKEN
+- **yfinance market data**: yfinance import usage in market modules
+- **Mem0 + Qdrant**: mem0 library, vector store operations
+- **ChromaDB**: kuro_chromadb and ingestion center
+- **Proxmox API**: PVE_* settings
+
+## Environment Variables Read from `config.py`
+- `GEMINI_API_KEY`
+- `GEMINI_CACHED_CONTENT`
+- `KURO_ADVISOR_AUTO_SEARCH`
+- `KURO_ADVISOR_MAX_SERPER_CALLS`
+- `KURO_ADVISOR_NODE_TIMEOUT_S`
+- `KURO_ADVISOR_SCHOLAR_NUM_RESULTS`
+- `KURO_BACKUP_ALERT_ON_FAILURE`
+- `KURO_BACKUP_COMPRESS_LEVEL`
+- `KURO_BACKUP_DIR`
+- `KURO_BACKUP_ENABLED`
+- `KURO_BACKUP_PRE_MIGRATION_RETAIN_DAYS`
+- `KURO_BACKUP_RETAIN_DAYS`
+- `KURO_BACKUP_WEEKLY_RETAIN_WEEKS`
+- `KURO_CANVAS2_AUTONOMOUS_REPRIORITIZATION_ENABLED`
+- `KURO_CANVAS2_COG_ROUTER_ENABLED`
+- `KURO_CANVAS2_GOAL_RUNTIME_ENABLED`
+- `KURO_CANVAS2_GOVERNANCE_ENABLED`
+- `KURO_CANVAS2_OPENAI_MODEL_PLACEHOLDER_ENABLED`
+- `KURO_CANVAS2_REFLECTION_ENABLED`
+- `KURO_CANVAS3_AUTONOMY_BOUNDARIES_ENABLED`
+- `KURO_CANVAS3_COGNITIVE_BUDGET_ENABLED`
+- `KURO_CANVAS3_CONSTITUTION_ENABLED`
+- `KURO_CANVAS3_EVALUATION_RUNTIME_ENABLED`
+- `KURO_CANVAS3_FAILURE_RECOVERY_ENABLED`
+- `KURO_CANVAS3_IDENTITY_CORE_ENABLED`
+- `KURO_CANVAS3_MAX_CONSENSUS_ROUNDS`
+- `KURO_CANVAS3_MAX_REFLECTION_DEPTH`
+- `KURO_CANVAS3_MAX_RETRIEVAL_EXPANSION`
+- `KURO_CANVAS3_MAX_TOOL_CALLS`
+- `KURO_CANVAS3_MEMORY_CANONICALIZATION_ENABLED`
+- `KURO_CANVAS3_RUNTIME_MODES_ENABLED`
+- `KURO_CANVAS3_SOURCE_RELIABILITY_ENABLED`
+- `KURO_CANVAS3_TOOL_GOVERNANCE_ENABLED`
+- `KURO_CHAT_CONTEXT_MODEL`
+- `KURO_CHAT_CONTEXT_REFRESH_THRESHOLD`
+- `KURO_CVE_MAX_ALERTS_PER_CYCLE`
+- `KURO_CVE_MIN_CVSS`
+- `KURO_CVE_SENTINEL_ENABLED`
+- `KURO_DB_BUSY_TIMEOUT_MS`
+- `KURO_EPISTEMIC_V2_ENABLED`
+- `KURO_EVAL_ALERT_THRESHOLD`
+- `KURO_EVAL_BATCH_RPM`
+- `KURO_FINANCE_DB_PATH`
+- `KURO_FINANCE_TRACKING_ENABLED`
+- `KURO_FISCAL_DAILY_USD_THRESHOLD`
+- `KURO_FISCAL_SENTINEL_ENABLED`
+- `KURO_FITNESS_DATA_PATH`
+- `KURO_FITNESS_ENABLED`
+- `KURO_FITNESS_INTERVAL_MIN`
+- `KURO_INGESTION_BRIDGE_ENABLED`
+- `KURO_INGESTION_BRIDGE_MAX_CHARS`
+- `KURO_INGESTION_BRIDGE_MIN_SCORE`
+- `KURO_INGESTION_BRIDGE_TOP_K`
+- `KURO_MARKET_MOVE_PCT`
+- `KURO_MARKET_SENTINEL_ENABLED`
+- `KURO_MEMORY_INTEGRITY_V2_ENABLED`
+- `KURO_NODE_TIMEOUT_S`
+- `KURO_PERSONA_RUNTIME_V2_ENABLED`
+- `KURO_PREDICTION_SCAN_ENABLED`
+- `KURO_PROACTIVE_ENABLED`
+- `KURO_PROACTIVE_GREETING_COOLDOWN_DAYS`
+- `KURO_PROACTIVE_GREETING_ENABLED`
+- `KURO_PROACTIVE_GREETING_LANG`
+- `KURO_PROACTIVE_GREETING_TEXT`
+- `KURO_PROACTIVE_SEVERITY_FLOOR`
+- `KURO_PROACTIVE_TELEGRAM_ENABLED`
+- `KURO_RESEARCH_EXTRACT_MODEL`
+- `KURO_RETRIEVAL_QUALITY_V2_ENABLED`
+- `KURO_RUNTIME_MODE_DEFAULT`
+- `KURO_SENTINEL_DEDUP_WINDOW_MIN`
+- `KURO_SENTINEL_STALE_THRESHOLD_MIN`
+- `KURO_STREAM_SANITIZER_ENABLED`
+- `KURO_TELEGRAM_QUEUE_MAXSIZE`
+- `KURO_TELEGRAM_RATE_LIMIT_PER_MIN`
+- `KURO_TRACE_SPAN_TIMEOUT_S`
+- `KURO_UI_MODE_DEFAULT`
+- `KURO_VULN_NMAP_ENABLED`
+- `MODEL_NAME`
+- `PHOENIX_SQL_DATABASE_URL`
+- `PHOENIX_WORKING_DIR`
+- `PVE_HOST`
+- `PVE_PORT`
+- `PVE_TOKEN_ID`
+- `PVE_TOKEN_SECRET`
+- `TELEGRAM_CHAT_ID`
+- `TELEGRAM_TOKEN`
+- `TELEGRAM_WEBHOOK_SECRET`
+- `TIMEZONE`
+- `WORKING_DIR`
+
+## Module-Level Mutable Variables
+- `kuro_backend/agency/cognitive_effort.py` `_LOW_EFFORT_CATEGORIES` (set) risk=LOW
+- `kuro_backend/agency/joint_goal_store.py` `_SCHEMA_LOCK` (Lock) risk=HIGH
+  - Shared mutable object; verify concurrent access and locking across async handlers.
+- `kuro_backend/auth_db.py` `_SCHEMA_LOCK` (Lock) risk=HIGH
+  - Shared mutable object; verify concurrent access and locking across async handlers.
+- `kuro_backend/autonomy_boundaries.py` `RULES` (list) risk=MED
+- `kuro_backend/backup_manager.py` `_SQLITE_REQUIRED_CORE` (set) risk=LOW
+- `kuro_backend/chat_history.py` `_SCHEMA_LOCK` (Lock) risk=HIGH
+  - Shared mutable object; verify concurrent access and locking across async handlers.
+- `kuro_backend/cognition_profiles.py` `COGNITION_LAYERS` (dict) risk=MED
+- `kuro_backend/cognitive_router/__init__.py` `__all__` (list) risk=LOW
+- `kuro_backend/cognitive_router/capability_matrix.py` `CAPABILITY_MATRIX` (dict) risk=MED
+- `kuro_backend/compliance_db.py` `_SCHEMA_LOCK` (Lock) risk=HIGH
+  - Shared mutable object; verify concurrent access and locking across async handlers.
+- `kuro_backend/constitution_engine.py` `_PRINCIPLES` (list) risk=LOW
+- `kuro_backend/core.py` `client` (Client) risk=MED
+- `kuro_backend/db_utils.py` `__all__` (list) risk=LOW
+- `kuro_backend/dreaming_worker.py` `__all__` (list) risk=LOW
+- `kuro_backend/embedding_cache.py` `__all__` (list) risk=LOW
+- `kuro_backend/embedding_cache.py` `_cache_lock` (RLock) risk=HIGH
+  - Shared mutable object; verify concurrent access and locking across async handlers.
+- `kuro_backend/embedding_cache.py` `_embed_client_lock` (Lock) risk=HIGH
+  - Shared mutable object; verify concurrent access and locking across async handlers.
+- `kuro_backend/execution/openclaw_bridge.py` `_circuit_breaker_lock` (Lock) risk=HIGH
+  - Shared mutable object; verify concurrent access and locking across async handlers.
+- `kuro_backend/expertise_profiles.py` `EXPERTISE_LAYERS` (dict) risk=MED
+- `kuro_backend/export_engine/__init__.py` `__all__` (list) risk=LOW
+- `kuro_backend/export_engine/export_registry.py` `EXPORTER_REGISTRY` (dict) risk=MED
+- `kuro_backend/export_engine/export_security.py` `_ALLOWED_TRANSCRIPT_KEYS` (set) risk=LOW
+- `kuro_backend/export_engine/exporters/__init__.py` `__all__` (list) risk=LOW
+- `kuro_backend/export_engine/renderers/__init__.py` `__all__` (list) risk=LOW
+- `kuro_backend/finance_db.py` `_SCHEMA_LOCK` (Lock) risk=HIGH
+  - Shared mutable object; verify concurrent access and locking across async handlers.
+- `kuro_backend/finance_db.py` `__all__` (list) risk=LOW
+- `kuro_backend/fitness_service.py` `__all__` (list) risk=LOW
+- `kuro_backend/goals/__init__.py` `__all__` (list) risk=LOW
+- `kuro_backend/governance/__init__.py` `__all__` (list) risk=LOW
+- `kuro_backend/identity_core.py` `IDENTITY_ANCHORS` (dict) risk=MED
+- `kuro_backend/ingestion_center/__init__.py` `__all__` (list) risk=LOW
+- `kuro_backend/ingestion_center/ingestion_registry.py` `_SCHEMA_LOCK` (Lock) risk=HIGH
+  - Shared mutable object; verify concurrent access and locking across async handlers.
+- `kuro_backend/ingestion_center/ingestion_security.py` `ALLOWED_EXTENSIONS` (set) risk=MED
+- `kuro_backend/ingestion_center/renderers/__init__.py` `__all__` (list) risk=LOW
+- `kuro_backend/ingestion_center/schemas/__init__.py` `__all__` (list) risk=LOW
+- `kuro_backend/intelligence/__init__.py` `__all__` (list) risk=LOW
+- `kuro_backend/intelligence/confidence_engine.py` `WEIGHTS` (dict) risk=MED
+- `kuro_backend/intelligence_db.py` `_SCHEMA_LOCK` (Lock) risk=HIGH
+  - Shared mutable object; verify concurrent access and locking across async handlers.
+- `kuro_backend/langgraph_core.py` `DESTRUCTIVE_KEYWORDS` (list) risk=MED
+- `kuro_backend/langgraph_core.py` `OPENCLAW_READONLY_KEYWORDS` (list) risk=MED
+- `kuro_backend/langgraph_core.py` `_AGENCY_PERSONAS` (set) risk=LOW
+- `kuro_backend/langgraph_core.py` `_approval_lock` (Lock) risk=HIGH
+  - Shared mutable object; verify concurrent access and locking across async handlers.
+- `kuro_backend/langgraph_core.py` `_post_response_queue` (Queue) risk=HIGH
+  - Shared mutable object; verify concurrent access and locking across async handlers.
+- `kuro_backend/langgraph_core.py` `_v7_reset_announcement_lock` (Lock) risk=HIGH
+  - Shared mutable object; verify concurrent access and locking across async handlers.
+- `kuro_backend/llm_utils.py` `genai_client` (Client) risk=MED
+- `kuro_backend/market_sentinel.py` `genai_client` (Client) risk=MED
+- `kuro_backend/memory_coordinator.py` `_FP_LOCK` (Lock) risk=HIGH
+  - Shared mutable object; verify concurrent access and locking across async handlers.
+- `kuro_backend/memory_coordinator.py` `_MEM0_PREFETCH_LOCK` (Lock) risk=HIGH
+  - Shared mutable object; verify concurrent access and locking across async handlers.
+- `kuro_backend/memory_coordinator.py` `_MEM0_QUEUE_LOCK` (Lock) risk=HIGH
+  - Shared mutable object; verify concurrent access and locking across async handlers.
+- `kuro_backend/memory_coordinator.py` `_summary_genai_client_lock` (Lock) risk=HIGH
+  - Shared mutable object; verify concurrent access and locking across async handlers.
+- `kuro_backend/memory_manager.py` `CANONICAL_PERSONAS` (list) risk=MED
+- `kuro_backend/memory_manager.py` `DECAY_EXEMPT_CATEGORIES` (list) risk=MED
+- `kuro_backend/memory_manager.py` `FACT_CATEGORIES` (list) risk=MED
+- `kuro_backend/memory_manager.py` `MASTER_FACT_KEYWORDS` (list) risk=MED
+- `kuro_backend/memory_manager.py` `MEMORY_KEYWORDS` (list) risk=MED
+- `kuro_backend/memory_manager.py` `PERSONA_ALIASES` (dict) risk=MED
+- `kuro_backend/memory_manager.py` `_SHORT_TERM_LOCK` (Lock) risk=HIGH
+  - Shared mutable object; verify concurrent access and locking across async handlers.
+- `kuro_backend/memory_manager.py` `_lock` (Lock) risk=HIGH
+  - Shared mutable object; verify concurrent access and locking across async handlers.
+- `kuro_backend/observability.py` `_token_tracker` (dict) risk=LOW
+- `kuro_backend/perpetual_memory.py` `CLIENT_DATA_KEYWORDS` (list) risk=MED
+- `kuro_backend/perpetual_memory.py` `HABIT_TRACKING_KEYWORDS` (dict) risk=MED
+- `kuro_backend/perpetual_memory.py` `PREFERENCE_INDICATORS` (list) risk=MED
+- `kuro_backend/perpetual_memory.py` `_kuro_memory_lock` (Lock) risk=HIGH
+  - Shared mutable object; verify concurrent access and locking across async handlers.
+- `kuro_backend/persona_history_admin.py` `ADVISOR_PATTERNS` (list) risk=MED
+- `kuro_backend/persona_runtime.py` `_DEFAULT_STATE` (dict) risk=LOW
+- `kuro_backend/price_ticker_worker.py` `WATCHLIST` (list) risk=MED
+- `kuro_backend/pricing.py` `__all__` (list) risk=LOW
+- `kuro_backend/proactive_events.py` `__all__` (list) risk=LOW
+- `kuro_backend/proactive_greeting.py` `__all__` (list) risk=LOW
+- `kuro_backend/semantic_cache.py` `__all__` (list) risk=LOW
+- `kuro_backend/semantic_cache.py` `_lock` (RLock) risk=HIGH
+  - Shared mutable object; verify concurrent access and locking across async handlers.
+- `kuro_backend/serper_tool.py` `RESEARCH_PILLARS` (dict) risk=MED
+- `kuro_backend/services/__init__.py` `__all__` (list) risk=LOW
+- `kuro_backend/services/core_service.py` `_write_lock` (Lock) risk=HIGH
+  - Shared mutable object; verify concurrent access and locking across async handlers.
+- `kuro_backend/ssot_shortcuts.py` `__all__` (list) risk=LOW
+- `kuro_backend/telegram_notifier.py` `__all__` (list) risk=LOW
+- `kuro_backend/token_budget.py` `__all__` (list) risk=LOW
+- `kuro_backend/tone_engine.py` `_INTERACTION_LAYERS` (dict) risk=LOW
+- `kuro_backend/tone_engine.py` `_TONE_LAYERS` (dict) risk=LOW
+- `kuro_backend/tools/base_tools.py` `CONTEXTUAL_FILE_REFERENCES` (set) risk=MED
+- `kuro_backend/tools/base_tools.py` `DOCX_EXTENSIONS` (set) risk=MED
+- `kuro_backend/tools/base_tools.py` `IMAGE_EXTENSIONS` (set) risk=MED
+- `kuro_backend/tools/base_tools.py` `PDF_EXTENSIONS` (set) risk=MED
+- `kuro_backend/tools/base_tools.py` `PPTX_EXTENSIONS` (set) risk=MED
+- `kuro_backend/tools/base_tools.py` `TEXT_EXTENSIONS` (set) risk=MED
+- `kuro_backend/tools/base_tools.py` `WHITELIST_PATHS` (list) risk=MED
+- `kuro_backend/tools/base_tools.py` `XLSX_EXTENSIONS` (set) risk=MED
+- `kuro_backend/tools/system_tools.py` `TOOL_DESCRIPTIONS` (dict) risk=MED
+- `kuro_backend/ui_mode_router.py` `__all__` (list) risk=LOW
+- `kuro_backend/version.py` `__all__` (list) risk=LOW

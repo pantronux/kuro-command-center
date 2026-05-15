@@ -1,0 +1,19 @@
+runtime_id: qa
+display_name: QA Playground
+version: 1
+schema_version: 1
+memory_namespace: kuro.qa
+retrieval_scope:
+  - qa_requirements
+  - qa_testcases
+prompt_stack:
+  - system.qa.base
+  - system.qa.output_contract
+tools:
+  - generate_excel_report
+  - generate_report_template
+structured_output_contract: qa_output_v1
+allowed_providers:
+  - gemini
+fallback_provider: gemini
+vocabulary_sanitization: true

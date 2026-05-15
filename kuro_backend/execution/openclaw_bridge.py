@@ -33,7 +33,13 @@ OPENCLAW_UNAVAILABLE_FEEDBACK = (
     "Maaf Master, otot eksekusi (OpenClaw) sedang tidak tersedia. "
     "Saya akan tetap mencatat instruksi ini di memori sementara."
 )
+OPENCLAW_DISABLED_FEEDBACK = (
+    "OpenClaw execution daemon is disabled (OPENCLAW_ENABLED=false). "
+    "Enable it in .env when the daemon is deployed."
+)
 _circuit_breaker_lock = threading.Lock()
+# Single-fire guard so we only emit the disabled-startup INFO once per process.
+_disabled_logged_once = False
 _consecutive_unavailable_failures = 0
 _circuit_open = False
 _circuit_opened_at = 0.0
@@ -47,6 +53,34 @@ _DANGEROUS_COMMAND_KEYWORDS = (
     "init 0",
     "rm -rf /",
 )
+
+
+def is_openclaw_enabled() -> bool:
+    """Return True only when OPENCLAW_ENABLED is explicitly set to a truthy value."""
+    return os.getenv("OPENCLAW_ENABLED", "false").strip().lower() in (
+        "1", "true", "yes", "on"
+    )
+
+
+def _build_disabled_response(request_id: Optional[str] = None) -> Dict[str, Any]:
+    """Return a safe, non-error response when OpenClaw is disabled by config."""
+    global _disabled_logged_once
+    if not _disabled_logged_once:
+        logger.info("[OPENCLAW] disabled by configuration (OPENCLAW_ENABLED=false). Skills will not be invoked.")
+        _disabled_logged_once = True
+    return {
+        "success": False,
+        "error": OPENCLAW_DISABLED_FEEDBACK,
+        "status_code": None,
+        "request_id": request_id or str(uuid.uuid4()),
+        "raw_response": None,
+        "memory_fallback_required": False,
+        "openclaw_disabled": True,
+        "circuit_breaker": {
+            "open": False,
+            "disabled": True,
+        },
+    }
 
 
 def is_command_safe(command: Optional[str]) -> bool:
@@ -422,7 +456,12 @@ def execute_openclaw_skill_blocking(
 
     Does NOT spawn a nested asyncio event loop — uses `requests.post` directly.
     Async callers should keep using `execute_openclaw_skill`.
+    When OPENCLAW_ENABLED=false the call short-circuits immediately — no HTTP
+    attempt, no circuit breaker state mutation.
     """
+    if not is_openclaw_enabled():
+        return _build_disabled_response()
+
     pre = _build_bridge_request(skill_name, params, client)
     if "short_circuit" in pre:
         return pre["short_circuit"]
@@ -448,7 +487,12 @@ async def execute_openclaw_skill(
 ) -> Dict[str, Any]:
     """
     Async handover to OpenClaw daemon. Offloads blocking HTTP to a worker thread.
+    When OPENCLAW_ENABLED=false the call short-circuits immediately — no HTTP
+    attempt, no circuit breaker state mutation.
     """
+    if not is_openclaw_enabled():
+        return _build_disabled_response()
+
     pre = _build_bridge_request(skill_name, params, client)
     if "short_circuit" in pre:
         return pre["short_circuit"]
@@ -467,7 +511,9 @@ async def execute_openclaw_skill(
 
 
 def get_circuit_state() -> str:
-    """Return current circuit breaker state: closed | open | half-open."""
+    """Return current circuit breaker state: disabled | closed | open | half-open."""
+    if not is_openclaw_enabled():
+        return "disabled"
     with _circuit_breaker_lock:
         if _half_open_probe_inflight:
             return "half-open"
@@ -477,7 +523,20 @@ def get_circuit_state() -> str:
 
 
 def get_circuit_metrics() -> Dict[str, Any]:
-    """Expose lightweight circuit breaker metrics for diagnostics."""
+    """Expose lightweight circuit breaker metrics for diagnostics.
+
+    Includes ``enabled`` key so callers can distinguish intentional
+    disabled state from an unexpected open circuit.
+    """
+    enabled = is_openclaw_enabled()
+    if not enabled:
+        return {
+            "enabled": False,
+            "circuit_breaker_state": "disabled",
+            "circuit_breaker_trips_total": 0,
+            "consecutive_failures": 0,
+            "opened_at_monotonic": 0.0,
+        }
     with _circuit_breaker_lock:
         if _half_open_probe_inflight:
             state = "half-open"
@@ -486,6 +545,7 @@ def get_circuit_metrics() -> Dict[str, Any]:
         else:
             state = "closed"
         return {
+            "enabled": True,
             "circuit_breaker_state": state,
             "circuit_breaker_trips_total": int(_circuit_trips_total),
             "consecutive_failures": int(_consecutive_unavailable_failures),

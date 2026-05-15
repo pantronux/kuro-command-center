@@ -101,6 +101,8 @@ from kuro_backend import backup_manager
 from kuro_backend import persona_history_admin
 from kuro_backend import version as kuro_version
 from kuro_backend import proactive_greeting
+from kuro_backend.runtime.runtime_context import resolve_runtime_context
+from kuro_backend.runtime.runtime_registry import RuntimeRegistry
 from kuro_backend.ingestion_center import chroma_inspector, ingestion_manager, ingestion_registry
 from kuro_backend.export_engine import export_manager
 from kuro_backend.intelligence.stream_safety import sanitize_stream_chunk
@@ -236,6 +238,15 @@ def validate_token(token: str) -> Optional[Dict]:
     except JWTError:
         pass
     return None
+
+
+def validate_token_dependency(request: Request) -> Dict[str, str]:
+    """FastAPI dependency wrapper around cookie-based token validation."""
+    token = get_token_from_cookie(request)
+    user = validate_token(token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return user
 
 
 def require_admin_user(request: Request) -> Dict[str, str]:
@@ -466,6 +477,80 @@ def _resolve_chat_session_id(request: Request, form_chat_id: str = None) -> str:
     return f"fallback_{request.client.host}_default"
 
 
+def _normalize_runtime_id(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    cleaned = str(value).strip()
+    return cleaned or None
+
+
+def _resolve_requested_runtime_id(
+    runtime_id_query: Optional[str],
+    runtime_id_form: Optional[str],
+) -> Optional[str]:
+    query_value = _normalize_runtime_id(runtime_id_query)
+    form_value = _normalize_runtime_id(runtime_id_form)
+    if query_value and form_value and query_value != form_value:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "runtime_id mismatch between query and form body; "
+                "use one value consistently."
+            ),
+        )
+    return query_value or form_value
+
+
+def _resolve_runtime_context_for_chat_request(
+    *,
+    request: Request,
+    username: str,
+    resolved_persona: str,
+    chat_id: Optional[str],
+    runtime_id_query: Optional[str],
+    runtime_id_form: Optional[str],
+    trace_id: str,
+) -> tuple[str, "RuntimeContext", bool]:
+    incoming_chat_id = str(chat_id or "").strip()
+    if not incoming_chat_id or incoming_chat_id.lower() == "null":
+        incoming_chat_id = str(uuid.uuid4())
+    session_scope = _resolve_chat_session_id(request, incoming_chat_id)
+    requested_runtime_id = _resolve_requested_runtime_id(
+        runtime_id_query, runtime_id_form
+    )
+    existing_session = chat_history.get_session(session_scope)
+    should_create_session = existing_session is None
+    if existing_session is not None:
+        stored_runtime_id = _normalize_runtime_id(existing_session.get("runtime_id"))
+        effective_runtime_id = stored_runtime_id or "sovereign"
+        if requested_runtime_id and requested_runtime_id != effective_runtime_id:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"runtime_id conflict for chat_id={session_scope}: "
+                    f"stored={effective_runtime_id}, requested={requested_runtime_id}"
+                ),
+            )
+    else:
+        effective_runtime_id = requested_runtime_id or "sovereign"
+
+    ctx = resolve_runtime_context(
+        effective_runtime_id,
+        username=username,
+        chat_id=session_scope,
+        trace_id=trace_id,
+    )
+    if should_create_session:
+        chat_history.create_session(
+            session_scope,
+            username,
+            resolved_persona,
+            "New Chat",
+            runtime_id=ctx.runtime_id,
+        )
+    return session_scope, ctx, should_create_session
+
+
 def _as_env_bool(value: Optional[str], default: bool = False) -> bool:
     if value is None:
         return default
@@ -513,6 +598,7 @@ _mount_playground_router_if_enabled(app)
 async def _register_dashboard_sync_loop():
     """Enable cross-thread revision bumps to schedule WebSocket REFRESH_NOW."""
     core_data.register_main_event_loop(asyncio.get_running_loop())
+    RuntimeRegistry.load_all()
     # --- Header Doc ---
     # Purpose: Startup environment safety checks for required/optional integrations.
     # Caller: FastAPI startup lifecycle.
@@ -1283,6 +1369,8 @@ async def chat_endpoint(
     files: list[UploadFile] = File([]),
     persona: str = Form(None),
     chat_id: str = Form(None),
+    runtime_id: Optional[str] = Query(default=None),
+    runtime_id_form: Optional[str] = Form(default=None, alias="runtime_id"),
 ):
     """Handle chat requests from the web interface with vision and file reading support. (Non-streaming fallback)"""
     try:
@@ -1313,17 +1401,15 @@ async def chat_endpoint(
 
         request_id = f"web_{uuid.uuid4().hex}"
 
-        is_new_session = False
-        if (
-            not chat_id
-            or not str(chat_id).strip()
-            or str(chat_id).strip().lower() == "null"
-        ):
-            chat_id = str(uuid.uuid4())
-            is_new_session = True
-            chat_history.create_session(chat_id, username, resolved_persona, "New Chat")
-
-        session_scope = _resolve_chat_session_id(request, chat_id)
+        session_scope, ctx, _ = _resolve_runtime_context_for_chat_request(
+            request=request,
+            username=username,
+            resolved_persona=resolved_persona,
+            chat_id=chat_id,
+            runtime_id_query=runtime_id,
+            runtime_id_form=runtime_id_form,
+            trace_id=trace_id,
+        )
 
         # UI mode router gate — intercept "Kuro, mode riset" style commands
         # before hitting the LangGraph core. When the cleaned remainder is
@@ -1500,6 +1586,8 @@ async def chat_endpoint(
             master_name=master_name,
             username=username,
             chat_id=session_scope,
+            runtime_id=ctx.runtime_id,
+            runtime_namespace=ctx.memory_namespace,
         )
 
         # Save AI response to chat history
@@ -1536,6 +1624,8 @@ async def chat_endpoint(
             },
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception(f"Error in chat endpoint: {e}")
         return api_error(f"My apologies, {master_name} — an error occurred: {e}")
@@ -1548,14 +1638,41 @@ async def chat_stream_endpoint(
     files: list[UploadFile] = File([]),
     persona: str = Form(None),
     chat_id: str = Form(None),
+    runtime_id: Optional[str] = Query(default=None),
+    runtime_id_form: Optional[str] = Form(default=None, alias="runtime_id"),
 ):
     """V6.0 STREAMING: Handle chat requests with Server-Sent Events (SSE) streaming."""
     from fastapi.responses import StreamingResponse
+    token = get_token_from_cookie(request)
+    user = validate_token(token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    username = user.get("username")
+    user_info = auth_db.get_user(username) or {}
+    master_name = user_info.get("master_name", "Master Pantronux")
+    restricted_persona = user_info.get("restricted_persona")
+    if restricted_persona:
+        resolved_persona = restricted_persona
+    else:
+        resolved_persona = memory_manager.normalize_persona(
+            persona
+            or request.query_params.get("persona")
+            or memory_manager.get_active_persona()
+        )
+    trace_id = f"chatstream_{uuid.uuid4().hex}"
+    session_scope, ctx, is_new_session = _resolve_runtime_context_for_chat_request(
+        request=request,
+        username=username,
+        resolved_persona=resolved_persona,
+        chat_id=chat_id,
+        runtime_id_query=runtime_id,
+        runtime_id_form=runtime_id_form,
+        trace_id=trace_id,
+    )
 
     async def event_generator():
         """Generate SSE events for streaming response."""
         request_started = time.perf_counter()
-        trace_id = f"chatstream_{uuid.uuid4().hex}"
         request_id = trace_id
         first_chunk_ms = None
         stream_metrics: Dict[str, Any] = {}
@@ -1565,46 +1682,6 @@ async def chat_stream_endpoint(
         except (TypeError, ValueError):
             last_event_id = None
         try:
-            # Resolve user context
-            token = get_token_from_cookie(request)
-            user = validate_token(token)
-
-            if not user:
-
-                raise HTTPException(status_code=401, detail="Unauthorized")
-
-            username = user.get("username")
-            user_info = auth_db.get_user(username) or {}
-            master_name = user_info.get("master_name", "Master Pantronux")
-
-            # Persona restriction
-            restricted_persona = user_info.get("restricted_persona")
-            if restricted_persona:
-                resolved_persona = restricted_persona
-            else:
-                resolved_persona = memory_manager.normalize_persona(
-                    persona
-                    or request.query_params.get("persona")
-                    or memory_manager.get_active_persona()
-                )
-
-            # Auto-provision chat session if not provided
-            is_new_session = False
-            if (
-                not chat_id
-                or not str(chat_id).strip()
-                or str(chat_id).strip().lower() == "null"
-            ):
-                resolved_chat_id = str(uuid.uuid4())
-                is_new_session = True
-                chat_history.create_session(
-                    resolved_chat_id, username, resolved_persona, "New Chat"
-                )
-            else:
-                resolved_chat_id = str(chat_id).strip()
-
-            session_scope = _resolve_chat_session_id(request, resolved_chat_id)
-
             sse_buffer = _sse_buffers.setdefault(session_scope, deque(maxlen=10))
             next_event_id = int(_sse_event_counters.get(session_scope, 0))
 
@@ -1835,6 +1912,8 @@ async def chat_stream_endpoint(
                 master_name=master_name,
                 username=username,
                 chat_id=session_scope,
+                runtime_id=ctx.runtime_id,
+                runtime_namespace=ctx.memory_namespace,
             ):
                 safe_chunk = sanitize_stream_chunk(chunk)
                 if not safe_chunk:
@@ -1959,6 +2038,43 @@ async def cancel_chat_stream(request: Request, request_id: str):
     # the client just aborting the fetch handles it. This endpoint just acknowledges the client's intent to stop.
     logger.info(f"Stream {request_id} cancelled by client.")
     return {"status": "success", "message": "Stream cancelled"}
+
+
+@app.get("/api/runtimes")
+async def list_public_runtimes():
+    """Public-safe runtime list (no internal topology fields)."""
+    return [
+        {
+            "runtime_id": r.runtime_id,
+            "display_name": r.display_name,
+            "version": r.version,
+        }
+        for r in RuntimeRegistry.list_runtimes(include_stubs=False)
+    ]
+
+
+@app.get("/api/admin/runtimes/{runtime_id}")
+async def get_admin_runtime_config(
+    runtime_id: str,
+    token_data: Dict[str, str] = Depends(validate_token_dependency),
+):
+    """Admin-only full runtime configuration view."""
+    if token_data.get("username") != os.getenv("ADMIN_USERNAME", "Pantronux"):
+        raise HTTPException(status_code=403, detail="Admin only")
+    runtime_cfg = RuntimeRegistry.get_exact(runtime_id)
+    if runtime_cfg is None:
+        raise HTTPException(status_code=404, detail=f"Unknown runtime_id: {runtime_id}")
+    return runtime_cfg.model_dump()
+
+
+@app.get("/api/admin/boundary-violations")
+async def get_boundary_violations(
+    limit: int = Query(default=100, ge=1, le=500),
+    token_data: Dict[str, str] = Depends(validate_token_dependency),
+):
+    if token_data.get("username") != os.getenv("ADMIN_USERNAME", "Pantronux"):
+        raise HTTPException(status_code=403, detail="Admin only")
+    return intelligence_db.get_recent_boundary_violations(limit=limit)
 
 @app.get("/api/system-status")
 async def system_status(request: Request):
@@ -3907,6 +4023,9 @@ def start_reminder_scheduler():
         global _openclaw_last_open_alert_at
         try:
             from kuro_backend.execution import openclaw_bridge
+            # Never alert when OpenClaw is intentionally disabled.
+            if not openclaw_bridge.is_openclaw_enabled():
+                return
             metrics = openclaw_bridge.get_circuit_metrics()
             if metrics.get("circuit_breaker_state") != "open":
                 return
@@ -3928,6 +4047,7 @@ def start_reminder_scheduler():
             )
         except Exception as exc:
             logger.debug("[OPENCLAW] Circuit-open alert check skipped: %s", exc)
+
 
     def run_retry_failed_telegram_notifications_job():
         async def _runner():

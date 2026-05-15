@@ -1,0 +1,17 @@
+runtime_id: forensic
+display_name: Forensic Runtime
+version: 1
+schema_version: 1
+memory_namespace: kuro.forensic
+retrieval_scope:
+  - forensic_sessions
+prompt_stack:
+  - system.forensic.base
+tools:
+  - advanced_execution_tool
+structured_output_contract: forensic_output_v1
+allowed_providers:
+  - gemini
+fallback_provider: gemini
+vocabulary_sanitization: true
+is_stub: true

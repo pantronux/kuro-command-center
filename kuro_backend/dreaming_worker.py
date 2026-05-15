@@ -315,9 +315,16 @@ def _google_via_openclaw(query: str) -> List[Dict[str, Any]]:
     """Primary search path — OpenClaw ``google_search`` skill.
 
     Returns a list of ``{title, snippet, link}`` dicts or ``[]`` on failure.
+    Returns ``[]`` silently when OpenClaw is disabled by configuration.
     """
     if not query:
         return []
+    try:
+        from kuro_backend.execution.openclaw_bridge import is_openclaw_enabled
+        if not is_openclaw_enabled():
+            return []
+    except Exception:
+        pass
     try:
         from kuro_backend.execution.service import execute_openclaw_skill_sync
     except Exception as exc:
@@ -414,7 +421,16 @@ def _cve_scan_via_openclaw(
 
     Returns ``(targets, cves)``. Empty lists signal the caller to try the
     direct NVD fallback.
+    Returns ``([], [])`` silently when OpenClaw is disabled by configuration
+    so the caller falls through to NVD direct without treating it as a failure.
     """
+    try:
+        from kuro_backend.execution.openclaw_bridge import is_openclaw_enabled
+        if not is_openclaw_enabled():
+            logger.debug("[CVE] openclaw disabled; skipping vulnerability_scan skill (NVD fallback will run)")
+            return [], []
+    except Exception:
+        pass
     try:
         from kuro_backend.execution.service import execute_openclaw_skill_sync
     except Exception as exc:
@@ -1024,6 +1040,17 @@ def _run_fiscal_sentinel(*, cycle_id: int, dry_run: bool, username: str = "Pantr
 
 
 def _market_openclaw_price(symbol: str) -> Optional[float]:
+    """Fetch a live price via OpenClaw market_analysis skill.
+
+    Returns ``None`` silently when OpenClaw is disabled by configuration
+    so the market sentinel does not treat the skip as stale data.
+    """
+    try:
+        from kuro_backend.execution.openclaw_bridge import is_openclaw_enabled
+        if not is_openclaw_enabled():
+            return None
+    except Exception:
+        pass
     try:
         from kuro_backend.execution.service import execute_openclaw_skill_sync
 
@@ -1084,6 +1111,13 @@ def _run_prediction_scan_nightly(*, dry_run: bool, username: str = "Pantronux") 
 
     if not _env_bool("KURO_PREDICTION_SCAN_ENABLED", True):
         return 0
+    try:
+        from kuro_backend.execution.openclaw_bridge import is_openclaw_enabled
+        if not is_openclaw_enabled():
+            logger.debug("[MARKET] openclaw disabled; skipping prediction_market_scan (not a failure)")
+            return 0
+    except Exception:
+        pass
     try:
         from kuro_backend.execution.service import execute_openclaw_skill_sync
         from kuro_backend import finance_db

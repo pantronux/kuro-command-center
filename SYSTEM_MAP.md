@@ -1,9 +1,13 @@
-# Kuro AI V1.2.0 Beta 1 "Sovereign Chat" — SYSTEM_MAP
+# Kuro AI Pre V.2.0.0 Beta 1 "Runtime Sovereign" — SYSTEM_MAP
 
 > Authoritative navigation map for the repository. Traced function-by-function
 > from the true entrypoint (`main.py`) outward. Only source code under version
 > control is listed; runtime caches, logs, SQLite files, virtualenvs, and build
 > artefacts are intentionally excluded.
+
+> **PARTIAL MIGRATION TAG (2026-05-10):** V2 runtime migration baru dieksekusi
+> sampai Prompt `2` (Prompt `-1`, `0`, `1`, `2` selesai). Prompt `3+` belum
+> dieksekusi. Anggap status ini **PARTIAL**, belum final V2.
 
 ## Executive Summary (User-Friendly Overview)
 
@@ -55,6 +59,25 @@ Kuro AI is your **Intelligent Personal Sovereign**—a sophisticated digital com
   HTTP bridge for privileged skill execution.
 
 ## Evolution & Core Milestones
+
+### [PARTIAL] V2.0.0 Beta 1 Runtime Migration (Prompt -1..2 Only)
+
+- **Execution status**: Partial only (stopped intentionally after Prompt `2`).
+- **Completed phases**:
+  - Prompt `-1`: safety prep, backup, pre-migration inventory.
+  - Prompt `0`: architecture snapshot docs + V2 scaffolding + runtime YAML configs.
+  - Prompt `1`: runtime registry/context, runtime-aware request path, public/admin runtime routes, `chat_sessions.runtime_id` migration.
+  - Prompt `2`: runtime boundary guard, boundary violation DB logging, admin boundary violation route, strict/audit behavioral tests.
+- **New core modules introduced**:
+  - `kuro_backend/runtime/runtime_registry.py`
+  - `kuro_backend/runtime/runtime_context.py`
+  - `kuro_backend/runtime/boundary_guard.py`
+- **New partial V2 routes**:
+  - `GET /api/runtimes` (public-safe fields only)
+  - `GET /api/admin/runtimes/{runtime_id}` (admin-only full config)
+  - `GET /api/admin/boundary-violations` (admin-only audit data)
+- **Pending (not executed yet)**:
+  - Prompt `3+` memory stratification, structured output engine, provider abstraction, QA runtime verticalization, final observability/evaluation upgrades.
 
 ### V7.0 Reset Notes ("Lean Leviathan")
 
@@ -279,26 +302,41 @@ Kuro AI is your **Intelligent Personal Sovereign**—a sophisticated digital com
 
 ## Core Logic Flow (Function-Level Flowchart)
 
+Layering masih **monolith FastAPI + LangGraph core**, tetapi sejak V2 Prompt `1-2`
+ada perubahan penting di jalur request:
+- ada **runtime resolution layer** (`runtime_id` + `runtime_namespace`) sebelum masuk graph;
+- ada **cognitive boundary layer** (memory/tool guard) yang berjalan `audit` saat `KURO_V2_STRICT_MODE=false`;
+- alur legacy tetap hidup: endpoint stream lama tanpa `runtime_id` fallback ke `sovereign`.
+
 ```mermaid
 flowchart TD
-    subgraph UI[View / UI]
+    subgraph UI[Ingress]
         U1[Browser dashboard]
         U2[Telegram chat]
         U3[WebSocket /ws/dashboard]
     end
 
-    subgraph Routes[FastAPI routes - main.py]
+    subgraph Routes[API Layer - main.py]
         R1["POST /api/chat\nchat_endpoint"]
         R2["POST /api/chat/stream\nchat_stream_endpoint"]
+        R3["GET /api/runtimes\npublic-safe runtime list"]
+        R6["GET /api/admin/runtimes/{runtime_id}\nadmin runtime detail"]
+        R7["GET /api/admin/boundary-violations\nadmin audit feed"]
         R4["WS /ws/dashboard\ndashboard_sync_websocket"]
         R5["GET/POST /api/ingestion/*\nadmin ingestion routes"]
     end
 
-    subgraph Pre[Pre-flight guards]
+    subgraph Pre[Pre-flight]
         G1[ui_mode_router.detect_mode_command]
     end
 
-    subgraph Brain[Reasoning core]
+    subgraph Runtime[V2 Runtime Layer - Partial]
+        V1[runtime_registry.load_all at startup]
+        V2[runtime_context resolve from request]
+        V3[default fallback runtime_id = sovereign]
+    end
+
+    subgraph Brain[LangGraph Core]
         B1[langgraph_core.process_chat_with_graph_stream]
         B2[langgraph_core.build_kuro_graph]
         B3["reflection → supervisor → memory_retrieval\n→ retrieval_grader ↺ query_transform\n→ attention_filter → advisor_research → executive_monitor\n→ metacognitive_review → reflective_response | tool | response"]
@@ -312,6 +350,12 @@ flowchart TD
         E3["epistemic post-filter\n(label_claims_in_response\n+ check_hard_rules\n+ inject_disclaimer_if_needed)"]
         E4["epistemic_log\n(audit trail)"]
         E1 --> E2 --> E3 --> E4
+    end
+
+    subgraph Guard[Boundary Isolation - Prompt 2]
+        BG1[boundary_guard.assert_memory_access]
+        BG2[boundary_guard.assert_tool_access]
+        BG3[intelligence_db.log_boundary_violation]
     end
 
     subgraph Mem[3-Layer Memory]
@@ -349,18 +393,24 @@ flowchart TD
 
     U1 --> R1
     U1 --> R2
+    U1 --> R3
+    U1 --> R6
+    U1 --> R7
     U1 --> R4
     U2 --> R1
-    R1 --> G1 --> B1
+    R1 --> G1 --> V2
     R2 --> G1
-    R2 --> B1
+    R2 --> V2
+    V2 --> V3 --> B1
     B1 --> B2 --> B3
     B3 --> B4
-    B3 --> M1
+    B3 --> BG1 --> M1
     M1 --> M2
     M1 --> M3
     M1 --> M4
-    B3 --> T1
+    B3 --> BG2 --> T1
+    BG1 --> BG3
+    BG2 --> BG3
     T1 --> T2
     T1 --> T3
     T1 --> S5
@@ -382,6 +432,8 @@ flowchart TD
     style E2 fill:#003366,color:#fff
     style E3 fill:#004499,color:#fff
     style E4 fill:#002244,color:#fff
+    style Runtime fill:#0b5a36,color:#fff
+    style Guard fill:#6d1f1f,color:#fff
 ```
 
 Side-branches not drawn on the trunk but reachable from the same
@@ -414,7 +466,7 @@ artefacts are excluded — see **Exclusions** at the bottom of this section.
 ├── INTEGRATION_HARDENING_DETAILS.md
 ├── SYSTEM_MAP.md                # this file
 ├── kuro_backend/
-│   ├── version.py               # V1.2.0 Beta 1 "Sovereign Chat" single source of truth
+│   ├── version.py               # Pre V.2.0.0 Beta 1 "Runtime Sovereign" single source of truth
 │   ├── config.py                # env keys -> typed Settings
 │   ├── db_utils.py              # shared SQLite connection/retry/migration helpers
 │   ├── personas.py              # persona prompts + Anti-Halusinasi epistemic layer
@@ -820,7 +872,7 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
 ### Frontend
 - [`web_interface/templates/index.html`](web_interface/templates/index.html)
   — dashboard shell: avatar (`/profile/kuro_avatar.png`), WebSocket status ticker, chat pane,
-  favicon links, `V1.2.0 Beta 1` sidebar badge, Chancellor persona option, market chips bar,
+  favicon links, `Pre V.2.0.0 Beta 1` sidebar badge, Chancellor persona option, market chips bar,
   and admin-only sidebar entries for `Ingestion Center` / `Ingestion Analytics`.
 - [`web_interface/templates/intelligence.html`](web_interface/templates/intelligence.html),
   [`ingestion_center.html`](web_interface/templates/ingestion_center.html),
