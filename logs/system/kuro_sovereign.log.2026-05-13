@@ -1,0 +1,299 @@
+2026-05-13 00:00:43 [WARNING] __main__: Network error: httpx.ConnectError: All connection attempts failed
+2026-05-13 00:00:46 [WARNING] __main__: Network error: httpx.ConnectError: All connection attempts failed
+2026-05-13 00:00:50 [WARNING] __main__: Network error: httpx.ConnectError: All connection attempts failed
+2026-05-13 00:00:53 [WARNING] __main__: Network error: httpx.ConnectError: All connection attempts failed
+2026-05-13 00:00:59 [WARNING] __main__: Network error: httpx.ConnectError: All connection attempts failed
+2026-05-13 00:01:07 [WARNING] __main__: Network error: httpx.ConnectError: All connection attempts failed
+2026-05-13 00:01:16 [WARNING] __main__: Network error: httpx.ConnectError: All connection attempts failed
+2026-05-13 01:00:03 [INFO] __main__: [BACKUP] Nightly backup OK - 10 files, 3.7 MB, 3.1s
+2026-05-13 02:00:00 [INFO] kuro_backend.file_retention_worker: [RETENTION] Starting cycle (dry_run=False)
+2026-05-13 02:00:00 [INFO] kuro_backend.file_retention_worker: [RETENTION] Cycle complete: {'total': 0, 'archived': 0, 'failed': 0}
+2026-05-13 02:30:00 [INFO] kuro_backend.evaluation.evaluation_scheduler: Running nightly autonomous evaluation...
+2026-05-13 02:30:00 [ERROR] kuro_backend.evaluation.evaluation_scheduler: Nightly evaluation failed: module 'kuro_backend.intelligence_db' has no attribute '_conn'
+2026-05-13 03:00:00 [INFO] kuro_backend.dreaming_worker: [DREAMING] Starting cycle for user: Faikhira
+2026-05-13 03:00:00 [INFO] kuro_backend.dreaming_worker: [CVE] sentinel: no CVEs above CVSS 7.0
+2026-05-13 03:00:00 [WARNING] kuro_backend.dreaming_worker: [FISCAL] sentinel failed for Faikhira: Cannot add a column with non-constant default
+2026-05-13 03:00:00 [WARNING] kuro_backend.dreaming_worker: [DREAMING] Market sentinel failed for Faikhira: Cannot add a column with non-constant default
+2026-05-13 03:00:00 [INFO] kuro_backend.dreaming_worker: [DREAMING] Starting cycle for user: Pantronux
+2026-05-13 03:00:00 [INFO] kuro_backend.dreaming_worker: [CVE] sentinel: no CVEs above CVSS 7.0
+2026-05-13 03:00:00 [WARNING] kuro_backend.dreaming_worker: [FISCAL] sentinel failed for Pantronux: Cannot add a column with non-constant default
+2026-05-13 03:00:00 [WARNING] kuro_backend.dreaming_worker: [DREAMING] Market sentinel failed for Pantronux: Cannot add a column with non-constant default
+2026-05-13 03:43:54 [INFO] __main__: Hardware Sentinel Check [off-hours]: CPU=1.0%, RAM=16.6%, Disk=15.0%, Net TX=2550.1MB, RX=2403.2MB
+2026-05-13 07:43:54 [INFO] __main__: Hardware Sentinel Check [off-hours]: CPU=1.5%, RAM=16.9%, Disk=15.0%, Net TX=2550.9MB, RX=2411.9MB
+2026-05-13 08:00:00 [INFO] __main__: [INTELLIGENCE] Running daily research for Faikhira (08:00 AM briefing)...
+2026-05-13 08:00:00 [INFO] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-05-13 08:00:50 [INFO] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-05-13 08:01:13 [INFO] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-05-13 08:01:39 [INFO] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-05-13 08:02:06 [INFO] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-05-13 08:02:17 [INFO] __main__: [INTELLIGENCE] Briefing generated for Faikhira, skipping Telegram (non-Admin).
+2026-05-13 08:02:17 [INFO] __main__: [INTELLIGENCE] Running daily research for Pantronux (08:00 AM briefing)...
+2026-05-13 08:02:17 [INFO] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-05-13 08:03:06 [INFO] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-05-13 08:03:33 [INFO] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-05-13 08:03:59 [INFO] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-05-13 08:04:27 [INFO] google_genai.models: AFC is enabled with max remote calls: 10.
+2026-05-13 08:04:56 [INFO] __main__: [INTELLIGENCE] Daily briefing sent to Telegram for Pantronux
+2026-05-13 09:00:00 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-13 09:00:00 [INFO] kuro_backend.market_sentinel: [SENTINEL] Starting Hybrid Triangulation scan for Faikhira...
+2026-05-13 09:00:00 [WARNING] kuro_backend.market_sentinel: [SENTINEL] No stock data found in DB. Run price update first.
+2026-05-13 09:00:00 [INFO] kuro_backend.market_sentinel: [SENTINEL] Starting Hybrid Triangulation scan for Pantronux...
+2026-05-13 09:00:00 [ERROR] __main__: [SENTINEL] Failed for Pantronux: Cannot add a column with non-constant default
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for ADRO.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for AKRA.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for AMRT.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for ANTM.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for ASII.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for BBCA.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for BBNI.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for BBRI.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for BBTN.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for BMRI.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for BRPT.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for BUKA.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for CPIN.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for EMTK.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for ESSA.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for EXCL.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for GGRM.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for GOTO.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for HRUM.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for ICBP.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for INCO.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for INDF.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for INKP.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for INTP.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for ITMG.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for KLBF.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for MDKA.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for MEDC.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for MIKA.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for PGAS.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for PTBA.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for SCMA.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for SMGR.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for TBIG.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for TLKM.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for TOWR.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for TPIA.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for UNTR.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for UNVR.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for UNVR.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for ELSA.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for BUMI.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for ENRG.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for BRMS.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for DEWA.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for LPPS.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for PKPK.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for KRAS.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for MLPL.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for WIIM.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for DOID.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for SMDR.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for BSDE.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for PWON.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for ASRI.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:04 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 0 updated, 56 failed.
+2026-05-13 09:00:04 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for ADRO.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for AKRA.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for AMRT.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for ANTM.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for ASII.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for BBCA.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for BBNI.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for BBRI.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for BBTN.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for BMRI.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for BRPT.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for BUKA.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for CPIN.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for EMTK.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for ESSA.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for EXCL.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for GGRM.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for GOTO.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for HRUM.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for ICBP.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for INCO.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for INDF.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for INKP.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for INTP.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for ITMG.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for KLBF.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for MDKA.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for MEDC.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for MIKA.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for PGAS.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for PTBA.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for SCMA.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for SMGR.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for TBIG.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for TLKM.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for TOWR.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for TPIA.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for UNTR.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for UNVR.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for UNVR.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for ELSA.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for BUMI.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for ENRG.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for BRMS.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for DEWA.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for LPPS.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for PKPK.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for KRAS.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for MLPL.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for WIIM.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for DOID.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for SMDR.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for BSDE.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for PWON.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for ASRI.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:00:08 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 0 updated, 56 failed.
+2026-05-13 09:30:00 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-13 09:30:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:30:05 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-13 09:30:05 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Failed to refresh fetched_at heartbeat: Cannot add a column with non-constant default
+2026-05-13 09:30:05 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-13 09:30:09 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 09:30:10 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-13 09:30:10 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Failed to refresh fetched_at heartbeat: Cannot add a column with non-constant default
+2026-05-13 09:44:24 [INFO] __main__: Hardware Sentinel Check [work hours]: CPU=0.0%, RAM=16.9%, Disk=15.0%, Net TX=2552.5MB, RX=2419.0MB
+2026-05-13 10:00:00 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-13 10:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 10:00:07 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-13 10:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Failed to refresh fetched_at heartbeat: Cannot add a column with non-constant default
+2026-05-13 10:00:07 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-13 10:00:13 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 10:00:13 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-13 10:00:13 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Failed to refresh fetched_at heartbeat: Cannot add a column with non-constant default
+2026-05-13 10:30:00 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-13 10:30:05 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 10:30:05 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-13 10:30:05 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Failed to refresh fetched_at heartbeat: Cannot add a column with non-constant default
+2026-05-13 10:30:05 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-13 10:30:10 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 10:30:10 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-13 10:30:10 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Failed to refresh fetched_at heartbeat: Cannot add a column with non-constant default
+2026-05-13 11:00:00 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-13 11:00:05 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 11:00:05 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-13 11:00:05 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Failed to refresh fetched_at heartbeat: Cannot add a column with non-constant default
+2026-05-13 11:00:05 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-13 11:00:11 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 11:00:11 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-13 11:00:11 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Failed to refresh fetched_at heartbeat: Cannot add a column with non-constant default
+2026-05-13 11:30:00 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-13 11:30:06 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 11:30:06 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-13 11:30:06 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Failed to refresh fetched_at heartbeat: Cannot add a column with non-constant default
+2026-05-13 11:30:06 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-13 11:30:16 [ERROR] yfinance: $BBNI.JK: possibly delisted; no price data found  (period=30d)
+2026-05-13 11:30:16 [ERROR] yfinance: 
+1 Failed download:
+2026-05-13 11:30:16 [ERROR] yfinance: ['BBNI.JK']: possibly delisted; no price data found  (period=30d)
+2026-05-13 11:30:16 [WARNING] kuro_backend.price_ticker_worker: [TICKER] No valid numeric data for BBNI.JK
+2026-05-13 11:30:17 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 11:30:17 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 54 updated, 2 failed.
+2026-05-13 11:30:17 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Failed to refresh fetched_at heartbeat: Cannot add a column with non-constant default
+2026-05-13 11:44:54 [INFO] __main__: Hardware Sentinel Check [work hours]: CPU=1.5%, RAM=17.0%, Disk=15.1%, Net TX=2555.8MB, RX=2440.6MB
+2026-05-13 12:00:00 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-13 12:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 12:00:04 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-13 12:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Failed to refresh fetched_at heartbeat: Cannot add a column with non-constant default
+2026-05-13 12:00:04 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-13 12:00:09 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 12:00:09 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-13 12:00:09 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Failed to refresh fetched_at heartbeat: Cannot add a column with non-constant default
+2026-05-13 12:30:00 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-13 12:30:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 12:30:04 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-13 12:30:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Failed to refresh fetched_at heartbeat: Cannot add a column with non-constant default
+2026-05-13 12:30:04 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-13 12:30:09 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 12:30:09 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-13 12:30:09 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Failed to refresh fetched_at heartbeat: Cannot add a column with non-constant default
+2026-05-13 13:00:00 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-13 13:00:00 [INFO] kuro_backend.market_sentinel: [SENTINEL] Starting Hybrid Triangulation scan for Faikhira...
+2026-05-13 13:00:00 [WARNING] kuro_backend.market_sentinel: [SENTINEL] No stock data found in DB. Run price update first.
+2026-05-13 13:00:00 [INFO] kuro_backend.market_sentinel: [SENTINEL] Starting Hybrid Triangulation scan for Pantronux...
+2026-05-13 13:00:00 [ERROR] __main__: [SENTINEL] Failed for Pantronux: Cannot add a column with non-constant default
+2026-05-13 13:00:08 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 13:00:09 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-13 13:00:09 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Failed to refresh fetched_at heartbeat: Cannot add a column with non-constant default
+2026-05-13 13:00:09 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-13 13:00:13 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 13:00:13 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-13 13:00:13 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Failed to refresh fetched_at heartbeat: Cannot add a column with non-constant default
+2026-05-13 13:30:00 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-13 13:30:06 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 13:30:06 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-13 13:30:06 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Failed to refresh fetched_at heartbeat: Cannot add a column with non-constant default
+2026-05-13 13:30:06 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-13 13:30:11 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 13:30:11 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-13 13:30:11 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Failed to refresh fetched_at heartbeat: Cannot add a column with non-constant default
+2026-05-13 13:45:24 [INFO] __main__: Hardware Sentinel Check [work hours]: CPU=1.0%, RAM=17.0%, Disk=15.1%, Net TX=2564.8MB, RX=2460.6MB
+2026-05-13 14:00:00 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-13 14:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 14:00:07 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-13 14:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Failed to refresh fetched_at heartbeat: Cannot add a column with non-constant default
+2026-05-13 14:00:07 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-13 14:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 14:00:12 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-13 14:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Failed to refresh fetched_at heartbeat: Cannot add a column with non-constant default
+2026-05-13 14:30:00 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-13 14:30:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 14:30:07 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-13 14:30:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Failed to refresh fetched_at heartbeat: Cannot add a column with non-constant default
+2026-05-13 14:30:07 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-13 14:30:13 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 14:30:13 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-13 14:30:13 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Failed to refresh fetched_at heartbeat: Cannot add a column with non-constant default
+2026-05-13 15:00:00 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-13 15:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 15:00:07 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-13 15:00:07 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Failed to refresh fetched_at heartbeat: Cannot add a column with non-constant default
+2026-05-13 15:00:07 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-13 15:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 15:00:12 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-13 15:00:12 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Failed to refresh fetched_at heartbeat: Cannot add a column with non-constant default
+2026-05-13 15:30:00 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-13 15:30:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 15:30:04 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-13 15:30:05 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Failed to refresh fetched_at heartbeat: Cannot add a column with non-constant default
+2026-05-13 15:30:05 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-13 15:30:09 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 15:30:09 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-13 15:30:09 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Failed to refresh fetched_at heartbeat: Cannot add a column with non-constant default
+2026-05-13 15:45:24 [INFO] __main__: Hardware Sentinel Check [work hours]: CPU=1.5%, RAM=17.2%, Disk=15.1%, Net TX=2580.4MB, RX=2492.2MB
+2026-05-13 16:00:00 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-13 16:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 16:00:04 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-13 16:00:04 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Failed to refresh fetched_at heartbeat: Cannot add a column with non-constant default
+2026-05-13 16:00:04 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-13 16:00:09 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 16:00:09 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-13 16:00:09 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Failed to refresh fetched_at heartbeat: Cannot add a column with non-constant default
+2026-05-13 16:30:00 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-13 16:30:06 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 16:30:06 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-13 16:30:06 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Failed to refresh fetched_at heartbeat: Cannot add a column with non-constant default
+2026-05-13 16:30:06 [INFO] kuro_backend.price_ticker_worker: [TICKER] Starting price update for 56 tickers...
+2026-05-13 16:30:11 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Stale data for META.JK (timestamp: 2026-05-12 00:00:00) -> ignoring to prevent overwrite
+2026-05-13 16:30:11 [INFO] kuro_backend.price_ticker_worker: [TICKER] Update complete: 55 updated, 1 failed.
+2026-05-13 16:30:11 [WARNING] kuro_backend.price_ticker_worker: [TICKER] Failed to refresh fetched_at heartbeat: Cannot add a column with non-constant default
+2026-05-13 17:00:00 [INFO] kuro_backend.market_sentinel: [SENTINEL] Starting Hybrid Triangulation scan for Faikhira...
+2026-05-13 17:00:00 [WARNING] kuro_backend.market_sentinel: [SENTINEL] No stock data found in DB. Run price update first.
+2026-05-13 17:00:00 [INFO] kuro_backend.market_sentinel: [SENTINEL] Starting Hybrid Triangulation scan for Pantronux...
+2026-05-13 17:00:00 [ERROR] __main__: [SENTINEL] Failed for Pantronux: Cannot add a column with non-constant default
+2026-05-13 19:45:54 [INFO] __main__: Hardware Sentinel Check [off-hours]: CPU=1.0%, RAM=17.6%, Disk=15.1%, Net TX=2608.5MB, RX=2549.2MB
+2026-05-13 21:00:00 [INFO] kuro_backend.market_sentinel: [SENTINEL] Starting Hybrid Triangulation scan for Faikhira...
+2026-05-13 21:00:00 [WARNING] kuro_backend.market_sentinel: [SENTINEL] No stock data found in DB. Run price update first.
+2026-05-13 21:00:00 [INFO] kuro_backend.market_sentinel: [SENTINEL] Starting Hybrid Triangulation scan for Pantronux...
+2026-05-13 21:00:00 [ERROR] __main__: [SENTINEL] Failed for Pantronux: Cannot add a column with non-constant default
+2026-05-13 23:45:54 [INFO] __main__: Hardware Sentinel Check [off-hours]: CPU=1.5%, RAM=18.1%, Disk=15.1%, Net TX=2634.2MB, RX=2601.0MB

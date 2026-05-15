@@ -1,3 +1,45 @@
+## [V.2.1.0 Beta 1] — "Runtime Sovereign" — 2026-05-15
+
+### Status
+- V2 HARDENED batch execution completed through Prompt `7` (Prompt `-1..7`).
+- Previous **PARTIAL** status (Prompt `-1..2`) is now superseded.
+
+### Key Additions
+- **Prompt 3 — Memory Stratification & Provenance**:
+  - Added `kuro_backend/memory_v2/` production modules (`memory_store`, `migrations`, `conflict_resolver`, `decay_engine`).
+  - Added short-term schema extension (`memory_id`, `runtime_id`, `namespace`, `memory_type`, `confidence`, `provenance_json`, `expires_at`, `status`, `source`).
+  - Added scheduled decay job (`memory_decay_job`, daily 04:00 WIB).
+- **Prompt 4 — Structured Output Engine**:
+  - Added schema registry + validator + safe repair flow in `kuro_backend/output/`.
+  - Added schema routes: `GET /api/schemas`, `GET /api/schemas/{contract_id}`.
+  - Added SSE `structured_output` event emission before completion when available.
+- **Prompt 5 — Provider Abstraction (Adapter Mode)**:
+  - Added `kuro_backend/provider/` interface, Gemini adapter, and provider router.
+  - Added feature flag `KURO_PROVIDER_ROUTER_ENABLED` (default `false`) and preserved legacy streaming path.
+- **Prompt 6 — QA Playground Runtime**:
+  - Added QA runtime vertical modules (`requirement_parser`, `testcase_generator`, `cucumber_generator`, `qa_runtime`) with safe fallback behavior.
+  - Added QA routes:
+    - `POST /api/playground/qa/interpret`
+    - `POST /api/playground/qa/generate-testcases`
+    - `POST /api/playground/qa/generate-gherkin`
+  - Added kill switch `KURO_QA_PLAYGROUND_ENABLED` (default `true`).
+- **Prompt 7 — Observability + Evaluation + Vocabulary Sanitization**:
+  - Added global `TraceMiddleware` with `X-Trace-ID` propagation.
+  - Added cognition trace telemetry (`kuro_backend/telemetry/cognition_trace.py`) and DB persistence (`cognition_traces`).
+  - Added runtime health endpoint: `GET /api/admin/runtime-health`.
+  - Added vocabulary sanitization layer (`kuro_backend/vocabulary/sanitizer.py`) with `KURO_DEV_MODE` bypass.
+  - Added evaluation artifacts: `evaluation/datasets/qa_leakage.json`, `evaluation/runner.py`.
+
+### Baseline/Preflight Fixes Included
+- Fixed SQLite migration for `market_hud_snapshot.fetched_at` in `finance_db.py` (no non-constant default during `ALTER TABLE` + idempotent backfill).
+- Removed invalid dependency on `settings.PRIMARY_MODEL` in `llm_utils.py`.
+
+### Verification Snapshot
+- `python3 -m compileall kuro_backend main.py` ✅
+- `python3 -m pytest tests/ -x --tb=short` ✅ (`404 passed`)
+
+---
+
 ## [PARTIAL][V2.0.0 Beta 1] — "Runtime Migration (Prompt -1..2)" — 2026-05-10
 
 ### Status

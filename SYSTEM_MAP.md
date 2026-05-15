@@ -1,13 +1,13 @@
-# Kuro AI Pre V.2.0.0 Beta 1 "Runtime Sovereign" — SYSTEM_MAP
+# Kuro AI V.2.1.0 Beta 1 "Runtime Sovereign" — SYSTEM_MAP
 
 > Authoritative navigation map for the repository. Traced function-by-function
 > from the true entrypoint (`main.py`) outward. Only source code under version
 > control is listed; runtime caches, logs, SQLite files, virtualenvs, and build
 > artefacts are intentionally excluded.
 
-> **PARTIAL MIGRATION TAG (2026-05-10):** V2 runtime migration baru dieksekusi
-> sampai Prompt `2` (Prompt `-1`, `0`, `1`, `2` selesai). Prompt `3+` belum
-> dieksekusi. Anggap status ini **PARTIAL**, belum final V2.
+> **V2 COMPLETE TAG (2026-05-15):** Batch V2 HARDENED sudah dieksekusi sampai
+> Prompt `7` (Prompt `-1..7` complete), tanpa menambahkan goal/decision engine
+> baru di batch ini.
 
 ## Executive Summary (User-Friendly Overview)
 
@@ -60,24 +60,22 @@ Kuro AI is your **Intelligent Personal Sovereign**—a sophisticated digital com
 
 ## Evolution & Core Milestones
 
-### [PARTIAL] V2.0.0 Beta 1 Runtime Migration (Prompt -1..2 Only)
+### V2.1.0 Beta 1 Runtime Sovereign (Prompt -1..7 Complete)
 
-- **Execution status**: Partial only (stopped intentionally after Prompt `2`).
+- **Execution status**: Complete for V2 HARDENED scope (`-1..7`).
 - **Completed phases**:
-  - Prompt `-1`: safety prep, backup, pre-migration inventory.
+  - Prompt `-1`: safety prep, backup, pre-migration inventory, baseline tests.
   - Prompt `0`: architecture snapshot docs + V2 scaffolding + runtime YAML configs.
-  - Prompt `1`: runtime registry/context, runtime-aware request path, public/admin runtime routes, `chat_sessions.runtime_id` migration.
-  - Prompt `2`: runtime boundary guard, boundary violation DB logging, admin boundary violation route, strict/audit behavioral tests.
-- **New core modules introduced**:
-  - `kuro_backend/runtime/runtime_registry.py`
-  - `kuro_backend/runtime/runtime_context.py`
-  - `kuro_backend/runtime/boundary_guard.py`
-- **New partial V2 routes**:
-  - `GET /api/runtimes` (public-safe fields only)
-  - `GET /api/admin/runtimes/{runtime_id}` (admin-only full config)
-  - `GET /api/admin/boundary-violations` (admin-only audit data)
-- **Pending (not executed yet)**:
-  - Prompt `3+` memory stratification, structured output engine, provider abstraction, QA runtime verticalization, final observability/evaluation upgrades.
+  - Prompt `1`: runtime registry/context + runtime-aware chat/session path + runtime routes.
+  - Prompt `2`: cognitive boundary guard + boundary violation persistence + admin audit route.
+  - Prompt `3`: memory stratification/provenance store + conflict resolver + decay engine scheduler.
+  - Prompt `4`: structured output registry/validator/repair + schema routes + SSE structured event.
+  - Prompt `5`: provider abstraction adapter mode + router flag (`KURO_PROVIDER_ROUTER_ENABLED=false` default).
+  - Prompt `6`: QA playground runtime vertical (`/api/playground/qa/*`) + kill-switch flag.
+  - Prompt `7`: trace middleware + cognition traces + runtime health endpoint + vocabulary sanitization + evaluation artifacts.
+- **Important constraints preserved**:
+  - Legacy `/api/chat/stream` flow without `runtime_id` remains backward-compatible.
+  - Legacy streaming path remains active when provider router flag is disabled (default).
 
 ### V7.0 Reset Notes ("Lean Leviathan")
 
