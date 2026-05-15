@@ -42,7 +42,9 @@ def _auth_client(monkeypatch, username="Pantronux") -> TestClient:
     monkeypatch.setattr(
         ingestion_manager,
         "schedule_ingestion_job",
-        lambda background_tasks, job_id: ingestion_manager.process_ingestion_job(job_id),
+        lambda background_tasks, job_id: ingestion_manager.process_ingestion_job(
+            job_id
+        ),
     )
     return TestClient(main.app)
 
@@ -56,46 +58,77 @@ def _upload_dataset(client: TestClient, name: str, content: bytes):
     )
     assert response.status_code == 202, response.text
     dataset_uuid = response.json()["data"]["dataset"]["dataset_uuid"]
-    detail = client.get(f"/api/ingestion/datasets/{dataset_uuid}", cookies={main.COOKIE_NAME: "Bearer dummy"})
+    detail = client.get(
+        f"/api/ingestion/datasets/{dataset_uuid}",
+        cookies={main.COOKIE_NAME: "Bearer dummy"},
+    )
     assert detail.status_code == 200
     return detail.json()["data"]["dataset"]
 
 
 def test_upload_reindex_archive_delete_flow(monkeypatch):
     client = _auth_client(monkeypatch)
-    dataset = _upload_dataset(client, "alpha.txt", b"Alpha Beta Gamma\n\nPantronux Dataset Example")
+    dataset = _upload_dataset(
+        client, "alpha.txt", b"Alpha Beta Gamma\n\nPantronux Dataset Example"
+    )
     assert dataset["ingestion_status"] in {"completed", "partially_indexed"}
 
     dataset_uuid = dataset["dataset_uuid"]
-    detail = client.get(f"/api/ingestion/datasets/{dataset_uuid}", cookies={main.COOKIE_NAME: "Bearer dummy"})
+    detail = client.get(
+        f"/api/ingestion/datasets/{dataset_uuid}",
+        cookies={main.COOKIE_NAME: "Bearer dummy"},
+    )
     assert detail.status_code == 200
     payload = detail.json()["data"]
     assert payload["chunks"]
 
-    response = client.post(f"/api/ingestion/datasets/{dataset_uuid}/reindex", cookies={main.COOKIE_NAME: "Bearer dummy"})
+    response = client.post(
+        f"/api/ingestion/datasets/{dataset_uuid}/reindex",
+        cookies={main.COOKIE_NAME: "Bearer dummy"},
+    )
     assert response.status_code == 202
-    assert response.json()["data"]["dataset"]["ingestion_status"] in {"completed", "partially_indexed"}
+    assert response.json()["data"]["dataset"]["ingestion_status"] in {
+        "completed",
+        "partially_indexed",
+    }
 
-    response = client.post(f"/api/ingestion/datasets/{dataset_uuid}/archive", cookies={main.COOKIE_NAME: "Bearer dummy"})
+    response = client.post(
+        f"/api/ingestion/datasets/{dataset_uuid}/archive",
+        cookies={main.COOKIE_NAME: "Bearer dummy"},
+    )
     assert response.status_code == 200
     assert response.json()["data"]["dataset"]["ingestion_status"] == "archived"
 
-    response = client.get("/api/ingestion/datasets?active_only=true", cookies={main.COOKIE_NAME: "Bearer dummy"})
-    assert all(item["dataset_uuid"] != dataset_uuid for item in response.json()["data"]["datasets"])
+    response = client.get(
+        "/api/ingestion/datasets?active_only=true",
+        cookies={main.COOKIE_NAME: "Bearer dummy"},
+    )
+    assert all(
+        item["dataset_uuid"] != dataset_uuid
+        for item in response.json()["data"]["datasets"]
+    )
 
-    response = client.post(f"/api/ingestion/datasets/{dataset_uuid}/delete", cookies={main.COOKIE_NAME: "Bearer dummy"})
+    response = client.post(
+        f"/api/ingestion/datasets/{dataset_uuid}/delete",
+        cookies={main.COOKIE_NAME: "Bearer dummy"},
+    )
     assert response.status_code == 200
     assert response.json()["data"]["dataset"]["ingestion_status"] == "deleted"
 
-    lineage = client.get(f"/api/ingestion/datasets/{dataset_uuid}/lineage", cookies={main.COOKIE_NAME: "Bearer dummy"})
+    lineage = client.get(
+        f"/api/ingestion/datasets/{dataset_uuid}/lineage",
+        cookies={main.COOKIE_NAME: "Bearer dummy"},
+    )
     ops = {row["operation_type"] for row in lineage.json()["data"]}
     assert {"ingest", "reindex", "archive", "delete"} <= ops
 
 
 def test_vector_failure_becomes_partially_indexed(monkeypatch):
+    from kuro_backend.ingestion_center import ingestion_pipeline
+
     client = _auth_client(monkeypatch)
     monkeypatch.setattr(
-        embedding_manager,
+        ingestion_pipeline,
         "rebuild_vectors",
         lambda dataset_uuid, chunks, metadata: {
             "status": "failed",
