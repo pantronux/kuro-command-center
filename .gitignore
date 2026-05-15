@@ -1,6 +1,7 @@
 # File Sensitif
 .env
 *.log
+logs/
 *.json
 !requirements.txt
 !implementation_plan.md
