@@ -89,6 +89,8 @@ def create_session_context(user_id: str = MASTER_USER_ID, session_id: str = None
         "kuro.timestamp": datetime.now().isoformat(),
     }
 _latency_metrics: Dict[str, Dict[str, float]] = {}
+_counter_metrics: Dict[str, int] = {}
+_metrics_lock = threading.Lock()
 
 # ============================================
 # PHOENIX SERVER INITIALIZATION
@@ -365,6 +367,23 @@ def get_latency_metrics_snapshot() -> Dict[str, Dict[str, float]]:
             "last_ms": round(float(bucket.get("last_ms", 0.0)), 2),
         }
     return snapshot
+
+
+def record_counter_metric(metric_name: str, amount: int = 1) -> None:
+    """Record lightweight in-memory counter metrics."""
+    try:
+        key = str(metric_name or "").strip()
+        if not key:
+            return
+        with _metrics_lock:
+            _counter_metrics[key] = int(_counter_metrics.get(key, 0)) + int(amount)
+    except Exception as exc:
+        logger.debug("[OBS] record_counter_metric skipped: %s", exc)
+
+
+def get_counter_metrics_snapshot() -> Dict[str, int]:
+    with _metrics_lock:
+        return {k: int(v) for k, v in _counter_metrics.items()}
 
 
 def record_memory_retrieval_latency(latency_ms: float, username: str, hit: bool):

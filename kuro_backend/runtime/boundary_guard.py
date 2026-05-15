@@ -46,6 +46,7 @@ def _record_violation(
     )
     logger.warning(msg)
     try:
+        from kuro_backend import observability
         from kuro_backend import intelligence_db
 
         intelligence_db.log_boundary_violation(
@@ -57,6 +58,8 @@ def _record_violation(
             strict_mode=_is_strict(),
             trace_id=trace_id,
         )
+        observability.record_counter_metric("boundary_violation_total")
+        observability.record_counter_metric(f"boundary_violation_total:{runtime_id}")
     except Exception as exc:
         logger.error("Failed to persist boundary violation to DB: %s", exc)
 

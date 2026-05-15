@@ -491,6 +491,7 @@ def _resolve_requested_runtime_id(
     query_value = _normalize_runtime_id(runtime_id_query)
     form_value = _normalize_runtime_id(runtime_id_form)
     if query_value and form_value and query_value != form_value:
+        observability.record_counter_metric("runtime_query_form_mismatch_400_total")
         raise HTTPException(
             status_code=400,
             detail=(
@@ -524,6 +525,7 @@ def _resolve_runtime_context_for_chat_request(
         stored_runtime_id = _normalize_runtime_id(existing_session.get("runtime_id"))
         effective_runtime_id = stored_runtime_id or "sovereign"
         if requested_runtime_id and requested_runtime_id != effective_runtime_id:
+            observability.record_counter_metric("runtime_conflict_409_total")
             raise HTTPException(
                 status_code=409,
                 detail=(
@@ -2165,7 +2167,10 @@ async def latency_metrics():
     """Get aggregated latency metrics snapshot."""
     return {
         "status": "success",
-        "data": observability.get_latency_metrics_snapshot(),
+        "data": {
+            "latency": observability.get_latency_metrics_snapshot(),
+            "counters": observability.get_counter_metrics_snapshot(),
+        },
     }
 
 
