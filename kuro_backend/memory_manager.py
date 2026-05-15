@@ -348,6 +348,12 @@ def _init_short_term_db_locked():
         "CREATE INDEX IF NOT EXISTS idx_short_term_scope_user_chat_id_id "
         "ON short_term(persona_scope, username, chat_id, id DESC)"
     )
+    try:
+        from kuro_backend.memory_v2.migrations import extend_short_term_schema
+
+        extend_short_term_schema(conn)
+    except Exception as exc:
+        logger.warning("short_term memory_v2 migration skipped: %s", exc)
 
     # Sliding-window summary cache (P2.1) — keyed by (username, persona_scope). Keeps the
     # compressed summary of older turns keyed by the highest short_term.id

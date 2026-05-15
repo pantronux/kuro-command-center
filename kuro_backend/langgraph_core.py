@@ -86,6 +86,7 @@ from kuro_backend.tools.tool_trace_logger import (
 )
 from kuro_backend.tools.tool_budget_manager import consume_tool_budget
 from kuro_backend.runtime.runtime_context import resolve_runtime_context
+from kuro_backend.runtime.runtime_registry import RuntimeRegistry
 
 logger = logging.getLogger(__name__)
 logger.propagate = False  # Prevent double-reporting to root logger
@@ -590,6 +591,9 @@ class KuroState(TypedDict):
     chat_id: Optional[str]  # Active chat session ID for isolation
     runtime_id: str
     runtime_namespace: str
+    structured_output: Optional[Dict[str, Any]]
+    output_schema_valid: bool
+    provider_used: str
     # --- Natural Agency fields (V1.0.0) ---
     _intent_category: str
     inhibited: bool
@@ -2283,6 +2287,9 @@ def response_node(state: KuroState) -> Dict[str, Any]:
         )
 
         # Generate response using direct google-genai SDK (more reliable)
+        provider_used = "gemini"
+        structured_output: Optional[Dict[str, Any]] = None
+        output_schema_valid = False
         response_text: Optional[str] = None  # Initialize to detect if generation fails
         try:
             genai_client = _get_genai_client()
@@ -2524,6 +2531,45 @@ def response_node(state: KuroState) -> Dict[str, Any]:
                 ingestion_sources,
             )
 
+        # Structured output validation/repair (non-breaking fallback to plain text).
+        if response_text:
+            try:
+                from kuro_backend.output.output_repair import attempt_repair
+                from kuro_backend.output.output_validator import validate_output
+
+                runtime_config = RuntimeRegistry.get(state.get("runtime_id", "sovereign"))
+                contract_id = runtime_config.structured_output_contract
+                if contract_id:
+                    is_valid, validated, error = validate_output(response_text, contract_id)
+                    if not is_valid:
+                        logger.warning(
+                            "Structured output invalid contract=%s err=%s",
+                            contract_id,
+                            (error or "")[:180],
+                        )
+                        can_block_run = False
+                        try:
+                            asyncio.get_running_loop()
+                        except RuntimeError:
+                            can_block_run = True
+                        if can_block_run:
+                            is_valid, validated, error = asyncio.run(
+                                attempt_repair(response_text, contract_id, error or "invalid")
+                            )
+                        else:
+                            error = error or "repair skipped: active event loop"
+                    if is_valid and validated is not None:
+                        structured_output = validated.model_dump()
+                        output_schema_valid = True
+                    else:
+                        logger.error(
+                            "Structured output repair failed contract=%s err=%s",
+                            contract_id,
+                            (error or "")[:180],
+                        )
+            except Exception as exc:
+                logger.error("Structured output pipeline failed safely: %s", exc)
+
         # Single consolidated persist path (short-term + enqueue memory_write + mem0_extract).
         # memory_extraction_node still runs as a dedupe/guardian, but mem0 fingerprint dedupe
         # in memory_coordinator prevents double-store.
@@ -2549,6 +2595,9 @@ def response_node(state: KuroState) -> Dict[str, Any]:
         
         return {
             "final_response": response_text,
+            "structured_output": structured_output,
+            "output_schema_valid": output_schema_valid,
+            "provider_used": provider_used,
             "confidence_score": confidence_score,
             "identity_core_status": identity_status,
             "constitution_checks": constitution_checks,
@@ -3111,9 +3160,14 @@ def _iter_sse_text_chunks(text: str, soft_limit: int = 56) -> Iterator[str]:
         yield "".join(buf)
 
 
-def _sync_stream_collect_final_response(initial_state: Dict[str, Any], config: Dict[str, Any]) -> str:
-    """Run sync LangGraph stream in a worker thread (keeps asyncio event loop free for SSE)."""
+def _sync_stream_collect_final_response(
+    initial_state: Dict[str, Any],
+    config: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Run sync LangGraph stream in a worker thread and collect response payload."""
     raw: Optional[str] = None
+    structured_output: Optional[Dict[str, Any]] = None
+    output_schema_valid = False
     for event in kuro_graph.stream(initial_state, config=config, stream_mode="updates"):
         for node_name, node_output in event.items():
             if node_name != "response_node":
@@ -3126,7 +3180,15 @@ def _sync_stream_collect_final_response(initial_state: Dict[str, Any], config: D
                 raw = s
             elif raw is None:
                 raw = s
-    return raw if raw is not None else ""
+            if isinstance((node_output or {}).get("structured_output"), dict):
+                structured_output = dict((node_output or {}).get("structured_output"))
+            if "output_schema_valid" in (node_output or {}):
+                output_schema_valid = bool((node_output or {}).get("output_schema_valid"))
+    return {
+        "final_response": raw if raw is not None else "",
+        "structured_output": structured_output,
+        "output_schema_valid": output_schema_valid,
+    }
 
 
 def _split_head_for_early_flush(text: str) -> tuple[str, str]:
@@ -3183,6 +3245,8 @@ async def process_chat_with_graph_stream(
     resolved_runtime_namespace = str(
         runtime_namespace or f"kuro.{resolved_runtime_id}"
     )
+    runtime_config = RuntimeRegistry.get(resolved_runtime_id)
+    runtime_contract_id = runtime_config.structured_output_contract
 
     # Capture initial message count for title generation trigger
     msg_count_before = 0
@@ -3225,9 +3289,11 @@ async def process_chat_with_graph_stream(
         can_use_true_stream = (
             _TRUE_TOKEN_STREAMING_ENABLED
             and not image_paths
+            and not runtime_contract_id
         )
         if stream_metrics is not None:
             stream_metrics["stream_mode"] = "true_token_fastpath" if can_use_true_stream else "graph_collect_chunked"
+            stream_metrics["structured_output_contract"] = runtime_contract_id
 
         if can_use_true_stream:
             fastpath_started = time.perf_counter()
@@ -3431,6 +3497,9 @@ async def process_chat_with_graph_stream(
             "chat_id": chat_id,
             "runtime_id": resolved_runtime_id,
             "runtime_namespace": resolved_runtime_namespace,
+            "structured_output": None,
+            "output_schema_valid": False,
+            "provider_used": "gemini",
             "_session_id": session_id,
             "_approval_scope": approval_scope,
             "_trace_id": trace_id,
@@ -3499,13 +3568,17 @@ async def process_chat_with_graph_stream(
         logger.debug("[LANGGRAPH_STREAM] graph invoke (thread offload) preview=%.50s", message)
 
         graph_started = time.perf_counter()
-        raw_model_response = await asyncio.to_thread(
+        graph_payload = await asyncio.to_thread(
             _sync_stream_collect_final_response, initial_state, config
         )
         if stream_metrics is not None:
             stream_metrics["graph_collect_ms"] = round((time.perf_counter() - graph_started) * 1000, 2)
-        if raw_model_response is None:
-            raw_model_response = ""
+        raw_model_response = str(graph_payload.get("final_response") or "")
+        if stream_metrics is not None:
+            stream_metrics["structured_output"] = graph_payload.get("structured_output")
+            stream_metrics["output_schema_valid"] = bool(
+                graph_payload.get("output_schema_valid", False)
+            )
         logger.debug(
             "[LANGGRAPH_STREAM] model bytes=%s (sniper postprocess next)",
             len(raw_model_response),
@@ -3738,6 +3811,9 @@ def process_chat_with_graph(
             "chat_id": chat_id,
             "runtime_id": resolved_runtime_id,
             "runtime_namespace": resolved_runtime_namespace,
+            "structured_output": None,
+            "output_schema_valid": False,
+            "provider_used": "gemini",
             "_approval_scope": approval_scope,
             "_trace_id": trace_id,
             # Natural Agency defaults (V1.0.0)

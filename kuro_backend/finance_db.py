@@ -334,7 +334,12 @@ def _init_db_locked() -> None:
         c.execute("PRAGMA table_info(market_hud_snapshot)")
         hud_cols = [row["name"] for row in c.fetchall()]
         if "fetched_at" not in hud_cols:
-            c.execute("ALTER TABLE market_hud_snapshot ADD COLUMN fetched_at TEXT DEFAULT (datetime('now'))")
+            # SQLite cannot ALTER TABLE with non-constant default expressions.
+            c.execute("ALTER TABLE market_hud_snapshot ADD COLUMN fetched_at TEXT")
+        c.execute(
+            "UPDATE market_hud_snapshot SET fetched_at = datetime('now') "
+            "WHERE fetched_at IS NULL OR fetched_at = ''"
+        )
         if "snapshot_version" not in hud_cols:
             c.execute("ALTER TABLE market_hud_snapshot ADD COLUMN snapshot_version INTEGER DEFAULT 0")
         if "is_current" not in hud_cols:

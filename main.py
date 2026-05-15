@@ -103,6 +103,7 @@ from kuro_backend import version as kuro_version
 from kuro_backend import proactive_greeting
 from kuro_backend.runtime.runtime_context import resolve_runtime_context
 from kuro_backend.runtime.runtime_registry import RuntimeRegistry
+from kuro_backend.output.schema_registry import SchemaRegistry
 from kuro_backend.ingestion_center import chroma_inspector, ingestion_manager, ingestion_registry
 from kuro_backend.export_engine import export_manager
 from kuro_backend.intelligence.stream_safety import sanitize_stream_chunk
@@ -1933,6 +1934,12 @@ async def chat_stream_endpoint(
 
             # Send completion event
             response_text = "".join(full_response)
+            structured_output_payload = stream_metrics.get("structured_output")
+            if isinstance(structured_output_payload, dict):
+                yield _buffered_event(
+                    "structured_output",
+                    json.dumps(structured_output_payload, ensure_ascii=False),
+                )
             assistant_message_id = chat_history.add_message(
                 "web",
                 "assistant",
@@ -1984,6 +1991,9 @@ async def chat_stream_endpoint(
                     "ttfb_ms": first_chunk_ms,
                     "total_ms": total_ms,
                     "timings": stream_metrics,
+                    "output_schema_valid": bool(
+                        stream_metrics.get("output_schema_valid", False)
+                    ),
                     "export_suggestion": export_suggestions[0] if export_suggestions else None,
                     "export_suggestions": export_suggestions,
                 },
@@ -2053,6 +2063,19 @@ async def list_public_runtimes():
         }
         for r in RuntimeRegistry.list_runtimes(include_stubs=False)
     ]
+
+
+@app.get("/api/schemas")
+async def list_output_schemas():
+    return SchemaRegistry.list_schemas()
+
+
+@app.get("/api/schemas/{contract_id}")
+async def get_output_schema(contract_id: str):
+    try:
+        return SchemaRegistry.get_json_schema(contract_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Unknown schema: {contract_id}")
 
 
 @app.get("/api/admin/runtimes/{runtime_id}")
@@ -3997,6 +4020,9 @@ def start_reminder_scheduler():
     """Start the background scheduler for automated intelligence cycles."""
     global _reminder_scheduler
     from apscheduler.schedulers.background import BackgroundScheduler
+    from kuro_backend.memory_v2.decay_engine import expire_stale_memories
+    from kuro_backend.memory_v2.memory_store import MemoryStore
+
     _reminder_scheduler = BackgroundScheduler(daemon=True)
 
     def run_nightly_backup_job():
@@ -4085,6 +4111,13 @@ def start_reminder_scheduler():
                 logger.warning("[TELEGRAM] retry failed-notification job error: %s", exc)
 
         asyncio.run(_runner())
+
+    def run_memory_decay_job():
+        try:
+            expired_count = expire_stale_memories(MemoryStore())
+            logger.info("[MEMORY_V2] Decay job complete: expired=%s", expired_count)
+        except Exception as exc:
+            logger.warning("[MEMORY_V2] Decay job failed: %s", exc)
 
     # Daily intelligence briefing at 08:00 AM
     _reminder_scheduler.add_job(
@@ -4245,6 +4278,16 @@ def start_reminder_scheduler():
         "interval",
         minutes=30,
         id="retry_failed_telegram_notifications",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+    _reminder_scheduler.add_job(
+        run_memory_decay_job,
+        "cron",
+        hour=4,
+        minute=0,
+        id="memory_decay_job",
         replace_existing=True,
         max_instances=1,
         coalesce=True,

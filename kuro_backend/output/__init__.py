@@ -1,15 +1,25 @@
-"""Structured output package entrypoint.
-Target Phase 4.
-"""
+"""Structured output package entrypoint."""
 
-# --- Header Doc ---
-# Purpose: Structured output package entrypoint.
-# Target Phase: Phase 4
-# Dependencies: TBD
-# Status: STUB
+from .schema_registry import (
+    ComplianceOutputV1,
+    ForensicOutputV1,
+    GovernanceOutputV1,
+    QAOutputV1,
+    SchemaRegistry,
+    TestCase,
+    TestCaseStep,
+)
+from .output_validator import validate_output
+from .output_repair import attempt_repair
 
-KURO_STUB = True
-
-
-def stub_entrypoint() -> None:
-    raise NotImplementedError('STUB - Phase 4 - not yet implemented')
+__all__ = [
+    "ComplianceOutputV1",
+    "ForensicOutputV1",
+    "GovernanceOutputV1",
+    "QAOutputV1",
+    "SchemaRegistry",
+    "TestCase",
+    "TestCaseStep",
+    "attempt_repair",
+    "validate_output",
+]

@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import json
 from kuro_backend.config import settings
@@ -20,7 +21,7 @@ Ketentuan:
 - Contoh: "Analisis Ekonomi Makro", "Riset Dissertation", "Diskusi Keamanan Sistem".
 """
         response = genai_client.models.generate_content(
-            model=settings.PRIMARY_MODEL,
+            model=settings.MODEL_NAME,
             contents=prompt,
             config=types.GenerateContentConfig(
                 temperature=0.7,
@@ -82,3 +83,35 @@ def generate_chat_context_summary(conversation_text: str) -> str:
     except Exception as e:
         logger.error(f"Failed to generate chat context summary: {e}")
         return "{}"
+
+
+async def generate_text(
+    prompt: str,
+    *,
+    system_prompt: str = "",
+    temperature: float = 0.7,
+    max_tokens: int = 1024,
+) -> str:
+    """
+    Async helper for one-shot text generation using the existing Gemini client.
+    Safe fallback: returns empty string on any failure.
+    """
+    try:
+        def _call() -> str:
+            config_kwargs = {
+                "temperature": float(temperature),
+                "max_output_tokens": int(max_tokens),
+            }
+            if system_prompt:
+                config_kwargs["system_instruction"] = system_prompt
+            response = genai_client.models.generate_content(
+                model=settings.MODEL_NAME,
+                contents=prompt,
+                config=types.GenerateContentConfig(**config_kwargs),
+            )
+            return (getattr(response, "text", "") or "").strip()
+
+        return await asyncio.to_thread(_call)
+    except Exception as exc:
+        logger.error("generate_text failed: %s", exc)
+        return ""
