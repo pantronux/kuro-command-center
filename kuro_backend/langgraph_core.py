@@ -87,6 +87,8 @@ from kuro_backend.tools.tool_trace_logger import (
 from kuro_backend.tools.tool_budget_manager import consume_tool_budget
 from kuro_backend.runtime.runtime_context import resolve_runtime_context
 from kuro_backend.runtime.runtime_registry import RuntimeRegistry
+from kuro_backend.telemetry.cognition_trace import CognitionTrace
+from kuro_backend.vocabulary.sanitizer import sanitize_response as sanitize_vocabulary_response
 
 logger = logging.getLogger(__name__)
 logger.propagate = False  # Prevent double-reporting to root logger
@@ -2292,58 +2294,133 @@ def response_node(state: KuroState) -> Dict[str, Any]:
         output_schema_valid = False
         response_text: Optional[str] = None  # Initialize to detect if generation fails
         try:
-            genai_client = _get_genai_client()
-
             profile = personas.get_sampling_profile(persona_mode)
+            provider_path_used = False
 
-            # Use cached content if configured
-            config_kwargs = {
-                "system_instruction": system_prompt,
-                "temperature": profile.temperature,
-                "top_p": profile.top_p,
-                "top_k": profile.top_k,
-                "tools": [{"google_search": {}}],
-            }
-            if settings.GEMINI_CACHED_CONTENT:
-                config_kwargs["cached_content"] = settings.GEMINI_CACHED_CONTENT
-
-            response = genai_client.models.generate_content(
-                model=PRIMARY_MODEL,
-                contents=contents_parts,
-                config=genai_types.GenerateContentConfig(**config_kwargs),
-            )
-            
-            # SAFETY CHECK: Check prompt_feedback BEFORE accessing response.text
-            # When content is blocked by safety filters, response.text raises AttributeError
-            if hasattr(response, 'prompt_feedback') and response.prompt_feedback:
-                block_reason = getattr(response.prompt_feedback, 'block_reason', 'UNKNOWN')
-                logger.warning(f"[RESPONSE] Content blocked by safety filter: {block_reason}")
-                response_text = "Maaf, Pantronux. Respons diblokir oleh filter keamanan Gemini. Silakan ubah pertanyaan Anda."
-            
-            # Only access response.text if not blocked
-            if response_text is None:
+            if not image_paths:
                 try:
-                    response_text = response.text if response.text else "Maaf, Pantronux. Kuro tidak dapat menghasilkan respons yang valid."
-                except Exception as text_err:
-                    if "WARNING" in str(text_err) or "Safety" in str(text_err) or "blocked" in str(text_err).lower():
-                        logger.warning(f"[RESPONSE] response.text blocked: {text_err}")
-                        response_text = "Maaf, Pantronux. Respons diblokir oleh filter keamanan Gemini."
-                    else:
-                        raise text_err
-            
-            # Track token usage
-            if hasattr(response, 'usage_metadata') and response.usage_metadata:
-                prompt_tokens = response.usage_metadata.prompt_token_count or 0
-                completion_tokens = response.usage_metadata.candidates_token_count or 0
-                total_tokens = response.usage_metadata.total_token_count or (prompt_tokens + completion_tokens)
-                
-                username = state.get("username", "Pantronux")
-                observability.track_token_usage(session_id, prompt_tokens, completion_tokens, total_tokens, username=username)
-                
-                if span:
-                    span.set_attribute("response_node.prompt_tokens", prompt_tokens)
-                    span.set_attribute("response_node.completion_tokens", completion_tokens)
-                    span.set_attribute("response_node.total_tokens", total_tokens)
+                    from kuro_backend.provider.provider_interface import ProviderRequest
+                    from kuro_backend.provider.provider_router import ProviderRouter
+
+                    if ProviderRouter.is_enabled():
+                        runtime_cfg = RuntimeRegistry.get(
+                            state.get("runtime_id", "sovereign")
+                        )
+                        router = ProviderRouter(runtime_cfg)
+                        provider_request = ProviderRequest(
+                            prompt=full_message,
+                            system_prompt=system_prompt,
+                            temperature=float(profile.temperature),
+                            max_tokens=2048,
+                        )
+
+                        def _run_provider_route():
+                            return asyncio.run(router.route(provider_request))
+
+                        try:
+                            asyncio.get_running_loop()
+                        except RuntimeError:
+                            provider_response = asyncio.run(
+                                router.route(provider_request)
+                            )
+                        else:
+                            with ThreadPoolExecutor(max_workers=1) as local_executor:
+                                provider_response = local_executor.submit(
+                                    _run_provider_route
+                                ).result(timeout=max(10, _NODE_TIMEOUT_S))
+                        response_text = (
+                            provider_response.content
+                            or "Maaf, Pantronux. Kuro tidak dapat menghasilkan respons yang valid."
+                        )
+                        provider_used = provider_response.provider or "gemini"
+                        provider_path_used = True
+                except Exception as provider_exc:
+                    logger.warning(
+                        "[RESPONSE] Provider router path failed, using legacy Gemini: %s",
+                        provider_exc,
+                    )
+
+            if not provider_path_used:
+                genai_client = _get_genai_client()
+
+                # Use cached content if configured
+                config_kwargs = {
+                    "system_instruction": system_prompt,
+                    "temperature": profile.temperature,
+                    "top_p": profile.top_p,
+                    "top_k": profile.top_k,
+                    "tools": [{"google_search": {}}],
+                }
+                if settings.GEMINI_CACHED_CONTENT:
+                    config_kwargs["cached_content"] = settings.GEMINI_CACHED_CONTENT
+
+                response = genai_client.models.generate_content(
+                    model=PRIMARY_MODEL,
+                    contents=contents_parts,
+                    config=genai_types.GenerateContentConfig(**config_kwargs),
+                )
+
+                # SAFETY CHECK: Check prompt_feedback BEFORE accessing response.text
+                # When content is blocked by safety filters, response.text raises AttributeError
+                if hasattr(response, "prompt_feedback") and response.prompt_feedback:
+                    block_reason = getattr(
+                        response.prompt_feedback, "block_reason", "UNKNOWN"
+                    )
+                    logger.warning(
+                        "[RESPONSE] Content blocked by safety filter: %s", block_reason
+                    )
+                    response_text = (
+                        "Maaf, Pantronux. Respons diblokir oleh filter keamanan Gemini. "
+                        "Silakan ubah pertanyaan Anda."
+                    )
+
+                # Only access response.text if not blocked
+                if response_text is None:
+                    try:
+                        response_text = (
+                            response.text
+                            if response.text
+                            else "Maaf, Pantronux. Kuro tidak dapat menghasilkan respons yang valid."
+                        )
+                    except Exception as text_err:
+                        err_s = str(text_err)
+                        if (
+                            "WARNING" in err_s
+                            or "Safety" in err_s
+                            or "blocked" in err_s.lower()
+                        ):
+                            logger.warning("[RESPONSE] response.text blocked: %s", text_err)
+                            response_text = (
+                                "Maaf, Pantronux. Respons diblokir oleh filter keamanan Gemini."
+                            )
+                        else:
+                            raise text_err
+
+                # Track token usage
+                if hasattr(response, "usage_metadata") and response.usage_metadata:
+                    prompt_tokens = response.usage_metadata.prompt_token_count or 0
+                    completion_tokens = (
+                        response.usage_metadata.candidates_token_count or 0
+                    )
+                    total_tokens = response.usage_metadata.total_token_count or (
+                        prompt_tokens + completion_tokens
+                    )
+
+                    username = state.get("username", "Pantronux")
+                    observability.track_token_usage(
+                        session_id,
+                        prompt_tokens,
+                        completion_tokens,
+                        total_tokens,
+                        username=username,
+                    )
+
+                    if span:
+                        span.set_attribute("response_node.prompt_tokens", prompt_tokens)
+                        span.set_attribute(
+                            "response_node.completion_tokens", completion_tokens
+                        )
+                        span.set_attribute("response_node.total_tokens", total_tokens)
             
         except Exception as e:
             error_type = type(e).__name__
@@ -2530,6 +2607,12 @@ def response_node(state: KuroState) -> Dict[str, Any]:
                 response_text,
                 ingestion_sources,
             )
+        runtime_config = RuntimeRegistry.get(state.get("runtime_id", "sovereign"))
+        if response_text and bool(getattr(runtime_config, "vocabulary_sanitization", False)):
+            try:
+                response_text = sanitize_vocabulary_response(response_text)
+            except Exception as exc:
+                logger.debug("[VOCAB] sanitization skipped: %s", exc)
 
         # Structured output validation/repair (non-breaking fallback to plain text).
         if response_text:
@@ -2537,10 +2620,14 @@ def response_node(state: KuroState) -> Dict[str, Any]:
                 from kuro_backend.output.output_repair import attempt_repair
                 from kuro_backend.output.output_validator import validate_output
 
-                runtime_config = RuntimeRegistry.get(state.get("runtime_id", "sovereign"))
                 contract_id = runtime_config.structured_output_contract
+                state_trace_id = str(state.get("_trace_id", "") or "")
                 if contract_id:
-                    is_valid, validated, error = validate_output(response_text, contract_id)
+                    is_valid, validated, error = validate_output(
+                        response_text,
+                        contract_id,
+                        trace_id=state_trace_id,
+                    )
                     if not is_valid:
                         logger.warning(
                             "Structured output invalid contract=%s err=%s",
@@ -2554,7 +2641,12 @@ def response_node(state: KuroState) -> Dict[str, Any]:
                             can_block_run = True
                         if can_block_run:
                             is_valid, validated, error = asyncio.run(
-                                attempt_repair(response_text, contract_id, error or "invalid")
+                                attempt_repair(
+                                    response_text,
+                                    contract_id,
+                                    error or "invalid",
+                                    trace_id=state_trace_id,
+                                )
                             )
                         else:
                             error = error or "repair skipped: active event loop"
@@ -3163,6 +3255,7 @@ def _iter_sse_text_chunks(text: str, soft_limit: int = 56) -> Iterator[str]:
 def _sync_stream_collect_final_response(
     initial_state: Dict[str, Any],
     config: Dict[str, Any],
+    trace: Optional[CognitionTrace] = None,
 ) -> Dict[str, Any]:
     """Run sync LangGraph stream in a worker thread and collect response payload."""
     raw: Optional[str] = None
@@ -3170,6 +3263,14 @@ def _sync_stream_collect_final_response(
     output_schema_valid = False
     for event in kuro_graph.stream(initial_state, config=config, stream_mode="updates"):
         for node_name, node_output in event.items():
+            if trace is not None:
+                trace.record_node(node_name)
+                if isinstance((node_output or {}).get("runtime_namespace"), str):
+                    trace.record_memory_access((node_output or {}).get("runtime_namespace"))
+                if node_name == "tool_node":
+                    tool_result = (node_output or {}).get("tool_execution_result") or {}
+                    if isinstance(tool_result, dict):
+                        trace.record_tool_call(str(tool_result.get("tool", "") or ""))
             if node_name != "response_node":
                 continue
             text = (node_output or {}).get("final_response")
@@ -3245,8 +3346,26 @@ async def process_chat_with_graph_stream(
     resolved_runtime_namespace = str(
         runtime_namespace or f"kuro.{resolved_runtime_id}"
     )
+    resolved_trace_id = str(trace_id or f"trace_{uuid.uuid4().hex[:16]}")
     runtime_config = RuntimeRegistry.get(resolved_runtime_id)
     runtime_contract_id = runtime_config.structured_output_contract
+    cognition_trace = CognitionTrace.start(
+        trace_id=resolved_trace_id,
+        runtime_id=resolved_runtime_id,
+        username=username,
+        chat_id=str(chat_id or session_id or ""),
+    )
+    cognition_trace.record_memory_access(resolved_runtime_namespace)
+    trace_finalized = False
+
+    def _finalize_trace(error: str = "") -> None:
+        nonlocal trace_finalized
+        if trace_finalized:
+            return
+        try:
+            cognition_trace.finish(error=error)
+        finally:
+            trace_finalized = True
 
     # Capture initial message count for title generation trigger
     msg_count_before = 0
@@ -3257,7 +3376,9 @@ async def process_chat_with_graph_stream(
         stage_started = time.perf_counter()
         approval_response = _maybe_handle_pending_approval(message, approval_scope)
         if approval_response is not None:
+            cognition_trace.record_node("pending_approval")
             yield approval_response
+            _finalize_trace()
             return
 
 
@@ -3277,6 +3398,7 @@ async def process_chat_with_graph_stream(
             from kuro_backend import semantic_cache
             cached_response = semantic_cache.lookup(message, persona_mode)
             if cached_response is not None:
+                cognition_trace.record_node("semantic_cache_hit")
                 if stream_metrics is not None:
                     stream_metrics["stream_mode"] = "semantic_cache"
                 yield cached_response
@@ -3284,6 +3406,7 @@ async def process_chat_with_graph_stream(
                     _persist_short_term_and_enqueue_writes(message, cached_response, persona_mode, username, chat_id=chat_id, message_count_before=msg_count_before)
                 except Exception as exc:
                     logger.warning("[SEMANTIC_CACHE] persist failed: %s", exc)
+                _finalize_trace()
                 return
 
         can_use_true_stream = (
@@ -3461,7 +3584,7 @@ async def process_chat_with_graph_stream(
                             "runtime_id": resolved_runtime_id,
                             "runtime_namespace": resolved_runtime_namespace,
                             "chat_id": chat_id or "",
-                            "trace_id": trace_id,
+                            "trace_id": resolved_trace_id,
                         }
                     )
 
@@ -3479,6 +3602,8 @@ async def process_chat_with_graph_stream(
             if stream_metrics is not None:
                 stream_metrics["response_chars"] = float(len(response_text))
                 stream_metrics["stream_total_ms"] = round((time.perf_counter() - fastpath_started) * 1000, 2)
+            cognition_trace.record_node("fastpath_stream_complete")
+            _finalize_trace()
             return
         
         initial_state = {
@@ -3502,7 +3627,7 @@ async def process_chat_with_graph_stream(
             "provider_used": "gemini",
             "_session_id": session_id,
             "_approval_scope": approval_scope,
-            "_trace_id": trace_id,
+            "_trace_id": resolved_trace_id,
             # Natural Agency defaults (V1.0.0)
             "_intent_category": "general",
             "inhibited": False,
@@ -3569,7 +3694,10 @@ async def process_chat_with_graph_stream(
 
         graph_started = time.perf_counter()
         graph_payload = await asyncio.to_thread(
-            _sync_stream_collect_final_response, initial_state, config
+            _sync_stream_collect_final_response,
+            initial_state,
+            config,
+            cognition_trace,
         )
         if stream_metrics is not None:
             stream_metrics["graph_collect_ms"] = round((time.perf_counter() - graph_started) * 1000, 2)
@@ -3627,9 +3755,11 @@ async def process_chat_with_graph_stream(
         logger.debug("[LANGGRAPH_STREAM] streaming complete chars=%s", len(response_text))
         if stream_metrics is not None:
             stream_metrics["stream_total_ms"] = round((time.perf_counter() - stage_started) * 1000, 2)
+        _finalize_trace()
         
     except Exception as e:
         logger.exception(f"[LANGGRAPH_STREAM] Streaming failed: {e}")
+        _finalize_trace(error=str(e))
         error_msg = f"Maaf, {master_name}. Terjadi kesalahan saat memproses permintaan Anda."
         yield error_msg
         full_response = [error_msg]

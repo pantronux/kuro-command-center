@@ -1,15 +1,5 @@
-"""Vocabulary package entrypoint.
-Target Phase 7.
-"""
+"""Vocabulary package entrypoint."""
 
-# --- Header Doc ---
-# Purpose: Vocabulary package entrypoint.
-# Target Phase: Phase 7
-# Dependencies: TBD
-# Status: STUB
+from .sanitizer import sanitize_response
 
-KURO_STUB = True
-
-
-def stub_entrypoint() -> None:
-    raise NotImplementedError('STUB - Phase 7 - not yet implemented')
+__all__ = ["sanitize_response"]

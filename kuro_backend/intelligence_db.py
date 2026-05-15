@@ -18,6 +18,7 @@ import threading
 from datetime import datetime
 from typing import List, Dict, Optional
 from kuro_backend.db_utils import (
+    add_column_if_missing,
     db_retry,
     get_applied_version,
     get_connection,
@@ -402,6 +403,7 @@ def _init_db_locked():
             )
             """
         )
+        add_column_if_missing(conn, "audit_trail", "trace_id", "TEXT DEFAULT ''")
         cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS failed_telegram_notifications (
@@ -463,6 +465,37 @@ def _init_db_locked():
             """
             CREATE INDEX IF NOT EXISTS idx_boundary_violations_runtime_user
             ON boundary_violations(runtime_id, username, ts DESC)
+            """
+        )
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS cognition_traces (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                trace_id TEXT NOT NULL,
+                runtime_id TEXT NOT NULL,
+                username TEXT NOT NULL,
+                chat_id TEXT,
+                started_at TEXT,
+                finished_at TEXT,
+                latency_ms REAL DEFAULT 0.0,
+                node_sequence_json TEXT NOT NULL DEFAULT '[]',
+                memory_namespaces_json TEXT NOT NULL DEFAULT '[]',
+                tool_calls_json TEXT NOT NULL DEFAULT '[]',
+                error TEXT DEFAULT '',
+                ts TEXT DEFAULT (datetime('now'))
+            )
+            """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_cognition_traces_runtime_ts
+            ON cognition_traces(runtime_id, ts DESC)
+            """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_cognition_traces_trace_id
+            ON cognition_traces(trace_id)
             """
         )
 
@@ -1227,7 +1260,7 @@ def log_export_audit(
 
 
 @db_retry()
-def add_audit_trail(action: str, details: str = "") -> None:
+def add_audit_trail(action: str, details: str = "", trace_id: str = "") -> None:
     """Append one audit trail event for platform-level operational traces."""
     init_db()
     conn = None
@@ -1235,8 +1268,8 @@ def add_audit_trail(action: str, details: str = "") -> None:
         conn = _get_connection()
         cursor = conn.cursor()
         cursor.execute(
-            "INSERT INTO audit_trail (action, details) VALUES (?, ?)",
-            (str(action or ""), str(details or "")),
+            "INSERT INTO audit_trail (action, details, trace_id) VALUES (?, ?, ?)",
+            (str(action or ""), str(details or ""), str(trace_id or "")),
         )
         conn.commit()
     except Exception as exc:
@@ -1394,6 +1427,154 @@ def get_recent_boundary_violations(limit: int = 100) -> List[Dict]:
             (safe_limit,),
         )
         return [dict(r) for r in cursor.fetchall()]
+    finally:
+        if conn:
+            conn.close()
+
+
+@db_retry()
+def log_cognition_trace(trace) -> None:
+    """Persist one cognition trace row. Accepts CognitionTrace-like object."""
+    init_db()
+    conn = None
+    try:
+        conn = _get_connection()
+        conn.execute(
+            """
+            INSERT INTO cognition_traces (
+                trace_id, runtime_id, username, chat_id,
+                started_at, finished_at, latency_ms,
+                node_sequence_json, memory_namespaces_json, tool_calls_json, error
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                str(getattr(trace, "trace_id", "") or ""),
+                str(getattr(trace, "runtime_id", "") or ""),
+                str(getattr(trace, "username", "") or ""),
+                str(getattr(trace, "chat_id", "") or ""),
+                str(getattr(trace, "started_at", "") or ""),
+                str(getattr(trace, "finished_at", "") or ""),
+                float(getattr(trace, "latency_ms", 0.0) or 0.0),
+                json.dumps(list(getattr(trace, "node_sequence", []) or []), ensure_ascii=False),
+                json.dumps(list(getattr(trace, "memory_namespaces", []) or []), ensure_ascii=False),
+                json.dumps(list(getattr(trace, "tool_calls", []) or []), ensure_ascii=False),
+                str(getattr(trace, "error", "") or ""),
+            ),
+        )
+        conn.commit()
+    finally:
+        if conn:
+            conn.close()
+
+
+def get_runtime_health_snapshot(hours: int = 24) -> List[Dict]:
+    """
+    Aggregate runtime-health metrics from cognition traces and audit logs.
+    """
+    init_db()
+    safe_hours = max(1, min(168, int(hours)))
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT runtime_id,
+                   COUNT(*) AS total_requests,
+                   AVG(latency_ms) AS avg_latency_ms,
+                   SUM(CASE WHEN error IS NOT NULL AND TRIM(error) != '' THEN 1 ELSE 0 END) AS error_count
+            FROM cognition_traces
+            WHERE ts >= datetime('now', ?)
+            GROUP BY runtime_id
+            """,
+            (f"-{safe_hours} hours",),
+        )
+        base_rows = [dict(r) for r in cursor.fetchall()]
+
+        cursor.execute(
+            """
+            SELECT runtime_id, COUNT(*) AS cnt
+            FROM boundary_violations
+            WHERE ts >= datetime('now', ?)
+            GROUP BY runtime_id
+            """,
+            (f"-{safe_hours} hours",),
+        )
+        boundary_by_runtime = {
+            str(r["runtime_id"]): int(r["cnt"] or 0) for r in cursor.fetchall()
+        }
+
+        cursor.execute(
+            """
+            SELECT c.runtime_id AS runtime_id,
+                   SUM(CASE WHEN a.details LIKE '%status=valid%' THEN 1 ELSE 0 END) AS valid_count,
+                   COUNT(*) AS total_count
+            FROM audit_trail a
+            JOIN cognition_traces c ON c.trace_id = a.trace_id
+            WHERE a.action = 'output_validated'
+              AND a.created_at >= datetime('now', ?)
+              AND c.ts >= datetime('now', ?)
+            GROUP BY c.runtime_id
+            """,
+            (f"-{safe_hours} hours", f"-{safe_hours} hours"),
+        )
+        schema_by_runtime = {
+            str(r["runtime_id"]): {
+                "valid": int(r["valid_count"] or 0),
+                "total": int(r["total_count"] or 0),
+            }
+            for r in cursor.fetchall()
+        }
+
+        cursor.execute(
+            """
+            SELECT runtime_id, tool_calls_json
+            FROM cognition_traces
+            WHERE ts >= datetime('now', ?)
+            """,
+            (f"-{safe_hours} hours",),
+        )
+        tool_counts: Dict[str, Dict[str, int]] = {}
+        for row in cursor.fetchall():
+            runtime_id = str(row["runtime_id"] or "")
+            bucket = tool_counts.setdefault(runtime_id, {})
+            try:
+                tools = json.loads(row["tool_calls_json"] or "[]")
+            except Exception:
+                tools = []
+            if not isinstance(tools, list):
+                continue
+            for tool in tools:
+                t = str(tool or "").strip()
+                if not t:
+                    continue
+                bucket[t] = bucket.get(t, 0) + 1
+
+        payload: List[Dict] = []
+        for row in base_rows:
+            runtime_id = str(row.get("runtime_id") or "")
+            total_requests = int(row.get("total_requests") or 0)
+            error_count = int(row.get("error_count") or 0)
+            schema_stat = schema_by_runtime.get(runtime_id, {"valid": 0, "total": 0})
+            schema_total = int(schema_stat.get("total", 0))
+            schema_valid = int(schema_stat.get("valid", 0))
+            tool_bucket = tool_counts.get(runtime_id, {})
+            sorted_tools = sorted(tool_bucket.items(), key=lambda item: item[1], reverse=True)
+            payload.append(
+                {
+                    "runtime_id": runtime_id,
+                    "total_requests": total_requests,
+                    "avg_latency_ms": round(float(row.get("avg_latency_ms") or 0.0), 2),
+                    "schema_valid_rate": (
+                        round(schema_valid / schema_total, 4) if schema_total > 0 else 0.0
+                    ),
+                    "boundary_violations": int(boundary_by_runtime.get(runtime_id, 0)),
+                    "error_rate": round(error_count / total_requests, 4) if total_requests > 0 else 0.0,
+                    "most_used_tools": [tool for tool, _ in sorted_tools[:5]],
+                }
+            )
+        payload.sort(key=lambda item: item.get("runtime_id", ""))
+        return payload
     finally:
         if conn:
             conn.close()

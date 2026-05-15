@@ -35,7 +35,11 @@ def _strip_markdown_fence(raw_text: str) -> str:
     return "\n".join(body).strip()
 
 
-def validate_output(raw_text: str, contract_id: str) -> tuple[bool, Any, str | None]:
+def validate_output(
+    raw_text: str,
+    contract_id: str,
+    trace_id: str = "",
+) -> tuple[bool, Any, str | None]:
     """
     Parse and validate raw JSON text against contract schema.
     Returns (is_valid, model_instance_or_none, error_message_or_none).
@@ -48,6 +52,7 @@ def validate_output(raw_text: str, contract_id: str) -> tuple[bool, Any, str | N
         intelligence_db.add_audit_trail(
             action="output_validated",
             details=f"contract={contract_id} status=valid",
+            trace_id=trace_id,
         )
         return True, model, None
     except (json.JSONDecodeError, ValidationError, TypeError) as exc:
@@ -55,5 +60,6 @@ def validate_output(raw_text: str, contract_id: str) -> tuple[bool, Any, str | N
         intelligence_db.add_audit_trail(
             action="output_validated",
             details=f"contract={contract_id} status=invalid error={error_msg}",
+            trace_id=trace_id,
         )
         return False, None, error_msg

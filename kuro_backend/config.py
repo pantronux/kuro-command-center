@@ -40,6 +40,12 @@ class Settings:
     KURO_STREAM_SANITIZER_ENABLED: bool = os.getenv(
         "KURO_STREAM_SANITIZER_ENABLED", "true"
     ).strip().lower() in ("1", "true", "yes", "on")
+    KURO_PROVIDER_ROUTER_ENABLED: bool = os.getenv(
+        "KURO_PROVIDER_ROUTER_ENABLED", "false"
+    ).strip().lower() in ("1", "true", "yes", "on")
+    KURO_QA_PLAYGROUND_ENABLED: bool = os.getenv(
+        "KURO_QA_PLAYGROUND_ENABLED", "true"
+    ).strip().lower() in ("1", "true", "yes", "on")
     KURO_RETRIEVAL_QUALITY_V2_ENABLED: bool = os.getenv(
         "KURO_RETRIEVAL_QUALITY_V2_ENABLED", "true"
     ).strip().lower() in ("1", "true", "yes", "on")

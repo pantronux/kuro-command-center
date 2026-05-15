@@ -1,15 +1,5 @@
-"""Telemetry package entrypoint.
-Target Phase 7.
-"""
+"""Telemetry package entrypoint."""
 
-# --- Header Doc ---
-# Purpose: Telemetry package entrypoint.
-# Target Phase: Phase 7
-# Dependencies: TBD
-# Status: STUB
+from .cognition_trace import CognitionTrace
 
-KURO_STUB = True
-
-
-def stub_entrypoint() -> None:
-    raise NotImplementedError('STUB - Phase 7 - not yet implemented')
+__all__ = ["CognitionTrace"]

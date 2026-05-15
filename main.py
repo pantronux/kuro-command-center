@@ -40,6 +40,7 @@ from fastapi import (
 )
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import (
     HTMLResponse,
@@ -196,6 +197,10 @@ class NewChatSession(BaseModel):
     title: str = "New Chat"
 
 
+class QARequirementRequest(BaseModel):
+    requirement: str = Field(..., min_length=1, max_length=32000)
+
+
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verify a plain password against a bcrypt hash."""
     try:
@@ -259,6 +264,15 @@ def require_admin_user(request: Request) -> Dict[str, str]:
     if user.get("username") != os.getenv("ADMIN_USERNAME", "Pantronux"):
         raise HTTPException(status_code=403, detail="Forbidden: Admin access required.")
     return user
+
+
+class TraceMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        trace_id = request.headers.get("X-Trace-ID") or f"trace_{uuid.uuid4().hex[:16]}"
+        request.state.trace_id = trace_id
+        response = await call_next(request)
+        response.headers["X-Trace-ID"] = trace_id
+        return response
 
 
 def _build_system_status_backup_payload() -> Optional[Dict[str, Any]]:
@@ -560,6 +574,10 @@ def _as_env_bool(value: Optional[str], default: bool = False) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _is_qa_playground_enabled() -> bool:
+    return _as_env_bool(os.getenv("KURO_QA_PLAYGROUND_ENABLED"), True)
+
+
 def _mount_playground_router_if_enabled(
     target_app: FastAPI,
     enabled_override: Optional[bool] = None,
@@ -594,6 +612,7 @@ def _mount_playground_router_if_enabled(
 
 # --- FastAPI App ---
 app = FastAPI(title="Kuro AI Web Dashboard")
+app.add_middleware(TraceMiddleware)
 _mount_playground_router_if_enabled(app)
 
 
@@ -1389,7 +1408,9 @@ async def chat_endpoint(
         user_info = auth_db.get_user(username) or {}
         master_name = user_info.get("master_name", "Master Pantronux")
 
-        trace_id = f"chat_{uuid.uuid4().hex}"
+        trace_id = str(
+            getattr(request.state, "trace_id", "") or f"chat_{uuid.uuid4().hex}"
+        )
 
         # Persona restriction
         restricted_persona = user_info.get("restricted_persona")
@@ -1662,7 +1683,9 @@ async def chat_stream_endpoint(
             or request.query_params.get("persona")
             or memory_manager.get_active_persona()
         )
-    trace_id = f"chatstream_{uuid.uuid4().hex}"
+    trace_id = str(
+        getattr(request.state, "trace_id", "") or f"chatstream_{uuid.uuid4().hex}"
+    )
     session_scope, ctx, is_new_session = _resolve_runtime_context_for_chat_request(
         request=request,
         username=username,
@@ -2078,6 +2101,126 @@ async def get_output_schema(contract_id: str):
         raise HTTPException(status_code=404, detail=f"Unknown schema: {contract_id}")
 
 
+@app.post("/api/playground/qa/interpret")
+async def qa_playground_interpret(
+    request: Request,
+    payload: QARequirementRequest,
+    token_data: Dict[str, str] = Depends(validate_token_dependency),
+):
+    trace_id = getattr(request.state, "trace_id", "")
+    if not _is_qa_playground_enabled():
+        return JSONResponse(
+            status_code=503,
+            content=api_error("QA Playground disabled", trace_id=trace_id),
+        )
+    from kuro_backend.playground.qa.qa_runtime import QARuntime
+
+    username = token_data.get("username", "Pantronux")
+    chat_id = _resolve_chat_session_id(request)
+    try:
+        runtime = QARuntime(username=username, chat_id=chat_id, runtime_id="qa")
+        result = await runtime.process_request("interpret", payload.requirement)
+        if not result.get("ok"):
+            return JSONResponse(
+                status_code=500,
+                content=api_error(
+                    f"QA interpret failed: {result.get('error', 'unknown error')}",
+                    trace_id=trace_id,
+                ),
+            )
+        parsed = result.get("data") or {}
+        if not isinstance(parsed, dict):
+            parsed = {"result": parsed}
+        parsed["trace_id"] = trace_id
+        return parsed
+    except Exception as exc:
+        logger.exception("QA interpret route failed: %s", exc)
+        return JSONResponse(
+            status_code=500,
+            content=api_error(f"QA interpret failed: {exc}", trace_id=trace_id),
+        )
+
+
+@app.post("/api/playground/qa/generate-testcases")
+async def qa_playground_generate_testcases(
+    request: Request,
+    payload: QARequirementRequest,
+    token_data: Dict[str, str] = Depends(validate_token_dependency),
+):
+    trace_id = getattr(request.state, "trace_id", "")
+    if not _is_qa_playground_enabled():
+        return JSONResponse(
+            status_code=503,
+            content=api_error("QA Playground disabled", trace_id=trace_id),
+        )
+    from kuro_backend.playground.qa.qa_runtime import QARuntime
+
+    username = token_data.get("username", "Pantronux")
+    chat_id = _resolve_chat_session_id(request)
+    try:
+        runtime = QARuntime(username=username, chat_id=chat_id, runtime_id="qa")
+        result = await runtime.process_request("generate_testcases", payload.requirement)
+        if not result.get("ok"):
+            return JSONResponse(
+                status_code=500,
+                content=api_error(
+                    f"QA testcase generation failed: {result.get('error', 'unknown error')}",
+                    trace_id=trace_id,
+                ),
+            )
+        output = result.get("data") or {}
+        if not isinstance(output, dict):
+            output = {"structured_output": output}
+        output["trace_id"] = trace_id
+        return output
+    except Exception as exc:
+        logger.exception("QA testcase route failed: %s", exc)
+        return JSONResponse(
+            status_code=500,
+            content=api_error(f"QA testcase generation failed: {exc}", trace_id=trace_id),
+        )
+
+
+@app.post("/api/playground/qa/generate-gherkin")
+async def qa_playground_generate_gherkin(
+    request: Request,
+    payload: QARequirementRequest,
+    token_data: Dict[str, str] = Depends(validate_token_dependency),
+):
+    trace_id = getattr(request.state, "trace_id", "")
+    if not _is_qa_playground_enabled():
+        return JSONResponse(
+            status_code=503,
+            content=api_error("QA Playground disabled", trace_id=trace_id),
+        )
+    from kuro_backend.playground.qa.qa_runtime import QARuntime
+
+    username = token_data.get("username", "Pantronux")
+    chat_id = _resolve_chat_session_id(request)
+    try:
+        runtime = QARuntime(username=username, chat_id=chat_id, runtime_id="qa")
+        result = await runtime.process_request("generate_gherkin", payload.requirement)
+        if not result.get("ok"):
+            return JSONResponse(
+                status_code=500,
+                content=api_error(
+                    f"QA gherkin generation failed: {result.get('error', 'unknown error')}",
+                    trace_id=trace_id,
+                ),
+            )
+        output = result.get("data") or {}
+        if not isinstance(output, dict):
+            output = {"gherkin": str(output)}
+        output["trace_id"] = trace_id
+        return output
+    except Exception as exc:
+        logger.exception("QA gherkin route failed: %s", exc)
+        return JSONResponse(
+            status_code=500,
+            content=api_error(f"QA gherkin generation failed: {exc}", trace_id=trace_id),
+        )
+
+
 @app.get("/api/admin/runtimes/{runtime_id}")
 async def get_admin_runtime_config(
     runtime_id: str,
@@ -2100,6 +2243,15 @@ async def get_boundary_violations(
     if token_data.get("username") != os.getenv("ADMIN_USERNAME", "Pantronux"):
         raise HTTPException(status_code=403, detail="Admin only")
     return intelligence_db.get_recent_boundary_violations(limit=limit)
+
+
+@app.get("/api/admin/runtime-health")
+async def get_runtime_health(
+    token_data: Dict[str, str] = Depends(validate_token_dependency),
+):
+    if token_data.get("username") != os.getenv("ADMIN_USERNAME", "Pantronux"):
+        raise HTTPException(status_code=403, detail="Admin only")
+    return intelligence_db.get_runtime_health_snapshot(hours=24)
 
 @app.get("/api/system-status")
 async def system_status(request: Request):

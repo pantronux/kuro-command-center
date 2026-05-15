@@ -1,15 +1,13 @@
-"""QA playground package entrypoint.
-Target Phase 6.
-"""
+"""QA playground package entrypoint."""
 
-# --- Header Doc ---
-# Purpose: QA playground package entrypoint.
-# Target Phase: Phase 6
-# Dependencies: TBD
-# Status: STUB
+from .qa_runtime import QARuntime
+from .requirement_parser import parse_requirements
+from .testcase_generator import generate_testcases
+from .cucumber_generator import generate_gherkin
 
-KURO_STUB = True
-
-
-def stub_entrypoint() -> None:
-    raise NotImplementedError('STUB - Phase 6 - not yet implemented')
+__all__ = [
+    "QARuntime",
+    "generate_gherkin",
+    "generate_testcases",
+    "parse_requirements",
+]

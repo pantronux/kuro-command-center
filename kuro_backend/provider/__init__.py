@@ -1,15 +1,22 @@
-"""Provider abstraction package entrypoint.
-Target Phase 5.
-"""
+"""Provider abstraction package entrypoint."""
 
-# --- Header Doc ---
-# Purpose: Provider abstraction package entrypoint.
-# Target Phase: Phase 5
-# Dependencies: TBD
-# Status: STUB
+from .provider_interface import (
+    AIProvider,
+    ProviderRequest,
+    ProviderResponse,
+    ProviderStreamChunk,
+    ProviderUsage,
+)
+from .gemini_provider import GeminiProvider
+from .provider_router import PROVIDER_MAP, ProviderRouter
 
-KURO_STUB = True
-
-
-def stub_entrypoint() -> None:
-    raise NotImplementedError('STUB - Phase 5 - not yet implemented')
+__all__ = [
+    "AIProvider",
+    "GeminiProvider",
+    "PROVIDER_MAP",
+    "ProviderRequest",
+    "ProviderResponse",
+    "ProviderRouter",
+    "ProviderStreamChunk",
+    "ProviderUsage",
+]

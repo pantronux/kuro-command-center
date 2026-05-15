@@ -23,6 +23,7 @@ async def attempt_repair(
     raw_text: str,
     contract_id: str,
     error_message: str,
+    trace_id: str = "",
 ) -> tuple[bool, Any, str | None]:
     """
     Attempt schema-repair using the configured LLM helper.
@@ -42,7 +43,7 @@ async def attempt_repair(
         repaired_text = await _call_repair_llm(repair_prompt)
         if repaired_text is None:
             return False, None, "Repair LLM unavailable"
-        return validate_output(repaired_text, contract_id)
+        return validate_output(repaired_text, contract_id, trace_id=trace_id)
     except Exception as exc:
         logger.error("attempt_repair failed contract=%s: %s", contract_id, exc)
         return False, None, f"Repair exception: {str(exc)[:200]}"
