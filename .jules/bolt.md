@@ -1,3 +1,7 @@
 ## 2024-05-18 - [Semantic Cache Cosine Similarity Optimization]
 **Learning:** In purely Python-based vector operations (like in-memory semantic caches without C-extensions like numpy), evaluating the full cosine similarity formula (which involves multiplications, tracking sums of squares, and a square root) inside a loop over cached items is a significant overhead.
 **Action:** Always consider pre-normalizing vectors when they are stored. If both the cached vector and the query vector are unit-normalized ($L_2$ norm = 1), their cosine similarity is exactly equal to their dot product. Substituting a full cosine similarity calculation with a single-pass dot product loop speeds up lookup by ~2.6x.
+
+## 2026-05-14 - Replace Multiple Independent Generator Expressions with Single Loop
+**Learning:** When calculating multiple aggregates over the same sequence (e.g., tallying different statuses, computing sums, or checking conditions with `any()`), replacing multiple independent generator expressions with a single explicit `for` loop prevents redundant O(n) traversals and avoids the overhead of allocating multiple intermediate objects. This significantly speeds up aggregation in paths that run frequently.
+**Action:** Always combine iterations over the same collection into a single pass when computing multiple separate aggregated values (counts, sums, boolean flags). Also remember to always add inline comments and metrics to performance optimizations and to APPEND instead of overwrite the `.jules/bolt.md` journal.
