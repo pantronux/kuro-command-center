@@ -65,3 +65,4 @@ test_venv3/
 # Local runtime artifacts
 .kuro_telegram.lock
 exports/
+.venv/
