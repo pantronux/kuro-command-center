@@ -300,155 +300,159 @@ Kuro AI is your **Intelligent Personal Sovereign**—a sophisticated digital com
 
 ## Core Logic Flow (Function-Level Flowchart)
 
-Layering masih **monolith FastAPI + LangGraph core**, tetapi sejak V2 Prompt `1-2`
-ada perubahan penting di jalur request:
-- ada **runtime resolution layer** (`runtime_id` + `runtime_namespace`) sebelum masuk graph;
-- ada **cognitive boundary layer** (memory/tool guard) yang berjalan `audit` saat `KURO_V2_STRICT_MODE=false`;
-- alur legacy tetap hidup: endpoint stream lama tanpa `runtime_id` fallback ke `sovereign`.
+Layering tetap **monolith FastAPI + LangGraph core**, dan pada V2.1.0 Beta 1
+jalur produksi sudah mencakup Prompt `-1..7`:
+- **Ingress + tracing**: semua request masuk via route layer dan diberi `trace_id` (`X-Trace-ID`).
+- **Runtime layer**: runtime request di-resolve (query/form), diselaraskan dengan `chat_sessions.runtime_id`, lalu fallback legacy ke `sovereign`.
+- **Guard layer**: boundary guard memory/tool/prompt berjalan di mode `audit` atau `strict` (`KURO_V2_STRICT_MODE`).
+- **Cognitive layer**: graph reasoning + memory retrieval + tool path + epistemic post-filter.
+- **Output layer**: structured output (jika ada contract), SSE event `structured_output`, lalu completion event legacy.
+- **Observability layer**: cognition trace disimpan ke DB, admin bisa audit violation dan runtime health.
 
 ```mermaid
 flowchart TD
-    subgraph UI[Ingress]
-        U1[Browser dashboard]
-        U2[Telegram chat]
-        U3[WebSocket /ws/dashboard]
+    subgraph L1[Layer 1: Ingress and API]
+        U1[Browser Dashboard]
+        U2[Telegram]
+        A1[POST api chat]
+        A2[POST api chat stream]
+        A3[GET api runtimes]
+        A4[GET api schemas]
+        A5[POST api playground qa]
+        A6[GET admin runtime detail]
+        A7[GET admin boundary violations]
+        A8[GET admin runtime health]
     end
 
-    subgraph Routes[API Layer - main.py]
-        R1["POST /api/chat\nchat_endpoint"]
-        R2["POST /api/chat/stream\nchat_stream_endpoint"]
-        R3["GET /api/runtimes\npublic-safe runtime list"]
-        R6["GET /api/admin/runtimes/{runtime_id}\nadmin runtime detail"]
-        R7["GET /api/admin/boundary-violations\nadmin audit feed"]
-        R4["WS /ws/dashboard\ndashboard_sync_websocket"]
-        R5["GET/POST /api/ingestion/*\nadmin ingestion routes"]
+    subgraph L2[Layer 2: Trace and Runtime Resolution]
+        T1[Trace middleware set trace id]
+        T2[Resolve runtime id from query or form]
+        T3[Resolve runtime for chat request]
+        T4[Enforce session runtime consistency]
+        T5[Fallback to sovereign for legacy]
     end
 
-    subgraph Pre[Pre-flight]
-        G1[ui_mode_router.detect_mode_command]
+    subgraph L3[Layer 3: Boundary and Context]
+        B1[Assert memory boundary]
+        B2[Assert tool boundary]
+        B3[Log boundary violations]
+        C1[Build memory context]
+        C2[Memory V2 store provenance and TTL]
+        C3[Conflict resolver and decay]
     end
 
-    subgraph Runtime[V2 Runtime Layer - Partial]
-        V1[runtime_registry.load_all at startup]
-        V2[runtime_context resolve from request]
-        V3[default fallback runtime_id = sovereign]
+    subgraph L4[Layer 4: Cognitive Runtime]
+        G1[Graph stream processor]
+        G2[LangGraph node routing]
+        G3[Tool execution mapping]
+        G4[Epistemic filter]
     end
 
-    subgraph Brain[LangGraph Core]
-        B1[langgraph_core.process_chat_with_graph_stream]
-        B2[langgraph_core.build_kuro_graph]
-        B3["reflection → supervisor → memory_retrieval\n→ retrieval_grader ↺ query_transform\n→ attention_filter → advisor_research → executive_monitor\n→ metacognitive_review → reflective_response | tool | response"]
-        B4[personas.build_system_instruction]
+    subgraph L5[Layer 5: Provider and Structured Output]
+        P1[Provider router optional]
+        P2[Legacy gemini path default]
+        S1[Schema registry]
+        S2[Output validator]
+        S3[Output repair fallback]
+        S4[SSE structured output event]
     end
 
-    subgraph Epistemic[Anti-Halusinasi Epistemic Layer]
-        direction LR
-        E1["epistemic pre-filter\n(inject AutoRAG notification\n+ epistemic caution\ninto system prompt)"]
-        E2["Gemini API call\n(response generation)"]
-        E3["epistemic post-filter\n(label_claims_in_response\n+ check_hard_rules\n+ inject_disclaimer_if_needed)"]
-        E4["epistemic_log\n(audit trail)"]
-        E1 --> E2 --> E3 --> E4
+    subgraph L6[Layer 6: Persistence and Observability]
+        D1[Persist cognition traces]
+        D2[Persist audit trail trace id]
+        D3[Return X Trace ID header]
     end
 
-    subgraph Guard[Boundary Isolation - Prompt 2]
-        BG1[boundary_guard.assert_memory_access]
-        BG2[boundary_guard.assert_tool_access]
-        BG3[intelligence_db.log_boundary_violation]
-    end
+    U1 --> A1
+    U1 --> A2
+    U1 --> A3
+    U1 --> A4
+    U1 --> A5
+    U1 --> A6
+    U1 --> A7
+    U1 --> A8
+    U2 --> A1
 
-    subgraph Mem[3-Layer Memory]
-        M1[memory_coordinator.build_context_for_llm]
-        M2[memory_manager recent + short-term SQLite]
-        M3[perpetual_memory.PerpetualMemory - Mem0 + Chroma]
-        M4[ssot_shortcuts.try_shortcut]
-    end
+    A1 --> T1 --> T2 --> T3 --> T4 --> T5 --> G1
+    A2 --> T1 --> T2 --> T3 --> T4 --> T5 --> G1
 
-    subgraph SSoT[Services / SSoT]
-        S5[intelligence_engine + intelligence_db]
-    end
+    G1 --> G2
+    G2 --> B1 --> C1 --> C2 --> C3
+    G2 --> B2 --> G3
+    B1 --> B3
+    B2 --> B3
 
-    subgraph Ingest[Admin Ingestion Center]
-        I1[ingestion_manager]
-        I2[ingestion_pipeline]
-        I3[ingestion_registry]
-        I4[chroma_inspector + retrieval_analytics]
-    end
+    G2 --> G4
+    G2 --> P1 --> P2
+    G2 --> S1 --> S2
+    S2 --> S4
+    S2 --> S3 --> S4
 
-    subgraph Exec[Execution & Tools]
-        T1[tools.base_tools registered for Gemini tool-calling]
-        T2[execution.openclaw_bridge.execute_openclaw_skill_blocking]
-        T3[serper_tool.serper_search]
-    end
-
-    subgraph Out[Output fabric]
-        O2[dashboard_broadcast.broadcast_ui_command]
-        O3[telegram_notifier.send_message]
-    end
-
-    subgraph FE[Frontend]
-        F1[app.js dashboard handlers]
-    end
-
-    U1 --> R1
-    U1 --> R2
-    U1 --> R3
-    U1 --> R6
-    U1 --> R7
-    U1 --> R4
-    U2 --> R1
-    R1 --> G1 --> V2
-    R2 --> G1
-    R2 --> V2
-    V2 --> V3 --> B1
-    B1 --> B2 --> B3
-    B3 --> B4
-    B3 --> BG1 --> M1
-    M1 --> M2
-    M1 --> M3
-    M1 --> M4
-    B3 --> BG2 --> T1
-    BG1 --> BG3
-    BG2 --> BG3
-    T1 --> T2
-    T1 --> T3
-    T1 --> S5
-    B3 --> O3
-    R4 --> O2
-    O2 --> F1
-    U1 --> R5
-    R5 --> I1 --> I2 --> I3
-    I2 --> I4
-    I1 --> O2
-
-    %% Epistemic layer integration
-    B3 -->|"response path"| E1
-    E4 -->|"labeled response"| O3
-    E4 -->|"labeled response"| F1
-
-    style Epistemic fill:#0066cc,color:#fff
-    style E1 fill:#004499,color:#fff
-    style E2 fill:#003366,color:#fff
-    style E3 fill:#004499,color:#fff
-    style E4 fill:#002244,color:#fff
-    style Runtime fill:#0b5a36,color:#fff
-    style Guard fill:#6d1f1f,color:#fff
+    G1 --> D1
+    G1 --> D2
+    T1 --> D3
 ```
 
-Side-branches not drawn on the trunk but reachable from the same
-`tool_node` / scheduler layer:
-- **Intelligence briefings** — `/api/intelligence/*` and the daily scheduler
-  → `intelligence_engine` → `serper_tool` + `intelligence_db`.
-- **Admin ingestion center** — `/api/ingestion/*` and `/ingestion*`
-  → `ingestion_manager` → `ingestion_pipeline` → `ingestion_registry`
-  + `chroma_inspector` / `retrieval_analytics`.
-- **Chat ingestion bridge** — main chat flow
-  → `langgraph_core.response_node` / `process_chat_with_graph_stream`
-  → `memory_coordinator.build_context_for_llm*`
-  → ingestion Chroma + `ingestion_registry` filtering (`completed`/`partially_indexed`, owner-scoped).
-- **Dreaming / CVE + fiscal sentinels** — `dreaming_worker.run_dreaming_cycle`
-  → `proactive_events.publish` → `telegram_notifier` (CVE + `fiscal_alert`).
-- **Proactive greeting** — `proactive_greeting.maybe_send` on first
-  `/ws/dashboard` connect.
+
+
+### Core Logic Flow (Detailed Path Split)
+
+```mermaid
+flowchart TD
+    subgraph I[Ingress]
+        U1[Browser]
+        U2[Telegram]
+    end
+
+    subgraph API[API Routes]
+        C1[POST api chat]
+        C2[POST api chat stream]
+    end
+
+    subgraph RT[Runtime Resolution]
+        R1[Trace middleware]
+        R2[Resolve runtime id]
+        R3[Session runtime check]
+        R4[Fallback sovereign]
+    end
+
+    subgraph NS[Non Stream Path]
+        N1[process_chat_with_graph]
+        N2[Provider router optional]
+        N3[Structured output validate]
+        N4[JSON response]
+    end
+
+    subgraph ST[Stream Path]
+        S1[process_chat_with_graph_stream]
+        S2[Boundary guard memory and tool]
+        S3[LangGraph token stream]
+        S4[Emit SSE structured_output if exists]
+        S5[Emit SSE done]
+    end
+
+    subgraph OBS[Observability]
+        O1[Persist cognition trace]
+        O2[Persist boundary violation]
+        O3[Attach X Trace ID header]
+    end
+
+    U1 --> C1
+    U1 --> C2
+    U2 --> C1
+
+    C1 --> R1 --> R2 --> R3 --> R4 --> N1 --> N2 --> N3 --> N4
+    C2 --> R1 --> R2 --> R3 --> R4 --> S1 --> S2 --> S3 --> S4 --> S5
+
+    S2 --> O2
+    N1 --> O1
+    S1 --> O1
+    R1 --> O3
+```
+Side-branches not drawn on trunk:
+- **Admin ingestion center**: `/api/ingestion/*` and `/ingestion*` route ke `ingestion_manager -> ingestion_pipeline -> ingestion_registry`.
+- **Scheduler jobs**: daily intelligence briefing, dreaming cycle, memory decay job, backup routines.
+- **QA playground**: `interpret`, `generate-testcases`, `generate-gherkin` dengan kill-switch `KURO_QA_PLAYGROUND_ENABLED`.
 
 ## Clean Tree
 
@@ -464,7 +468,7 @@ artefacts are excluded — see **Exclusions** at the bottom of this section.
 ├── INTEGRATION_HARDENING_DETAILS.md
 ├── SYSTEM_MAP.md                # this file
 ├── kuro_backend/
-│   ├── version.py               # Pre V.2.0.0 Beta 1 "Runtime Sovereign" single source of truth
+│   ├── version.py               # V.2.1.0 Beta 1 "Runtime Sovereign" single source of truth
 │   ├── config.py                # env keys -> typed Settings
 │   ├── db_utils.py              # shared SQLite connection/retry/migration helpers
 │   ├── personas.py              # persona prompts + Anti-Halusinasi epistemic layer
@@ -870,7 +874,7 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
 ### Frontend
 - [`web_interface/templates/index.html`](web_interface/templates/index.html)
   — dashboard shell: avatar (`/profile/kuro_avatar.png`), WebSocket status ticker, chat pane,
-  favicon links, `Pre V.2.0.0 Beta 1` sidebar badge, Chancellor persona option, market chips bar,
+  favicon links, `V.2.1.0 Beta 1` sidebar badge, Chancellor persona option, market chips bar,
   and admin-only sidebar entries for `Ingestion Center` / `Ingestion Analytics`.
 - [`web_interface/templates/intelligence.html`](web_interface/templates/intelligence.html),
   [`ingestion_center.html`](web_interface/templates/ingestion_center.html),
