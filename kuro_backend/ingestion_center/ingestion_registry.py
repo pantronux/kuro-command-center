@@ -19,9 +19,51 @@ from kuro_backend.db_utils import (
 logger = logging.getLogger(__name__)
 logger.propagate = False
 
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "kuro_ingestion.db")
+DB_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "kuro_ingestion.db"
+)
 _SCHEMA_READY_FOR: Optional[str] = None
 _SCHEMA_LOCK = threading.Lock()
+
+ALLOWED_DATASET_COLUMNS = {
+    "dataset_name",
+    "original_filename",
+    "file_path",
+    "file_hash_sha256",
+    "source_type",
+    "category",
+    "owner_username",
+    "ingestion_status",
+    "chunk_count",
+    "embedding_count",
+    "vector_collection",
+    "memory_scope",
+    "tags_json",
+    "metadata_json",
+    "created_at",
+    "updated_at",
+    "archived_at",
+    "deleted_at",
+    "last_error",
+    "parser_type",
+    "entity_count",
+    "summary_text",
+    "updated_at",
+}
+
+ALLOWED_JOB_COLUMNS = {
+    "dataset_uuid",
+    "username",
+    "job_type",
+    "status",
+    "progress_percent",
+    "started_at",
+    "completed_at",
+    "error_message",
+    "logs_json",
+    "created_at",
+    "updated_at",
+}
 
 
 def _reset_schema_ready_for_tests() -> None:
@@ -64,8 +106,7 @@ def _init_db_locked() -> None:
 
         conn = _get_connection()
         cur = conn.cursor()
-        cur.execute(
-            """
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS ingested_datasets (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 dataset_uuid TEXT UNIQUE NOT NULL,
@@ -92,10 +133,8 @@ def _init_db_locked() -> None:
                 entity_count INTEGER DEFAULT 0,
                 summary_text TEXT
             )
-            """
-        )
-        cur.execute(
-            """
+            """)
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS dataset_chunks (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 dataset_uuid TEXT NOT NULL,
@@ -112,10 +151,8 @@ def _init_db_locked() -> None:
                 vector_id TEXT,
                 is_orphan INTEGER DEFAULT 0
             )
-            """
-        )
-        cur.execute(
-            """
+            """)
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS ingestion_jobs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 dataset_uuid TEXT,
@@ -130,10 +167,8 @@ def _init_db_locked() -> None:
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )
-            """
-        )
-        cur.execute(
-            """
+            """)
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS retrieval_analytics (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 dataset_uuid TEXT,
@@ -145,10 +180,8 @@ def _init_db_locked() -> None:
                 chat_id TEXT,
                 username TEXT
             )
-            """
-        )
-        cur.execute(
-            """
+            """)
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS dataset_lineage (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 dataset_uuid TEXT,
@@ -157,8 +190,7 @@ def _init_db_locked() -> None:
                 metadata_json TEXT,
                 created_at TEXT NOT NULL
             )
-            """
-        )
+            """)
         index_sql = (
             "CREATE INDEX IF NOT EXISTS idx_ingested_dataset_uuid ON ingested_datasets(dataset_uuid)",
             "CREATE INDEX IF NOT EXISTS idx_ingested_owner_created ON ingested_datasets(owner_username, created_at DESC)",
@@ -279,6 +311,9 @@ def create_dataset(payload: Dict[str, Any]) -> Dict[str, Any]:
 def update_dataset(dataset_uuid: str, **updates: Any) -> Optional[Dict[str, Any]]:
     if not updates:
         return get_dataset(dataset_uuid)
+    invalid_cols = set(updates.keys()) - ALLOWED_DATASET_COLUMNS
+    if invalid_cols:
+        raise ValueError(f"Invalid columns for update_dataset: {invalid_cols}")
     updates["updated_at"] = now_iso()
     columns = ", ".join(f"{key} = ?" for key in updates.keys())
     params = list(updates.values()) + [dataset_uuid]
@@ -287,10 +322,14 @@ def update_dataset(dataset_uuid: str, **updates: Any) -> Optional[Dict[str, Any]
 
 
 def get_dataset(dataset_uuid: str) -> Optional[Dict[str, Any]]:
-    return fetch_one("SELECT * FROM ingested_datasets WHERE dataset_uuid = ?", (dataset_uuid,))
+    return fetch_one(
+        "SELECT * FROM ingested_datasets WHERE dataset_uuid = ?", (dataset_uuid,)
+    )
 
 
-def find_dataset_by_hash(owner_username: str, sha256_hash: str) -> Optional[Dict[str, Any]]:
+def find_dataset_by_hash(
+    owner_username: str, sha256_hash: str
+) -> Optional[Dict[str, Any]]:
     return fetch_one(
         """
         SELECT * FROM ingested_datasets
@@ -301,7 +340,9 @@ def find_dataset_by_hash(owner_username: str, sha256_hash: str) -> Optional[Dict
     )
 
 
-def list_datasets(owner_username: Optional[str] = None, active_only: bool = False) -> List[Dict[str, Any]]:
+def list_datasets(
+    owner_username: Optional[str] = None, active_only: bool = False
+) -> List[Dict[str, Any]]:
     clauses = []
     params: List[Any] = []
     if owner_username:
@@ -310,7 +351,9 @@ def list_datasets(owner_username: Optional[str] = None, active_only: bool = Fals
     if active_only:
         clauses.append("ingestion_status NOT IN ('archived', 'deleted')")
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-    return fetch_all(f"SELECT * FROM ingested_datasets {where} ORDER BY created_at DESC", params)
+    return fetch_all(
+        f"SELECT * FROM ingested_datasets {where} ORDER BY created_at DESC", params
+    )
 
 
 def list_active_datasets(
@@ -339,7 +382,9 @@ def replace_chunks(dataset_uuid: str, chunks: List[Dict[str, Any]]) -> int:
     init_db()
     conn = _get_connection()
     try:
-        conn.execute("DELETE FROM dataset_chunks WHERE dataset_uuid = ?", (dataset_uuid,))
+        conn.execute(
+            "DELETE FROM dataset_chunks WHERE dataset_uuid = ?", (dataset_uuid,)
+        )
         conn.executemany(
             """
             INSERT INTO dataset_chunks (
@@ -374,10 +419,15 @@ def replace_chunks(dataset_uuid: str, chunks: List[Dict[str, Any]]) -> int:
 
 
 def list_chunks(dataset_uuid: str) -> List[Dict[str, Any]]:
-    return fetch_all("SELECT * FROM dataset_chunks WHERE dataset_uuid = ? ORDER BY chunk_index ASC", (dataset_uuid,))
+    return fetch_all(
+        "SELECT * FROM dataset_chunks WHERE dataset_uuid = ? ORDER BY chunk_index ASC",
+        (dataset_uuid,),
+    )
 
 
-def get_chunk_by_dataset_and_index(dataset_uuid: str, chunk_index: int) -> Optional[Dict[str, Any]]:
+def get_chunk_by_dataset_and_index(
+    dataset_uuid: str, chunk_index: int
+) -> Optional[Dict[str, Any]]:
     return fetch_one(
         "SELECT * FROM dataset_chunks WHERE dataset_uuid = ? AND chunk_index = ? LIMIT 1",
         (dataset_uuid, chunk_index),
@@ -393,7 +443,9 @@ def increment_chunk_retrieval_count(chunk_id: int, amount: int = 1) -> None:
 
 
 @db_retry()
-def update_chunk_vector(dataset_uuid: str, chunk_index: int, vector_id: Optional[str], embedding_status: str) -> None:
+def update_chunk_vector(
+    dataset_uuid: str, chunk_index: int, vector_id: Optional[str], embedding_status: str
+) -> None:
     execute(
         """
         UPDATE dataset_chunks
@@ -421,7 +473,9 @@ def update_chunk_orphans(dataset_uuid: str, vector_ids_missing: Iterable[str]) -
 
 
 @db_retry()
-def create_job(dataset_uuid: Optional[str], username: str, job_type: str, status: str = "queued") -> Dict[str, Any]:
+def create_job(
+    dataset_uuid: Optional[str], username: str, job_type: str, status: str = "queued"
+) -> Dict[str, Any]:
     init_db()
     stamp = now_iso()
     conn = _get_connection()
@@ -437,7 +491,9 @@ def create_job(dataset_uuid: Optional[str], username: str, job_type: str, status
             (dataset_uuid, username, job_type, status, stamp, stamp),
         )
         conn.commit()
-        row = conn.execute("SELECT * FROM ingestion_jobs WHERE id = ?", (cur.lastrowid,)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM ingestion_jobs WHERE id = ?", (cur.lastrowid,)
+        ).fetchone()
         return dict(row)
     finally:
         conn.close()
@@ -447,6 +503,9 @@ def create_job(dataset_uuid: Optional[str], username: str, job_type: str, status
 def update_job(job_id: int, **updates: Any) -> Optional[Dict[str, Any]]:
     if not updates:
         return get_job(job_id)
+    invalid_cols = set(updates.keys()) - ALLOWED_JOB_COLUMNS
+    if invalid_cols:
+        raise ValueError(f"Invalid columns for update_job: {invalid_cols}")
     updates["updated_at"] = now_iso()
     columns = ", ".join(f"{key} = ?" for key in updates.keys())
     params = list(updates.values()) + [job_id]
@@ -469,18 +528,31 @@ def get_job(job_id: int) -> Optional[Dict[str, Any]]:
 
 
 def list_jobs(limit: int = 100) -> List[Dict[str, Any]]:
-    return fetch_all("SELECT * FROM ingestion_jobs ORDER BY created_at DESC LIMIT ?", (limit,))
+    return fetch_all(
+        "SELECT * FROM ingestion_jobs ORDER BY created_at DESC LIMIT ?", (limit,)
+    )
 
 
 @db_retry()
-def create_lineage(dataset_uuid: str, operation_type: str, metadata: Dict[str, Any], parent_dataset_uuid: Optional[str] = None) -> None:
+def create_lineage(
+    dataset_uuid: str,
+    operation_type: str,
+    metadata: Dict[str, Any],
+    parent_dataset_uuid: Optional[str] = None,
+) -> None:
     execute(
         """
         INSERT INTO dataset_lineage (
             dataset_uuid, parent_dataset_uuid, operation_type, metadata_json, created_at
         ) VALUES (?, ?, ?, ?, ?)
         """,
-        (dataset_uuid, parent_dataset_uuid, operation_type, json.dumps(metadata, ensure_ascii=False), now_iso()),
+        (
+            dataset_uuid,
+            parent_dataset_uuid,
+            operation_type,
+            json.dumps(metadata, ensure_ascii=False),
+            now_iso(),
+        ),
     )
 
 
@@ -514,7 +586,9 @@ def create_retrieval_event(payload: Dict[str, Any]) -> None:
 
 
 def list_retrieval_events(limit: int = 200) -> List[Dict[str, Any]]:
-    return fetch_all("SELECT * FROM retrieval_analytics ORDER BY created_at DESC LIMIT ?", (limit,))
+    return fetch_all(
+        "SELECT * FROM retrieval_analytics ORDER BY created_at DESC LIMIT ?", (limit,)
+    )
 
 
 def get_retrieval_summary(limit: int = 10) -> List[Dict[str, Any]]:
@@ -532,7 +606,9 @@ def get_retrieval_summary(limit: int = 10) -> List[Dict[str, Any]]:
     )
 
 
-def search_datasets(query: str, owner_username: Optional[str] = None) -> List[Dict[str, Any]]:
+def search_datasets(
+    query: str, owner_username: Optional[str] = None
+) -> List[Dict[str, Any]]:
     like_query = f"%{query.strip()}%"
     sql = """
         SELECT d.*, c.preview_text AS matched_chunk_preview
@@ -554,25 +630,21 @@ def search_datasets(query: str, owner_username: Optional[str] = None) -> List[Di
 
 
 def get_status_counts() -> Dict[str, int]:
-    rows = fetch_all(
-        """
+    rows = fetch_all("""
         SELECT ingestion_status, COUNT(*) AS count
         FROM ingested_datasets
         GROUP BY ingestion_status
-        """
-    )
+        """)
     return {row["ingestion_status"]: row["count"] for row in rows}
 
 
 def get_totals() -> Dict[str, Any]:
-    row = fetch_one(
-        """
+    row = fetch_one("""
         SELECT COUNT(*) AS dataset_count,
                COALESCE(SUM(chunk_count), 0) AS chunk_count,
                COALESCE(SUM(embedding_count), 0) AS embedding_count
         FROM ingested_datasets
         WHERE deleted_at IS NULL
-        """
-    ) or {"dataset_count": 0, "chunk_count": 0, "embedding_count": 0}
+        """) or {"dataset_count": 0, "chunk_count": 0, "embedding_count": 0}
     row["status_counts"] = get_status_counts()
     return row
