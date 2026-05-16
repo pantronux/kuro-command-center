@@ -18,7 +18,8 @@ def test_playground_provider_env_canonical_six(monkeypatch):
     monkeypatch.setenv("PLAYGROUND_GEMINI_MODEL_NAME", "gem-test")
     monkeypatch.setenv("PLAYGROUND_ANTHROPIC_API_KEY", "k-anth")
     monkeypatch.setenv("PLAYGROUND_DEEPSEEK_API_KEY", "k-deep")
-    monkeypatch.setenv("PLAYGROUND_OLLAMA_BASE_URL", "http://localhost:11434")
+    monkeypatch.setenv("PLAYGROUND_OLLAMA_BASE_URL", "http://localhost:11434/v1")
+    monkeypatch.setenv("PLAYGROUND_OLLAMA_MODEL_NAME", "qwen3:4b")
     monkeypatch.setenv("PLAYGROUND_OPENAI_COMPAT_BASE_URL", "http://localhost:8080/v1")
 
     cfg = _reload_config_module()
@@ -35,6 +36,8 @@ def test_playground_provider_env_canonical_six(monkeypatch):
     }
     assert providers["openai"].active is True
     assert providers["ollama"].active is True
+    assert providers["ollama"].base_url == "http://localhost:11434/v1"
+    assert providers["ollama"].model_name == "qwen3:4b"
     assert providers["openai_compat"].active is True
 
 

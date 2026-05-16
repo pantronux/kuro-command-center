@@ -172,6 +172,31 @@ Operational notes:
 - comparative execution requires at least two active providers and respects
   `KURO_PLAYGROUND_MAX_CONCURRENT_PROVIDERS`.
 
+Local Ollama setup (OpenAI-compatible path):
+
+- `export PLAYGROUND_OLLAMA_BASE_URL=http://localhost:11434/v1`
+- `export PLAYGROUND_OLLAMA_MODEL_NAME=qwen3:4b`
+- verify native Ollama tags:
+  `curl http://localhost:11434/api/tags`
+- verify model listing:
+  `curl http://localhost:11434/v1/models`
+- verify chat completion:
+  `curl http://localhost:11434/v1/chat/completions ...`
+
+Expected validation:
+
+- `/api/tags` includes `qwen3:4b`
+- `/v1/models` includes `qwen3:4b`
+- `/v1/chat/completions` returns `choices[0].message.content`
+- some models may also return `choices[0].message.reasoning`
+
+Security note:
+
+- Do not expose Ollama port `11434` publicly without strict network controls.
+- Treat `choices[0].message.reasoning` as a model-generated visible reasoning artifact.
+- Treat Gemini `thought_signature` as an opaque provider reasoning signature.
+- Neither field is treated as guaranteed true internal chain-of-thought.
+
 Gemini note:
 
 - the adapter uses Google's OpenAI-compatible endpoint under

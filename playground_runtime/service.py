@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import re
+from copy import deepcopy
 from dataclasses import asdict
 from datetime import datetime
 from hashlib import sha256
@@ -135,10 +136,28 @@ class PlaygroundRuntimeService:
                     "status": existing.get("status", "active"),
                 }
 
+        env_flags = self.settings.snapshot_flags()
         runtime_config = {
             "mode": profile.name,
             "profile": asdict(profile),
-            "flags": self.settings.snapshot_flags(),
+            "flags": env_flags,
+            "selected_mode": profile.name,
+            "effective_workflow_mode": "quick",
+            "env_feature_flags": env_flags,
+            "ui_selected_providers": [],
+            "provider_count": 0,
+            "effective_features": {
+                "comparative_execution_enabled": False,
+                "forensic_integrity_enabled": False,
+                "ontology_graph_enabled": profile.name == "ontology",
+                "report_export_enabled": False,
+            },
+            "comparative_execution_enabled": False,
+            "forensic_integrity_enabled": False,
+            "ontology_graph_enabled": profile.name == "ontology",
+            "report_export_enabled": False,
+            "feature_sources": ["env", "runtime_profile"],
+            "feature_source": "mixed",
         }
         if runtime_config_override:
             runtime_config["override"] = runtime_config_override
@@ -224,6 +243,17 @@ class PlaygroundRuntimeService:
             provider_id,
             {"trace_id": trace.trace_id},
         )
+        self._update_runtime_config_state(
+            session_id=session_id,
+            source="ui",
+            selected_mode=session.get("mode", "research"),
+            ui_selected_providers=[provider_id],
+            provider_count=1,
+            effective_features={
+                "comparative_execution_enabled": False,
+                "forensic_integrity_enabled": True,
+            },
+        )
         self.build_session_timeline_integrity(session_id=session_id, actor=actor)
         return self._trace_to_dict(trace)
 
@@ -273,6 +303,18 @@ class PlaygroundRuntimeService:
         divergence_rows = compute_semantic_divergence(traces)
         for row in divergence_rows:
             self.db.insert_semantic_divergence(session_id=session_id, payload=row)
+        self._update_runtime_config_state(
+            session_id=session_id,
+            source="ui",
+            selected_mode=session.get("mode", "research"),
+            ui_selected_providers=provider_ids,
+            provider_count=len(provider_ids),
+            effective_features={
+                "comparative_execution_enabled": len(provider_ids) > 1,
+                "forensic_integrity_enabled": True,
+            },
+            effective_workflow_mode="comparative" if len(provider_ids) > 1 else "quick",
+        )
         self._emit(
             "execution_comparative_completed",
             session_id,
@@ -289,7 +331,7 @@ class PlaygroundRuntimeService:
         }
 
     def reconstruct_ontology(self, session_id: str, actor: Optional[str] = None) -> dict:
-        self._require_session(session_id)
+        session = self._require_session(session_id)
         traces = self._load_session_traces(session_id)
         graph = reconstruct_ontology_graph(traces)
         graph_id = self.db.insert_ontology_graph(
@@ -333,6 +375,12 @@ class PlaygroundRuntimeService:
                 weight=edge.weight,
                 provenance={"session_id": session_id},
             )
+        self._update_runtime_config_state(
+            session_id=session_id,
+            source="runtime_profile",
+            selected_mode=session.get("mode", "research"),
+            effective_features={"ontology_graph_enabled": True},
+        )
         self._emit(
             "ontology_reconstructed",
             session_id,
@@ -435,6 +483,12 @@ class PlaygroundRuntimeService:
             None,
             {"report_id": report_id, "format": report_format.lower()},
         )
+        self._update_runtime_config_state(
+            session_id=session_id,
+            source="runtime_profile",
+            selected_mode=session.get("mode", "research"),
+            effective_features={"report_export_enabled": True},
+        )
         self.build_session_timeline_integrity(session_id=session_id, actor=actor)
         return {
             "report_id": report_id,
@@ -518,6 +572,14 @@ class PlaygroundRuntimeService:
             for row in snapshots[:50]
             if row.get("snapshot_id")
         ]
+        runtime_latest_raw = self._decode_json(runtime_rows[0]["config_json"], {}) if runtime_rows else {}
+        runtime_latest = self._ensure_runtime_config_consistency(
+            runtime_config=runtime_latest_raw,
+            session_mode=session.get("mode", "research"),
+            executions=executions,
+            reports=reports,
+            ontology_graphs=graphs,
+        )
 
         return {
             "session": {
@@ -533,12 +595,18 @@ class PlaygroundRuntimeService:
                 "session_integrity_verified_at": session.get("session_integrity_verified_at"),
             },
             "runtime_configs": {
-                "latest": self._decode_json(runtime_rows[0]["config_json"], {}) if runtime_rows else {},
+                "latest": runtime_latest,
                 "items": [
                     {
                         "id": row["id"],
                         "created_at_utc": row["created_at_utc"],
-                        "config": self._decode_json(row["config_json"], {}),
+                        "config": self._ensure_runtime_config_consistency(
+                            runtime_config=self._decode_json(row["config_json"], {}),
+                            session_mode=session.get("mode", "research"),
+                            executions=executions,
+                            reports=reports,
+                            ontology_graphs=graphs,
+                        ),
                     }
                     for row in runtime_rows
                 ],
@@ -820,8 +888,14 @@ class PlaygroundRuntimeService:
         }
 
     def build_forensic_view(self, *, session_id: str, view: str, workflow_mode: str = "quick") -> dict:
-        self._require_session(session_id)
+        session = self._require_session(session_id)
         mode = self._normalize_workflow_mode(workflow_mode)
+        self._update_runtime_config_state(
+            session_id=session_id,
+            source="ui",
+            selected_mode=session.get("mode", "research"),
+            effective_workflow_mode=mode,
+        )
         view_name = (view or "summary").strip().lower()
         if view_name == "raw":
             rows = self.db.list_raw_evidence(session_id=session_id)
@@ -833,7 +907,20 @@ class PlaygroundRuntimeService:
             return self._shape_view_payload(payload, mode)
         if view_name == "ontology":
             rows = self.db.list_ontology_graphs(session_id=session_id)
-            payload = {"view": "ontology", "session_id": session_id, "graphs": rows}
+            minimal_graphs = self._build_minimal_ontology_graphs(session_id=session_id)
+            payload = {
+                "view": "ontology",
+                "session_id": session_id,
+                "graphs": minimal_graphs,
+                "stored_graphs": rows,
+            }
+            if minimal_graphs:
+                self._update_runtime_config_state(
+                    session_id=session_id,
+                    source="runtime_profile",
+                    selected_mode=session.get("mode", "research"),
+                    effective_features={"ontology_graph_enabled": True},
+                )
             return self._shape_view_payload(payload, mode)
         if view_name == "divergence":
             rows = self.db.list_semantic_divergence(session_id=session_id)
@@ -1027,7 +1114,7 @@ class PlaygroundRuntimeService:
             "transformation_version": manifest_rows[0].get("transformer_version") if manifest_rows else "unknown",
             "replay_compatibility": replay,
             "verified_at": row.get("verified_at"),
-            "runtime_mode": runtime_config.get("mode"),
+            "runtime_mode": runtime_config.get("selected_mode") or runtime_config.get("mode"),
         }
         summary["summary_text"] = self._build_snapshot_trust_text(summary)
         return summary
@@ -1146,7 +1233,7 @@ class PlaygroundRuntimeService:
         output_path: Optional[str] = None,
         actor: Optional[str] = None,
     ) -> dict:
-        self._require_session(session_id)
+        session = self._require_session(session_id)
         timeline = self.build_session_timeline_integrity(session_id=session_id, actor=actor)
         snapshots = self.db.list_snapshots(session_id=session_id)
         snapshot_summary = {"snapshot_integrity": "UNVERIFIED", "replay_compatibility": "LIMITED"}
@@ -1159,15 +1246,19 @@ class PlaygroundRuntimeService:
         )
 
         ontology_graphs = self.db.list_ontology_graphs(session_id=session_id)
-        ontology_payload = {}
+        minimal_graphs = self._build_minimal_ontology_graphs(session_id=session_id)
+        ontology_payload = {
+            "graphs": ontology_graphs,
+            "minimal_graphs": minimal_graphs,
+            "entities": [],
+            "relationships": [],
+            "mappings": [],
+        }
         if ontology_graphs:
             graph_id = ontology_graphs[0].get("id")
-            ontology_payload = {
-                "graphs": ontology_graphs,
-                "entities": self.db.list_ontology_entities(graph_id),
-                "relationships": self.db.list_ontology_relationships(graph_id),
-                "mappings": self.db.list_ontology_mappings(session_id),
-            }
+            ontology_payload["entities"] = self.db.list_ontology_entities(graph_id)
+            ontology_payload["relationships"] = self.db.list_ontology_relationships(graph_id)
+            ontology_payload["mappings"] = self.db.list_ontology_mappings(session_id)
 
         bundle_payload = {
             "session_id": session_id,
@@ -1205,6 +1296,15 @@ class PlaygroundRuntimeService:
                 new_hash=exported["bundle_sha256"],
                 notes=exported["bundle_path"],
             )
+        )
+        self._update_runtime_config_state(
+            session_id=session_id,
+            source="runtime_profile",
+            selected_mode=session.get("mode", "research"),
+            effective_features={
+                "report_export_enabled": True,
+                "ontology_graph_enabled": bool(minimal_graphs or ontology_graphs),
+            },
         )
         return {
             "session_id": session_id,
@@ -1400,16 +1500,42 @@ class PlaygroundRuntimeService:
             "dataset_version": dataset_version,
         }
         if isinstance(response.raw_json, dict):
-            for key in (
-                "reasoning",
-                "reasoning_content",
-                "chain_of_thought",
-                "cot",
-                "thought_process",
-                "internal_reasoning",
-            ):
-                if key in response.raw_json:
-                    normalized_input[key] = response.raw_json[key]
+            metadata_aliases = {
+                "system_fingerprint": "system_fingerprint",
+                "id": "provider_response_id",
+                "object": "provider_response_object",
+                "created": "provider_response_created",
+                "model": "provider_response_model",
+            }
+            for raw_key, canonical_key in metadata_aliases.items():
+                if raw_key in response.raw_json:
+                    normalized_input[canonical_key] = response.raw_json.get(raw_key)
+
+            raw_choices = response.raw_json.get("choices")
+            if isinstance(raw_choices, list) and raw_choices:
+                first_choice = raw_choices[0] if isinstance(raw_choices[0], dict) else {}
+                message = first_choice.get("message") if isinstance(first_choice, dict) else {}
+                if isinstance(message, dict):
+                    reasoning_artifact = message.get("reasoning")
+                    if reasoning_artifact is not None:
+                        normalized_input["visible_reasoning_trace"] = reasoning_artifact
+                        normalized_input["visible_reasoning_trace_origin"] = "model_generated_artifact"
+                        normalized_input["provider_specific_artifact_type"] = "visible_reasoning_trace"
+                        normalized_input["provider_specific_artifact_origin"] = "model_generated_artifact"
+                        normalized_input["provider_specific_artifact_human_readable"] = True
+
+                    extra_content = message.get("extra_content")
+                    if isinstance(extra_content, dict):
+                        google_meta = extra_content.get("google")
+                        if isinstance(google_meta, dict):
+                            thought_signature = google_meta.get("thought_signature")
+                            if thought_signature is not None:
+                                normalized_input["provider_thought_signature"] = thought_signature
+                                normalized_input["reasoning_signature_origin"] = "provider_opaque_artifact"
+                                normalized_input["provider_specific_artifact_type"] = "opaque_reasoning_signature"
+                                normalized_input["provider_specific_artifact_origin"] = "provider_opaque_artifact"
+                                normalized_input["provider_specific_artifact_human_readable"] = False
+
             if isinstance(response.raw_json.get("grounding_chunks"), list):
                 normalized_input["grounding_chunks"] = response.raw_json.get("grounding_chunks")
             if isinstance(response.raw_json.get("citations"), list):
@@ -1563,10 +1689,24 @@ class PlaygroundRuntimeService:
         }
 
     def _decode_semantic_divergence_row(self, row: dict) -> dict:
+        variance = self._decode_json(row.get("provider_variance_json"), {})
+        if not isinstance(variance, dict):
+            variance = {}
         return {
             **row,
             "contradiction_flags_json": self._decode_json(row.get("contradiction_flags_json"), []),
-            "provider_variance_json": self._decode_json(row.get("provider_variance_json"), {}),
+            "provider_variance_json": variance,
+            "classification_label_left": variance.get("classification_label_left"),
+            "classification_label_right": variance.get("classification_label_right"),
+            "classification_agreement": variance.get("classification_agreement"),
+            "rationale_overlap": variance.get("rationale_overlap"),
+            "output_length_delta": variance.get("output_length_delta"),
+            "token_delta": variance.get("token_delta"),
+            "latency_delta_ms": variance.get("latency_delta_ms"),
+            "metadata_surface_delta": variance.get("metadata_surface_delta"),
+            "visible_reasoning_delta": variance.get("visible_reasoning_delta"),
+            "provider_specific_artifact_delta": variance.get("provider_specific_artifact_delta"),
+            "contradiction_detected": variance.get("contradiction_detected"),
         }
 
     @staticmethod
@@ -1582,6 +1722,298 @@ class PlaygroundRuntimeService:
             f"Session contains {trace_count} trace(s) from provider(s): {provider_list}. "
             f"Observed {len(divergence_rows)} semantic divergence pair(s) across provider outputs."
         )
+
+    def _update_runtime_config_state(
+        self,
+        *,
+        session_id: str,
+        source: str,
+        selected_mode: Optional[str] = None,
+        effective_workflow_mode: Optional[str] = None,
+        ui_selected_providers: Optional[list[str]] = None,
+        provider_count: Optional[int] = None,
+        effective_features: Optional[dict[str, bool]] = None,
+    ) -> None:
+        runtime_rows = self.db.list_runtime_configs(session_id=session_id)
+        if not runtime_rows:
+            return
+        latest = self._decode_json(runtime_rows[0].get("config_json"), {}) if runtime_rows else {}
+        if not isinstance(latest, dict):
+            latest = {}
+        updated = deepcopy(latest)
+
+        if selected_mode:
+            updated["selected_mode"] = selected_mode
+        if effective_workflow_mode:
+            updated["effective_workflow_mode"] = effective_workflow_mode
+        if ui_selected_providers is not None:
+            providers = [str(p).strip() for p in ui_selected_providers if str(p).strip()]
+            updated["ui_selected_providers"] = providers
+            updated["provider_count"] = len(providers)
+        elif provider_count is not None:
+            updated["provider_count"] = int(max(provider_count, 0))
+
+        env_flags = updated.get("env_feature_flags")
+        if not isinstance(env_flags, dict):
+            env_flags = updated.get("flags")
+        if not isinstance(env_flags, dict):
+            env_flags = self.settings.snapshot_flags()
+        updated["env_feature_flags"] = env_flags
+
+        feature_state = updated.get("effective_features")
+        if not isinstance(feature_state, dict):
+            feature_state = {}
+        feature_defaults = {
+            "comparative_execution_enabled": bool(updated.get("comparative_execution_enabled", False)),
+            "forensic_integrity_enabled": bool(updated.get("forensic_integrity_enabled", False)),
+            "ontology_graph_enabled": bool(updated.get("ontology_graph_enabled", False)),
+            "report_export_enabled": bool(updated.get("report_export_enabled", False)),
+        }
+        merged_features = {**feature_defaults, **feature_state}
+        if isinstance(effective_features, dict):
+            merged_features.update({k: bool(v) for k, v in effective_features.items()})
+        updated["effective_features"] = merged_features
+        for key, value in merged_features.items():
+            updated[key] = bool(value)
+
+        sources = set()
+        previous_sources = updated.get("feature_sources", [])
+        if isinstance(previous_sources, list):
+            sources.update(str(item) for item in previous_sources if str(item).strip())
+        if source:
+            sources.add(source)
+        if selected_mode:
+            sources.add("runtime_profile")
+        if ui_selected_providers:
+            sources.add("ui")
+
+        env_mapping = {
+            "comparative_execution_enabled": bool(env_flags.get("KURO_PLAYGROUND_COMPARATIVE_MODE", False)),
+            "forensic_integrity_enabled": bool(env_flags.get("KURO_PLAYGROUND_FORENSIC_MODE", False)),
+            "ontology_graph_enabled": bool(env_flags.get("KURO_PLAYGROUND_ONTOLOGY_MODE", False)),
+            "report_export_enabled": bool(env_flags.get("KURO_PLAYGROUND_REPORT_EXPORT", False)),
+        }
+        if any(env_mapping.values()):
+            sources.add("env")
+        if any(merged_features.get(key, False) and not env_mapping.get(key, False) for key in env_mapping):
+            sources.add("ui")
+
+        if not sources:
+            sources.add("runtime_profile")
+        updated["feature_sources"] = sorted(sources)
+        updated["feature_source"] = next(iter(sources)) if len(sources) == 1 else "mixed"
+
+        self.db.insert_runtime_config(session_id=session_id, config=updated)
+
+    def _build_minimal_ontology_graphs(self, *, session_id: str) -> list[dict]:
+        traces = self.db.list_canonical_traces(session_id=session_id)
+        if not traces:
+            return []
+        executions = {row.get("id"): row for row in self.db.list_model_executions(session_id=session_id)}
+        raw_rows = {row.get("execution_id"): row for row in self.db.list_raw_evidence(session_id=session_id)}
+        runtime_rows = self.db.list_runtime_configs(session_id=session_id)
+        runtime_latest = self._decode_json(runtime_rows[0].get("config_json"), {}) if runtime_rows else {}
+
+        graphs: list[dict] = []
+        for trace_row in traces:
+            trace = self._decode_canonical_trace_row(trace_row)
+            trace_id = str(trace.get("id") or trace.get("trace_id") or "")
+            execution_id = str(trace.get("execution_id") or "")
+            if not trace_id:
+                continue
+            execution = executions.get(execution_id, {})
+            raw = raw_rows.get(execution_id, {})
+            raw_id = str(raw.get("id") or "")
+            provider_id = str(trace.get("provider_id") or execution.get("provider_id") or "unknown")
+            model_id = str(trace.get("model_id") or execution.get("model_id") or "unknown")
+            prompt_sha = str(trace.get("prompt_sha256") or execution.get("prompt_sha256") or "unknown")
+            response_text = str(trace.get("response_text") or "")
+            raw_sha = str(raw.get("raw_sha256") or "")
+            canonical_integrity = self.db.get_artifact_integrity(trace_id, "canonical_trace") or {}
+            canonical_sha = str(canonical_integrity.get("sha256") or "")
+            extra = trace.get("extra_fields_json")
+            if not isinstance(extra, dict):
+                extra = self._decode_json(trace.get("extra_fields_json"), {})
+            if not isinstance(extra, dict):
+                extra = {}
+
+            nodes: list[dict] = []
+            edges: list[dict] = []
+            node_seen: set[str] = set()
+
+            def add_node(node_id: str, **payload) -> None:
+                if node_id in node_seen:
+                    return
+                node_seen.add(node_id)
+                nodes.append({"id": node_id, **payload})
+
+            def add_edge(source: str, target: str, edge_type: str) -> None:
+                edges.append({"source": source, "target": target, "type": edge_type})
+
+            trace_node = f"trace:{trace_id}"
+            prompt_node = f"prompt:{prompt_sha}"
+            provider_node = f"provider:{provider_id}"
+            model_node = f"model:{model_id}"
+            output_node = f"output:{trace_id}"
+            raw_node = f"raw:{raw_id or execution_id or trace_id}"
+            normalize_node = f"normalize:{execution_id or trace_id}"
+            canonical_node = f"canonical:{trace_id}"
+            usage_node = f"usage:{trace_id}"
+            runtime_node = f"runtime:{session_id}:{execution_id or trace_id}"
+            raw_hash_node = f"hash:raw:{raw_id or execution_id or trace_id}"
+            canonical_hash_node = f"hash:canonical:{trace_id}"
+
+            add_node(trace_node, type="AIInferenceTrace")
+            add_node(prompt_node, type="PromptHash", sha256=prompt_sha)
+            add_node(provider_node, type="Provider", name=provider_id)
+            add_node(model_node, type="AIModel", model_id=model_id)
+            add_node(output_node, type="ModelOutput", text_preview=response_text[:240])
+            add_node(raw_node, type="RawProviderArtifact", artifact_id=raw_id, sha256=raw_sha or None)
+            add_node(normalize_node, type="NormalizationProcess", schema_version=trace.get("schema_version"))
+            add_node(canonical_node, type="CanonicalTrace", trace_id=trace_id, sha256=canonical_sha or None)
+            add_node(raw_hash_node, type="EvidenceHash", sha256=raw_sha or "unknown")
+            add_node(canonical_hash_node, type="EvidenceHash", sha256=canonical_sha or "unknown")
+            add_node(
+                usage_node,
+                type="TokenUsage",
+                input_tokens=trace.get("input_tokens"),
+                output_tokens=trace.get("output_tokens"),
+                total_tokens=trace.get("total_tokens"),
+            )
+            add_node(
+                runtime_node,
+                type="RuntimeMetadata",
+                selected_mode=runtime_latest.get("selected_mode") or runtime_latest.get("mode"),
+                effective_workflow_mode=runtime_latest.get("effective_workflow_mode"),
+                feature_source=runtime_latest.get("feature_source"),
+            )
+
+            add_edge(trace_node, prompt_node, "hasPromptHash")
+            add_edge(trace_node, provider_node, "generatedBy")
+            add_edge(trace_node, model_node, "usedModel")
+            add_edge(trace_node, output_node, "producedOutput")
+            add_edge(trace_node, raw_node, "hasRawEvidence")
+            add_edge(raw_node, normalize_node, "normalizedBy")
+            add_edge(normalize_node, canonical_node, "produced")
+            add_edge(raw_node, canonical_node, "normalizedInto")
+            add_edge(raw_node, raw_hash_node, "hasIntegrityHash")
+            add_edge(canonical_node, canonical_hash_node, "hasIntegrityHash")
+            add_edge(trace_node, usage_node, "hasTokenUsage")
+            add_edge(trace_node, runtime_node, "hasRuntimeMetadata")
+
+            provider_artifact_node = None
+            if extra.get("visible_reasoning_trace"):
+                provider_artifact_node = f"provider_artifact:{trace_id}:visible_reasoning"
+                add_node(
+                    provider_artifact_node,
+                    type="ProviderSpecificArtifact",
+                    artifact_type="visible_reasoning_trace",
+                    origin=extra.get("visible_reasoning_trace_origin", "model_generated_artifact"),
+                    human_readable=True,
+                )
+            elif extra.get("provider_thought_signature"):
+                provider_artifact_node = f"provider_artifact:{trace_id}:opaque_signature"
+                add_node(
+                    provider_artifact_node,
+                    type="ProviderSpecificArtifact",
+                    artifact_type="opaque_reasoning_signature",
+                    origin=extra.get("reasoning_signature_origin", "provider_opaque_artifact"),
+                    human_readable=False,
+                )
+            if provider_artifact_node:
+                add_edge(trace_node, provider_artifact_node, "hasProviderSpecificArtifact")
+
+            graphs.append(
+                {
+                    "graph_id": f"graph:{session_id}:{execution_id or trace_id}",
+                    "session_id": session_id,
+                    "execution_id": execution_id,
+                    "provider_id": provider_id,
+                    "model_id": model_id,
+                    "prompt_sha256": prompt_sha,
+                    "graph_schema_version": "kuro-ontology-minimal/1.0.0",
+                    "created_at_utc": trace.get("collected_at_utc"),
+                    "nodes": nodes,
+                    "edges": edges,
+                }
+            )
+        return graphs
+
+    def _ensure_runtime_config_consistency(
+        self,
+        *,
+        runtime_config: dict,
+        session_mode: str,
+        executions: list[dict],
+        reports: list[dict],
+        ontology_graphs: list[dict],
+    ) -> dict:
+        config = deepcopy(runtime_config if isinstance(runtime_config, dict) else {})
+        env_flags = config.get("env_feature_flags")
+        if not isinstance(env_flags, dict):
+            env_flags = config.get("flags")
+        if not isinstance(env_flags, dict):
+            env_flags = self.settings.snapshot_flags()
+        config["env_feature_flags"] = env_flags
+
+        provider_ids = sorted({str(row.get("provider_id")) for row in executions if row.get("provider_id")})
+        provider_count = len(provider_ids)
+        config["ui_selected_providers"] = config.get("ui_selected_providers") or provider_ids
+        config["provider_count"] = int(config.get("provider_count") or provider_count)
+        config["selected_mode"] = config.get("selected_mode") or config.get("mode") or session_mode
+
+        default_workflow = "comparative" if provider_count > 1 else "quick"
+        config["effective_workflow_mode"] = config.get("effective_workflow_mode") or default_workflow
+
+        feature_state = config.get("effective_features")
+        if not isinstance(feature_state, dict):
+            feature_state = {}
+        effective_features = {
+            "comparative_execution_enabled": bool(
+                feature_state.get("comparative_execution_enabled")
+                or config.get("comparative_execution_enabled")
+                or provider_count > 1
+            ),
+            "forensic_integrity_enabled": bool(
+                feature_state.get("forensic_integrity_enabled")
+                or config.get("forensic_integrity_enabled")
+                or len(executions) > 0
+            ),
+            "ontology_graph_enabled": bool(
+                feature_state.get("ontology_graph_enabled")
+                or config.get("ontology_graph_enabled")
+                or len(ontology_graphs) > 0
+            ),
+            "report_export_enabled": bool(
+                feature_state.get("report_export_enabled")
+                or config.get("report_export_enabled")
+                or len(reports) > 0
+            ),
+        }
+        config["effective_features"] = effective_features
+        for key, value in effective_features.items():
+            config[key] = value
+
+        env_mapping = {
+            "comparative_execution_enabled": bool(env_flags.get("KURO_PLAYGROUND_COMPARATIVE_MODE", False)),
+            "forensic_integrity_enabled": bool(env_flags.get("KURO_PLAYGROUND_FORENSIC_MODE", False)),
+            "ontology_graph_enabled": bool(env_flags.get("KURO_PLAYGROUND_ONTOLOGY_MODE", False)),
+            "report_export_enabled": bool(env_flags.get("KURO_PLAYGROUND_REPORT_EXPORT", False)),
+        }
+        sources: set[str] = set()
+        previous_sources = config.get("feature_sources", [])
+        if isinstance(previous_sources, list):
+            sources.update(str(item) for item in previous_sources if str(item).strip())
+        sources.add("runtime_profile")
+        if provider_count > 0:
+            sources.add("ui")
+        if any(env_mapping.values()):
+            sources.add("env")
+        if any(effective_features[key] and not env_mapping.get(key, False) for key in env_mapping):
+            sources.add("ui")
+        config["feature_sources"] = sorted(sources)
+        config["feature_source"] = next(iter(sources)) if len(sources) == 1 else "mixed"
+        return config
 
     @staticmethod
     def _normalize_workflow_mode(value: str) -> str:

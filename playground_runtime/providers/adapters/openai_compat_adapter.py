@@ -27,6 +27,14 @@ class OpenAICompatAdapter(BaseAdapter):
         self.api_key = api_key
         self.default_model = default_model
 
+    def _resolve_chat_completions_url(self) -> str:
+        base = self.base_url
+        if base.endswith("/chat/completions"):
+            return base
+        if base.endswith("/v1"):
+            return f"{base}/chat/completions"
+        return f"{base}/v1/chat/completions"
+
     def invoke(self, req: ProviderRequest) -> ProviderResponse:
         if not self.base_url:
             raise ProviderConfigurationError(f"Provider '{self.provider_id}' missing base_url")
@@ -43,10 +51,11 @@ class OpenAICompatAdapter(BaseAdapter):
             "messages": [{"role": "user", "content": req.prompt}],
             "temperature": 0,
         }
+        endpoint_url = self._resolve_chat_completions_url()
         start = time.perf_counter()
         try:
             resp = requests.post(
-                f"{self.base_url}/v1/chat/completions",
+                endpoint_url,
                 headers=headers,
                 json=payload,
                 timeout=60,

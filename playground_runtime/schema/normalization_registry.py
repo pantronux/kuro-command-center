@@ -51,6 +51,8 @@ class NormalizationRegistry:
             "anthropic": AnthropicMapper(),
             "claude": AnthropicMapper(),
             "deepseek": DeepSeekMapper(),
+            "ollama": OpenAIMapper(),
+            "openai_compat": OpenAIMapper(),
         }
 
     def register(self, provider_id: str, mapper: BaseMapper) -> None:

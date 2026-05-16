@@ -11,6 +11,8 @@ _CANDIDATE_MAP = {
     "citations": "citation_objects",
     "citation_objects": "citation_objects",
     "reasoning": "reasoning_artifact",
+    "visible_reasoning_trace": "provider_visible_reasoning_artifact",
+    "provider_thought_signature": "provider_opaque_reasoning_signature",
 }
 
 
@@ -19,6 +21,10 @@ def _collect_semantic_loss_flags(trace: CanonicalInferenceTrace) -> list[str]:
     for warning in trace.normalization_warnings:
         if warning.startswith("SCHEMA_DRIFT"):
             flags.append("UNMAPPED_FIELDS")
+        if warning.startswith("MAPPING_DRIFT"):
+            flags.append("MAPPING_DRIFT")
+        if warning.startswith("UNMAPPED_PROVIDER_FIELDS"):
+            flags.append("UNMAPPED_PROVIDER_FIELDS")
         if warning.startswith("UNKNOWN_PROVIDER"):
             flags.append("UNRESOLVED_PROVIDER_ALIAS")
         if warning.startswith("HIDDEN_REASONING"):

@@ -47,3 +47,49 @@ def test_compute_semantic_divergence_returns_expected_fields():
     assert "claim_overlap" in row
     assert "grounding_delta" in row
     assert "provider_variance" in row
+    assert "classification_label_left" in row
+    assert "classification_label_right" in row
+    assert "classification_agreement" in row
+    assert "contradiction_detected" in row
+
+
+def test_semantic_divergence_agreement_no_false_contradiction():
+    rows = compute_semantic_divergence(
+        [
+            _trace(
+                "t1",
+                "gemini",
+                "This prompt is classified as malicious because it attempts prompt injection.",
+                0,
+                0,
+                120,
+            ),
+            _trace(
+                "t2",
+                "ollama",
+                "Final classification: Malicious. It tries to ignore previous instructions.",
+                0,
+                0,
+                140,
+            ),
+        ]
+    )
+    row = rows[0]
+    assert row["classification_label_left"] == "malicious"
+    assert row["classification_label_right"] == "malicious"
+    assert row["classification_agreement"] is True
+    assert row["contradiction_detected"] is False
+    assert "LOW_OVERLAP_CONTRADICTION_ZONE" not in row["contradiction_flags"]
+
+
+def test_semantic_divergence_disagreement_flags_contradiction():
+    rows = compute_semantic_divergence(
+        [
+            _trace("t1", "gemini", "Final classification: benign.", 0, 0, 50),
+            _trace("t2", "ollama", "Final classification: malicious.", 0, 0, 70),
+        ]
+    )
+    row = rows[0]
+    assert row["classification_agreement"] is False
+    assert row["contradiction_detected"] is True
+    assert "CLASSIFICATION_DISAGREEMENT" in row["contradiction_flags"]

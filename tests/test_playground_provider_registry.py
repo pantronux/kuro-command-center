@@ -21,8 +21,8 @@ def _reload_config_module():
 def test_provider_registry_activation_by_key_presence(monkeypatch):
     monkeypatch.setenv("PLAYGROUND_OPENAI_API_KEY", "dummy")
     monkeypatch.setenv("PLAYGROUND_OPENAI_MODEL_NAME", "gpt-test")
-    monkeypatch.setenv("PLAYGROUND_OLLAMA_BASE_URL", "http://localhost:11434")
-    monkeypatch.setenv("PLAYGROUND_OLLAMA_MODEL_NAME", "llama3.1:8b")
+    monkeypatch.setenv("PLAYGROUND_OLLAMA_BASE_URL", "http://localhost:11434/v1")
+    monkeypatch.setenv("PLAYGROUND_OLLAMA_MODEL_NAME", "qwen3:4b")
 
     cfg = _reload_config_module()
     settings = cfg.PlaygroundSettings()
@@ -32,6 +32,9 @@ def test_provider_registry_activation_by_key_presence(monkeypatch):
     active = registry.list_active()
     assert "openai" in active
     assert "ollama" in active
+    ollama_adapter = registry.get("ollama")
+    assert ollama_adapter.base_url == "http://localhost:11434/v1"
+    assert ollama_adapter.default_model == "qwen3:4b"
 
 
 def test_provider_router_comparative_requires_min_two():
