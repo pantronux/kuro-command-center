@@ -33,7 +33,6 @@ from fastapi import (
     Request,
     Depends,
     HTTPException,
-    status,
     WebSocket,
     WebSocketDisconnect,
     Query,
@@ -49,7 +48,6 @@ from fastapi.responses import (
     RedirectResponse,
     StreamingResponse,
 )
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel, Field
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -70,7 +68,6 @@ logging.getLogger("pydantic").setLevel(logging.ERROR)
 logging.getLogger("opentelemetry").setLevel(logging.ERROR)
 
 from kuro_backend.config import settings
-from kuro_backend.core import process_chat
 from kuro_backend.langgraph_core import (
     process_chat_with_graph,
     process_chat_with_graph_stream,
@@ -79,7 +76,6 @@ from kuro_backend import memory_manager
 from kuro_backend import memory_coordinator
 from kuro_backend import chat_history
 from kuro_backend import tools
-from kuro_backend import compliance_db
 
 from kuro_backend import dashboard_broadcast
 from kuro_backend.services import core_service as core_data
@@ -88,10 +84,8 @@ from kuro_backend.services.schemas import (
     ApiUsageDailyRecord,
     MarketHudChip,
     MonthlyBudgetRecord,
-    PredictionWatchRecord,
     RecurringExpenseRecord,
     WatchedSymbolRecord,
-    ChatSessionRecord,
 )
 from kuro_backend import llm_utils
 from kuro_backend import finance_db
@@ -105,7 +99,11 @@ from kuro_backend import proactive_greeting
 from kuro_backend.runtime.runtime_context import resolve_runtime_context
 from kuro_backend.runtime.runtime_registry import RuntimeRegistry
 from kuro_backend.output.schema_registry import SchemaRegistry
-from kuro_backend.ingestion_center import chroma_inspector, ingestion_manager, ingestion_registry
+from kuro_backend.ingestion_center import (
+    chroma_inspector,
+    ingestion_manager,
+    ingestion_registry,
+)
 from kuro_backend.export_engine import export_manager
 from kuro_backend.intelligence.stream_safety import sanitize_stream_chunk
 from kuro_backend.export_engine.export_models import (
@@ -176,7 +174,9 @@ def _check_telegram_rate_limit(chat_id: str, limit_per_min: int) -> bool:
     now = time.time()
     elapsed = now - float(bucket.get("last_refill", now))
     refill = elapsed * (float(limit_per_min) / 60.0)
-    bucket["tokens"] = min(float(limit_per_min), float(bucket.get("tokens", 0.0)) + refill)
+    bucket["tokens"] = min(
+        float(limit_per_min), float(bucket.get("tokens", 0.0)) + refill
+    )
     bucket["last_refill"] = now
     if float(bucket["tokens"]) >= 1.0:
         bucket["tokens"] -= 1.0
@@ -290,13 +290,24 @@ def _build_system_status_backup_payload() -> Optional[Dict[str, Any]]:
         backup_root = Path(settings.KURO_BACKUP_DIR).expanduser()
         if not backup_root.is_absolute():
             backup_root = Path(settings.WORKING_DIR).joinpath(backup_root).resolve()
-        backup_dir_size_mb = sum(
-            f.stat().st_size for f in backup_root.rglob("*") if f.is_file()
-        ) / (1024 ** 2) if backup_root.exists() else 0.0
+        backup_dir_size_mb = (
+            sum(f.stat().st_size for f in backup_root.rglob("*") if f.is_file())
+            / (1024**2)
+            if backup_root.exists()
+            else 0.0
+        )
         daily_root = backup_root / "daily"
         pre_migration_root = backup_root / "pre_migration"
-        backup_count_daily = sum(1 for p in daily_root.iterdir() if p.is_dir()) if daily_root.exists() else 0
-        backup_count_pre_migration = sum(1 for p in pre_migration_root.iterdir() if p.is_file()) if pre_migration_root.exists() else 0
+        backup_count_daily = (
+            sum(1 for p in daily_root.iterdir() if p.is_dir())
+            if daily_root.exists()
+            else 0
+        )
+        backup_count_pre_migration = (
+            sum(1 for p in pre_migration_root.iterdir() if p.is_file())
+            if pre_migration_root.exists()
+            else 0
+        )
     except Exception as exc:
         logger.warning("[BACKUP] backup directory stats failed: %s", exc)
         backup_dir_size_mb = 0.0
@@ -318,7 +329,7 @@ def _build_system_status_backup_payload() -> Optional[Dict[str, Any]]:
         "last_backup_type": last_backup.get("backup_type"),
         "files_backed_up": last_backup.get("files_backed_up", 0),
         "total_size_mb": round(
-            float(last_backup.get("total_size_bytes", 0) or 0) / (1024 ** 2),
+            float(last_backup.get("total_size_bytes", 0) or 0) / (1024**2),
             1,
         ),
         "duration_seconds": float(last_backup.get("duration_seconds", 0.0) or 0.0),
@@ -636,7 +647,9 @@ async def _register_dashboard_sync_loop():
     }
     for var in required_vars:
         if not os.getenv(var):
-            logger.critical("STARTUP: Required env var %s is not set. System may fail.", var)
+            logger.critical(
+                "STARTUP: Required env var %s is not set. System may fail.", var
+            )
     for var, msg in optional_vars_with_warnings.items():
         if not os.getenv(var):
             logger.warning("STARTUP: Optional env var %s not set — %s", var, msg)
@@ -644,6 +657,7 @@ async def _register_dashboard_sync_loop():
     # Clear stale dreaming leases
     try:
         from kuro_backend import memory_manager
+
         conn = memory_manager._get_short_term_conn()
         c = conn.cursor()
         c.execute("DELETE FROM dreaming_locks WHERE lease_expires_at < datetime('now')")
@@ -656,9 +670,12 @@ async def _register_dashboard_sync_loop():
     try:
         from kuro_backend import memory_manager, memory_coordinator
         import json
+
         failures = memory_manager.get_pending_mem0_write_failures()
         if failures:
-            logger.info(f"Replaying {len(failures)} pending Mem0 writes from mem0_write_failures...")
+            logger.info(
+                f"Replaying {len(failures)} pending Mem0 writes from mem0_write_failures..."
+            )
             for failure in failures:
                 try:
                     payload = json.loads(failure["payload"])
@@ -666,7 +683,7 @@ async def _register_dashboard_sync_loop():
                     memory_coordinator.execute_mem0_extract_task(
                         user_input=payload.get("user_input", ""),
                         final_response=payload.get("final_response", ""),
-                        username=failure["username"]
+                        username=failure["username"],
                     )
                 except Exception as e:
                     logger.error(f"Failed to replay mem0 write failure: {e}")
@@ -1636,14 +1653,18 @@ async def chat_endpoint(
         return api_success(
             data={
                 "response": response,
-                "export_suggestion": export_suggestions[0] if export_suggestions else None,
+                "export_suggestion": (
+                    export_suggestions[0] if export_suggestions else None
+                ),
                 "export_suggestions": export_suggestions,
             },
             trace_id=trace_id,
             response=response,  # backward compatibility for current frontend
             meta={
                 "trace_id": trace_id,
-                "export_suggestion": export_suggestions[0] if export_suggestions else None,
+                "export_suggestion": (
+                    export_suggestions[0] if export_suggestions else None
+                ),
                 "export_suggestions": export_suggestions,
             },
         )
@@ -1667,6 +1688,7 @@ async def chat_stream_endpoint(
 ):
     """V6.0 STREAMING: Handle chat requests with Server-Sent Events (SSE) streaming."""
     from fastapi.responses import StreamingResponse
+
     token = get_token_from_cookie(request)
     user = validate_token(token)
     if not user:
@@ -1704,7 +1726,9 @@ async def chat_stream_endpoint(
         stream_metrics: Dict[str, Any] = {}
         last_event_id_raw = request.headers.get("Last-Event-ID")
         try:
-            last_event_id = int(last_event_id_raw) if last_event_id_raw is not None else None
+            last_event_id = (
+                int(last_event_id_raw) if last_event_id_raw is not None else None
+            )
         except (TypeError, ValueError):
             last_event_id = None
         try:
@@ -1769,7 +1793,10 @@ async def chat_stream_endpoint(
                     yield (
                         _buffered_event(
                             "meta",
-                            json.dumps({"ui_command": mode_envelope["command"]}, ensure_ascii=False),
+                            json.dumps(
+                                {"ui_command": mode_envelope["command"]},
+                                ensure_ascii=False,
+                            ),
                         )
                     )
                     yield _buffered_event(
@@ -2017,11 +2044,15 @@ async def chat_stream_endpoint(
                     "output_schema_valid": bool(
                         stream_metrics.get("output_schema_valid", False)
                     ),
-                    "export_suggestion": export_suggestions[0] if export_suggestions else None,
+                    "export_suggestion": (
+                        export_suggestions[0] if export_suggestions else None
+                    ),
                     "export_suggestions": export_suggestions,
                 },
             )
-            yield _buffered_event("complete", json.dumps(complete_payload, ensure_ascii=False))
+            yield _buffered_event(
+                "complete", json.dumps(complete_payload, ensure_ascii=False)
+            )
             yield _buffered_event(None, "[DONE]")
 
         except Exception as e:
@@ -2062,7 +2093,6 @@ async def chat_stream_endpoint(
             "X-Accel-Buffering": "no",  # Disable nginx buffering
         },
     )
-
 
 
 @app.delete("/api/chat/stream/{request_id}")
@@ -2159,7 +2189,9 @@ async def qa_playground_generate_testcases(
     chat_id = _resolve_chat_session_id(request)
     try:
         runtime = QARuntime(username=username, chat_id=chat_id, runtime_id="qa")
-        result = await runtime.process_request("generate_testcases", payload.requirement)
+        result = await runtime.process_request(
+            "generate_testcases", payload.requirement
+        )
         if not result.get("ok"):
             return JSONResponse(
                 status_code=500,
@@ -2177,7 +2209,9 @@ async def qa_playground_generate_testcases(
         logger.exception("QA testcase route failed: %s", exc)
         return JSONResponse(
             status_code=500,
-            content=api_error(f"QA testcase generation failed: {exc}", trace_id=trace_id),
+            content=api_error(
+                f"QA testcase generation failed: {exc}", trace_id=trace_id
+            ),
         )
 
 
@@ -2217,7 +2251,9 @@ async def qa_playground_generate_gherkin(
         logger.exception("QA gherkin route failed: %s", exc)
         return JSONResponse(
             status_code=500,
-            content=api_error(f"QA gherkin generation failed: {exc}", trace_id=trace_id),
+            content=api_error(
+                f"QA gherkin generation failed: {exc}", trace_id=trace_id
+            ),
         )
 
 
@@ -2253,6 +2289,7 @@ async def get_runtime_health(
         raise HTTPException(status_code=403, detail="Admin only")
     return intelligence_db.get_runtime_health_snapshot(hours=24)
 
+
 @app.get("/api/system-status")
 async def system_status(request: Request):
     """Get real-time system status with additive backup metadata."""
@@ -2269,8 +2306,9 @@ async def system_status(request: Request):
 
 
 @app.get("/api/log-storage")
-async def log_storage():
+async def log_storage(request: Request):
     """Get log storage usage information."""
+    require_admin_user(request)
     usage = get_log_storage_usage()
     return api_success(data=usage)
 
@@ -2286,8 +2324,9 @@ async def proxmox_status(request: Request):
 
 
 @app.get("/api/health")
-async def health_check():
+async def health_check(request: Request):
     """Health check endpoint."""
+    require_admin_user(request)
     return api_success(
         data={"health": "healthy", "memory_stats": memory_manager.get_memory_stats()}
     )
@@ -2314,8 +2353,9 @@ async def observability_status(request: Request):
 
 
 @app.get("/api/observability/tokens")
-async def token_usage(session_id: str = None):
+async def token_usage(request: Request, session_id: str = None):
     """Get token usage for sessions."""
+    require_admin_user(request)
     if session_id:
         usage = observability.get_session_token_usage(session_id)
         return {"status": "success", "data": {session_id: usage}}
@@ -2338,8 +2378,9 @@ async def token_usage(session_id: str = None):
 
 
 @app.get("/api/observability/latency")
-async def latency_metrics():
+async def latency_metrics(request: Request):
     """Get aggregated latency metrics snapshot."""
+    require_admin_user(request)
     return {
         "status": "success",
         "data": {
@@ -2357,13 +2398,14 @@ async def evaluation_summary(username: str = "Pantronux"):
     """
     if username != os.getenv("ADMIN_USERNAME", "Pantronux"):
         raise HTTPException(status_code=403, detail="Forbidden: Admin access required.")
-        
+
     from kuro_backend.evaluation import autonomous_evaluator
+
     summary = autonomous_evaluator.get_evaluation_summary()
-    
+
     if summary.get("status") == "error":
         raise HTTPException(status_code=500, detail=summary.get("message"))
-        
+
     return summary
 
 
@@ -2392,8 +2434,10 @@ async def backup_history(request: Request):
     require_admin_user(request)
     return api_success(data=intelligence_db.get_backup_history(limit=30))
 
+
 def run_observability_cleanup():
     observability.cleanup_old_sessions()
+
 
 @app.get("/api/observability/cleanup")
 async def cleanup_observability():
@@ -2458,18 +2502,21 @@ async def observability_dashboard(request: Request):
 
 
 @app.get("/api/system-analysis")
-async def system_analysis():
+async def system_analysis(request: Request):
     """Full system health analysis from /var/log."""
+    require_admin_user(request)
     return {"status": "success", "data": tools.analyze_system_health()}
 
 
 @app.post("/api/index-path")
-async def index_path(path: str = Form("/home/kuro/projects/")):
+async def index_path(request: Request, path: str = Form("/home/kuro/projects/")):
     """Index a system path recursively."""
+    require_admin_user(request)
     # Security: only allow whitelisted paths, prevent path traversal
     path = os.path.abspath(path)
     is_whitelisted = any(
-        os.path.commonpath([os.path.realpath(path), os.path.realpath(wp)]) == os.path.realpath(wp)
+        os.path.commonpath([os.path.realpath(path), os.path.realpath(wp)])
+        == os.path.realpath(wp)
         for wp in tools.WHITELIST_PATHS
     )
     if not is_whitelisted:
@@ -2480,13 +2527,14 @@ async def index_path(path: str = Form("/home/kuro/projects/")):
 
 
 @app.post("/api/memory/reindex")
-async def memory_reindex(source: str = Form("uploaded_files")):
+async def memory_reindex(request: Request, source: str = Form("uploaded_files")):
     """
     V3.0 CONTEXTUAL RAG RE-INDEXING:
     Clear old ChromaDB and re-index files with contextual enrichment.
 
     source: "uploaded_files" (default) or "all" (includes system paths)
     """
+    require_admin_user(request)
     try:
         import time
 
@@ -2551,13 +2599,15 @@ async def memory_reindex(source: str = Form("uploaded_files")):
 
 
 @app.get("/api/memory/stats")
-async def memory_stats():
+async def memory_stats(request: Request):
     """V3.0 Enhanced memory statistics."""
+    require_admin_user(request)
     return {"status": "success", "data": memory_manager.get_memory_stats()}
 
 
 @app.post("/api/compliance/ingest")
-async def compliance_ingest(clear: bool = Form(False)):
+async def compliance_ingest(request: Request, clear: bool = Form(False)):
+    require_admin_user(request)
     return JSONResponse(
         status_code=410,
         content={
@@ -2568,7 +2618,8 @@ async def compliance_ingest(clear: bool = Form(False)):
 
 
 @app.get("/api/compliance/stats")
-async def compliance_stats():
+async def compliance_stats(request: Request):
+    require_admin_user(request)
     return JSONResponse(
         status_code=410,
         content={
@@ -2626,7 +2677,9 @@ async def habits_legacy_gone(legacy_path: str = ""):
 
 # --- Chat Session Management ---
 @app.get("/api/chats")
-async def get_chats(request: Request, persona: str = None, limit: int = 50, offset: int = 0):
+async def get_chats(
+    request: Request, persona: str = None, limit: int = 50, offset: int = 0
+):
     """Get all chat sessions for the current user and persona."""
     token = get_token_from_cookie(request)
     user = validate_token(token)
@@ -2719,8 +2772,7 @@ async def delete_chat(request: Request, chat_id: str):
     session = chat_history.get_session(chat_id)
     if session and session.get("is_pinned"):
         raise HTTPException(
-            status_code=403,
-            detail="Cannot delete a pinned session. Unpin it first."
+            status_code=403, detail="Cannot delete a pinned session. Unpin it first."
         )
 
     success = chat_history.delete_session(chat_id, username=username)
@@ -2730,7 +2782,9 @@ async def delete_chat(request: Request, chat_id: str):
 
             semantic_cache.invalidate_tag(username)
         except Exception as cache_exc:
-            logger.debug("[CHAT] semantic cache invalidate after delete skipped: %s", cache_exc)
+            logger.debug(
+                "[CHAT] semantic cache invalidate after delete skipped: %s", cache_exc
+            )
     if success:
         return api_success(message="Sesi chat dihapus.")
     else:
@@ -2762,7 +2816,9 @@ async def unpin_chat(request: Request, chat_id: str):
 
 
 @app.put("/api/chats/{chat_id}/messages/{msg_id}/edit")
-async def edit_message(request: Request, chat_id: str, msg_id: int, edit: MessageEditRequest):
+async def edit_message(
+    request: Request, chat_id: str, msg_id: int, edit: MessageEditRequest
+):
     """Edit a user message and truncate history after it."""
     token = get_token_from_cookie(request)
     user = validate_token(token)
@@ -2781,7 +2837,9 @@ async def edit_message(request: Request, chat_id: str, msg_id: int, edit: Messag
         raise HTTPException(status_code=400, detail="Only user messages can be edited")
 
     if msg["chat_id"] != chat_id:
-        raise HTTPException(status_code=400, detail="Message does not belong to this chat")
+        raise HTTPException(
+            status_code=400, detail="Message does not belong to this chat"
+        )
 
     edit_group_id = msg.get("edit_group_id") or uuid.uuid4().hex
 
@@ -2793,7 +2851,7 @@ async def edit_message(request: Request, chat_id: str, msg_id: int, edit: Messag
         role="user",
         content=msg["content"],
         edit_type="edit",
-        edit_group_id=edit_group_id
+        edit_group_id=edit_group_id,
     )
 
     # Update message content and mark as edited
@@ -2801,12 +2859,14 @@ async def edit_message(request: Request, chat_id: str, msg_id: int, edit: Messag
     # Truncate all subsequent messages
     deleted_count = chat_history.delete_messages_after(msg_id, chat_id)
 
-    return api_success(data={
-        "chat_id": chat_id,
-        "message_id": msg_id,
-        "edit_group_id": edit_group_id,
-        "deleted_after_count": deleted_count
-    })
+    return api_success(
+        data={
+            "chat_id": chat_id,
+            "message_id": msg_id,
+            "edit_group_id": edit_group_id,
+            "deleted_after_count": deleted_count,
+        }
+    )
 
 
 @app.post("/api/chats/{chat_id}/messages/{msg_id}/regenerate")
@@ -2826,11 +2886,16 @@ async def regenerate_message(request: Request, chat_id: str, msg_id: int):
         raise HTTPException(status_code=403, detail="You do not own this message")
 
     if msg["role"] != "assistant":
-        raise HTTPException(status_code=400, detail="Only assistant messages can be regenerated")
+        raise HTTPException(
+            status_code=400, detail="Only assistant messages can be regenerated"
+        )
 
     preceding_user_msg = chat_history.get_preceding_user_message(msg_id, chat_id)
     if not preceding_user_msg:
-        raise HTTPException(status_code=400, detail="Cannot find preceding user message to regenerate from")
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot find preceding user message to regenerate from",
+        )
 
     edit_group_id = msg.get("edit_group_id") or uuid.uuid4().hex
 
@@ -2842,16 +2907,15 @@ async def regenerate_message(request: Request, chat_id: str, msg_id: int):
         role="assistant",
         content=msg["content"],
         edit_type="regeneration",
-        edit_group_id=edit_group_id
+        edit_group_id=edit_group_id,
     )
 
     # Delete the assistant message and everything after
     chat_history.delete_messages_after(msg_id - 1, chat_id)
 
-    return api_success(data={
-        "preceding_user_message": preceding_user_msg,
-        "deleted_msg_id": msg_id
-    })
+    return api_success(
+        data={"preceding_user_message": preceding_user_msg, "deleted_msg_id": msg_id}
+    )
 
 
 @app.post("/api/chats/{chat_id}/messages/{msg_id}/bookmark")
@@ -2897,14 +2961,18 @@ async def export_chat(request: Request, chat_id: str, format: str = Query("md"))
     if not user:
         raise HTTPException(status_code=401, detail="Unauthorized")
     if format not in (UniversalExportFormat.MD.value, UniversalExportFormat.TXT.value):
-        raise HTTPException(status_code=400, detail="Legacy route only supports md or txt")
+        raise HTTPException(
+            status_code=400, detail="Legacy route only supports md or txt"
+        )
 
     export_request = UniversalExportRequest(
         target="chat_session",
         format=format,
         chat_id=chat_id,
     )
-    content, _, media_type = export_manager.export_sync(export_request, user["username"])
+    content, _, media_type = export_manager.export_sync(
+        export_request, user["username"]
+    )
     return StreamingResponse(
         iter([content]),
         media_type=media_type,
@@ -3117,7 +3185,9 @@ class OrphanSourceRecoveryRequest(BaseModel):
 @app.get("/api/ingestion/datasets")
 async def list_ingestion_datasets(request: Request, active_only: bool = Query(False)):
     user = require_admin_user(request)
-    return ingestion_manager.get_dashboard_snapshot(owner_username=user["username"], active_only=active_only)
+    return ingestion_manager.get_dashboard_snapshot(
+        owner_username=user["username"], active_only=active_only
+    )
 
 
 @app.get("/api/ingestion/datasets/{dataset_uuid}")
@@ -3150,11 +3220,18 @@ async def get_ingestion_lineage(request: Request, dataset_uuid: str):
 @app.get("/api/ingestion/jobs")
 async def list_ingestion_jobs(request: Request, limit: int = Query(25, ge=1, le=200)):
     user = require_admin_user(request)
-    return {"status": "success", "data": ingestion_manager.list_jobs(owner_username=user["username"], limit=limit)}
+    return {
+        "status": "success",
+        "data": ingestion_manager.list_jobs(
+            owner_username=user["username"], limit=limit
+        ),
+    }
 
 
 @app.get("/api/ingestion/search")
-async def search_ingestion_datasets(request: Request, q: str = Query(..., min_length=1)):
+async def search_ingestion_datasets(
+    request: Request, q: str = Query(..., min_length=1)
+):
     user = require_admin_user(request)
     return ingestion_manager.search_datasets(q, owner_username=user["username"])
 
@@ -3216,10 +3293,20 @@ async def ingestion_graph(request: Request, dataset_uuid: str):
                 "id": chunk_node_id,
                 "label": f"Chunk {chunk['chunk_index']}",
                 "type": "chunk",
-                "meta": {"preview": chunk.get("preview_text", ""), "score": chunk.get("retrieval_count", 0)},
+                "meta": {
+                    "preview": chunk.get("preview_text", ""),
+                    "score": chunk.get("retrieval_count", 0),
+                },
             }
         )
-        edges.append({"source": f"dataset:{dataset_uuid}", "target": chunk_node_id, "type": "contains", "weight": 1.0})
+        edges.append(
+            {
+                "source": f"dataset:{dataset_uuid}",
+                "target": chunk_node_id,
+                "type": "contains",
+                "weight": 1.0,
+            }
+        )
         try:
             entities = json.loads(chunk.get("entity_json") or "[]")
         except Exception:
@@ -3227,8 +3314,17 @@ async def ingestion_graph(request: Request, dataset_uuid: str):
         for entity in entities:
             entity_id = f"entity:{dataset_uuid}:{entity}"
             if not any(node["id"] == entity_id for node in nodes):
-                nodes.append({"id": entity_id, "label": entity, "type": "entity", "meta": {}})
-            edges.append({"source": chunk_node_id, "target": entity_id, "type": "mentions", "weight": 0.5})
+                nodes.append(
+                    {"id": entity_id, "label": entity, "type": "entity", "meta": {}}
+                )
+            edges.append(
+                {
+                    "source": chunk_node_id,
+                    "target": entity_id,
+                    "type": "mentions",
+                    "weight": 0.5,
+                }
+            )
     return {"status": "success", "data": {"nodes": nodes, "edges": edges}}
 
 
@@ -3258,7 +3354,9 @@ async def upload_ingestion_dataset(
 
 
 @app.post("/api/ingestion/datasets/{dataset_uuid}/reindex")
-async def reindex_ingestion_dataset(background_tasks: BackgroundTasks, request: Request, dataset_uuid: str):
+async def reindex_ingestion_dataset(
+    background_tasks: BackgroundTasks, request: Request, dataset_uuid: str
+):
     user = require_admin_user(request)
     payload = ingestion_manager.reindex_dataset(dataset_uuid, user["username"])
     if payload.get("status") == "error":
@@ -3313,7 +3411,10 @@ async def delete_ingestion_dataset(request: Request, dataset_uuid: str):
 async def cleanup_ingestion_orphans(request: Request):
     require_admin_user(request)
     orphans = chroma_inspector.find_orphan_chunks()
-    return {"status": "success", "data": {"orphan_count": len(orphans), "orphans": orphans}}
+    return {
+        "status": "success",
+        "data": {"orphan_count": len(orphans), "orphans": orphans},
+    }
 
 
 @app.post("/api/read-file")
@@ -3332,7 +3433,9 @@ async def read_file(request: Request, file_path: str = Form("")):
     # Security: Prevent path traversal
     abs_upload_dir = os.path.abspath(tools.UPLOAD_DIR)
     abs_file_path = os.path.abspath(file_path)
-    if os.path.commonpath([os.path.realpath(abs_file_path), os.path.realpath(abs_upload_dir)]) != os.path.realpath(abs_upload_dir):
+    if os.path.commonpath(
+        [os.path.realpath(abs_file_path), os.path.realpath(abs_upload_dir)]
+    ) != os.path.realpath(abs_upload_dir):
         return {
             "status": "error",
             "message": "Invalid file path: Path traversal is not allowed",
@@ -3387,11 +3490,16 @@ async def playground_tutorial_content(request: Request):
     """Return the raw markdown content of SYSTEM_MAP_PLAYGROUND.md."""
     require_admin_user(request)
     try:
-        map_path = os.path.join(BASE_DIR, "playground_runtime", "SYSTEM_MAP_PLAYGROUND.md")
+        map_path = os.path.join(
+            BASE_DIR, "playground_runtime", "SYSTEM_MAP_PLAYGROUND.md"
+        )
         if not os.path.exists(map_path):
             return JSONResponse(
                 status_code=404,
-                content={"status": "error", "message": "SYSTEM_MAP_PLAYGROUND.md not found"},
+                content={
+                    "status": "error",
+                    "message": "SYSTEM_MAP_PLAYGROUND.md not found",
+                },
             )
         with open(map_path, "r", encoding="utf-8") as f:
             content = f.read()
@@ -4161,8 +4269,11 @@ def start_evaluation_scheduler():
     _evaluation_scheduler = BackgroundScheduler(daemon=True)
     _evaluation_scheduler.add_job(
         run_evaluation_batch_job,
-        "cron", hour=2, minute=30,
-        id="nightly_eval", replace_existing=True
+        "cron",
+        hour=2,
+        minute=30,
+        id="nightly_eval",
+        replace_existing=True,
     )
     _evaluation_scheduler.start()
     logger.info("Evaluation Scheduler started.")
@@ -4206,6 +4317,7 @@ def start_reminder_scheduler():
         global _openclaw_last_open_alert_at
         try:
             from kuro_backend.execution import openclaw_bridge
+
             # Never alert when OpenClaw is intentionally disabled.
             if not openclaw_bridge.is_openclaw_enabled():
                 return
@@ -4231,13 +4343,14 @@ def start_reminder_scheduler():
         except Exception as exc:
             logger.debug("[OPENCLAW] Circuit-open alert check skipped: %s", exc)
 
-
     def run_retry_failed_telegram_notifications_job():
         async def _runner():
             try:
                 from kuro_backend import telegram_notifier
 
-                pending = intelligence_db.get_pending_failed_notifications(max_attempts=5)
+                pending = intelligence_db.get_pending_failed_notifications(
+                    max_attempts=5
+                )
                 for notif in pending:
                     try:
                         payload = json.loads(notif["payload_json"])
@@ -4255,12 +4368,16 @@ def start_reminder_scheduler():
                         )
                     else:
                         intelligence_db.update_notification_attempt(
-                            int(notif["id"]), error_message="retry failed", success=False
+                            int(notif["id"]),
+                            error_message="retry failed",
+                            success=False,
                         )
                         if int(notif.get("attempt_count", 0)) + 1 >= 5:
                             intelligence_db.mark_notification_dead(int(notif["id"]))
             except Exception as exc:
-                logger.warning("[TELEGRAM] retry failed-notification job error: %s", exc)
+                logger.warning(
+                    "[TELEGRAM] retry failed-notification job error: %s", exc
+                )
 
         asyncio.run(_runner())
 
@@ -4457,7 +4574,7 @@ def send_daily_intelligence_briefing():
             format_telegram_message,
             format_stock_telegram_message,
         )
-        from kuro_backend import telegram_notifier, memory_manager
+        from kuro_backend import telegram_notifier
 
         # Get all users to process
         all_usernames = auth_db.get_all_users()
@@ -4498,12 +4615,16 @@ def send_daily_intelligence_briefing():
                     telegram_message = format_telegram_message(
                         briefing, display_name=display_name
                     )
-                    asyncio.run(telegram_notifier.send_message_with_retry(telegram_message))
+                    asyncio.run(
+                        telegram_notifier.send_message_with_retry(telegram_message)
+                    )
 
                     # Message 2: Stock Recommendations
                     stock_message = format_stock_telegram_message(briefing)
                     if stock_message:
-                        asyncio.run(telegram_notifier.send_message_with_retry(stock_message))
+                        asyncio.run(
+                            telegram_notifier.send_message_with_retry(stock_message)
+                        )
 
                     logger.info(
                         f"[INTELLIGENCE] Daily briefing sent to Telegram for {username}"
@@ -4604,7 +4725,9 @@ def get_log_storage_usage() -> Dict:
                         {
                             "name": f,
                             "size_mb": size / (1024 * 1024),
-                            "modified_at": datetime.fromtimestamp(modified_ts).strftime("%Y-%m-%d %H:%M:%S"),
+                            "modified_at": datetime.fromtimestamp(modified_ts).strftime(
+                                "%Y-%m-%d %H:%M:%S"
+                            ),
                             "modified_ts": modified_ts,
                         }
                     )
@@ -4869,7 +4992,9 @@ def run_bot_with_recovery():
             if isinstance(e, KeyboardInterrupt):
                 logger.info("Received KeyboardInterrupt. Stopping bot...")
                 break
-            logger.exception(f"CRITICAL: Bot polling exited with {type(e).__name__}: {e}")
+            logger.exception(
+                f"CRITICAL: Bot polling exited with {type(e).__name__}: {e}"
+            )
             if attempt < max_retries - 1:
                 logger.info(f"Retrying in {retry_delay} seconds...")
                 time.sleep(retry_delay)
@@ -4894,8 +5019,8 @@ def run_uvicorn():
         ssl_context.load_cert_chain(CERT_FILE, KEY_FILE)
 
         logger.info("HTTPS enabled with mkcert certificates")
-        logger.info(f"Secure Web Dashboard: https://0.0.0.0:8443")
-        logger.info(f"Secure Login Page: https://0.0.0.0:8443/login")
+        logger.info("Secure Web Dashboard: https://0.0.0.0:8443")
+        logger.info("Secure Login Page: https://0.0.0.0:8443/login")
 
         uvicorn.run(
             app,
@@ -4907,8 +5032,8 @@ def run_uvicorn():
         )
     else:
         logger.warning("SSL certificates not found. Running on HTTP only.")
-        logger.info(f"Web Dashboard: http://0.0.0.0:8000 (Authentication Required)")
-        logger.info(f"Login Page: http://0.0.0.0:8000/login")
+        logger.info("Web Dashboard: http://0.0.0.0:8000 (Authentication Required)")
+        logger.info("Login Page: http://0.0.0.0:8000/login")
         uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
 
 
@@ -4942,8 +5067,8 @@ if __name__ == "__main__":
 
     logger.info("Kuro AI Reborn is starting...")
     logger.info(f"Memory stats: {memory_manager.get_memory_stats()}")
-    logger.info(f"Web Dashboard: http://0.0.0.0:8000 (Authentication Required)")
-    logger.info(f"Login Page: http://0.0.0.0:8000/login")
+    logger.info("Web Dashboard: http://0.0.0.0:8000 (Authentication Required)")
+    logger.info("Login Page: http://0.0.0.0:8000/login")
 
     # Initialize databases
     auth_db.init_auth_db()
@@ -4981,8 +5106,8 @@ if __name__ == "__main__":
         logger.info(
             f"[OBSERVABILITY] Phoenix dashboard available at: {obs_status['dashboard_url']}"
         )
-        logger.info(f"[OBSERVABILITY] Auth: DISABLED (local private network)")
-        logger.info(f"[OBSERVABILITY] Project: Kuro-AI-Audit")
+        logger.info("[OBSERVABILITY] Auth: DISABLED (local private network)")
+        logger.info("[OBSERVABILITY] Project: Kuro-AI-Audit")
     else:
         logger.warning("[OBSERVABILITY] Failed to start Phoenix server")
 
