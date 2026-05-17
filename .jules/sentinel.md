@@ -2,3 +2,7 @@
 **Vulnerability:** Several sensitive administrative endpoints under `/api/persona/history/*` (used to rewrite database state, perform restores, and override logic) were missing explicit authorization checks, meaning any unauthenticated user could trigger them.
 **Learning:** In FastAPI implementations where endpoints are added ad-hoc without global router dependencies, it's easy to forget to add authorization logic to specific routes, resulting in Broken Access Control vulnerabilities.
 **Prevention:** For endpoints intended strictly for administrators, always inject the `request: Request` parameter and invoke the explicit authorization dependency `require_admin_user(request)` at the very beginning of the endpoint body.
+## 2024-05-18 - Admin Endpoint Broken Access Control
+**Vulnerability:** Several sensitive administrative endpoints (e.g. system status, health check, log storage, system analysis, memory re-indexing, index path generation) were missing explicit authorization checks, meaning any authenticated (or sometimes unauthenticated) user could access or trigger them.
+**Learning:** In FastAPI implementations where endpoints are added ad-hoc without global router dependencies, it's easy to forget to add authorization logic to specific routes, resulting in Broken Access Control vulnerabilities.
+**Prevention:** For endpoints intended strictly for administrators, always inject the `request: Request` parameter and invoke the explicit authorization dependency `require_admin_user(request)` at the very beginning of the endpoint body.
