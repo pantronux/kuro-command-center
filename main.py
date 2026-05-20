@@ -3136,7 +3136,8 @@ async def intelligence_run(force: str = "false"):
         briefing = run_daily_research(force=force_bool)
         return {"status": "success", "briefing": briefing}
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        logger.error("Intelligence run failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="An internal error occurred")
 
 
 @app.get("/intelligence", response_class=HTMLResponse)

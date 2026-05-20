@@ -311,6 +311,7 @@ def _init_db_locked():
             cursor.execute("UPDATE chat_history SET chat_id = 'legacy_' || username || '_' || persona WHERE chat_id IS NULL")
         
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_chat_history_chat_id ON chat_history(chat_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_chat_history_chat_id_username ON chat_history(chat_id, username)")
 
         # Migration: Create "Default Chat" for each (username, persona) that has legacy rows
         cursor.execute("""
