@@ -28,14 +28,30 @@ def log_retrieval_event(
 
 
 def get_dataset_analytics(dataset_uuid: Optional[str] = None) -> Dict[str, Any]:
-    events = ingestion_registry.list_retrieval_events(limit=500)
-    if dataset_uuid:
-        events = [event for event in events if event.get("dataset_uuid") == dataset_uuid]
-    low_quality = [event for event in events if float(event.get("retrieval_score", 0.0) or 0.0) < 0.4]
+    raw_events = ingestion_registry.list_retrieval_events(limit=500)
+
+    events = []
+    low_quality = []
+    hallucination_count = 0
+
+    # ⚡ Bolt Optimization: Replaced multiple list comprehensions and sum() generator
+    # expressions with a single explicit for-loop to prevent redundant O(n) traversals
+    # and avoid intermediate object allocations (~3x fewer traversals).
+    for event in raw_events:
+        if dataset_uuid and event.get("dataset_uuid") != dataset_uuid:
+            continue
+
+        events.append(event)
+
+        if float(event.get("retrieval_score", 0.0) or 0.0) < 0.4:
+            low_quality.append(event)
+
+        hallucination_count += int(event.get("hallucination_flag") or 0)
+
     return {
         "events": events,
         "low_quality_events": low_quality,
-        "hallucination_count": sum(int(event.get("hallucination_flag") or 0) for event in events),
+        "hallucination_count": hallucination_count,
     }
 
 
