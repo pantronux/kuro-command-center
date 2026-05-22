@@ -96,6 +96,13 @@ from kuro_backend import backup_manager
 from kuro_backend import persona_history_admin
 from kuro_backend import version as kuro_version
 from kuro_backend import proactive_greeting
+from kuro_backend.enterprise_ops import (
+    build_health_payload,
+    build_live_payload,
+    build_ready_payload,
+    log_startup_validation,
+    validate_startup_environment,
+)
 from kuro_backend.enterprise_flags import get_enterprise_flag_snapshot
 from kuro_backend.memory_v3.health import get_memory_v3_health, get_memory_v3_public_status
 from kuro_backend.memory_v3.retention import MemoryRetentionEngine
@@ -830,23 +837,9 @@ async def _register_dashboard_sync_loop():
     # Purpose: Startup environment safety checks for required/optional integrations.
     # Caller: FastAPI startup lifecycle.
     # Dependencies: os.getenv, module logger.
-    # Main Functions: required var CRITICAL logs + optional var WARNING logs.
+    # Main Functions: secret-safe required/optional env validation.
     # Side Effects: Emits startup diagnostics into runtime logs.
-    required_vars = ["GEMINI_API_KEY", "TELEGRAM_TOKEN", "TELEGRAM_CHAT_ID"]
-    optional_vars_with_warnings = {
-        "NEWSAPI_API_KEY": "Market news data will be unavailable. Market Sentinel running in price-only mode.",
-        "SERPER_API_KEY": "Web search fallover will be disabled.",
-        "METACULUS_API_TOKEN": "Prediction market scan will use demo mode.",
-        "NVD_API_KEY": "NVD CVE feed running without auth (rate-limited).",
-    }
-    for var in required_vars:
-        if not os.getenv(var):
-            logger.critical(
-                "STARTUP: Required env var %s is not set. System may fail.", var
-            )
-    for var, msg in optional_vars_with_warnings.items():
-        if not os.getenv(var):
-            logger.warning("STARTUP: Optional env var %s not set — %s", var, msg)
+    log_startup_validation(validate_startup_environment(), logger)
 
     # Clear stale dreaming leases
     try:
@@ -1348,6 +1341,9 @@ PUBLIC_API_ROUTES = [
     "/api/auth/stats",
     "/api/auth/logout",
     "/api/capabilities",
+    "/api/live",
+    "/api/ready",
+    "/api/health",
 ]
 
 
@@ -2619,12 +2615,24 @@ async def proxmox_status(request: Request):
 
 
 @app.get("/api/health")
-async def health_check(request: Request):
-    """Health check endpoint."""
-    require_admin_user(request)
-    return api_success(
-        data={"health": "healthy", "memory_stats": memory_manager.get_memory_stats()}
-    )
+async def health_check():
+    """Public-safe aggregate health endpoint."""
+    return build_health_payload()
+
+
+@app.get("/api/ready")
+async def readiness_check():
+    """Public-safe readiness endpoint for load balancers and VM checks."""
+    payload = build_ready_payload()
+    if payload["status"] != "success":
+        return JSONResponse(status_code=503, content=payload)
+    return payload
+
+
+@app.get("/api/live")
+async def liveness_check():
+    """Public-safe liveness endpoint."""
+    return build_live_payload()
 
 
 @app.get("/api/observability/status")

@@ -59,7 +59,7 @@ _SQLITE_REQUIRED_CORE = {
 
 
 def _working_dir() -> Path:
-    return Path(settings.WORKING_DIR).resolve()
+    return Path(settings.WORKING_DIR or os.getcwd()).resolve()
 
 
 def get_backup_dir() -> Path:
@@ -144,6 +144,29 @@ def get_backup_status() -> dict:
     except Exception as exc:
         logger.warning("Failed to fetch backup status: %s", exc)
         return {}
+
+
+def get_backup_health() -> dict:
+    """Return public-safe backup readiness metadata without raw paths."""
+    latest = get_backup_status()
+    docs_available = (
+        _working_dir() / "docs" / "deployment" / "backup_restore.md"
+    ).exists()
+    age_hours = None
+    last_status = str(latest.get("status") or "unknown")
+    started_at = latest.get("started_at") or latest.get("completed_at")
+    if started_at:
+        try:
+            parsed = datetime.fromisoformat(str(started_at).replace("Z", "+00:00"))
+            age_hours = round(max(0.0, (_now_local() - parsed).total_seconds() / 3600.0), 3)
+        except Exception:
+            age_hours = None
+    return {
+        "configured": bool(settings.KURO_BACKUP_ENABLED),
+        "last_status": last_status,
+        "last_backup_age_hours": age_hours,
+        "restore_docs_available": docs_available,
+    }
 
 
 def prune_old_backups(retain_days: int | None = None) -> int:

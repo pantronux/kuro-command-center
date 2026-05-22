@@ -1,0 +1,35 @@
+services:
+  app:
+    image: python:3.10-slim
+    working_dir: /app
+    env_file:
+      - .env
+    environment:
+      KURO_DEPLOYMENT_PROFILE: docker-compose
+      WORKING_DIR: /app/runtime
+      PHOENIX_WORKING_DIR: /app/runtime/phoenix_data
+    ports:
+      - "8443:8443"
+    volumes:
+      - ./:/app
+      - kuro-runtime:/app/runtime
+      - kuro-backups:/app/backups
+    command: >
+      sh -c "pip install --no-cache-dir -r requirements.txt &&
+             uvicorn main:app --host 0.0.0.0 --port 8443"
+    restart: unless-stopped
+
+  phoenix:
+    image: arizephoenix/phoenix:latest
+    profiles:
+      - observability
+    ports:
+      - "6006:6006"
+    volumes:
+      - kuro-phoenix:/mnt/data
+    restart: unless-stopped
+
+volumes:
+  kuro-runtime:
+  kuro-backups:
+  kuro-phoenix:
