@@ -719,12 +719,31 @@ def _mount_provider_registry_v2_router(target_app: FastAPI) -> bool:
         return False
 
 
+def _mount_tools_v2_router(target_app: FastAPI) -> bool:
+    """Mount governed Tool Runtime V2 routes; handlers remain flag-gated."""
+    try:
+        from kuro_backend.tools_v2.executor import create_tools_v2_router
+
+        target_app.include_router(
+            create_tools_v2_router(
+                auth_dependency=validate_token_dependency,
+                admin_dependency=require_admin_user,
+            )
+        )
+        logger.info("[TOOLS_V2] Router mounted")
+        return True
+    except Exception as exc:
+        logger.exception("[TOOLS_V2] Failed to mount router: %s", exc)
+        return False
+
+
 # --- FastAPI App ---
 app = FastAPI(title="Kuro AI Web Dashboard")
 app.add_middleware(TraceMiddleware)
 _mount_playground_router_if_enabled(app)
 _mount_chat_v2_router(app)
 _mount_provider_registry_v2_router(app)
+_mount_tools_v2_router(app)
 
 
 @app.on_event("startup")
