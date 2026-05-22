@@ -755,6 +755,21 @@ def _mount_market_v2_router(target_app: FastAPI) -> bool:
         return False
 
 
+def _mount_telegram_v2_router(target_app: FastAPI) -> bool:
+    """Mount Telegram API V2 routes; handlers remain flag-gated."""
+    try:
+        from kuro_backend.telegram_v2.routes import create_telegram_v2_router
+
+        target_app.include_router(
+            create_telegram_v2_router(admin_dependency=require_admin_user)
+        )
+        logger.info("[TELEGRAM_V2] Router mounted")
+        return True
+    except Exception as exc:
+        logger.exception("[TELEGRAM_V2] Failed to mount router: %s", exc)
+        return False
+
+
 # --- FastAPI App ---
 app = FastAPI(title="Kuro AI Web Dashboard")
 app.add_middleware(TraceMiddleware)
@@ -763,6 +778,7 @@ _mount_chat_v2_router(app)
 _mount_provider_registry_v2_router(app)
 _mount_tools_v2_router(app)
 _mount_market_v2_router(app)
+_mount_telegram_v2_router(app)
 
 
 @app.on_event("startup")
