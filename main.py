@@ -737,6 +737,24 @@ def _mount_tools_v2_router(target_app: FastAPI) -> bool:
         return False
 
 
+def _mount_market_v2_router(target_app: FastAPI) -> bool:
+    """Mount Market Sentinel V2 routes; handlers remain flag-gated."""
+    try:
+        from kuro_backend.market_v2.routes import create_market_v2_router
+
+        target_app.include_router(
+            create_market_v2_router(
+                auth_dependency=validate_token_dependency,
+                admin_dependency=require_admin_user,
+            )
+        )
+        logger.info("[MARKET_V2] Router mounted")
+        return True
+    except Exception as exc:
+        logger.exception("[MARKET_V2] Failed to mount router: %s", exc)
+        return False
+
+
 # --- FastAPI App ---
 app = FastAPI(title="Kuro AI Web Dashboard")
 app.add_middleware(TraceMiddleware)
@@ -744,6 +762,7 @@ _mount_playground_router_if_enabled(app)
 _mount_chat_v2_router(app)
 _mount_provider_registry_v2_router(app)
 _mount_tools_v2_router(app)
+_mount_market_v2_router(app)
 
 
 @app.on_event("startup")
@@ -4684,6 +4703,25 @@ def start_reminder_scheduler():
         coalesce=True,
     )
     logger.info("Market Sentinel Triangulation scans scheduled for all users.")
+
+    if bool(getattr(settings, "KURO_MARKET_SENTINEL_V2_ENABLED", False)):
+        try:
+            from kuro_backend.market_v2.routes import run_market_v2_scheduled_scan
+
+            _reminder_scheduler.add_job(
+                run_market_v2_scheduled_scan,
+                "cron",
+                day_of_week="mon-fri",
+                hour="9,13,17,21",
+                minute=15,
+                id="market_v2_sentinel_scan",
+                replace_existing=True,
+                max_instances=1,
+                coalesce=True,
+            )
+            logger.info("Market Sentinel V2 scans scheduled.")
+        except Exception as exc:
+            logger.warning("[MARKET_V2] Scheduler hook skipped: %s", exc)
 
     # Autonomous memory dreaming cycle (Kuro AI V6.0 Sovereign).
     if os.getenv("KURO_DREAMING_ENABLED", "true").strip().lower() in (
