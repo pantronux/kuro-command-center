@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 def extend_short_term_schema(conn: sqlite3.Connection) -> None:
     cols = [
+        ("username", "TEXT NOT NULL DEFAULT 'Pantronux'"),
         ("memory_id", "TEXT"),
         ("runtime_id", "TEXT DEFAULT 'sovereign'"),
         ("namespace", "TEXT DEFAULT 'kuro.sovereign'"),
@@ -75,6 +76,21 @@ def extend_short_term_schema(conn: sqlite3.Connection) -> None:
         WHERE source IS NULL OR source = ''
         """
     )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_short_term_v2_scope_user_status "
+        "ON short_term(namespace, runtime_id, username, status)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_short_term_v2_type_status "
+        "ON short_term(runtime_id, namespace, memory_type, status)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_short_term_v2_status_expires "
+        "ON short_term(status, expires_at)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_short_term_v2_memory_id "
+        "ON short_term(memory_id)"
+    )
     conn.commit()
     logger.debug("Memory V2 short_term schema ensured")
-

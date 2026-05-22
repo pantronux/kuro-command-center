@@ -72,6 +72,7 @@ _MEM0_PENDING_QUEUE: Dict[str, "collections.deque[tuple[str, str, str, Any]]"] =
     collections.defaultdict(collections.deque)
 )
 _MEM0_QUEUE_LOCK = threading.Lock()
+_MEM0_PENDING_PER_USER_MAX = int(os.getenv("KURO_MEM0_PENDING_PER_USER_MAX", "100"))
 _user_locks: dict[str, asyncio.Lock] = {}
 
 
@@ -1190,6 +1191,8 @@ def build_context_for_llm(
     session_id: Optional[str] = None,
     username: str = "Pantronux",
     chat_id: Optional[str] = None,
+    runtime_id: str = "sovereign",
+    runtime_namespace: str = "kuro.sovereign",
 ) -> Dict[str, Any]:
     """
     Single read path: raw short-term + optional Mem0 block (same inputs as response_node / stream).
@@ -1205,6 +1208,8 @@ def build_context_for_llm(
     from kuro_backend import personas
 
     budget = context_budget or personas.get_context_budget(persona_mode)
+    runtime_id = str(runtime_id or "sovereign")
+    runtime_namespace = str(runtime_namespace or f"kuro.{runtime_id}")
 
     _trace_coordinator_span(
         "build_context_for_llm",
@@ -1218,7 +1223,13 @@ def build_context_for_llm(
     # Parallelize independent I/O. Short-term retrieval and referent grounding
     # are independent from Mem0 context formatting.
     parallel_tasks: Dict[str, Any] = {
-        "short_term": lambda: (logger.warning("[MEMORY_COORD] chat_id is None in build_context_for_llm") if chat_id is None else None) or memory_manager.get_short_term(persona_scope=persona_mode, username=username, chat_id=chat_id),
+        "short_term": lambda: (logger.warning("[MEMORY_COORD] chat_id is None in build_context_for_llm") if chat_id is None else None) or memory_manager.get_short_term(
+            persona_scope=persona_mode,
+            username=username,
+            chat_id=chat_id,
+            runtime_id=runtime_id,
+            namespace=runtime_namespace,
+        ),
         "session_files": lambda: memory_manager.get_session_files(session_id) if session_id else [],
         "ingestion": lambda: _retrieve_ingestion_evidence(
             user_input,
@@ -1346,6 +1357,8 @@ async def build_context_for_llm_async(
     session_id: Optional[str] = None,
     username: str = "Pantronux",
     chat_id: Optional[str] = None,
+    runtime_id: str = "sovereign",
+    runtime_namespace: str = "kuro.sovereign",
 ) -> Dict[str, Any]:
     """Async variant of :func:`build_context_for_llm`.
 
@@ -1366,6 +1379,8 @@ async def build_context_for_llm_async(
         session_id=session_id,
         username=username,
         chat_id=chat_id,
+        runtime_id=runtime_id,
+        runtime_namespace=runtime_namespace,
     )
 
 
@@ -1667,8 +1682,17 @@ def execute_mem0_extract_task(
             if dedup_key in _MEM0_QUEUE_DEDUP:
                 logger.info("[MEMORY_COORD] mem0_enqueue skipped duplicate key=%s", dedup_key)
                 return
+            queue_for_user = _MEM0_PENDING_QUEUE[username]
+            if len(queue_for_user) >= max(1, _MEM0_PENDING_PER_USER_MAX):
+                dropped = queue_for_user.popleft()
+                _MEM0_QUEUE_DEDUP.discard(dropped[2])
+                logger.warning(
+                    "[MEMORY_COORD] mem0 pending queue capped user=%s max=%d; dropped oldest",
+                    username,
+                    _MEM0_PENDING_PER_USER_MAX,
+                )
             _MEM0_QUEUE_DEDUP.add(dedup_key)
-            _MEM0_PENDING_QUEUE[username].append(
+            queue_for_user.append(
                 (user_input, final_response, dedup_key, ctx)
             )
         logger.info("[MEMORY_COORD] mem0 task queued for user=%s depth=%d", username, len(_MEM0_PENDING_QUEUE[username]))
@@ -1784,7 +1808,16 @@ def execute_mem0_extract_task(
                     except Exception:
                         pass
                     try:
-                        payload = json.dumps({"user_input": user_input, "final_response": final_response})
+                        payload = json.dumps(
+                            {
+                                "user_input": user_input,
+                                "final_response": final_response,
+                                "runtime_id": runtime_id_for_dedup,
+                                "runtime_namespace": runtime_namespace_for_dedup,
+                                "chat_id": getattr(ctx, "chat_id", "") if ctx is not None else "",
+                                "trace_id": getattr(ctx, "trace_id", "") if ctx is not None else "",
+                            }
+                        )
                         memory_manager.record_mem0_write_failure(username, payload)
                     except Exception as db_err:
                         logger.error("[MEMORY_COORD] Failed to record mem0_write_failure: %s", db_err)

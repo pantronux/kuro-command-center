@@ -1281,12 +1281,38 @@ def add_audit_trail(action: str, details: str = "", trace_id: str = "") -> None:
 
 @db_retry()
 def log_failed_notification(payload_json: str, error_message: str) -> int:
-    """Insert a failed Telegram payload into DLQ and return row id."""
+    """Insert a failed Telegram payload into DLQ and return row id.
+
+    Identical pending payloads are coalesced so a temporary Telegram outage
+    cannot inflate the retry queue with the same message over and over.
+    """
     init_db()
     conn = None
     try:
         conn = _get_connection()
         cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT id FROM failed_telegram_notifications
+            WHERE status = 'pending' AND payload_json = ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (payload_json,),
+        )
+        existing = cursor.fetchone()
+        if existing:
+            row_id = int(existing["id"])
+            cursor.execute(
+                """
+                UPDATE failed_telegram_notifications
+                SET error_message = ?, last_attempt_at = datetime('now')
+                WHERE id = ?
+                """,
+                (error_message, row_id),
+            )
+            conn.commit()
+            return row_id
         cursor.execute(
             """
             INSERT INTO failed_telegram_notifications (
@@ -1302,8 +1328,31 @@ def log_failed_notification(payload_json: str, error_message: str) -> int:
             conn.close()
 
 
-def get_pending_failed_notifications(max_attempts: int = 5) -> List[Dict]:
+def get_pending_failed_notifications(max_attempts: int = 5, limit: int = 10) -> List[Dict]:
     """Return pending Telegram DLQ rows below retry-attempt cap."""
+    init_db()
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        capped_limit = max(1, min(int(limit), 100))
+        cursor.execute(
+            """
+            SELECT * FROM failed_telegram_notifications
+            WHERE status = 'pending' AND attempt_count < ?
+            ORDER BY created_at ASC, id ASC
+            LIMIT ?
+            """,
+            (int(max_attempts), capped_limit),
+        )
+        return [dict(r) for r in cursor.fetchall()]
+    finally:
+        if conn:
+            conn.close()
+
+
+def get_failed_notification_summary() -> Dict[str, int]:
+    """Return status counters for Telegram DLQ health checks."""
     init_db()
     conn = None
     try:
@@ -1311,13 +1360,18 @@ def get_pending_failed_notifications(max_attempts: int = 5) -> List[Dict]:
         cursor = conn.cursor()
         cursor.execute(
             """
-            SELECT * FROM failed_telegram_notifications
-            WHERE status = 'pending' AND attempt_count < ?
-            ORDER BY created_at ASC, id ASC
-            """,
-            (int(max_attempts),),
+            SELECT status, COUNT(*) AS count
+            FROM failed_telegram_notifications
+            GROUP BY status
+            """
         )
-        return [dict(r) for r in cursor.fetchall()]
+        summary = {"pending": 0, "sent": 0, "dead": 0, "total": 0}
+        for row in cursor.fetchall():
+            status = str(row["status"] or "unknown")
+            count = int(row["count"] or 0)
+            summary[status] = count
+            summary["total"] += count
+        return summary
     finally:
         if conn:
             conn.close()

@@ -46,9 +46,11 @@ _INCONSISTENCY_TEMPLATE: Final[str] = (
 
 def _is_telegram_enabled() -> bool:
     """Worker-level kill switch; does NOT check config (that's send_message)."""
-    return os.getenv("KURO_DREAMING_TELEGRAM_ENABLED", "true").strip().lower() in (
-        "1", "true", "yes", "on",
+    raw = os.getenv(
+        "KURO_TELEGRAM_ENABLED",
+        os.getenv("KURO_DREAMING_TELEGRAM_ENABLED", "true"),
     )
+    return str(raw).strip().lower() in ("1", "true", "yes", "on")
 
 
 def _resolve_credentials() -> tuple[Optional[str], Optional[str]]:
@@ -95,6 +97,14 @@ def _sanitize_for_telegram_limit(text: str) -> str:
     return trimmed
 
 
+def split_text_for_telegram(text: str, chunk_size: int = _TELEGRAM_MAX_LEN) -> list[str]:
+    """Split long text into Telegram-safe chunks without silently dropping tail content."""
+    if not text:
+        return []
+    safe_chunk_size = max(1, min(int(chunk_size), _TELEGRAM_MAX_LEN))
+    return [text[i : i + safe_chunk_size] for i in range(0, len(text), safe_chunk_size)]
+
+
 def _post_to_telegram_sync(payload: dict, timeout_s: float = _DEFAULT_TIMEOUT_S):
     import requests
 
@@ -113,6 +123,7 @@ async def send_message_with_retry(
     text: str,
     chat_id: str = None,
     max_attempts: int = 3,
+    record_failure: bool = True,
 ) -> bool:
     """Retrying async Telegram sender with DLQ fallback on terminal failure."""
     if not text or not _is_telegram_enabled():
@@ -126,39 +137,40 @@ async def send_message_with_retry(
 
     sent_all = True
     for target in targets:
-        payload = {
-            "chat_id": target,
-            "text": _sanitize_for_telegram_limit(text),
-            "parse_mode": "HTML",
-        }
-        last_error = None
-        for attempt in range(max(1, int(max_attempts))):
-            try:
-                resp = await _post_to_telegram(payload)
-                if 200 <= int(resp.status_code) < 300:
-                    last_error = None
-                    break
-                body = await asyncio.to_thread(lambda: resp.text)
-                last_error = f"HTTP {resp.status_code}: {body}"
-            except Exception as exc:
-                last_error = str(exc)
-            delay = (2 ** attempt) + random.uniform(0, 0.5)
-            await asyncio.sleep(delay)
+        for chunk in split_text_for_telegram(text):
+            payload = {
+                "chat_id": target,
+                "text": chunk,
+            }
+            last_error = None
+            for attempt in range(max(1, int(max_attempts))):
+                try:
+                    resp = await _post_to_telegram(payload)
+                    if 200 <= int(resp.status_code) < 300:
+                        last_error = None
+                        break
+                    body = await asyncio.to_thread(lambda: resp.text)
+                    last_error = f"HTTP {resp.status_code}: {body}"
+                except Exception as exc:
+                    last_error = str(exc)
+                delay = (2 ** attempt) + random.uniform(0, 0.5)
+                await asyncio.sleep(delay)
 
-        if last_error is not None:
-            sent_all = False
-            try:
-                intelligence_db.log_failed_notification(
-                    payload_json=json.dumps(payload, ensure_ascii=False),
-                    error_message=last_error,
+            if last_error is not None:
+                sent_all = False
+                if record_failure:
+                    try:
+                        intelligence_db.log_failed_notification(
+                            payload_json=json.dumps(payload, ensure_ascii=False),
+                            error_message=last_error,
+                        )
+                    except Exception as db_exc:
+                        logger.warning("[TELEGRAM] failed to enqueue DLQ row: %s", db_exc)
+                logger.error(
+                    "Telegram send failed after %s attempts: %s",
+                    max_attempts,
+                    last_error,
                 )
-            except Exception as db_exc:
-                logger.warning("[TELEGRAM] failed to enqueue DLQ row: %s", db_exc)
-            logger.error(
-                "Telegram send failed after %s attempts: %s",
-                max_attempts,
-                last_error,
-            )
     return sent_all
 
 
@@ -185,7 +197,7 @@ def send_message(
         logger.warning("[TELEGRAM] missing TELEGRAM_TOKEN / TELEGRAM_CHAT_ID")
         return False
 
-    _ = parse_mode  # parse mode is fixed to HTML in retry sender.
+    _ = parse_mode  # parse mode intentionally ignored for free-form reports.
     _ = disable_notification  # preserved for signature compatibility.
     _ = timeout_s
     try:
@@ -232,4 +244,5 @@ __all__ = [
     "send_dream_inconsistency",
     "send_message",
     "send_message_with_retry",
+    "split_text_for_telegram",
 ]

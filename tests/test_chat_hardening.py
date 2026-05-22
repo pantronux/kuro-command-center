@@ -72,6 +72,11 @@ def test_get_history_page_has_more_when_rows_exceed_limit(isolated_chat_db):
     assert len(page["messages"]) == 3
     assert page["has_more"] is True
     assert page["oldest_id"] is not None
+    assert [msg["content"] for msg in page["messages"]] == [
+        "message-5",
+        "message-6",
+        "message-7",
+    ]
 
 
 def test_get_history_page_before_id_returns_older_only(isolated_chat_db):

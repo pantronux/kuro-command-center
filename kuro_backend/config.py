@@ -122,8 +122,16 @@ class Settings:
     TELEGRAM_TOKEN: str = os.getenv("TELEGRAM_TOKEN")
     TELEGRAM_CHAT_ID: str = os.getenv("TELEGRAM_CHAT_ID")
     TELEGRAM_WEBHOOK_SECRET: str = os.getenv("TELEGRAM_WEBHOOK_SECRET", "")
+    KURO_TELEGRAM_ENABLED: bool = os.getenv(
+        "KURO_TELEGRAM_ENABLED",
+        os.getenv("KURO_DREAMING_TELEGRAM_ENABLED", "true"),
+    ).strip().lower() in ("1", "true", "yes", "on")
     KURO_TELEGRAM_RATE_LIMIT_PER_MIN: int = int(os.getenv("KURO_TELEGRAM_RATE_LIMIT_PER_MIN", "10"))
     KURO_TELEGRAM_QUEUE_MAXSIZE: int = int(os.getenv("KURO_TELEGRAM_QUEUE_MAXSIZE", "50"))
+    KURO_TELEGRAM_RESPONSE_TIMEOUT_S: int = int(os.getenv("KURO_TELEGRAM_RESPONSE_TIMEOUT_S", "180"))
+    KURO_TELEGRAM_DROP_PENDING_UPDATES: bool = os.getenv(
+        "KURO_TELEGRAM_DROP_PENDING_UPDATES", "false"
+    ).strip().lower() in ("1", "true", "yes", "on")
     WORKING_DIR: str = os.getenv("WORKING_DIR")
     TIMEZONE: str = os.getenv("TIMEZONE", "Asia/Jakarta")
     # Optional Gemini cached content resource (e.g. cachedContents/abc123) for repeated static prompts

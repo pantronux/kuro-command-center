@@ -267,7 +267,80 @@ def _init_db_locked() -> None:
                 price_updated_at         TEXT DEFAULT NULL,
                 analysis_updated_at      TEXT DEFAULT NULL,
                 created_at               DATETIME DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(stock_code)
+                UNIQUE(username, stock_code)
+            )
+            """
+        )
+        c.execute("PRAGMA index_list(market_sentinel_stocks)")
+        stock_indexes = c.fetchall()
+        needs_stock_unique_migration = False
+        for idx in stock_indexes:
+            if not int(idx["unique"]):
+                continue
+            c.execute(f"PRAGMA index_info({idx['name']})")
+            idx_cols = [row["name"] for row in c.fetchall()]
+            if idx_cols == ["stock_code"]:
+                needs_stock_unique_migration = True
+                break
+        if needs_stock_unique_migration:
+            c.execute("ALTER TABLE market_sentinel_stocks RENAME TO market_sentinel_stocks_old")
+            c.execute(
+                """
+                CREATE TABLE market_sentinel_stocks (
+                    id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username                 TEXT NOT NULL DEFAULT 'Pantronux',
+                    stock_code               TEXT NOT NULL,
+                    company_name             TEXT NOT NULL,
+                    sector                   TEXT DEFAULT '',
+                    current_price_per_share  INTEGER NOT NULL DEFAULT 0,
+                    current_price_per_lot    INTEGER NOT NULL DEFAULT 0,
+                    price_category           TEXT NOT NULL DEFAULT '',
+                    volume_24h               INTEGER NOT NULL DEFAULT 0,
+                    ytd_performance          REAL NOT NULL DEFAULT 0.0,
+                    projected_roi_1m         REAL DEFAULT NULL,
+                    projected_roi_1y         REAL DEFAULT NULL,
+                    triangulation_summary    TEXT DEFAULT '',
+                    conclusion               TEXT DEFAULT '',
+                    price_updated_at         TEXT DEFAULT NULL,
+                    analysis_updated_at      TEXT DEFAULT NULL,
+                    created_at               DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(username, stock_code)
+                )
+                """
+            )
+            c.execute(
+                """
+                INSERT OR REPLACE INTO market_sentinel_stocks (
+                    id, username, stock_code, company_name, sector,
+                    current_price_per_share, current_price_per_lot, price_category,
+                    volume_24h, ytd_performance, projected_roi_1m, projected_roi_1y,
+                    triangulation_summary, conclusion, price_updated_at,
+                    analysis_updated_at, created_at
+                )
+                SELECT
+                    id, username, stock_code, company_name, sector,
+                    current_price_per_share, current_price_per_lot, price_category,
+                    volume_24h, ytd_performance, projected_roi_1m, projected_roi_1y,
+                    triangulation_summary, conclusion, price_updated_at,
+                    analysis_updated_at, created_at
+                FROM market_sentinel_stocks_old
+                """
+            )
+            c.execute("DROP TABLE market_sentinel_stocks_old")
+            logger.info("[FINANCE] migrated market_sentinel_stocks unique key to (username, stock_code)")
+        c.execute(
+            """
+            CREATE TABLE IF NOT EXISTS market_price_history (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                username            TEXT NOT NULL DEFAULT 'Pantronux',
+                stock_code          TEXT NOT NULL,
+                observed_at         TEXT NOT NULL,
+                price_per_share     INTEGER NOT NULL,
+                price_per_lot       INTEGER NOT NULL,
+                volume_24h          INTEGER NOT NULL DEFAULT 0,
+                source              TEXT NOT NULL DEFAULT 'ticker',
+                created_at          DATETIME DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(username, stock_code, observed_at)
             )
             """
         )
@@ -297,6 +370,10 @@ def _init_db_locked() -> None:
         c.execute(
             "CREATE INDEX IF NOT EXISTS idx_sentinel_stocks_roi_1y "
             "ON market_sentinel_stocks(projected_roi_1y DESC)"
+        )
+        c.execute(
+            "CREATE INDEX IF NOT EXISTS idx_market_price_history_user_code_ts "
+            "ON market_price_history(username, stock_code, observed_at DESC)"
         )
         c.execute(
             "CREATE INDEX IF NOT EXISTS idx_sentinel_code_ts "
@@ -344,6 +421,22 @@ def _init_db_locked() -> None:
             c.execute("ALTER TABLE market_hud_snapshot ADD COLUMN snapshot_version INTEGER DEFAULT 0")
         if "is_current" not in hud_cols:
             c.execute("ALTER TABLE market_hud_snapshot ADD COLUMN is_current INTEGER DEFAULT 1")
+        c.execute(
+            """
+            DELETE FROM market_hud_snapshot
+            WHERE id NOT IN (
+                SELECT MAX(id)
+                FROM market_hud_snapshot
+                GROUP BY username
+            )
+            """
+        )
+        c.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_market_hud_snapshot_username_unique
+            ON market_hud_snapshot(username)
+            """
+        )
         if get_applied_version(conn) < 1:
             record_migration(conn, 1, "Initial schema baseline")
         conn.commit()
@@ -1111,16 +1204,46 @@ def get_sentinel_history_for_chart(stock_code: str, username: str = "Pantronux",
     try:
         conn = _conn()
         since = (datetime.now() - timedelta(days=days)).isoformat()
+        normalized_code = str(stock_code or "").replace(".JK", "").upper()
+        cursor = conn.execute(
+            """
+            SELECT observed_at AS scan_timestamp, price_per_share, price_per_lot
+            FROM market_price_history
+            WHERE username = ? AND stock_code = ? AND observed_at >= ?
+            ORDER BY observed_at ASC
+            """,
+            (username, normalized_code, since)
+        )
+        history = [dict(row) for row in cursor.fetchall()]
+        if history:
+            return history
+
         cursor = conn.execute(
             """
             SELECT scan_timestamp, price_per_share, price_per_lot
             FROM market_sentinel_history
-            WHERE username = ? AND stock_code = ? AND scan_timestamp >= ?
+            WHERE username = ?
+              AND stock_code IN (?, ?)
+              AND scan_timestamp >= ?
             ORDER BY scan_timestamp ASC
             """,
-            (username, stock_code, since)
+            (username, normalized_code, f"{normalized_code}.JK", since)
         )
-        return [dict(row) for row in cursor.fetchall()]
+        history = [dict(row) for row in cursor.fetchall()]
+        if history:
+            return history
+
+        row = conn.execute(
+            """
+            SELECT price_updated_at AS scan_timestamp,
+                   current_price_per_share AS price_per_share,
+                   current_price_per_lot AS price_per_lot
+            FROM market_sentinel_stocks
+            WHERE username = ? AND stock_code = ?
+            """,
+            (username, normalized_code),
+        ).fetchone()
+        return [dict(row)] if row and row["scan_timestamp"] else []
     except Exception as exc:
         logger.error("[FINANCE] get_sentinel_history_for_chart failed: %s", exc)
         return []
@@ -1208,7 +1331,9 @@ def upsert_sentinel_stock_price(stock_code, company_name, sector,
                 current_price_per_share, current_price_per_lot, price_category,
                 volume_24h, ytd_performance, price_updated_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(stock_code) DO UPDATE SET
+            ON CONFLICT(username, stock_code) DO UPDATE SET
+                company_name = excluded.company_name,
+                sector = excluded.sector,
                 current_price_per_share = excluded.current_price_per_share,
                 current_price_per_lot = excluded.current_price_per_lot,
                 price_category = excluded.price_category,
@@ -1219,6 +1344,15 @@ def upsert_sentinel_stock_price(stock_code, company_name, sector,
             (username, stock_code, company_name, sector, 
              price_per_share, price_per_lot, price_category,
              volume_24h, ytd_performance, now)
+        )
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO market_price_history (
+                username, stock_code, observed_at, price_per_share,
+                price_per_lot, volume_24h, source
+            ) VALUES (?, ?, ?, ?, ?, ?, 'ticker')
+            """,
+            (username, stock_code, now, price_per_share, price_per_lot, volume_24h),
         )
         conn.commit()
         return True
@@ -1246,9 +1380,9 @@ def update_sentinel_stock_analysis(stock_code, projected_roi_1m, projected_roi_1
                 triangulation_summary = ?,
                 conclusion = ?,
                 analysis_updated_at = ?
-            WHERE stock_code = ?
+            WHERE stock_code = ? AND username = ?
             """,
-            (projected_roi_1m, projected_roi_1y, triangulation_summary, conclusion, now, stock_code)
+            (projected_roi_1m, projected_roi_1y, triangulation_summary, conclusion, now, stock_code, username)
         )
         conn.commit()
         return True
@@ -1303,7 +1437,11 @@ def get_sentinel_stock_detail(stock_code, username="Pantronux") -> dict | None:
     conn = None
     try:
         conn = _conn()
-        cursor = conn.execute("SELECT * FROM market_sentinel_stocks WHERE stock_code = ?", (stock_code,))
+        normalized_code = str(stock_code or "").replace(".JK", "").upper()
+        cursor = conn.execute(
+            "SELECT * FROM market_sentinel_stocks WHERE username = ? AND stock_code = ?",
+            (username, normalized_code),
+        )
         row = cursor.fetchone()
         return dict(row) if row else None
     except Exception as exc:

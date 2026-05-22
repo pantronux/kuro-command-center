@@ -26,9 +26,13 @@ from glob import glob
 from pathlib import Path
 
 _kuro_memory_lock = threading.Lock()
+_kuro_memory_cache = {"path": None, "mtime": None, "raw": None}
 from typing import List, Dict, Optional, Any
 from datetime import datetime
-from mem0 import Memory
+try:
+    from mem0 import Memory
+except Exception:  # pragma: no cover - optional dependency in some test envs
+    Memory = None  # type: ignore[assignment]
 from kuro_backend.config import settings
 from pydantic import BaseModel, Field, ValidationError
 
@@ -207,6 +211,8 @@ class PerpetualMemory:
         self._client: Optional[Memory] = None
         self._cooldown_until_ts: float = 0.0
         self._consecutive_failures: int = 0
+        self._store_fingerprints: set[str] = set()
+        self._store_fingerprints_lock = threading.Lock()
 
     def _is_in_cooldown(self) -> bool:
         return time.monotonic() < self._cooldown_until_ts
@@ -233,6 +239,10 @@ class PerpetualMemory:
     def client(self) -> Optional[Memory]:
         """Lazy initialization of Mem0 client with cooldown-aware fallback."""
         if self._is_in_cooldown():
+            return None
+        if Memory is None:
+            logger.warning("[MEM0] mem0 package unavailable; memory client disabled.")
+            self._enter_cooldown("mem0_package_missing")
             return None
         if self._client is None:
             try:
@@ -417,6 +427,7 @@ class PerpetualMemory:
             return
         
         for mem in memories:
+            fingerprint = None
             try:
                 # Normalize all input shapes before .add(), including bare strings.
                 # Prevents "string indices must be integers" from downstream dict-style access.
@@ -439,6 +450,25 @@ class PerpetualMemory:
                     logger.warning(f"[MEM0] Skipping invalid memory entry (unknown type): {type(mem)}")
                     continue
 
+                runtime_id = str(metadata.get("runtime_id") or "")
+                runtime_namespace = str(metadata.get("runtime_namespace") or "")
+                fingerprint_blob = (
+                    f"{user_id}\n{runtime_id}\n{runtime_namespace}\n"
+                    f"{mem_text.strip().lower()}"
+                )
+                fingerprint = hashlib.sha256(
+                    fingerprint_blob.encode("utf-8", errors="replace")
+                ).hexdigest()
+                with self._store_fingerprints_lock:
+                    if fingerprint in self._store_fingerprints:
+                        logger.info(
+                            "[MEM0] Skipping duplicate memory fingerprint=%s",
+                            fingerprint[:12],
+                        )
+                        continue
+                    self._store_fingerprints.add(fingerprint)
+                metadata["fingerprint"] = fingerprint
+
                 self.client.add(
                     messages=[payload],
                     user_id=user_id,
@@ -448,6 +478,9 @@ class PerpetualMemory:
                 logger.debug(f"[MEM0] Stored memory preview: {mem_text[:60]}...")
                 self._reset_cooldown()
             except Exception as e:
+                if fingerprint:
+                    with self._store_fingerprints_lock:
+                        self._store_fingerprints.discard(fingerprint)
                 error_str = str(e).lower()
                 if "404" in error_str or "not found" in error_str or "embedding" in error_str:
                     logger.warning(f"[MEM0] Embedding error during store (cooldown): {e}")
@@ -500,7 +533,9 @@ class PerpetualMemory:
                     })
                 else:
                     logger.warning(f"[MEM0] Skipping unknown result type: {type(result)}")
-            
+
+            memories.sort(key=lambda item: float(item.get("score") or 0), reverse=True)
+            memories = memories[: max(1, int(limit or 1))]
             logger.info(f"[MEM0] Retrieved {len(memories)} memories for query: {query[:50]}...")
             self._reset_cooldown()
             return memories
@@ -609,6 +644,16 @@ class PerpetualMemory:
         
         parts = []
         for mem in memories:
+            if isinstance(mem, str):
+                text = mem.strip()
+                if text:
+                    parts.append(f"[MEMORI] {text}")
+                continue
+            if not isinstance(mem, dict):
+                text = str(mem).strip()
+                if text:
+                    parts.append(f"[MEMORI] {text}")
+                continue
             mem_type = mem.get("metadata", {}).get("type", "general")
             text = mem.get("text", "")
             
@@ -697,7 +742,15 @@ def load_kuro_memory_schema(path: Optional[str | Path] = None) -> KuroMemorySche
         try:
             if not target.exists():
                 return _schema_from_raw([])
+            mtime = target.stat().st_mtime
+            if (
+                _kuro_memory_cache.get("path") == str(target)
+                and _kuro_memory_cache.get("mtime") == mtime
+                and _kuro_memory_cache.get("raw") is not None
+            ):
+                return _schema_from_raw(_kuro_memory_cache["raw"])
             raw = json.loads(target.read_text(encoding="utf-8"))
+            _kuro_memory_cache.update({"path": str(target), "mtime": mtime, "raw": raw})
             return _schema_from_raw(raw)
         except (ValidationError, json.JSONDecodeError):
             logger.error(
@@ -725,10 +778,25 @@ def write_kuro_memory_schema(schema: KuroMemorySchema, path: Optional[str | Path
     """Write schema to disk atomically using tmp+rename semantics."""
     target = _resolve_kuro_memory_path(path)
     tmp_path = target.with_suffix(".json.tmp")
-    payload = json.dumps(_schema_to_raw(schema), ensure_ascii=False, indent=2)
+    raw = _schema_to_raw(schema)
+    payload = json.dumps(raw, ensure_ascii=False, indent=2)
     with _kuro_memory_lock:
         tmp_path.write_text(payload, encoding="utf-8")
+        try:
+            os.chmod(tmp_path, 0o600)
+        except Exception:
+            logger.debug("[PERPETUAL_MEMORY] chmod tmp skipped for %s", tmp_path)
         tmp_path.replace(target)
+        try:
+            os.chmod(target, 0o600)
+        except Exception:
+            logger.debug("[PERPETUAL_MEMORY] chmod target skipped for %s", target)
+        try:
+            _kuro_memory_cache.update(
+                {"path": str(target), "mtime": target.stat().st_mtime, "raw": raw}
+            )
+        except Exception:
+            _kuro_memory_cache.update({"path": None, "mtime": None, "raw": None})
 
 
 # Global instance

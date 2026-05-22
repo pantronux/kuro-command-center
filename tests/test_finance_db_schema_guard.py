@@ -94,3 +94,84 @@ def test_recurring_and_watched_hot_indexes_exist(isolated_finance_db):
     assert "idx_watched_active_user" in watched_idx, (
         "Expected idx_watched_active_user(active, username, symbol) for the dreaming sentinel hot path"
     )
+
+
+def test_legacy_market_hud_snapshot_gets_username_conflict_target(tmp_path, monkeypatch):
+    from kuro_backend import finance_db
+
+    db = tmp_path / "legacy_finance.db"
+    monkeypatch.setenv("KURO_FINANCE_DB_PATH", str(db))
+    finance_db._reset_schema_ready_for_tests()
+
+    conn = sqlite3.connect(db)
+    try:
+        conn.execute(
+            """
+            CREATE TABLE market_hud_snapshot (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                brief_text TEXT NOT NULL DEFAULT '',
+                last_sentinel_note TEXT NOT NULL DEFAULT '',
+                updated_at TEXT DEFAULT (datetime('now')),
+                username TEXT NOT NULL DEFAULT 'Pantronux'
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO market_hud_snapshot (username, brief_text) VALUES ('Pantronux', 'old')"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    finance_db.init_db()
+    finance_db.touch_market_snapshot_fetched_at("Pantronux")
+
+    conn = sqlite3.connect(db)
+    try:
+        indexes = _index_list(conn, "market_hud_snapshot")
+        row_count = conn.execute(
+            "SELECT COUNT(*) FROM market_hud_snapshot WHERE username = 'Pantronux'"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+        finance_db._reset_schema_ready_for_tests()
+
+    assert "idx_market_hud_snapshot_username_unique" in indexes
+    assert row_count == 1
+
+
+def test_market_sentinel_stocks_are_user_scoped_and_chart_history_records_prices(isolated_finance_db):
+    f = isolated_finance_db
+    f.init_db()
+
+    assert f.upsert_sentinel_stock_price(
+        stock_code="MDKA",
+        company_name="MDKA",
+        sector="IDX",
+        price_per_share=2550,
+        price_per_lot=255000,
+        price_category="below_500k",
+        volume_24h=10,
+        ytd_performance=0.0,
+        username="Pantronux",
+    )
+    assert f.upsert_sentinel_stock_price(
+        stock_code="MDKA",
+        company_name="MDKA",
+        sector="IDX",
+        price_per_share=2600,
+        price_per_lot=260000,
+        price_category="below_500k",
+        volume_24h=20,
+        ytd_performance=0.0,
+        username="Faikhira",
+    )
+
+    pantronux = f.get_sentinel_stock_detail("MDKA", username="Pantronux")
+    faikhira = f.get_sentinel_stock_detail("MDKA", username="Faikhira")
+    chart = f.get_sentinel_history_for_chart("MDKA", username="Pantronux")
+
+    assert pantronux["current_price_per_share"] == 2550
+    assert faikhira["current_price_per_share"] == 2600
+    assert chart
+    assert chart[-1]["price_per_share"] == 2550

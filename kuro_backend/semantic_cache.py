@@ -57,6 +57,9 @@ _CACHE_MAX: Final[int] = int(os.getenv("KURO_SEMANTIC_CACHE_MAX", "256"))
 @dataclass
 class _Entry:
     persona: str
+    username: str
+    runtime_id: str
+    runtime_namespace: str
     embedding: tuple[float, ...]
     response: str
     tags: frozenset[str]
@@ -105,7 +108,24 @@ def _evict_expired_locked(now: float) -> None:
     _entries = [e for e in _entries if now - e.ts <= _CACHE_TTL_S]
 
 
-def lookup(query: str, persona: str) -> Optional[str]:
+def _normalize_scope(
+    username: str = "Pantronux",
+    runtime_id: str = "sovereign",
+    runtime_namespace: str = "kuro.sovereign",
+) -> tuple[str, str, str]:
+    rid = str(runtime_id or "sovereign")
+    ns = str(runtime_namespace or f"kuro.{rid}")
+    return str(username or "Pantronux"), rid, ns
+
+
+def lookup(
+    query: str,
+    persona: str,
+    *,
+    username: str = "Pantronux",
+    runtime_id: str = "sovereign",
+    runtime_namespace: str = "kuro.sovereign",
+) -> Optional[str]:
     """Return a cached response if a similar, still-fresh entry exists.
 
     Returns ``None`` when the feature is disabled, no embedding is available,
@@ -118,6 +138,9 @@ def lookup(query: str, persona: str) -> Optional[str]:
         return None
 
     vec = _normalize(vec)
+    scope_username, scope_runtime, scope_namespace = _normalize_scope(
+        username, runtime_id, runtime_namespace
+    )
 
     now = time.monotonic()
     current_rev = _current_revision()
@@ -126,6 +149,12 @@ def lookup(query: str, persona: str) -> Optional[str]:
         best: tuple[float, _Entry] | None = None
         for entry in _entries:
             if entry.persona != persona:
+                continue
+            if (
+                entry.username != scope_username
+                or entry.runtime_id != scope_runtime
+                or entry.runtime_namespace != scope_namespace
+            ):
                 continue
             sim = _dot_product(vec, entry.embedding)
             if sim >= _SIM_THRESHOLD and (best is None or sim > best[0]):
@@ -152,7 +181,16 @@ def lookup(query: str, persona: str) -> Optional[str]:
         return entry.response
 
 
-def store(query: str, persona: str, response: str, tags: Iterable[str] = ()) -> None:
+def store(
+    query: str,
+    persona: str,
+    response: str,
+    tags: Iterable[str] = (),
+    *,
+    username: str = "Pantronux",
+    runtime_id: str = "sovereign",
+    runtime_namespace: str = "kuro.sovereign",
+) -> None:
     """Write a fresh entry into the cache.
 
     No-op when disabled or when the embedding API is unavailable.
@@ -166,8 +204,14 @@ def store(query: str, persona: str, response: str, tags: Iterable[str] = ()) -> 
     vec = _normalize(vec)
 
     tag_set = frozenset(tags)
+    scope_username, scope_runtime, scope_namespace = _normalize_scope(
+        username, runtime_id, runtime_namespace
+    )
     entry = _Entry(
         persona=persona,
+        username=scope_username,
+        runtime_id=scope_runtime,
+        runtime_namespace=scope_namespace,
         embedding=vec,
         response=response,
         tags=tag_set,
@@ -218,7 +262,7 @@ async def atomic_write_and_invalidate(
     if write_callable is not None:
         write_callable()
     else:
-        store(query=query, persona=persona, response=response, tags=tags)
+        store(query=query, persona=persona, response=response, tags=tags, username=username)
     invalidate_tag(username)
     yield
 

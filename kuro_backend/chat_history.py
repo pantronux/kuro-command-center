@@ -550,6 +550,8 @@ def get_history_page(
         chat_id=chat_id,
         before_id=before_id,
     )
+    if before_id is None:
+        rows = list(reversed(rows))
     has_more = len(rows) > page_limit
     if has_more:
         # get_history returns ascending order; drop the oldest overflow row.

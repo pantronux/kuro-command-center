@@ -157,18 +157,20 @@ def search_commitments(keyword: str, username: str = "Pantronux") -> List[Dict]:
         return []
 
 
-def close_commitment(goal_id: int) -> bool:
+def close_commitment(goal_id: int, username: str = "Pantronux") -> bool:
     """Mark a commitment as closed (completed/superseded)."""
     try:
         init_joint_goals_table()
         with _conn() as c:
-            c.execute(
-                "UPDATE joint_goals SET status='closed', closed_at=datetime('now') WHERE id=?",
-                (goal_id,),
+            cur = c.execute(
+                "UPDATE joint_goals SET status='closed', closed_at=datetime('now') "
+                "WHERE id=? AND username=?",
+                (goal_id, username),
             )
             c.commit()
-        logger.info("[JOINT_GOAL] Closed commitment id=%s", goal_id)
-        return True
+        closed = int(cur.rowcount or 0) > 0
+        logger.info("[JOINT_GOAL] Closed commitment id=%s user=%s closed=%s", goal_id, username, closed)
+        return closed
     except Exception as exc:
         logger.warning("[JOINT_GOAL] close_commitment failed id=%s: %s", goal_id, exc)
         return False

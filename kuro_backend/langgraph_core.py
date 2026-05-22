@@ -133,7 +133,7 @@ _TRUE_TOKEN_STREAMING_ENABLED = (
 _POST_RESPONSE_QUEUE_MAXSIZE = int(os.getenv("KURO_POST_RESPONSE_QUEUE_MAXSIZE", "500"))
 _post_response_queue = queue.Queue(maxsize=_POST_RESPONSE_QUEUE_MAXSIZE)  # type: ignore[assignment]
 _STREAM_CHUNK_QUEUE_MAXSIZE = int(os.getenv("KURO_STREAM_CHUNK_QUEUE_MAXSIZE", "256"))
-_STREAM_IDLE_TIMEOUT_S = float(os.getenv("KURO_STREAM_IDLE_TIMEOUT_S", "20"))
+_STREAM_IDLE_TIMEOUT_S = float(os.getenv("KURO_STREAM_IDLE_TIMEOUT_S", "120"))
 _EPISTEMIC_V2_ENABLED = os.getenv("KURO_EPISTEMIC_V2_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
 _STREAM_SANITIZER_ENABLED = os.getenv("KURO_STREAM_SANITIZER_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
 _RETRIEVAL_QUALITY_V2_ENABLED = os.getenv("KURO_RETRIEVAL_QUALITY_V2_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
@@ -360,6 +360,56 @@ def _execute_post_response_task(task: Dict[str, Any]) -> None:
         logger.warning("[POST_RESPONSE_WORKER] Unknown task kind=%s", kind)
 
 
+def _sanitize_cached_response(
+    response_text: str,
+    *,
+    session_id: str,
+    chat_id: Optional[str],
+) -> str:
+    """Apply the same user-facing safety gate used by generated responses."""
+    safe_text = response_sanitizer.sanitize_user_output(
+        response_text or "",
+        fallback="Maaf, saya belum punya cukup bukti yang ter-grounding untuk merespons ini dengan aman.",
+    )
+    if not safe_text:
+        return safe_text
+    if not _EPISTEMIC_V2_ENABLED:
+        return safe_text
+    try:
+        annotation = epistemic_engine.annotate(
+            safe_text,
+            retrieval_grade="weak",
+            has_memory=False,
+            evidence_items=[],
+        )
+        safe_text = str(annotation.get("user_safe_text", safe_text))
+        try:
+            from kuro_backend import intelligence_db
+
+            intelligence_db.save_epistemic_claims(
+                session_id=str(session_id or ""),
+                message_id=str(chat_id or ""),
+                claims=[
+                    {
+                        "text": c.text,
+                        "source_type": c.source_type,
+                        "confidence": c.confidence,
+                        "contradiction_score": c.contradiction_score,
+                        "visibility": c.visibility,
+                    }
+                    for c in (annotation.get("claims") or [])
+                ],
+            )
+        except Exception as exc:
+            logger.debug("[SEMANTIC_CACHE] save_epistemic_claims skipped: %s", exc)
+    except Exception as exc:
+        logger.debug("[SEMANTIC_CACHE] epistemic annotation skipped: %s", exc)
+    return response_sanitizer.sanitize_user_output(
+        safe_text,
+        fallback="Maaf, saya belum punya cukup bukti yang ter-grounding untuk merespons ini dengan aman.",
+    )
+
+
 def _post_response_worker_loop() -> None:
     while True:
         task = _post_response_queue.get()
@@ -415,11 +465,36 @@ def get_post_response_queue_depth() -> int:
     return _post_response_queue.qsize()
 
 
-def _persist_short_term_and_enqueue_writes(user_input: str, response_text: str, persona_mode: str, username: str = "Pantronux", chat_id: Optional[str] = None, message_count_before: int = 0) -> None:
+def _persist_short_term_and_enqueue_writes(
+    user_input: str,
+    response_text: str,
+    persona_mode: str,
+    username: str = "Pantronux",
+    chat_id: Optional[str] = None,
+    message_count_before: int = 0,
+    runtime_id: str = "sovereign",
+    runtime_namespace: str = "kuro.sovereign",
+) -> None:
     if chat_id is None:
         logger.warning("[LANGGRAPH] chat_id is None in _persist_short_term_and_enqueue_writes. Session isolation collapsed.")
-    memory_manager.add_short_term("user", user_input, persona_scope=persona_mode, username=username, chat_id=chat_id)
-    memory_manager.add_short_term("assistant", response_text, persona_scope=persona_mode, username=username, chat_id=chat_id)
+    memory_manager.add_short_term(
+        "user",
+        user_input,
+        persona_scope=persona_mode,
+        username=username,
+        chat_id=chat_id,
+        runtime_id=runtime_id,
+        namespace=runtime_namespace,
+    )
+    memory_manager.add_short_term(
+        "assistant",
+        response_text,
+        persona_scope=persona_mode,
+        username=username,
+        chat_id=chat_id,
+        runtime_id=runtime_id,
+        namespace=runtime_namespace,
+    )
 
     # Beta 5: Trigger background title generation if this is the first message in the session
     if chat_id and message_count_before == 0:
@@ -896,7 +971,10 @@ def memory_retrieval_node(state: KuroState) -> Dict[str, Any]:
             memories = []
             if raw_memories:
                 for m in raw_memories:
-                    memories.append(m.get("text", m.get("content", "")))
+                    if isinstance(m, dict):
+                        memories.append(m)
+                    elif m:
+                        memories.append({"text": str(m), "metadata": {}, "score": 0})
             
             logger.info(f"[MEMORY] Retrieved {len(memories)} memories")
             return {"mem0_retrieved_memories": memories}
@@ -2094,6 +2172,11 @@ def response_node(state: KuroState) -> Dict[str, Any]:
             session_id=session_id,
             username=username,
             chat_id=chat_id,
+            runtime_id=str(state.get("runtime_id", "sovereign") or "sovereign"),
+            runtime_namespace=str(
+                state.get("runtime_namespace")
+                or f"kuro.{state.get('runtime_id', 'sovereign') or 'sovereign'}"
+            ),
         )
         memory_injection = ctx["memory_injection"]
         mem0_context_block = ctx.get("mem0_context_block")
@@ -2668,7 +2751,19 @@ def response_node(state: KuroState) -> Dict[str, Any]:
         username = state.get("username", "Pantronux")
         chat_id = state.get("chat_id")
         msg_count_before = state.get("message_count_before", 0)
-        _persist_short_term_and_enqueue_writes(user_input, response_text, persona_mode, username, chat_id=chat_id, message_count_before=msg_count_before)
+        state_runtime_id = str(state.get("runtime_id", "sovereign") or "sovereign")
+        _persist_short_term_and_enqueue_writes(
+            user_input,
+            response_text,
+            persona_mode,
+            username,
+            chat_id=chat_id,
+            message_count_before=msg_count_before,
+            runtime_id=state_runtime_id,
+            runtime_namespace=str(
+                state.get("runtime_namespace") or f"kuro.{state_runtime_id}"
+            ),
+        )
         try:
             persona_runtime.upsert_runtime_state(
                 username=username,
@@ -3396,14 +3491,34 @@ async def process_chat_with_graph_stream(
         # Disabled by default; opt-in via KURO_SEMANTIC_CACHE_ENABLED.
         if not image_paths:
             from kuro_backend import semantic_cache
-            cached_response = semantic_cache.lookup(message, persona_mode)
+            cached_response = semantic_cache.lookup(
+                message,
+                persona_mode,
+                username=username,
+                runtime_id=resolved_runtime_id,
+                runtime_namespace=resolved_runtime_namespace,
+            )
             if cached_response is not None:
+                cached_response = _sanitize_cached_response(
+                    cached_response,
+                    session_id=str(session_id or ""),
+                    chat_id=chat_id,
+                )
                 cognition_trace.record_node("semantic_cache_hit")
                 if stream_metrics is not None:
                     stream_metrics["stream_mode"] = "semantic_cache"
                 yield cached_response
                 try:
-                    _persist_short_term_and_enqueue_writes(message, cached_response, persona_mode, username, chat_id=chat_id, message_count_before=msg_count_before)
+                    _persist_short_term_and_enqueue_writes(
+                        message,
+                        cached_response,
+                        persona_mode,
+                        username,
+                        chat_id=chat_id,
+                        message_count_before=msg_count_before,
+                        runtime_id=resolved_runtime_id,
+                        runtime_namespace=resolved_runtime_namespace,
+                    )
                 except Exception as exc:
                     logger.warning("[SEMANTIC_CACHE] persist failed: %s", exc)
                 _finalize_trace()
@@ -3422,13 +3537,28 @@ async def process_chat_with_graph_stream(
             fastpath_started = time.perf_counter()
             memory_coordinator.apply_path_tokens_to_runtime(message, persona_mode)
             memory_started = time.perf_counter()
+            runtime_ctx = resolve_runtime_context(
+                resolved_runtime_id,
+                username=username,
+                chat_id=str(chat_id or ""),
+                trace_id=resolved_trace_id,
+            )
+            mem0_memories = await asyncio.to_thread(
+                memory_coordinator.safe_mem0_retrieve,
+                message,
+                limit=5,
+                username=username,
+                ctx=runtime_ctx,
+            )
             ctx = await memory_coordinator.build_context_for_llm_async(
                 message,
                 persona_mode,
-                mem0_retrieved_memories=None,
+                mem0_retrieved_memories=mem0_memories,
                 session_id=session_id,
                 username=username,
                 chat_id=chat_id,
+                runtime_id=resolved_runtime_id,
+                runtime_namespace=resolved_runtime_namespace,
             )
             if stream_metrics is not None:
                 stream_metrics["memory_query_ms"] = round((time.perf_counter() - memory_started) * 1000, 2)
@@ -3549,7 +3679,16 @@ async def process_chat_with_graph_stream(
                     yield extra_tail
                     emitted += 1
                 response_text = response_with_ref
-            _persist_short_term_and_enqueue_writes(message, response_text, persona_mode, username, chat_id=chat_id, message_count_before=msg_count_before)
+            _persist_short_term_and_enqueue_writes(
+                message,
+                response_text,
+                persona_mode,
+                username,
+                chat_id=chat_id,
+                message_count_before=msg_count_before,
+                runtime_id=resolved_runtime_id,
+                runtime_namespace=resolved_runtime_namespace,
+            )
             try:
                 persona_runtime.upsert_runtime_state(
                     username=username,
@@ -3596,6 +3735,9 @@ async def process_chat_with_graph_stream(
                     persona_mode,
                     response_text,
                     tags=list(semantic_cache.classify_tags(message)) + [username],
+                    username=username,
+                    runtime_id=resolved_runtime_id,
+                    runtime_namespace=resolved_runtime_namespace,
                 )
             except Exception as exc:
                 logger.debug("[SEMANTIC_CACHE] store skipped: %s", exc)
@@ -3910,10 +4052,30 @@ def process_chat_with_graph(
         # P3.1 — semantic cache lookup on the sync path as well.
         if not image_paths:
             from kuro_backend import semantic_cache
-            cached_response = semantic_cache.lookup(message, persona_mode)
+            cached_response = semantic_cache.lookup(
+                message,
+                persona_mode,
+                username=username,
+                runtime_id=resolved_runtime_id,
+                runtime_namespace=resolved_runtime_namespace,
+            )
             if cached_response is not None:
+                cached_response = _sanitize_cached_response(
+                    cached_response,
+                    session_id=str(session_id or ""),
+                    chat_id=chat_id,
+                )
                 try:
-                    _persist_short_term_and_enqueue_writes(message, cached_response, persona_mode, username, chat_id=chat_id, message_count_before=msg_count_before)
+                    _persist_short_term_and_enqueue_writes(
+                        message,
+                        cached_response,
+                        persona_mode,
+                        username,
+                        chat_id=chat_id,
+                        message_count_before=msg_count_before,
+                        runtime_id=resolved_runtime_id,
+                        runtime_namespace=resolved_runtime_namespace,
+                    )
                 except Exception as exc:
                     logger.warning("[SEMANTIC_CACHE] persist failed: %s", exc)
                 return cached_response
@@ -4022,6 +4184,9 @@ def process_chat_with_graph(
                 persona_mode,
                 response,
                 tags=list(semantic_cache.classify_tags(message)) + [username],
+                username=username,
+                runtime_id=resolved_runtime_id,
+                runtime_namespace=resolved_runtime_namespace,
             )
         except Exception as exc:
             logger.debug("[SEMANTIC_CACHE] store (sync) skipped: %s", exc)

@@ -26,6 +26,9 @@ DEFAULT_TTL_DAYS: dict[str, int] = {
 }
 
 
+DECAY_BATCH_SIZE = 500
+
+
 def expire_stale_memories(store: MemoryStore) -> int:
     """
     1. Set missing expires_at using TTL by memory type.
@@ -35,26 +38,61 @@ def expire_stale_memories(store: MemoryStore) -> int:
     now = datetime.utcnow()
     expired_count = 0
     try:
-        all_active = store.retrieve_all_active_without_expiry()
-        for mem in all_active:
+        if hasattr(store.__class__, "iter_active_without_expiry"):
+            active_iter = store.iter_active_without_expiry(batch_size=DECAY_BATCH_SIZE)
+        else:
+            active_iter = iter(store.retrieve_all_active_without_expiry())
+        expiry_updates: list[tuple[str, str]] = []
+        for mem in active_iter:
             ttl_days = DEFAULT_TTL_DAYS.get(mem.type, 90)
             try:
                 created = datetime.fromisoformat(mem.created_at)
             except ValueError:
                 created = now
             expires_at = (created + timedelta(days=ttl_days)).isoformat()
-            store.set_expires_at(mem.id, expires_at)
+            expiry_updates.append((mem.id, expires_at))
+            if len(expiry_updates) >= DECAY_BATCH_SIZE:
+                if hasattr(store.__class__, "set_expires_at_many"):
+                    store.set_expires_at_many(expiry_updates)
+                else:
+                    for memory_id, expires in expiry_updates:
+                        store.set_expires_at(memory_id, expires)
+                expiry_updates = []
+        if expiry_updates:
+            if hasattr(store.__class__, "set_expires_at_many"):
+                store.set_expires_at_many(expiry_updates)
+            else:
+                for memory_id, expires in expiry_updates:
+                    store.set_expires_at(memory_id, expires)
 
-        stale = store.retrieve_stale(as_of=now.isoformat())
-        for mem in stale:
-            store.expire(mem.id)
-            expired_count += 1
+        if hasattr(store.__class__, "iter_stale"):
+            stale_iter = store.iter_stale(as_of=now.isoformat(), batch_size=DECAY_BATCH_SIZE)
+        else:
+            stale_iter = iter(store.retrieve_stale(as_of=now.isoformat()))
+        expire_ids: list[str] = []
+        for mem in stale_iter:
+            expire_ids.append(mem.id)
+            if len(expire_ids) >= DECAY_BATCH_SIZE:
+                if hasattr(store.__class__, "expire_many"):
+                    store.expire_many(expire_ids)
+                else:
+                    for memory_id in expire_ids:
+                        store.expire(memory_id)
+                expired_count += len(expire_ids)
+                expire_ids = []
             logger.debug(
                 "Expired memory id=%r type=%r runtime=%r",
                 mem.id,
                 mem.type,
                 mem.runtime_id,
             )
+        if expire_ids:
+            if hasattr(store.__class__, "expire_many"):
+                store.expire_many(expire_ids)
+            else:
+                for memory_id in expire_ids:
+                    store.expire(memory_id)
+            expired_count += len(expire_ids)
         logger.info("DecayEngine expired %s memories", expired_count)
     except Exception as exc:
         logger.error("DecayEngine failed: %s", exc, exc_info=True)

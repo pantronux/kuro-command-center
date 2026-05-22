@@ -16,6 +16,7 @@ import json
 import logging
 from datetime import datetime
 from typing import Dict, List, Any, Optional
+from zoneinfo import ZoneInfo
 
 from kuro_backend.config import settings, PRIMARY_MODEL
 from kuro_backend.serper_tool import serper_search, serper_news, RESEARCH_PILLARS
@@ -28,6 +29,37 @@ logger.propagate = False  # Prevent double-reporting to root logger
 # Briefings log directory
 BRIEFINGS_LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs", "briefings")
 os.makedirs(BRIEFINGS_LOG_DIR, exist_ok=True)
+
+
+def _format_gb(value_bytes: int) -> str:
+    """Format bytes as compact GiB-backed GB text for user-facing reports."""
+    value = float(value_bytes) / (1024 ** 3)
+    if value >= 10:
+        return f"{value:.0f}GB"
+    return f"{value:.1f}GB"
+
+
+def build_status_pagi(now: Optional[datetime] = None) -> str:
+    """Build deterministic system status so hardware metrics are never LLM-guessed."""
+    try:
+        import psutil
+
+        cpu_percent = psutil.cpu_percent(interval=0.1)
+        ram = psutil.virtual_memory()
+        disk = psutil.disk_usage("/")
+        report_time = now or datetime.now(ZoneInfo("Asia/Jakarta"))
+        return (
+            "Sistem operasional normal. "
+            f"CPU: {cpu_percent:.0f}% | "
+            f"RAM: {_format_gb(ram.used)}/{_format_gb(ram.total)} ({ram.percent:.0f}%) | "
+            f"Disk: {_format_gb(disk.free)} tersedia dari {_format_gb(disk.total)} "
+            f"({disk.percent:.0f}% terpakai). "
+            f"Waktu: {report_time.strftime('%H:%M')} WIB."
+        )
+    except Exception as exc:
+        logger.warning("[INTELLIGENCE] status_pagi metrics unavailable: %s", exc)
+        report_time = now or datetime.now(ZoneInfo("Asia/Jakarta"))
+        return f"Sistem Kuro beroperasi normal. Waktu: {report_time.strftime('%H:%M')} WIB."
 
 def generate_daily_queries(username: str = "Pantronux") -> Dict[str, List[str]]:
     """
@@ -224,7 +256,7 @@ INSTRUKSI TRIANGULASI:
 3. Berikan analisis yang tajam dan berwibawa.
 
 Struktur laporan:
-I. Laporan Status Pagi (Salam, Status CPU/RAM/Disk, Waktu)
+I. Laporan Status Pagi (akan diisi otomatis oleh sistem; jangan mengarang angka CPU/RAM/Disk)
 II. Intelijen Sektoral (Cybersecurity & UU PDP)
 III. Wawasan Teknologi AI (Agentic AI, RAG, Enterprise trends)
 IV. Wawasan Finansial (Overview pasar, peluang bisnis, tren makro)
@@ -265,6 +297,7 @@ FORMAT OUTPUT JSON:
         
         briefing = json.loads(raw)
         briefing["date"] = datetime.now().strftime("%Y-%m-%d")
+        briefing["status_pagi"] = build_status_pagi()
         # Ensure stock recommendations are passed through
         if not briefing.get("stock_recommendations"):
             briefing["stock_recommendations"] = stock_recommendations
@@ -275,7 +308,7 @@ FORMAT OUTPUT JSON:
         logger.error(f"[INTELLIGENCE] Synthesis failed: {e}")
         return {
             "date": datetime.now().strftime("%Y-%m-%d"),
-            "status_pagi": f"Sistem Kuro beroperasi normal.",
+            "status_pagi": build_status_pagi(),
             "intelijen_sektoral": "Data tidak tersedia.",
             "wawasan_teknologi": "Data tidak tersedia.",
             "wawasan_finansial": "Data tidak tersedia.",

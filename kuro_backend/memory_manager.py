@@ -660,26 +660,38 @@ def _init_short_term_db_locked():
     logger.info("Short-term memory database initialized.")
 
 
-def get_short_term_with_ids(persona_scope: str = None, username: str = "Pantronux", chat_id: Optional[str] = None) -> List[Dict]:
+def get_short_term_with_ids(
+    persona_scope: str = None,
+    username: str = "Pantronux",
+    chat_id: Optional[str] = None,
+    runtime_id: str = "sovereign",
+    namespace: str = "kuro.sovereign",
+) -> List[Dict]:
     """Same as :func:`get_short_term` but includes the SQLite row id per entry.
 
     Needed for the sliding-window summary cache so we can key summaries by the
     highest id they cover.
     """
     scope = normalize_persona(persona_scope or get_active_persona(username))
+    runtime_id = str(runtime_id or "sovereign")
+    namespace = str(namespace or f"kuro.{runtime_id}")
     conn = _get_short_term_conn()
     cursor = conn.cursor()
     if chat_id is not None:
         cursor.execute(
             "SELECT id, role, content, persona_scope, timestamp FROM short_term "
-            "WHERE persona_scope = ? AND username = ? AND chat_id = ? ORDER BY id DESC LIMIT ?",
-            (scope, username, chat_id, SHORT_TERM_LIMIT),
+            "WHERE persona_scope = ? AND username = ? AND chat_id = ? "
+            "AND runtime_id = ? AND namespace = ? AND status = 'active' "
+            "AND memory_type = 'short_term' ORDER BY id DESC LIMIT ?",
+            (scope, username, chat_id, runtime_id, namespace, SHORT_TERM_LIMIT),
         )
     else:
         cursor.execute(
             "SELECT id, role, content, persona_scope, timestamp FROM short_term "
-            "WHERE persona_scope = ? AND username = ? AND chat_id IS NULL ORDER BY id DESC LIMIT ?",
-            (scope, username, SHORT_TERM_LIMIT),
+            "WHERE persona_scope = ? AND username = ? AND chat_id IS NULL "
+            "AND runtime_id = ? AND namespace = ? AND status = 'active' "
+            "AND memory_type = 'short_term' ORDER BY id DESC LIMIT ?",
+            (scope, username, runtime_id, namespace, SHORT_TERM_LIMIT),
         )
     rows = cursor.fetchall()
     conn.close()
@@ -1234,14 +1246,26 @@ def mark_dream_notification(
         conn.close()
 
 @db_retry()
-def add_short_term(role: str, content: str, persona_scope: str = None, username: str = "Pantronux", chat_id: Optional[str] = None):
+def add_short_term(
+    role: str,
+    content: str,
+    persona_scope: str = None,
+    username: str = "Pantronux",
+    chat_id: Optional[str] = None,
+    runtime_id: str = "sovereign",
+    namespace: str = "kuro.sovereign",
+):
     """Add interaction to short-term buffer, keyed by (persona_scope, username, chat_id)."""
     scope = normalize_persona(persona_scope or get_active_persona(username))
+    runtime_id = str(runtime_id or "sovereign")
+    namespace = str(namespace or f"kuro.{runtime_id}")
     conn = _get_short_term_conn()
     cursor = conn.cursor()
     cursor.execute(
-        "INSERT INTO short_term (role, content, persona_scope, username, chat_id) VALUES (?, ?, ?, ?, ?)",
-        (role, content, scope, username, chat_id),
+        "INSERT INTO short_term "
+        "(role, content, persona_scope, username, chat_id, runtime_id, namespace, memory_type, status, source) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, 'short_term', 'active', 'conversation')",
+        (role, content, scope, username, chat_id, runtime_id, namespace),
     )
     
     # Enforce limit - delete oldest if over limit, per (persona_scope, username, chat_id)
@@ -1249,13 +1273,20 @@ def add_short_term(role: str, content: str, persona_scope: str = None, username:
         """
         DELETE FROM short_term
         WHERE persona_scope = ? AND username = ? AND (chat_id = ? OR (chat_id IS NULL AND ? IS NULL))
+          AND runtime_id = ? AND namespace = ? AND memory_type = 'short_term'
+          AND source = 'conversation'
           AND id NOT IN (
               SELECT id FROM short_term
               WHERE persona_scope = ? AND username = ? AND (chat_id = ? OR (chat_id IS NULL AND ? IS NULL))
+                AND runtime_id = ? AND namespace = ? AND memory_type = 'short_term'
+                AND source = 'conversation'
               ORDER BY id DESC LIMIT ?
           )
         """,
-        (scope, username, chat_id, chat_id, scope, username, chat_id, chat_id, SHORT_TERM_LIMIT),
+        (
+            scope, username, chat_id, chat_id, runtime_id, namespace,
+            scope, username, chat_id, chat_id, runtime_id, namespace, SHORT_TERM_LIMIT,
+        ),
     )
     
     conn.commit()
@@ -1309,20 +1340,32 @@ def prune_research_ledger(retention_days: int = 90, archive_retention_days: int 
     finally:
         conn.close()
 
-def get_short_term(persona_scope: str = None, username: str = "Pantronux", chat_id: Optional[str] = None) -> List[Dict]:
+def get_short_term(
+    persona_scope: str = None,
+    username: str = "Pantronux",
+    chat_id: Optional[str] = None,
+    runtime_id: str = "sovereign",
+    namespace: str = "kuro.sovereign",
+) -> List[Dict]:
     """Get recent short-term memory, optionally filtered by chat_id."""
     scope = normalize_persona(persona_scope or get_active_persona(username))
+    runtime_id = str(runtime_id or "sovereign")
+    namespace = str(namespace or f"kuro.{runtime_id}")
     conn = _get_short_term_conn()
     cursor = conn.cursor()
     if chat_id is not None:
         cursor.execute(
-            "SELECT * FROM short_term WHERE persona_scope = ? AND username = ? AND chat_id = ? ORDER BY id DESC LIMIT ?",
-            (scope, username, chat_id, SHORT_TERM_LIMIT),
+            "SELECT * FROM short_term WHERE persona_scope = ? AND username = ? AND chat_id = ? "
+            "AND runtime_id = ? AND namespace = ? AND status = 'active' "
+            "AND memory_type = 'short_term' ORDER BY id DESC LIMIT ?",
+            (scope, username, chat_id, runtime_id, namespace, SHORT_TERM_LIMIT),
         )
     else:
         cursor.execute(
-            "SELECT * FROM short_term WHERE persona_scope = ? AND username = ? AND chat_id IS NULL ORDER BY id DESC LIMIT ?",
-            (scope, username, SHORT_TERM_LIMIT),
+            "SELECT * FROM short_term WHERE persona_scope = ? AND username = ? AND chat_id IS NULL "
+            "AND runtime_id = ? AND namespace = ? AND status = 'active' "
+            "AND memory_type = 'short_term' ORDER BY id DESC LIMIT ?",
+            (scope, username, runtime_id, namespace, SHORT_TERM_LIMIT),
         )
     rows = cursor.fetchall()
     conn.close()

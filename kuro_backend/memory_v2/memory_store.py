@@ -27,6 +27,13 @@ def _utc_now_sql() -> str:
     return datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
 
 
+def _require_username(username: Optional[str]) -> str:
+    value = str(username or "").strip()
+    if not value:
+        raise ValueError("username is required for MemoryStore operations")
+    return value
+
+
 class MemoryProvenance(BaseModel):
     session_id: Optional[str] = None
     message_id: Optional[str] = None
@@ -131,6 +138,25 @@ class MemoryStore:
         )
 
     def add(self, memory: KuroMemory) -> str:
+        username = _require_username(memory.username)
+        from kuro_backend.memory_v2.provenance_tracker import normalize_provenance
+
+        provenance = normalize_provenance(memory.provenance)
+        existing_conflicts: list[KuroMemory] = []
+        if memory.type in ("semantic", "episodic"):
+            try:
+                from kuro_backend.memory_v2.conflict_resolver import detect_conflicts
+
+                existing = self.retrieve(
+                    namespace=memory.namespace,
+                    runtime_id=memory.runtime_id,
+                    memory_type=memory.type,
+                    username=username,
+                    limit=50,
+                )
+                existing_conflicts = detect_conflicts(memory, existing)
+            except Exception as exc:
+                logger.warning("Memory conflict detection skipped: %s", exc)
         conn = self._conn()
         try:
             conn.execute(
@@ -145,20 +171,24 @@ class MemoryStore:
                     "assistant",
                     memory.content,
                     "consultant",
-                    memory.username or "Pantronux",
-                    memory.provenance.session_id,
+                    username,
+                    provenance.session_id,
                     memory.id,
                     memory.runtime_id,
                     memory.namespace,
                     memory.type,
                     float(memory.confidence),
-                    memory.provenance.model_dump_json(),
+                    provenance.model_dump_json(),
                     memory.expires_at,
                     memory.status,
                     memory.source,
                 ),
             )
             conn.commit()
+            if existing_conflicts:
+                from kuro_backend.memory_v2.conflict_resolver import resolve_conflict
+
+                resolve_conflict(self, memory, existing_conflicts)
             return memory.id
         finally:
             conn.close()
@@ -167,10 +197,11 @@ class MemoryStore:
         self,
         namespace: str,
         runtime_id: str,
+        username: str,
         memory_type: Optional[str] = None,
-        username: Optional[str] = None,
         limit: int = 20,
     ) -> list[KuroMemory]:
+        username = _require_username(username)
         conn = self._conn()
         try:
             query = [
@@ -184,10 +215,9 @@ class MemoryStore:
             if memory_type:
                 query.append("AND memory_type = ?")
                 params.append(memory_type)
-            if username:
-                query.append("AND username = ?")
-                params.append(username)
-            query.append("ORDER BY id DESC LIMIT ?")
+            query.append("AND username = ?")
+            params.append(username)
+            query.append("ORDER BY confidence DESC, id DESC LIMIT ?")
             params.append(max(1, int(limit)))
             rows = conn.execute(" ".join(query), params).fetchall()
             return [self._row_to_memory(row) for row in rows]
@@ -244,6 +274,31 @@ class MemoryStore:
         finally:
             conn.close()
 
+    def iter_active_without_expiry(self, batch_size: int = 500):
+        last_row_id = 0
+        size = max(1, int(batch_size or 500))
+        while True:
+            conn = self._conn()
+            try:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM short_term
+                    WHERE status = 'active'
+                      AND expires_at IS NULL
+                      AND id > ?
+                    ORDER BY id ASC
+                    LIMIT ?
+                    """,
+                    (last_row_id, size),
+                ).fetchall()
+            finally:
+                conn.close()
+            if not rows:
+                break
+            for row in rows:
+                last_row_id = int(row["id"])
+                yield self._row_to_memory(row)
+
     def retrieve_stale(self, as_of: str) -> list[KuroMemory]:
         conn = self._conn()
         try:
@@ -261,12 +316,64 @@ class MemoryStore:
         finally:
             conn.close()
 
+    def iter_stale(self, as_of: str, batch_size: int = 500):
+        last_row_id = 0
+        size = max(1, int(batch_size or 500))
+        while True:
+            conn = self._conn()
+            try:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM short_term
+                    WHERE status = 'active'
+                      AND expires_at IS NOT NULL
+                      AND replace(expires_at, 'T', ' ') < replace(?, 'T', ' ')
+                      AND id > ?
+                    ORDER BY id ASC
+                    LIMIT ?
+                    """,
+                    (as_of, last_row_id, size),
+                ).fetchall()
+            finally:
+                conn.close()
+            if not rows:
+                break
+            for row in rows:
+                last_row_id = int(row["id"])
+                yield self._row_to_memory(row)
+
     def set_expires_at(self, memory_id: str, expires_at: str) -> None:
         conn = self._conn()
         try:
             conn.execute(
                 "UPDATE short_term SET expires_at = ? WHERE memory_id = ?",
                 (expires_at, memory_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def set_expires_at_many(self, updates: list[tuple[str, str]]) -> None:
+        if not updates:
+            return
+        conn = self._conn()
+        try:
+            conn.executemany(
+                "UPDATE short_term SET expires_at = ? WHERE memory_id = ?",
+                [(expires_at, memory_id) for memory_id, expires_at in updates],
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def expire_many(self, memory_ids: list[str]) -> None:
+        if not memory_ids:
+            return
+        conn = self._conn()
+        try:
+            conn.executemany(
+                "UPDATE short_term SET status = 'expired' WHERE memory_id = ?",
+                [(memory_id,) for memory_id in memory_ids],
             )
             conn.commit()
         finally:

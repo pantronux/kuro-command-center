@@ -1074,6 +1074,7 @@ async function kuroLoadHistory(isInitial = false) {
                         is_bookmarked: msg.is_bookmarked,
                         is_regenerated: msg.is_regenerated,
                         export_suggestions: msg.export_suggestions || [],
+                        timestamp: msg.timestamp,
                     });
                 });
 
@@ -1106,6 +1107,7 @@ async function kuroLoadHistory(isInitial = false) {
                         is_bookmarked: msg.is_bookmarked,
                         is_regenerated: msg.is_regenerated,
                         export_suggestions: msg.export_suggestions || [],
+                        timestamp: msg.timestamp,
                     });
                 });
                 if (isInitial) {
@@ -2250,7 +2252,7 @@ async function sendMessage(isFromWelcome = false) {
                 <div class="markdown-content streaming-content"></div>
             </div>
             <div class="flex items-center justify-between mt-1 px-1">
-                <span class="text-[10px] text-gray-400 font-mono tracking-tighter">${getCurrentTime()}</span>
+                <span class="text-[10px] text-gray-400 font-mono tracking-tighter js-message-time">${getCurrentTime()}</span>
             </div>
         </div>
     `;
@@ -2390,6 +2392,11 @@ async function sendMessage(isFromWelcome = false) {
                             renderExportSuggestions(streamingContent, streamMeta.export_suggestions);
                         } else if (streamMeta?.export_suggestion) {
                             renderExportSuggestions(streamingContent, [streamMeta.export_suggestion]);
+                        }
+                        const serverTimestamp = data?.meta?.timestamp || data?.timestamp || data?.data?.timestamp;
+                        if (serverTimestamp) {
+                            const timeEl = aiMessageDiv.querySelector('.js-message-time');
+                            if (timeEl) timeEl.textContent = formatChatTimestamp(serverTimestamp);
                         }
                         if (wasPinnedToBottom) {
                             scrollToBottom();
@@ -2567,7 +2574,7 @@ function addMessageToChat(role, content, files = [], messageId = null, extra = {
             <div class="flex items-center ${role === 'user' ? 'justify-end' : 'justify-start'} mt-1 px-1 gap-2">
                 ${extra.is_edited ? '<span class="text-[9px] text-gray-400 italic">edited</span>' : ''}
                 ${extra.is_regenerated ? '<span class="text-[9px] text-gray-400 italic">regenerated</span>' : ''}
-                <span class="text-[10px] text-gray-400 font-mono tracking-tighter">${getCurrentTime()}</span>
+                <span class="text-[10px] text-gray-400 font-mono tracking-tighter">${formatChatTimestamp(extra.timestamp)}</span>
             </div>
         </div>
     `;
@@ -2655,7 +2662,7 @@ function prependMessageToChat(role, content, attachments = [], messageId = null,
             <div class="flex items-center ${role === 'user' ? 'justify-end' : 'justify-start'} mt-1 px-1 gap-2">
                 ${extra.is_edited ? '<span class="text-[9px] text-gray-400 italic">edited</span>' : ''}
                 ${extra.is_regenerated ? '<span class="text-[9px] text-gray-400 italic">regenerated</span>' : ''}
-                <span class="text-[10px] text-gray-400 font-mono tracking-tighter">${getCurrentTime()}</span>
+                <span class="text-[10px] text-gray-400 font-mono tracking-tighter">${formatChatTimestamp(extra.timestamp)}</span>
             </div>
         </div>
     `;
@@ -2927,6 +2934,7 @@ async function loadChatHistory() {
                     is_regenerated: msg.is_regenerated,
                     is_bookmarked: msg.is_bookmarked,
                     export_suggestions: msg.export_suggestions || [],
+                    timestamp: msg.timestamp,
                 });
             });
 
@@ -3544,6 +3552,18 @@ function escapeAttr(text) {
 
 function getCurrentTime() {
     return new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+}
+
+function formatChatTimestamp(timestamp) {
+    if (!timestamp) return getCurrentTime();
+    let value = String(timestamp).trim();
+    if (!value) return getCurrentTime();
+    if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(value)) {
+        value = value.replace(' ', 'T') + 'Z';
+    }
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return getCurrentTime();
+    return parsed.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
 }
 
 function showNotification(message, type = 'info') {

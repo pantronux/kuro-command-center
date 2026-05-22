@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from kuro_backend.config import settings
@@ -43,18 +44,23 @@ def _get_collection_name(owner_username: str) -> str:
 def embed_chunks(dataset_uuid: str, chunks: List[Dict[str, Any]], metadata: Dict[str, Any]) -> Dict[str, Any]:
     owner_username = metadata.get("owner_username", "unknown")
     collection_name = _get_collection_name(owner_username)
+    ingestion_ts = datetime.utcnow().replace(microsecond=0).isoformat()
     try:
         client = _get_client()
         collection = client.get_or_create_collection(name=collection_name)
         ids = [f"{dataset_uuid}:{chunk['chunk_index']}" for chunk in chunks]
         documents = [chunk["chunk_text"] for chunk in chunks]
         metadatas = [
-            {
-                "dataset_uuid": dataset_uuid,
-                "chunk_index": chunk["chunk_index"],
-                "dataset_name": metadata.get("dataset_name", ""),
-                "source_type": metadata.get("source_type", ""),
-            }
+                {
+                    "dataset_uuid": dataset_uuid,
+                    "chunk_index": chunk["chunk_index"],
+                    "dataset_name": metadata.get("dataset_name", ""),
+                    "source_type": metadata.get("source_type", ""),
+                    "owner_username": owner_username,
+                    "runtime_id": metadata.get("runtime_id", ""),
+                    "ingestion_ts": ingestion_ts,
+                    "source_file_hash": metadata.get("file_hash_sha256", ""),
+                }
             for chunk in chunks
         ]
         embeddings = [_stable_embedding(chunk["chunk_text"]) for chunk in chunks]
