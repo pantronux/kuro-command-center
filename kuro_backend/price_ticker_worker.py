@@ -7,15 +7,23 @@ Main Functions: run_price_update(), is_market_hours().
 Side Effects: DB upserts to market_sentinel_stocks, no LLM calls.
 """
 import logging
-import yfinance as yf
+import os
 from datetime import datetime
+from typing import Any, Callable, Sequence
+
 import pytz
+
 from kuro_backend.finance_db import touch_market_snapshot_fetched_at, upsert_sentinel_stock_price
+
+try:
+    import yfinance as yf
+except Exception:  # pragma: no cover - optional dependency in some deployments
+    yf = None
 
 logger = logging.getLogger(__name__)
 
 # Expanded Watchlist: LQ45 + Cheap Mid-caps
-WATCHLIST = [
+WATCHLIST = tuple(dict.fromkeys([
     # LQ45 (representative sample)
     "ADRO.JK", "AKRA.JK", "AMRT.JK", "ANTM.JK", "ASII.JK", "BBCA.JK", "BBNI.JK", "BBRI.JK",
     "BBTN.JK", "BMRI.JK", "BRPT.JK", "BUKA.JK", "CPIN.JK", "EMTK.JK", "ESSA.JK", "EXCL.JK",
@@ -25,7 +33,34 @@ WATCHLIST = [
     # Cheap Mid-caps / High Volume
     "ELSA.JK", "BUMI.JK", "ENRG.JK", "BRMS.JK", "DEWA.JK", "LPPS.JK", "PKPK.JK", "KRAS.JK",
     "META.JK", "MLPL.JK", "WIIM.JK", "DOID.JK", "SMDR.JK", "BSDE.JK", "PWON.JK", "ASRI.JK"
-]
+]))
+
+
+def _download_timeout_seconds() -> float:
+    try:
+        return max(1.0, float(os.getenv("KURO_PRICE_TICKER_TIMEOUT_S", "20")))
+    except (TypeError, ValueError):
+        return 20.0
+
+
+def _download_market_data(symbols: Sequence[str], timeout_s: float) -> Any:
+    if yf is None:
+        raise RuntimeError("yfinance dependency unavailable")
+    return yf.download(
+        list(symbols),
+        period="30d",
+        interval="1d",
+        group_by="ticker",
+        progress=False,
+        threads=True,
+        timeout=timeout_s,
+    )
+
+
+def _frame_for_ticker(data: Any, ticker_symbol: str, symbol_count: int) -> Any:
+    if symbol_count == 1 and hasattr(data, "columns") and "Close" in data.columns:
+        return data
+    return data[ticker_symbol]
 
 def is_market_hours() -> bool:
     """Check if IDX is currently open (Mon-Fri 09:00-16:00 WIB)."""
@@ -39,21 +74,29 @@ def is_market_hours() -> bool:
         return False
     return True
 
-def run_price_update(username: str = "Pantronux") -> dict:
+def run_price_update(
+    username: str = "Pantronux",
+    *,
+    watchlist: Sequence[str] | None = None,
+    downloader: Callable[[Sequence[str], float], Any] | None = None,
+) -> dict:
     """Fetch latest prices via yfinance and update the database."""
+    symbols = tuple(dict.fromkeys(watchlist or WATCHLIST))
+    if not symbols:
+        return {"updated": 0, "failed": 0}
     # Note: We still allow manual runs even outside market hours for testing
-    logger.info("[TICKER] Starting price update for %d tickers...", len(WATCHLIST))
+    logger.info("[TICKER] Starting price update for %d tickers...", len(symbols))
     
     results = {"updated": 0, "failed": 0}
     
     try:
         # Batch download for efficiency
         # We use 30d period to ensure we can calculate YTD if needed or just get the latest close
-        data = yf.download(WATCHLIST, period="30d", interval="1d", group_by='ticker', progress=False)
+        data = (downloader or _download_market_data)(symbols, _download_timeout_seconds())
         
-        for ticker_symbol in WATCHLIST:
+        for ticker_symbol in symbols:
             try:
-                ticker_data = data[ticker_symbol]
+                ticker_data = _frame_for_ticker(data, ticker_symbol, len(symbols))
                 if ticker_data.empty:
                     logger.warning("[TICKER] No data for %s", ticker_symbol)
                     results["failed"] += 1
@@ -91,7 +134,7 @@ def run_price_update(username: str = "Pantronux") -> dict:
                             results["failed"] += 1
                             continue
                 except Exception as e:
-                    pass
+                    logger.debug("[TICKER] Timestamp freshness check skipped for %s: %s", ticker_symbol, e)
 
 
                 # Calculate YTD approx (this is simplified)

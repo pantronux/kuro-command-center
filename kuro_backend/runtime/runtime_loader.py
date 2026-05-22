@@ -1,15 +1,18 @@
-"""Runtime config loader orchestration utilities.
-Target Phase 1.
-"""
+"""Runtime config loader orchestration utilities."""
+from __future__ import annotations
 
-# --- Header Doc ---
-# Purpose: Runtime config loader orchestration utilities.
-# Target Phase: Phase 1
-# Dependencies: TBD
-# Status: STUB
+from typing import Dict
 
-KURO_STUB = True
+from kuro_backend.runtime.runtime_registry import RuntimeConfig, RuntimeRegistry
 
 
-def stub_entrypoint() -> None:
-    raise NotImplementedError('STUB - Phase 1 - not yet implemented')
+def load_runtime_configs(*, reload: bool = False) -> Dict[str, RuntimeConfig]:
+    """Load runtime configs and return a runtime_id keyed snapshot."""
+    if reload:
+        RuntimeRegistry.reload()
+    return {config.runtime_id: config for config in RuntimeRegistry.list_runtimes(include_stubs=True)}
+
+
+def get_runtime_config(runtime_id: str) -> RuntimeConfig:
+    """Return a runtime config, preserving sovereign fallback semantics."""
+    return RuntimeRegistry.get(runtime_id)
