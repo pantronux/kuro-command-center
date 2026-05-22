@@ -97,6 +97,9 @@ from kuro_backend import persona_history_admin
 from kuro_backend import version as kuro_version
 from kuro_backend import proactive_greeting
 from kuro_backend.enterprise_flags import get_enterprise_flag_snapshot
+from kuro_backend.memory_v3.health import get_memory_v3_health, get_memory_v3_public_status
+from kuro_backend.memory_v3.retention import MemoryRetentionEngine
+from kuro_backend.memory_v3.store import MemoryV3Store
 from kuro_backend.storage.data_catalog import get_storage_catalog_snapshot
 from kuro_backend.storage.health import get_storage_health_snapshot
 from kuro_backend.storage.migrations import get_all_migration_histories
@@ -1304,6 +1307,50 @@ async def get_admin_storage_migrations(request: Request):
     require_admin_user(request)
     return api_success(data=get_all_migration_histories())
 
+
+@app.get("/api/admin/memory-v3/health")
+async def get_admin_memory_v3_health(request: Request):
+    """Return admin-only Memory V3 health diagnostics."""
+    require_admin_user(request)
+    return api_success(data=get_memory_v3_health())
+
+
+@app.get("/api/admin/memory-v3/conflicts")
+async def get_admin_memory_v3_conflicts(
+    request: Request,
+    limit: int = Query(default=100, ge=1, le=500),
+):
+    """Return admin-only Memory V3 conflict inventory."""
+    require_admin_user(request)
+    return api_success(data={"conflicts": MemoryV3Store().list_conflicts(limit=limit)})
+
+
+@app.get("/api/admin/memory-v3/access-log")
+async def get_admin_memory_v3_access_log(
+    request: Request,
+    limit: int = Query(default=100, ge=1, le=500),
+):
+    """Return admin-only Memory V3 access log."""
+    require_admin_user(request)
+    return api_success(data={"access_log": MemoryV3Store().list_access_log(limit=limit)})
+
+
+@app.post("/api/admin/memory-v3/expire")
+async def post_admin_memory_v3_expire(request: Request):
+    """Run Memory V3 retention expiry without physical deletion."""
+    require_admin_user(request)
+    expired = MemoryRetentionEngine().expire_stale_memories()
+    return api_success(data={"expired_count": expired})
+
+
+@app.get("/api/memory-v3/status")
+async def get_memory_v3_status(request: Request):
+    """Return user-safe Memory V3 status without topology or cross-user details."""
+    token = get_token_from_cookie(request)
+    token_data = validate_token(token)
+    if not token_data:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    return api_success(data=get_memory_v3_public_status())
 
 
 @app.get("/api/history")
