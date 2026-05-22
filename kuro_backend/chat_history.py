@@ -20,7 +20,7 @@ import logging
 import os
 import threading
 from datetime import datetime
-from typing import List, Dict, Optional
+from typing import Any, List, Dict, Optional
 from kuro_backend.config import settings
 from kuro_backend import memory_manager
 from kuro_backend.db_utils import (
@@ -387,8 +387,55 @@ def _init_db_locked():
             "UPDATE chat_sessions SET runtime_id='sovereign' WHERE runtime_id IS NULL"
         )
 
+        # Enterprise Chat V2 migrations: session settings, soft lifecycle,
+        # streaming traceability, branching lineage, and attachment metadata.
+        for col, ddl in [
+            ("model_alias", "TEXT DEFAULT ''"),
+            ("provider_alias", "TEXT DEFAULT ''"),
+            ("temperature", "REAL DEFAULT 0.7"),
+            ("workspace_id", "TEXT DEFAULT 'default'"),
+            ("archived_at", "DATETIME DEFAULT NULL"),
+            ("deleted_at", "DATETIME DEFAULT NULL"),
+            ("mode", "TEXT DEFAULT 'default'"),
+            ("tools_enabled", "INTEGER NOT NULL DEFAULT 1"),
+            ("web_search_enabled", "INTEGER NOT NULL DEFAULT 0"),
+            ("memory_v3_enabled", "INTEGER NOT NULL DEFAULT 0"),
+        ]:
+            add_column_if_missing(conn, "chat_sessions", col, ddl)
+
+        for col, ddl in [
+            ("trace_id", "TEXT DEFAULT ''"),
+            ("event_seq", "INTEGER DEFAULT 0"),
+            ("parent_message_id", "INTEGER DEFAULT NULL"),
+            ("branch_id", "TEXT DEFAULT ''"),
+            ("artifact_refs_json", "TEXT DEFAULT '[]'"),
+            ("grounding_refs_json", "TEXT DEFAULT '[]'"),
+        ]:
+            add_column_if_missing(conn, "chat_history", col, ddl)
+
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_chat_history_stream_seq
+            ON chat_history(chat_id, event_seq)
+            """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_chat_history_branch
+            ON chat_history(chat_id, branch_id, parent_message_id)
+            """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_chat_sessions_workspace_user
+            ON chat_sessions(workspace_id, username, updated_at DESC)
+            """
+        )
+
         if get_applied_version(conn) < 1:
             record_migration(conn, 1, "Initial schema baseline")
+        if get_applied_version(conn) < 4:
+            record_migration(conn, 4, "Enterprise Chat V2 additive columns")
         conn.commit()
         logger.info(f"Chat history database initialized at {DB_PATH}")
     except Exception as e:
@@ -407,6 +454,12 @@ def add_message(
     request_id: Optional[str] = None,
     username: str = "Pantronux",
     chat_id: Optional[str] = None,
+    trace_id: str = "",
+    event_seq: int = 0,
+    parent_message_id: Optional[int] = None,
+    branch_id: str = "",
+    artifact_refs: Optional[List[Dict[str, Any]]] = None,
+    grounding_refs: Optional[List[Dict[str, Any]]] = None,
 ) -> Optional[int]:
     """Add a message to the chat history and return its row ID if inserted."""
     conn = None
@@ -418,9 +471,37 @@ def add_message(
         # If no chat_id provided, fallback to legacy format
         final_chat_id = chat_id or f"legacy_{username}_{normalized_persona}"
         
+        safe_artifact_refs = artifact_refs
+        if safe_artifact_refs is None and attachments:
+            safe_artifact_refs = [
+                {"type": "attachment", "stored_filename": str(name)}
+                for name in attachments
+            ]
         cursor.execute(
-            "INSERT OR IGNORE INTO chat_history (platform, role, content, attachments, persona, request_id, username, chat_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (platform, role, content, json.dumps(attachments or []), normalized_persona, request_id, username, final_chat_id)
+            """
+            INSERT OR IGNORE INTO chat_history (
+                platform, role, content, attachments, persona, request_id, username,
+                chat_id, trace_id, event_seq, parent_message_id, branch_id,
+                artifact_refs_json, grounding_refs_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                platform,
+                role,
+                content,
+                json.dumps(attachments or [], ensure_ascii=False),
+                normalized_persona,
+                request_id,
+                username,
+                final_chat_id,
+                trace_id or "",
+                int(event_seq or 0),
+                parent_message_id,
+                branch_id or "",
+                json.dumps(safe_artifact_refs or [], ensure_ascii=False),
+                json.dumps(grounding_refs or [], ensure_ascii=False),
+            ),
         )
         inserted_id = int(cursor.lastrowid) if cursor.lastrowid else None
         
@@ -513,6 +594,20 @@ def get_history(
                 "is_bookmarked": row["is_bookmarked"] if "is_bookmarked" in row.keys() else 0,
                 "is_regenerated": row["is_regenerated"] if "is_regenerated" in row.keys() else 0,
                 "edit_group_id": row["edit_group_id"] if "edit_group_id" in row.keys() else None,
+                "trace_id": row["trace_id"] if "trace_id" in row.keys() else "",
+                "event_seq": row["event_seq"] if "event_seq" in row.keys() else 0,
+                "parent_message_id": row["parent_message_id"] if "parent_message_id" in row.keys() else None,
+                "branch_id": row["branch_id"] if "branch_id" in row.keys() else "",
+                "artifact_refs": (
+                    json.loads(row["artifact_refs_json"])
+                    if "artifact_refs_json" in row.keys() and row["artifact_refs_json"]
+                    else []
+                ),
+                "grounding_refs": (
+                    json.loads(row["grounding_refs_json"])
+                    if "grounding_refs_json" in row.keys() and row["grounding_refs_json"]
+                    else []
+                ),
                 "export_suggestions": (
                     json.loads(row["export_suggestions_json"])
                     if "export_suggestions_json" in row.keys() and row["export_suggestions_json"]
@@ -806,6 +901,14 @@ def create_session(
     persona: str,
     title: str = "New Chat",
     runtime_id: str = "sovereign",
+    workspace_id: str = "default",
+    provider_alias: str = "",
+    model_alias: str = "",
+    temperature: float = 0.7,
+    mode: str = "default",
+    tools_enabled: bool = True,
+    web_search_enabled: bool = False,
+    memory_v3_enabled: bool = False,
 ) -> bool:
     """Create a new chat session."""
     conn = None
@@ -813,8 +916,29 @@ def create_session(
         conn = _get_connection()
         cursor = conn.cursor()
         cursor.execute(
-            "INSERT INTO chat_sessions (chat_id, username, persona, title, runtime_id) VALUES (?, ?, ?, ?, ?)",
-            (chat_id, username, persona, title, runtime_id),
+            """
+            INSERT INTO chat_sessions (
+                chat_id, username, persona, title, runtime_id, workspace_id,
+                provider_alias, model_alias, temperature, mode, tools_enabled,
+                web_search_enabled, memory_v3_enabled
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                chat_id,
+                username,
+                persona,
+                title,
+                runtime_id,
+                workspace_id or "default",
+                provider_alias or "",
+                model_alias or "",
+                float(temperature if temperature is not None else 0.7),
+                mode or "default",
+                1 if tools_enabled else 0,
+                1 if web_search_enabled else 0,
+                1 if memory_v3_enabled else 0,
+            ),
         )
         conn.commit()
         return True
@@ -825,16 +949,25 @@ def create_session(
         if conn:
             conn.close()
 
-def get_sessions(username: str, persona: str, limit: int = 50, offset: int = 0) -> List[Dict]:
+def get_sessions(
+    username: str,
+    persona: str,
+    limit: int = 50,
+    offset: int = 0,
+    include_deleted: bool = False,
+) -> List[Dict]:
     """Get all chat sessions for a user and persona."""
     conn = None
     try:
         conn = _get_connection()
         cursor = conn.cursor()
-        cursor.execute(
-            "SELECT * FROM chat_sessions WHERE username = ? AND persona = ? ORDER BY is_pinned DESC, pinned_at DESC, updated_at DESC LIMIT ? OFFSET ?",
-            (username, persona, limit, offset)
-        )
+        query = "SELECT * FROM chat_sessions WHERE username = ? AND persona = ?"
+        params: List[Any] = [username, persona]
+        if not include_deleted:
+            query += " AND deleted_at IS NULL"
+        query += " ORDER BY is_pinned DESC, pinned_at DESC, updated_at DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+        cursor.execute(query, tuple(params))
         rows = cursor.fetchall()
         return [dict(r) for r in rows]
     except Exception as e:
@@ -869,6 +1002,98 @@ def update_session_title(chat_id: str, title: str, is_auto_titled: Optional[bool
     finally:
         if conn:
             conn.close()
+
+
+@db_retry()
+def update_session_fields(
+    chat_id: str,
+    username: str,
+    **fields: Any,
+) -> bool:
+    """Update allowed Chat V2 session fields for an owned session."""
+    allowed = {
+        "title",
+        "persona",
+        "runtime_id",
+        "workspace_id",
+        "provider_alias",
+        "model_alias",
+        "temperature",
+        "mode",
+        "tools_enabled",
+        "web_search_enabled",
+        "memory_v3_enabled",
+        "archived_at",
+        "deleted_at",
+    }
+    updates: List[str] = []
+    params: List[Any] = []
+    for key, value in fields.items():
+        if key not in allowed:
+            continue
+        updates.append(f"{key} = ?")
+        if key in {"tools_enabled", "web_search_enabled", "memory_v3_enabled"}:
+            params.append(1 if value else 0)
+        else:
+            params.append(value)
+    if not updates:
+        return False
+    updates.append("updated_at = CURRENT_TIMESTAMP")
+    params.extend([chat_id, username])
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            f"UPDATE chat_sessions SET {', '.join(updates)} WHERE chat_id = ? AND username = ?",
+            tuple(params),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    except Exception as e:
+        logger.error(f"Failed to update session fields: {e}")
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+
+def get_session_settings(chat_id: str, username: str) -> Optional[Dict[str, Any]]:
+    """Return persisted Chat V2 settings for an owned session."""
+    session = get_session(chat_id, username=username)
+    if not session:
+        return None
+    return {
+        "provider_alias": session.get("provider_alias") or "",
+        "model_alias": session.get("model_alias") or "",
+        "temperature": float(session.get("temperature") or 0.7),
+        "runtime_id": session.get("runtime_id") or "sovereign",
+        "mode": session.get("mode") or "default",
+        "tools_enabled": bool(session.get("tools_enabled", 1)),
+        "web_search_enabled": bool(session.get("web_search_enabled", 0)),
+        "memory_v3_enabled": bool(session.get("memory_v3_enabled", 0)),
+    }
+
+
+def get_next_event_seq(chat_id: str) -> int:
+    """Return the next monotonic event sequence for a chat."""
+    conn = None
+    try:
+        conn = _get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT COALESCE(MAX(event_seq), 0) + 1 AS next_seq FROM chat_history WHERE chat_id = ?",
+            (chat_id,),
+        )
+        row = cursor.fetchone()
+        return int(row["next_seq"] if row else 1)
+    except Exception as e:
+        logger.error(f"Failed to get next event_seq: {e}")
+        return 1
+    finally:
+        if conn:
+            conn.close()
+
 
 @db_retry()
 def delete_session(chat_id: str, username: Optional[str] = None) -> bool:
@@ -916,6 +1141,12 @@ def delete_session(chat_id: str, username: Optional[str] = None) -> bool:
     finally:
         if conn:
             conn.close()
+
+
+@db_retry()
+def soft_delete_session(chat_id: str, username: str) -> bool:
+    """Mark a session deleted without deleting history rows."""
+    return update_session_fields(chat_id, username, deleted_at=datetime.utcnow().isoformat())
 
 @db_retry()
 def clear_all_history(username: str) -> bool:
@@ -1049,13 +1280,24 @@ def get_default_chat_id(username: str, persona: str) -> str:
 
 # --- Beta 5 Sovereign Chat Features ---
 
-def get_session(chat_id: str) -> Optional[Dict]:
+def get_session(
+    chat_id: str,
+    username: Optional[str] = None,
+    include_deleted: bool = False,
+) -> Optional[Dict]:
     """Retrieve a single chat session by ID."""
     conn = None
     try:
         conn = _get_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM chat_sessions WHERE chat_id = ?", (chat_id,))
+        query = "SELECT * FROM chat_sessions WHERE chat_id = ?"
+        params: List[Any] = [chat_id]
+        if username:
+            query += " AND username = ?"
+            params.append(username)
+        if not include_deleted:
+            query += " AND deleted_at IS NULL"
+        cursor.execute(query, tuple(params))
         row = cursor.fetchone()
         return dict(row) if row else None
     except Exception as e:
@@ -1177,15 +1419,33 @@ def delete_messages_after(message_id: int, chat_id: str) -> int:
         if conn:
             conn.close()
 
-def update_message_content(message_id: int, new_content: str) -> bool:
+def update_message_content(
+    message_id: int,
+    new_content: str,
+    edit_group_id: Optional[str] = None,
+    parent_message_id: Optional[int] = None,
+    branch_id: Optional[str] = None,
+) -> bool:
     """Update a message's content and mark as edited."""
     conn = None
     try:
         conn = _get_connection()
         cursor = conn.cursor()
+        fields = ["content = ?", "is_edited = 1"]
+        params: List[Any] = [new_content]
+        if edit_group_id is not None:
+            fields.append("edit_group_id = ?")
+            params.append(edit_group_id)
+        if parent_message_id is not None:
+            fields.append("parent_message_id = ?")
+            params.append(parent_message_id)
+        if branch_id is not None:
+            fields.append("branch_id = ?")
+            params.append(branch_id)
+        params.append(message_id)
         cursor.execute(
-            "UPDATE chat_history SET content = ?, is_edited = 1 WHERE id = ?",
-            (new_content, message_id)
+            f"UPDATE chat_history SET {', '.join(fields)} WHERE id = ?",
+            tuple(params),
         )
         conn.commit()
         return cursor.rowcount > 0

@@ -628,10 +628,55 @@ def _mount_playground_router_if_enabled(
         return False
 
 
+def _mount_chat_v2_router(target_app: FastAPI) -> bool:
+    """Mount additive Chat V2 routes; handlers remain flag-gated."""
+    try:
+        from kuro_backend.chat_v2.service import create_chat_v2_router
+
+        async def _chat_v2_token_stream(**kwargs):
+            message = str(kwargs.get("message") or "")
+            persona = str(kwargs.get("persona") or "consultant")
+            username = str(kwargs.get("username") or "Pantronux")
+            chat_id = str(kwargs.get("chat_id") or "")
+            trace_id = str(kwargs.get("trace_id") or f"chatv2_{uuid.uuid4().hex}")
+            user_info = auth_db.get_user(username) or {}
+            master_name = user_info.get("master_name", "Master Pantronux")
+            async for chunk in process_chat_with_graph_stream(
+                message,
+                image_paths=None,
+                persona_override=persona,
+                stream_metrics={},
+                approval_scope=f"web:{chat_id}:{persona}",
+                trace_id=trace_id,
+                session_id=chat_id,
+                master_name=master_name,
+                username=username,
+                chat_id=chat_id,
+                runtime_id="sovereign",
+                runtime_namespace="kuro.sovereign",
+            ):
+                safe_chunk = sanitize_stream_chunk(chunk)
+                if safe_chunk:
+                    yield safe_chunk
+
+        target_app.include_router(
+            create_chat_v2_router(
+                auth_dependency=validate_token_dependency,
+                token_stream_factory=_chat_v2_token_stream,
+            )
+        )
+        logger.info("[CHAT_V2] Additive router mounted")
+        return True
+    except Exception as exc:
+        logger.exception("[CHAT_V2] Failed to mount router: %s", exc)
+        return False
+
+
 # --- FastAPI App ---
 app = FastAPI(title="Kuro AI Web Dashboard")
 app.add_middleware(TraceMiddleware)
 _mount_playground_router_if_enabled(app)
+_mount_chat_v2_router(app)
 
 
 @app.on_event("startup")
@@ -2959,8 +3004,16 @@ async def edit_message(
         edit_group_id=edit_group_id,
     )
 
-    # Update message content and mark as edited
-    chat_history.update_message_content(msg_id, edit.new_content)
+    branch_id = msg.get("branch_id") or f"branch_{uuid.uuid4().hex[:12]}"
+
+    # Update message content and mark as edited with lineage metadata.
+    chat_history.update_message_content(
+        msg_id,
+        edit.new_content,
+        edit_group_id=edit_group_id,
+        parent_message_id=msg_id,
+        branch_id=branch_id,
+    )
     # Truncate all subsequent messages
     deleted_count = chat_history.delete_messages_after(msg_id, chat_id)
 
@@ -2969,6 +3022,7 @@ async def edit_message(
             "chat_id": chat_id,
             "message_id": msg_id,
             "edit_group_id": edit_group_id,
+            "branch_id": branch_id,
             "deleted_after_count": deleted_count,
         }
     )
@@ -3019,7 +3073,12 @@ async def regenerate_message(request: Request, chat_id: str, msg_id: int):
     chat_history.delete_messages_after(msg_id - 1, chat_id)
 
     return api_success(
-        data={"preceding_user_message": preceding_user_msg, "deleted_msg_id": msg_id}
+        data={
+            "preceding_user_message": preceding_user_msg,
+            "deleted_msg_id": msg_id,
+            "parent_message_id": preceding_user_msg["id"],
+            "edit_group_id": edit_group_id,
+        }
     )
 
 
