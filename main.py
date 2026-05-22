@@ -97,6 +97,9 @@ from kuro_backend import persona_history_admin
 from kuro_backend import version as kuro_version
 from kuro_backend import proactive_greeting
 from kuro_backend.enterprise_flags import get_enterprise_flag_snapshot
+from kuro_backend.storage.data_catalog import get_storage_catalog_snapshot
+from kuro_backend.storage.health import get_storage_health_snapshot
+from kuro_backend.storage.migrations import get_all_migration_histories
 from kuro_backend.runtime.runtime_context import resolve_runtime_context
 from kuro_backend.runtime.runtime_registry import RuntimeRegistry
 from kuro_backend.output.schema_registry import SchemaRegistry
@@ -1280,6 +1283,27 @@ async def get_admin_enterprise_flags(request: Request):
     """Return enterprise flag status for authenticated admins only."""
     require_admin_user(request)
     return api_success(data=get_enterprise_flag_snapshot(admin=True))
+
+@app.get("/api/admin/storage/health")
+async def get_admin_storage_health(request: Request):
+    """Return admin-only Storage V2 health diagnostics."""
+    require_admin_user(request)
+    return api_success(data=get_storage_health_snapshot())
+
+
+@app.get("/api/admin/storage/catalog")
+async def get_admin_storage_catalog(request: Request):
+    """Return admin-only storage catalog metadata."""
+    require_admin_user(request)
+    return api_success(data=get_storage_catalog_snapshot())
+
+
+@app.get("/api/admin/storage/migrations")
+async def get_admin_storage_migrations(request: Request):
+    """Return admin-only migration history across registered stores."""
+    require_admin_user(request)
+    return api_success(data=get_all_migration_histories())
+
 
 
 @app.get("/api/history")
