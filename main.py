@@ -1333,6 +1333,23 @@ PUBLIC_API_ROUTES = [
 ]
 
 
+def _dashboard_template_name() -> str:
+    return "index_v2.html" if bool(getattr(settings, "KURO_FRONTEND_V2_ENABLED", False)) else "index.html"
+
+
+def _dashboard_template_context(username: str, user_info: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "username": username,
+        "display_name": user_info.get("display_name", username),
+        "role": user_info.get("role", "User"),
+        "is_admin": username == os.getenv("ADMIN_USERNAME", "Pantronux"),
+        "restricted_persona": user_info.get("restricted_persona") or "",
+        "master_name": user_info.get("master_name", f"Master {username}"),
+        "custom_persona": user_info.get("custom_persona") or "",
+        "frontend_v2_enabled": bool(getattr(settings, "KURO_FRONTEND_V2_ENABLED", False)),
+    }
+
+
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     """
@@ -1393,15 +1410,8 @@ async def index(request: Request):
 
     return templates.TemplateResponse(
         request=request,
-        name="index.html",
-        context={
-            "username": username,
-            "display_name": user_info.get("display_name", username),
-            "role": user_info.get("role", "User"),
-            "is_admin": username == os.getenv("ADMIN_USERNAME", "Pantronux"),
-            "restricted_persona": user_info.get("restricted_persona") or "",
-            "master_name": user_info.get("master_name", f"Master {username}"),
-        },
+        name=_dashboard_template_name(),
+        context=_dashboard_template_context(username, user_info),
     )
 
 
@@ -1418,15 +1428,8 @@ async def chat_page(request: Request):
 
     return templates.TemplateResponse(
         request=request,
-        name="index.html",
-        context={
-            "username": username,
-            "display_name": user_info.get("display_name", username),
-            "role": user_info.get("role", "User"),
-            "is_admin": username == os.getenv("ADMIN_USERNAME", "Pantronux"),
-            "restricted_persona": user_info.get("restricted_persona") or "",
-            "master_name": user_info.get("master_name", f"Master {username}"),
-        },
+        name=_dashboard_template_name(),
+        context=_dashboard_template_context(username, user_info),
     )
 
 
