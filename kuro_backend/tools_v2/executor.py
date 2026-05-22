@@ -9,6 +9,8 @@ from typing import Any, Callable, Dict, Optional
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 
 from kuro_backend.enterprise_flags import is_enabled
+from kuro_backend.enterprise_observability.metrics import record_tool_call_if_enabled
+from kuro_backend.enterprise_observability.security_events import record_tool_denied_if_enabled
 from kuro_backend.tools_v2.agent_mode import AgentModeRunner
 from kuro_backend.tools_v2.approvals import ToolApprovalStore
 from kuro_backend.tools_v2.audit import ToolAuditStore
@@ -73,6 +75,13 @@ class ToolExecutor:
                 "runtime_id": request.runtime_id or actor.runtime_id,
                 "workspace_id": request.workspace_id or actor.workspace_id,
             }
+        )
+        record_tool_call_if_enabled(
+            tool_id=tool_id,
+            username=actor.username,
+            runtime_id=actor.runtime_id,
+            workspace_id=actor.workspace_id,
+            trace_id=trace_id,
         )
         definition = self.registry.get(tool_id)
         started = time.monotonic()
@@ -161,6 +170,15 @@ class ToolExecutor:
                 duration_ms=self._duration_ms(started),
             )
         except ToolPolicyError as exc:
+            record_tool_denied_if_enabled(
+                definition.tool_id,
+                actor_username=actor.username,
+                runtime_id=actor.runtime_id,
+                workspace_id=actor.workspace_id,
+                trace_id=trace_id,
+                reason=exc.code,
+                metadata={"message": exc.message},
+            )
             audit_id = self.audit.log_event(
                 event_type="tool_blocked",
                 tool_id=definition.tool_id,

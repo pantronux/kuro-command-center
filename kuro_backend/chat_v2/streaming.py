@@ -10,6 +10,7 @@ from starlette.requests import Request
 
 from kuro_backend.chat_v2.schemas import StreamingEnvelope
 from kuro_backend.chat_v2.telemetry import record_chat_v2_event
+from kuro_backend.enterprise_observability.metrics import record_sse_disconnect_if_enabled
 
 
 OnComplete = Callable[[str], Awaitable[None] | None]
@@ -107,6 +108,7 @@ async def stream_chat_v2_envelopes(
         async for chunk in token_source():
             if request is not None and await request.is_disconnected():
                 record_chat_v2_event("stream_client_disconnected", chat_id=chat_id, trace_id=trace_id)
+                record_sse_disconnect_if_enabled(chat_id=chat_id, trace_id=trace_id, stream="chat_v2")
                 return
             text = str(chunk or "")
             if not text:

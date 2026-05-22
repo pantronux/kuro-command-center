@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Callable, Dict, Optional
 
+from kuro_backend.enterprise_observability.metrics import record_telegram_dlq_if_enabled
 from kuro_backend.telegram_v2.queue import TelegramV2QueueStore
 from kuro_backend.telegram_v2.schemas import TelegramOutboundMessage
 
@@ -66,6 +67,13 @@ class TelegramV2Notifier:
         )
         if failed is None:
             raise RuntimeError("telegram outbound message disappeared after failure")
+        if failed.status == "dead":
+            record_telegram_dlq_if_enabled(
+                username=failed.username,
+                chat_id=failed.chat_id,
+                channel=failed.channel,
+                error=error,
+            )
         return failed
 
     def retry_message(self, message_id: str) -> TelegramOutboundMessage:

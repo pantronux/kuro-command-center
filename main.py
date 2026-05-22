@@ -791,6 +791,23 @@ def _mount_api_v2_controls(target_app: FastAPI) -> bool:
         return False
 
 
+def _mount_enterprise_observability_router(target_app: FastAPI) -> bool:
+    """Mount admin-only Enterprise Observability routes."""
+    try:
+        from kuro_backend.enterprise_observability import (
+            create_enterprise_observability_router,
+        )
+
+        target_app.include_router(
+            create_enterprise_observability_router(admin_dependency=require_admin_user)
+        )
+        logger.info("[ENTERPRISE_OBSERVABILITY] Router mounted")
+        return True
+    except Exception as exc:
+        logger.exception("[ENTERPRISE_OBSERVABILITY] Failed to mount router: %s", exc)
+        return False
+
+
 # --- FastAPI App ---
 app = FastAPI(title="Kuro AI Web Dashboard")
 app.add_middleware(TraceMiddleware)
@@ -801,6 +818,7 @@ _mount_tools_v2_router(app)
 _mount_market_v2_router(app)
 _mount_telegram_v2_router(app)
 _mount_api_v2_controls(app)
+_mount_enterprise_observability_router(app)
 
 
 @app.on_event("startup")

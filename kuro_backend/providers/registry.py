@@ -4,9 +4,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 from typing import AsyncIterator, Dict, Iterable, Optional, Type
 
 from kuro_backend.config import settings
+from kuro_backend.enterprise_observability.metrics import record_provider_latency_if_enabled
+from kuro_backend.enterprise_observability.security_events import record_provider_error_if_enabled
 from kuro_backend.providers.anthropic_provider import AnthropicProvider
 from kuro_backend.providers.base import BaseProvider
 from kuro_backend.providers.deepseek_provider import DeepSeekProvider
@@ -178,18 +181,28 @@ class ProviderRegistryV2:
     ) -> ProviderResponse:
         aliases = self._route_aliases(request.model_alias, fallback_aliases)
         last_error: Optional[Exception] = None
-        for alias in aliases:
+        for index, alias in enumerate(aliases):
+            resolved_provider = "unknown"
+            started = time.monotonic()
             try:
                 resolved = self.resolve_model_alias(alias)
+                resolved_provider = resolved.provider
                 provider = self.get_provider_for_alias(alias)
                 routed_request = request.model_copy(update={"model_alias": alias, "model_id": request.model_id or resolved.model_id})
                 attempts = max(1, int(retry_count or 0) + 1)
                 for attempt in range(attempts):
                     try:
-                        return await asyncio.wait_for(
+                        response = await asyncio.wait_for(
                             provider.generate(routed_request, model_id=routed_request.model_id),
                             timeout=timeout_s,
                         )
+                        record_provider_latency_if_enabled(
+                            round((time.monotonic() - started) * 1000.0, 3),
+                            provider=resolved_provider,
+                            model_alias=alias,
+                            trace_id=request.trace_id,
+                        )
+                        return response
                     except ProviderSafetyRefusal:
                         raise
                     except Exception as exc:
@@ -201,6 +214,14 @@ class ProviderRegistryV2:
             except Exception as exc:
                 logger.warning("Provider route failed alias=%s error=%s", alias, exc)
                 last_error = exc
+                fallback_alias = aliases[index + 1] if index + 1 < len(aliases) else ""
+                record_provider_error_if_enabled(
+                    resolved_provider,
+                    str(exc)[:500],
+                    model_alias=alias,
+                    fallback_alias=fallback_alias,
+                    trace_id=request.trace_id,
+                )
                 continue
         raise ProviderUnavailableError(f"all providers failed: {last_error}")
 
@@ -213,19 +234,37 @@ class ProviderRegistryV2:
     ) -> AsyncIterator[ProviderStreamEvent]:
         aliases = self._route_aliases(request.model_alias, fallback_aliases)
         last_error: Optional[Exception] = None
-        for alias in aliases:
+        for index, alias in enumerate(aliases):
+            resolved_provider = "unknown"
+            started = time.monotonic()
             try:
                 resolved = self.resolve_model_alias(alias)
+                resolved_provider = resolved.provider
                 provider = self.get_provider_for_alias(alias)
                 routed_request = request.model_copy(update={"model_alias": alias, "model_id": request.model_id or resolved.model_id})
                 async for event in provider.stream(routed_request, model_id=routed_request.model_id):
                     yield event
+                record_provider_latency_if_enabled(
+                    round((time.monotonic() - started) * 1000.0, 3),
+                    provider=resolved_provider,
+                    model_alias=alias,
+                    trace_id=request.trace_id,
+                    stream=True,
+                )
                 return
             except ProviderSafetyRefusal:
                 raise
             except Exception as exc:
                 logger.warning("Provider stream failed alias=%s error=%s", alias, exc)
                 last_error = exc
+                fallback_alias = aliases[index + 1] if index + 1 < len(aliases) else ""
+                record_provider_error_if_enabled(
+                    resolved_provider,
+                    str(exc)[:500],
+                    model_alias=alias,
+                    fallback_alias=fallback_alias,
+                    trace_id=request.trace_id,
+                )
                 continue
         yield ProviderStreamEvent(
             event_type="error",

@@ -1,6 +1,7 @@
 """Deterministic Memory V3 conflict detection and resolution."""
 from __future__ import annotations
 
+from kuro_backend.enterprise_observability.metrics import record_memory_conflict_if_enabled
 from kuro_backend.memory_v3.schemas import MemoryItem
 from kuro_backend.memory_v3.store import MemoryV3Store
 
@@ -70,6 +71,13 @@ class MemoryConflictResolver:
                 memory_id_b=candidate.memory_id,
                 conflict_type="canonical_key_conflict",
                 resolution_strategy=strategy,
+            )
+            record_memory_conflict_if_enabled(
+                workspace_id=candidate.workspace_id,
+                runtime_id=candidate.runtime_id,
+                username=candidate.username,
+                persona_scope=candidate.persona_scope,
+                conflict_type=conflict.conflict_type,
             )
             conflict_ids.append(conflict.conflict_id)
         return conflict_ids

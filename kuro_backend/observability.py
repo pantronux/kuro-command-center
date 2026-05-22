@@ -261,6 +261,19 @@ def track_token_usage(session_id: str, prompt_tokens: int, completion_tokens: in
     _token_tracker[session_id]["completion_tokens"] += completion_tokens
     _token_tracker[session_id]["total_tokens"] += total_tokens
 
+    try:
+        from kuro_backend.enterprise_observability.metrics import record_token_usage_if_enabled
+
+        record_token_usage_if_enabled(
+            total_tokens=total_tokens,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            username=username,
+            session_id=session_id,
+        )
+    except Exception as exc:
+        logger.debug("[OBS] enterprise token metric skipped: %s", exc)
+
     # Chancellor / finances: persist daily API cost rollup (best-effort).
     if os.getenv("KURO_FINANCE_TRACKING_ENABLED", "true").strip().lower() in (
         "1", "true", "yes", "on",
