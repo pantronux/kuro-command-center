@@ -219,8 +219,8 @@ def collect_last_24h(lookback_hours: int = 24, username: str = "Pantronux") -> D
     """
     from kuro_backend import memory_manager
 
-    cutoff = (datetime.now() - timedelta(hours=max(1, int(lookback_hours)))).isoformat(
-        timespec="seconds"
+    cutoff = (datetime.utcnow() - timedelta(hours=max(1, int(lookback_hours)))).strftime(
+        "%Y-%m-%d %H:%M:%S"
     )
 
     raw_summaries = memory_manager.query_short_term_summaries_recent(username=username, limit=50)

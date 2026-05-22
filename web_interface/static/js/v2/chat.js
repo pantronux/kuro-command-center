@@ -216,7 +216,7 @@ async function boot() {
     window.KURO_USER_CONTEXT = context;
     document.getElementById('v2ActivePersona').textContent = selectedPersona.charAt(0).toUpperCase() + selectedPersona.slice(1);
     bindModalCloseButtons();
-    bindProfileMenu({ onOpenAdmin: openAdminSettings, onOpenModelSettings });
+    bindProfileMenu({ onOpenAdmin: openAdminSettings, onOpenModelSettings: openModelSettings });
     bindAdminSettings();
     bindModelSettings();
     bindDrawer();

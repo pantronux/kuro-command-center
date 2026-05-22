@@ -158,6 +158,13 @@ def test_chat_settings_panel_uses_safe_model_aliases(monkeypatch):
     assert "secret" not in response.text.lower()
 
 
+def test_frontend_v2_boot_binds_model_settings_callback():
+    chat_js = (PROJECT_ROOT / "web_interface" / "static" / "js" / "v2" / "chat.js").read_text()
+
+    assert "onOpenModelSettings: openModelSettings" in chat_js
+    assert "bindProfileMenu({ onOpenAdmin: openAdminSettings, onOpenModelSettings });" not in chat_js
+
+
 def test_backend_admin_endpoint_still_forbidden_for_non_admin(monkeypatch):
     monkeypatch.setattr(main.settings, "KURO_FRONTEND_V2_ENABLED", True, raising=False)
     client = _client(monkeypatch, username="Faikhira", role="User")
