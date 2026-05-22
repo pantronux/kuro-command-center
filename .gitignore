@@ -24,6 +24,12 @@ kuro_auth.db
 
 # Runtime databases - never commit
 *.db
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3-wal
+*.sqlite3-shm
 *.db-wal
 *.db-shm
 *.db-backup*
@@ -56,6 +62,12 @@ test_venv3/
 
 # DB Files
 *.db
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3-wal
+*.sqlite3-shm
 *.db-wal
 *.db-shm
 *.db-backup*
