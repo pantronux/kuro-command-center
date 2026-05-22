@@ -41,6 +41,11 @@ Kuro AI is your **Intelligent Personal Sovereign**—a sophisticated digital com
   and proactive sentinels (CVE, fitness) into one cohesive assistant accessible
   from a web dashboard and Telegram.
 - **V1.2.0 Beta 1 Focus**: End-to-end hardening release covering memory consistency, DB resiliency/retry+migration baseline, chat/SSE reliability, Market Sentinel safeguards, Telegram retry+DLQ, UI/RBAC hardening, observability expansion, and topology/contract test coverage.
+- **Enterprise Major Refactor status**: Prompts `-2..14` have been executed as
+  an additive, feature-flagged enterprise refactor. The legacy runtime remains
+  the default path; Memory V3, Chat V2, provider registry, governed tools,
+  Market Sentinel V2, Telegram V2, API V2, Frontend V2, and enterprise
+  observability are present behind explicit flags.
 - **Tech stack**:
   - Backend: FastAPI, LangGraph, `google-genai` (Gemini),
     APScheduler, SQLite, ChromaDB, Mem0 (via `perpetual_memory.py`),
@@ -76,6 +81,44 @@ Kuro AI is your **Intelligent Personal Sovereign**—a sophisticated digital com
 - **Important constraints preserved**:
   - Legacy `/api/chat/stream` flow without `runtime_id` remains backward-compatible.
   - Legacy streaming path remains active when provider router flag is disabled (default).
+
+### Enterprise Major Refactor (Prompts -2..14 Complete)
+
+- **Execution status**: Complete for the Codex enterprise prompt pack through
+  Phase 14 documentation and acceptance.
+- **Safety model**: all enterprise replacements are additive and guarded by
+  explicit `KURO_*_V2_ENABLED` or enterprise flags. Defaults stay off unless
+  deployment profiles or `.env` opt in.
+- **Core packages added**:
+  - `kuro_backend/storage/` for SQLite connection policy, idempotency,
+    migration history, retention helpers, health, and data catalog views.
+  - `kuro_backend/memory_v3/` for evented memory writes, canonical items,
+    assertions, links, provenance, access logging, privacy, retention, and
+    retrieval grounding.
+  - `kuro_backend/chat_v2/` for additive chat/session routes, SSE streaming,
+    attachment contracts, session settings, and telemetry.
+  - `kuro_backend/providers/` for provider adapters, model alias registry,
+    fallback routing, usage metadata, and streaming normalization.
+  - `kuro_backend/tools_v2/` for governed tools, approvals, audit log,
+    Deep Research V2 jobs, durable tasks, reminders, agent mode, and web search.
+  - `kuro_backend/market_v2/` for source registry, collection, freshness,
+    triangulation, cache, alerts, and admin health.
+  - `kuro_backend/telegram_v2/` for webhook handling, sender mappings,
+    outbound queue, DLQ, command parsing, and retry controls.
+  - `kuro_backend/api_v2/` for normalized responses, pagination, authz,
+    rate limiting, API V2 middleware, and public OpenAPI filtering.
+  - `kuro_backend/enterprise_observability/` for audit/security events,
+    metrics, traces, eval summaries, and admin dashboards.
+  - `kuro_backend/enterprise_ops/` for deployment profiles, startup validation,
+    and public-safe liveness/readiness/health metadata.
+- **Frontend V2**: `web_interface/templates/index_v2.html`,
+  `web_interface/static/css/v2.css`, and `web_interface/static/js/v2/*`
+  implement the feature-flagged chat workspace, model settings, tasks,
+  market panels, sidebar, profile menu, API helpers, and admin settings.
+- **Acceptance status**: suitable for a small enterprise pilot when flags are
+  enabled gradually with rollback plans. Large enterprise production still
+  needs tenant isolation, SSO/OIDC, stronger RBAC, PostgreSQL/pgvector option,
+  external telemetry collector, and formal secrets management.
 
 ### V7.0 Reset Notes ("Lean Leviathan")
 
@@ -454,6 +497,42 @@ Side-branches not drawn on trunk:
 - **Scheduler jobs**: daily intelligence briefing, dreaming cycle, memory decay job, backup routines.
 - **QA playground**: `interpret`, `generate-testcases`, `generate-gherkin` dengan kill-switch `KURO_QA_PLAYGROUND_ENABLED`.
 
+### Enterprise V2 Additive Data Flows
+
+- **Capability discovery**: `/api/capabilities` reads
+  `enterprise_flags.get_enterprise_flag_snapshot()` and returns a public-safe
+  feature map without secrets, DB paths, prompts, or internal topology.
+- **Admin control plane**: `/api/admin/enterprise-flags`,
+  `/api/admin/storage/*`, `/api/admin/memory-v3/*`,
+  `/api/admin/providers*`, `/api/admin/tools/*`,
+  `/api/admin/market-v2/health`, `/api/admin/telegram-v2/*`,
+  `/api/admin/observability/*`, `/api/ready`, and `/api/health` expose
+  operator status while preserving existing admin authentication.
+- **Memory V3**: legacy chat/memory writes can mirror into
+  `memory_v3.store`, then `memory_v3.reader` retrieves scoped, provenance-aware
+  context only when `KURO_MEMORY_V3_ENABLED=true`; legacy Mem0/Chroma context
+  remains the fallback.
+- **Chat V2**: `/api/chat/v2/stream` accepts the new chat contract, resolves
+  session settings, streams normalized SSE events, optionally routes through
+  `providers.registry`, and falls back to the legacy graph stream on provider
+  failure.
+- **Governed tools and research**: `/api/tools`,
+  `/api/tools/{tool_id}/execute`, `/api/deep-research/jobs`, `/api/tasks`,
+  and `/api/reminders` flow through `tools_v2.policy`, approvals, audit log,
+  and durable SQLite stores.
+- **Market Sentinel V2**: watchlist and analysis routes collect normalized
+  market inputs, enforce freshness, triangulate evidence, cache reports, and
+  deduplicate alerts before exposing user/admin views.
+- **Telegram V2**: `/api/telegram/webhook` validates inbound payloads,
+  records mappings and queued outbound messages, and lets admin retry DLQ
+  items without changing the legacy notifier path.
+- **API V2 middleware**: `/api/v2/*` routes normalize errors/responses, apply
+  rate limits by path bucket, filter public OpenAPI output, and keep legacy
+  `/api/*` behavior intact.
+- **Frontend V2**: when `KURO_FRONTEND_V2_ENABLED=true`, the dashboard serves
+  `index_v2.html`, loads `static/js/v2/*`, and consumes the additive Chat V2,
+  provider registry, tasks, market, and admin endpoints.
+
 ## Clean Tree
 
 Source-only view. Everything listed below is either code, a template, a
@@ -471,11 +550,19 @@ artefacts are excluded — see **Exclusions** at the bottom of this section.
 │   ├── version.py               # V.2.1.0 Beta 1 "Runtime Sovereign" single source of truth
 │   ├── config.py                # env keys -> typed Settings
 │   ├── db_utils.py              # shared SQLite connection/retry/migration helpers
+│   ├── enterprise_flags.py      # enterprise refactor feature flag snapshot
+│   ├── storage/                 # Storage V2 connections, migrations, catalog, idempotency
+│   ├── api_v2/                  # response/error/rate-limit/OpenAPI V2 controls
 │   ├── personas.py              # persona prompts + Anti-Halusinasi epistemic layer
 │   ├── core.py                  # non-graph Gemini fallback
 │   ├── langgraph_core.py        # graph nodes, streaming, tool dispatch
+│   ├── runtime/                 # runtime registry/context/boundary loader
+│   ├── output/                  # structured output schema/validation/normalization
+│   ├── chat_v2/                 # additive Chat V2 contracts, settings, stream service
+│   ├── providers/               # provider adapters, alias registry, fallback router
 │   ├── memory_coordinator.py    # orchestrates 3-layer memory + evaluate_alignment
 │   ├── memory_manager.py        # SQLite short-term + research ledger
+│   ├── memory_v3/               # evented memory, provenance, conflicts, retention
 │   ├── perpetual_memory.py      # Mem0 + Chroma wrapper
 │   ├── ssot_shortcuts.py        # deterministic SSoT answers
 │   ├── semantic_cache.py        # embedding-keyed response cache
@@ -485,10 +572,15 @@ artefacts are excluded — see **Exclusions** at the bottom of this section.
 │   ├── ui_mode_router.py        # English mode commands
 │   ├── dashboard_broadcast.py   # /ws/dashboard fan-out
 │   ├── telegram_notifier.py
+│   ├── telegram_v2/             # webhook, outbound queue, mappings, DLQ, commands
 │   ├── proactive_events.py
 │   ├── proactive_greeting.py
 │   ├── file_retention_worker.py  # 180-day retention & AI archival (V1.0)
 │   ├── price_ticker_worker.py   # Quantitative market anchor (V1.0)
+│   ├── market_v2/               # source registry, collectors, triangulator, alerts
+│   ├── tools_v2/                # governed tools, approvals, tasks, reminders, research
+│   ├── enterprise_observability/ # audit, security events, metrics, traces, evals
+│   ├── enterprise_ops/          # deployment profiles, startup validation, health
 │   ├── epistemic_filter.py      # Anti-Halusinasi claim labeling & hard-rule enforcement (V1.0)
 │   ├── fitness_service.py
 │   ├── intelligence_engine.py
@@ -535,6 +627,7 @@ artefacts are excluded — see **Exclusions** at the bottom of this section.
 ├── web_interface/
 │   ├── templates/
 │   │   ├── index.html           # dashboard + avatar
+│   │   ├── index_v2.html        # feature-flagged Chat Workspace V2
 │   │   ├── login.html
 │   │   ├── intelligence.html
 │   │   ├── ingestion_center.html
@@ -544,8 +637,9 @@ artefacts are excluded — see **Exclusions** at the bottom of this section.
 │       ├── js/
 │       │   ├── app.js           # WS client, UI modes
 │       │   ├── ingestion_center.js
-│       │   └── semantic_graph.js
-│       ├── css/                 # dashboard styles
+│       │   ├── semantic_graph.js
+│       │   └── v2/              # Chat V2 workspace JS modules
+│       ├── css/                 # dashboard styles, including v2.css
 │       └── vendor/
 ├── openclaw_skills/
 │   ├── harvest_gemini_share/
@@ -590,6 +684,21 @@ artefacts are excluded — see **Exclusions** at the bottom of this section.
 │   ├── test_chat_hardening.py
 │   ├── test_market_hardening.py
 │   ├── test_telegram_hardening.py
+│   ├── test_enterprise_refactor_baseline.py
+│   ├── test_enterprise_feature_flags.py
+│   ├── test_storage_v2.py
+│   ├── test_memory_v3_core.py
+│   ├── test_memory_v3_retrieval.py
+│   ├── test_chat_v2.py
+│   ├── test_provider_registry_v2.py
+│   ├── test_tools_v2.py
+│   ├── test_market_v2.py
+│   ├── test_telegram_v2.py
+│   ├── test_api_v2.py
+│   ├── test_frontend_v2.py
+│   ├── test_enterprise_observability.py
+│   ├── test_enterprise_ops.py
+│   ├── test_performance_bugfix_sweep.py
 │   ├── test_rbac_routes.py
 │   ├── test_langgraph_topology.py
 │   ├── test_ingestion_api.py
@@ -637,10 +746,52 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
   `/ws/dashboard`, `/api/compliance*`,
   `/api/intelligence*`, `/api/finances/*`, `/api/persona*`, `/api/observability/*`,
   `/ingestion`, `/ingestion/analytics`, `/api/ingestion/*`,
+  `/api/capabilities`, `/api/admin/enterprise-flags`,
+  `/api/admin/storage/*`, `/api/admin/memory-v3/*`,
+  `/api/chat/v2/stream`, `/api/models`, `/api/admin/providers*`,
+  `/api/tools`, `/api/deep-research/jobs`, `/api/tasks`,
+  `/api/market-v2/*`, `/api/telegram/webhook`, `/api/admin/telegram-v2/*`,
+  `/api/v2/*`, `/api/admin/observability/*`,
   `/api/evaluation/summary` (**Beta 3** — Admin-only aggregated quality metrics),
   `/api/backup/status`, `/api/backup/run`, `/api/backup/history`,
-  `/api/system-status`, `/api/health`. Also wires three APScheduler
+  `/api/system-status`, `/api/live`, `/api/ready`, `/api/health`. Also wires three APScheduler
   `BackgroundScheduler` instances (`_hardware_sentinel_scheduler`) and the Uvicorn boot thread.
+
+### Enterprise V2 Packages
+- [`kuro_backend/enterprise_flags.py`](kuro_backend/enterprise_flags.py) —
+  *public*: `ENTERPRISE_FLAG_NAMES`, `is_enabled`,
+  `require_feature_enabled`, `get_enterprise_flag_snapshot`.
+- [`kuro_backend/storage/`](kuro_backend/storage/) — *public*:
+  `get_connection`, `run_migration`, `get_migration_history`,
+  `get_storage_health`, `get_data_catalog`, `record_idempotency_result`.
+- [`kuro_backend/api_v2/`](kuro_backend/api_v2/) — *public*:
+  `create_api_v2_router`, `install_api_v2_middleware`, normalized response
+  models, error payloads, pagination helpers, authz helpers, and rate limit
+  buckets.
+- [`kuro_backend/chat_v2/`](kuro_backend/chat_v2/) — *public*:
+  `create_chat_v2_router`, session settings helpers, attachment contracts,
+  streaming event helpers, and Chat V2 telemetry.
+- [`kuro_backend/providers/`](kuro_backend/providers/) — *public*:
+  provider adapters for Gemini/OpenAI/Anthropic/DeepSeek, model alias
+  registry, fallback router, streaming adapter, and usage summaries.
+- [`kuro_backend/memory_v3/`](kuro_backend/memory_v3/) — *public*:
+  `write_memory_event`, retrieval reader helpers, provenance builders,
+  conflict detection, privacy redaction, retention, and health snapshots.
+- [`kuro_backend/tools_v2/`](kuro_backend/tools_v2/) — *public*:
+  tool registry, policy checks, executor router, approval queue, audit log,
+  Deep Research V2 jobs, task/reminder stores, agent mode, and web search.
+- [`kuro_backend/market_v2/`](kuro_backend/market_v2/) — *public*:
+  source registry, collectors, normalizer, freshness checks, triangulator,
+  report cache, alert deduplication, telemetry, and route factory.
+- [`kuro_backend/telegram_v2/`](kuro_backend/telegram_v2/) — *public*:
+  Telegram webhook security, inbound command parser, sender mappings, bounded
+  outbound queue, DLQ retry helpers, notifier, and route factory.
+- [`kuro_backend/enterprise_observability/`](kuro_backend/enterprise_observability/) —
+  *public*: audit writer, security event recorder, metric recorder, trace
+  exporter, eval recorder, and admin dashboard router.
+- [`kuro_backend/enterprise_ops/`](kuro_backend/enterprise_ops/) —
+  *public*: deployment profiles, startup validation, liveness/readiness/health
+  snapshot helpers.
 
 ### Reasoning Core
 - [`kuro_backend/langgraph_core.py`](kuro_backend/langgraph_core.py) —
@@ -865,6 +1016,30 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
   `monthly_budget`, `recurring_expenses`, `api_usage_daily`,
   `watched_symbols`, `prediction_watch`, `market_hud_snapshot`
   (→ `kuro_finances.db`, path from `KURO_FINANCE_DB_PATH`).
+- [`kuro_backend/memory_v3/store.py`](kuro_backend/memory_v3/store.py) —
+  *public*: `init_memory_v3_db`, event/item/assertion/link/conflict/access
+  helpers. **Tables**: `memory_events`, `memory_items`,
+  `memory_assertions`, `memory_links`, `memory_conflicts`,
+  `memory_access_log`, `memory_retention_policies`, `memory_redaction_log`,
+  `memory_embedding_refs`, `memory_source_refs`
+  (→ `kuro_memory_v3.db` or `KURO_MEMORY_V3_DB_PATH`).
+- [`kuro_backend/tools_v2/`](kuro_backend/tools_v2/) stores governed action
+  state in `tool_audit_log_v2`, `tool_approval_requests_v2`,
+  `deep_research_jobs_v2`, `tasks_v2`, and `reminders_v2`
+  (→ `kuro_tools_v2.db` or `KURO_TOOLS_V2_DB_PATH`).
+- [`kuro_backend/market_v2/`](kuro_backend/market_v2/) stores
+  `market_v2_reports` and `market_v2_alerts`
+  (→ `kuro_market_v2.db` or `KURO_MARKET_V2_DB_PATH`).
+- [`kuro_backend/telegram_v2/`](kuro_backend/telegram_v2/) stores
+  `telegram_v2_outbound_queue` and `telegram_v2_sender_mappings`
+  (→ `kuro_telegram_v2.db` or `KURO_TELEGRAM_V2_DB_PATH`).
+- [`kuro_backend/enterprise_observability/audit.py`](kuro_backend/enterprise_observability/audit.py)
+  stores `enterprise_audit_events`, `enterprise_security_events`,
+  `enterprise_metrics`, `enterprise_traces`, and `enterprise_evals`
+  (→ `kuro_enterprise_observability.db` or
+  `KURO_ENTERPRISE_OBSERVABILITY_DB_PATH`).
+- [`kuro_backend/storage/`](kuro_backend/storage/) standardizes
+  `migration_history` and `idempotency_results` across managed SQLite stores.
 - `memory_manager.py` additionally declares `short_term`,
   `short_term_summaries`, `research_ledger`, `dreaming_locks`,
   `dreaming_cycles`, `dream_notifications` in `kuro_short_term.db`.
@@ -876,6 +1051,9 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
   — dashboard shell: avatar (`/profile/kuro_avatar.png`), WebSocket status ticker, chat pane,
   favicon links, `V.2.1.0 Beta 1` sidebar badge, Chancellor persona option, market chips bar,
   and admin-only sidebar entries for `Ingestion Center` / `Ingestion Analytics`.
+- [`web_interface/templates/index_v2.html`](web_interface/templates/index_v2.html)
+  — feature-flagged Chat Workspace V2 shell served when
+  `KURO_FRONTEND_V2_ENABLED=true`.
 - [`web_interface/templates/intelligence.html`](web_interface/templates/intelligence.html),
   [`ingestion_center.html`](web_interface/templates/ingestion_center.html),
   [`ingestion_analytics.html`](web_interface/templates/ingestion_analytics.html),
@@ -888,6 +1066,12 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
   `kuroEnsureTicker`, `kuroRenderStatusTicker`, `kuroRenderSentinelTicker`,
   `kuroSetAvatarSpeaking`, `kuroConnectDashboardWS`, `kuroStartMarketHudPoll`, `kuroMarketHudChipLine`,
   `kuroHandleGreeting`, `kuroRestoreUIMode`, `sendMessage`, `handleFiles`.
+- [`web_interface/static/css/v2.css`](web_interface/static/css/v2.css) and
+  [`web_interface/static/js/v2/`](web_interface/static/js/v2/) — Chat
+  Workspace V2 UI modules: API client, streaming, chat layout, sidebar,
+  model settings, task/reminder panel, market panel, profile menu, and admin
+  settings. The prior UI boot issue was fixed by exposing
+  `window.onOpenModelSettings` before inline handlers can call it.
 - [`web_interface/static/js/ingestion_center.js`](web_interface/static/js/ingestion_center.js) —
   dataset registry UI, upload form, polling for jobs, detail drawer, and lifecycle actions.
 - [`web_interface/static/js/semantic_graph.js`](web_interface/static/js/semantic_graph.js) —
@@ -912,7 +1096,14 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
   dreaming worker, CVE sentinel, fiscal shortcuts, finance_db,
   proactive events/greeting, upload hashing, version,
   persona budget, **chat isolation (Beta 2)**, and the admin ingestion
-  center (`test_ingestion_*`).
+  center (`test_ingestion_*`). Enterprise refactor coverage includes
+  `test_enterprise_refactor_baseline.py`, `test_enterprise_feature_flags.py`,
+  `test_storage_v2.py`, `test_memory_v3_core.py`,
+  `test_memory_v3_retrieval.py`, `test_chat_v2.py`,
+  `test_provider_registry_v2.py`, `test_tools_v2.py`,
+  `test_market_v2.py`, `test_telegram_v2.py`, `test_api_v2.py`,
+  `test_frontend_v2.py`, `test_enterprise_observability.py`,
+  `test_enterprise_ops.py`, and `test_performance_bugfix_sweep.py`.
 
 ## Data & Config
 
@@ -921,16 +1112,36 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
   but never committed. Public env keys (values redacted):
   - Gemini / runtime: `GEMINI_API_KEY`, `MODEL_NAME`, `TIMEZONE`,
     `WORKING_DIR`, `GEMINI_CACHED_CONTENT`.
+  - Provider registry: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
+    `DEEPSEEK_API_KEY`, `KURO_DEFAULT_PROVIDER`,
+    `KURO_DEFAULT_MODEL_ALIAS`, `KURO_PROVIDER_FALLBACK_ALIASES`,
+    `KURO_MODEL_GEMINI_FAST`, `KURO_MODEL_OPENAI_NANO`,
+    `KURO_MODEL_CLAUDE_FAST`, `KURO_MODEL_DEEPSEEK_FAST`.
+  - Enterprise feature flags: `KURO_ENTERPRISE_REFACTOR_ENABLED`,
+    `KURO_MEMORY_V3_ENABLED`, `KURO_STORAGE_V2_ENABLED`,
+    `KURO_CHAT_V2_ENABLED`, `KURO_MARKET_SENTINEL_V2_ENABLED`,
+    `KURO_TELEGRAM_V2_ENABLED`, `KURO_PROVIDER_REGISTRY_V2_ENABLED`,
+    `KURO_AGENT_TOOLS_V2_ENABLED`, `KURO_TASKS_V2_ENABLED`,
+    `KURO_DEEP_RESEARCH_V2_ENABLED`, `KURO_WEB_SEARCH_V2_ENABLED`,
+    `KURO_FRONTEND_V2_ENABLED`, `KURO_ADMIN_SETTINGS_V2_ENABLED`,
+    `KURO_ENTERPRISE_OBSERVABILITY_ENABLED`, `KURO_API_V2_ENABLED`.
   - Chat / memory / DB hardening: `KURO_CHAT_CONTEXT_REFRESH_THRESHOLD`,
     `KURO_CHAT_CONTEXT_MODEL`, `KURO_NODE_TIMEOUT_S`,
     `KURO_ADVISOR_NODE_TIMEOUT_S`, `KURO_DB_BUSY_TIMEOUT_MS`.
+  - Enterprise data paths: `KURO_MEMORY_V3_DB_PATH`,
+    `KURO_TOOLS_V2_DB_PATH`, `KURO_MARKET_V2_DB_PATH`,
+    `KURO_TELEGRAM_V2_DB_PATH`, `KURO_ENTERPRISE_OBSERVABILITY_DB_PATH`,
+    `KURO_PLAYGROUND_DB_PATH`, `KURO_MEM0_STORAGE_DIR`.
   - Phoenix: `PHOENIX_WORKING_DIR` (default `./phoenix_data`),
     `PHOENIX_SQL_DATABASE_URL` (optional; auto-derived from PHOENIX_WORKING_DIR if unset),
-    `KURO_TRACE_SPAN_TIMEOUT_S` (default `120`).
+    `KURO_TRACE_SPAN_TIMEOUT_S` (default `120`),
+    `KURO_OBSERVABILITY_LOG_PROMPTS_ENABLED`, `KURO_EVAL_BATCH_RPM`,
+    `KURO_EVAL_ALERT_THRESHOLD`.
   - Proxmox: `PVE_HOST`, `PVE_PORT`, `PVE_TOKEN_ID`, `PVE_TOKEN_SECRET`.
   - Telegram: `TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID`,
     `TELEGRAM_WEBHOOK_SECRET`, `KURO_TELEGRAM_RATE_LIMIT_PER_MIN`,
-    `KURO_TELEGRAM_QUEUE_MAXSIZE`.
+    `KURO_TELEGRAM_QUEUE_MAXSIZE`, `KURO_TELEGRAM_RESPONSE_TIMEOUT_S`,
+    `KURO_TELEGRAM_DROP_PENDING_UPDATES`.
   - CVE sentinel: `KURO_CVE_SENTINEL_ENABLED`, `KURO_CVE_MIN_CVSS`,
     `KURO_CVE_MAX_ALERTS_PER_CYCLE`, `KURO_VULN_NMAP_ENABLED`.
   - Proactive: `KURO_PROACTIVE_ENABLED`,
@@ -941,7 +1152,7 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
     `KURO_FINANCE_DB_PATH`, `KURO_FISCAL_DAILY_USD_THRESHOLD`,
     `KURO_FISCAL_SENTINEL_ENABLED`.
   - Market Sentinel hardening: `KURO_SENTINEL_STALE_THRESHOLD_MIN`,
-    `KURO_SENTINEL_DEDUP_WINDOW_MIN`.
+    `KURO_SENTINEL_DEDUP_WINDOW_MIN`, `KURO_PRICE_TICKER_TIMEOUT_S`.
   - Greeting / UI: `KURO_PROACTIVE_GREETING_ENABLED`,
     `KURO_PROACTIVE_GREETING_COOLDOWN_DAYS`,
     `KURO_PROACTIVE_GREETING_LANG`, `KURO_UI_MODE_DEFAULT`.
@@ -949,6 +1160,8 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
     `KURO_BACKUP_RETAIN_DAYS`, `KURO_BACKUP_WEEKLY_RETAIN_WEEKS`,
     `KURO_BACKUP_PRE_MIGRATION_RETAIN_DAYS`,
     `KURO_BACKUP_COMPRESS_LEVEL`, `KURO_BACKUP_ALERT_ON_FAILURE`.
+  - Deployment ops: `KURO_DEPLOYMENT_PROFILE`, `JWT_SECRET_KEY`,
+    `ADMIN_USERNAME`, `ADMIN_PASSWORD_HASH`.
   - Additional runtime keys read inline across modules (e.g. Mem0, OpenAI
     embedding, OpenClaw bridge URL/token, Serper) are documented in the
     respective files' docstrings.
@@ -961,7 +1174,9 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
 - **SQLite files** (all sit at repo root, excluded from the tree, schemas
   cited above): `kuro_auth.db`, `kuro_chat_history.db`,
   `kuro_compliance.db`, `kuro_habits.db`, `kuro_intelligence.db`,
-  `kuro_reminders.db`, `kuro_short_term.db`, `kuro_finances.db`. The empty
+  `kuro_reminders.db`, `kuro_short_term.db`, `kuro_finances.db`,
+  `kuro_memory_v3.db`, `kuro_tools_v2.db`, `kuro_market_v2.db`,
+  `kuro_telegram_v2.db`, `kuro_enterprise_observability.db`. The empty
   [`db/`](db/) directory is reserved for future versioned migrations.
 - **Vector stores**: `kuro_chromadb/` (general semantic memory). It is a
   Chroma on-disk persistent and is excluded from the tree.
@@ -996,6 +1211,27 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
   - `monthly_budget(id, month, amount_usd, notes, …)`,
     `recurring_expenses(id, label, amount_usd, cadence, next_due, …)`,
     `api_usage_daily(date, model_name, prompt_tokens, completion_tokens, cost_usd, …)`
+  - `memory_events(event_id, username, workspace_id, chat_id, event_type, …)`,
+    `memory_items(item_id, username, workspace_id, canonical_text, …)`,
+    `memory_assertions(assertion_id, item_id, assertion_text, confidence, …)`,
+    `memory_links(link_id, source_item_id, target_item_id, relation, …)`,
+    `memory_conflicts(conflict_id, status, resolution_note, …)`,
+    `memory_access_log(id, username, purpose, created_at, …)`
+  - `tool_audit_log_v2(id, trace_id, username, tool_id, action, status, …)`,
+    `tool_approval_requests_v2(approval_id, username, tool_id, status, …)`,
+    `deep_research_jobs_v2(job_id, username, status, query, result_json, …)`,
+    `tasks_v2(task_id, username, status, title, …)`,
+    `reminders_v2(reminder_id, username, status, due_at, …)`
+  - `market_v2_reports(report_id, username, symbol, payload_json, generated_at, …)`,
+    `market_v2_alerts(alert_id, username, fingerprint, severity, expires_at, …)`
+  - `telegram_v2_outbound_queue(message_id, chat_id, payload_json, status, …)`,
+    `telegram_v2_sender_mappings(mapping_id, username, telegram_chat_id, active, …)`
+  - `enterprise_audit_events(id, trace_id, actor, action, target, created_at, …)`,
+    `enterprise_security_events(id, event_type, severity, details_json, …)`,
+    `enterprise_metrics(id, metric_name, value, labels_json, created_at, …)`,
+    `enterprise_traces(id, trace_id, span_name, status, created_at, …)`,
+    `enterprise_evals(id, eval_name, score, payload_json, created_at, …)`
+  - `idempotency_results(key, scope, response_json, created_at, expires_at, …)`
   - `migration_history(version, applied_at, description)` (baseline migration ledger across SQLite modules)
 - **Migrations / seeds**: [`maintenance/`](maintenance/) +
   [`scripts/`](scripts/).
@@ -1012,6 +1248,7 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
 | Integration | Call sites | Notes |
 | --- | --- | --- |
 | Google Gemini (`google-genai`) | `langgraph_core.py`, `core.py`, `memory_coordinator.py` (summariser), `dreaming_worker.py` | Primary LLM; persona-specific configs in `personas.py`. |
+| Provider Registry V2 | `providers/registry.py`, `providers/router.py`, `chat_v2/service.py` | Alias-based routing across Gemini/OpenAI/Anthropic/DeepSeek; all non-Gemini providers remain unavailable unless their API key env is configured. |
 | Static Gemini list pricing (USD) | `pricing.py` (→ `observability.track_token_usage` → `finance_db.add_api_usage`) | Approximate per-1K token map for ledgered `api_usage_daily`; unknown models log + record `0.0` cost. |
 | Mem0 | `perpetual_memory.py` (via `memory_coordinator.safe_mem0_retrieve` + `execute_mem0_extract_task`) | Long-term semantic memory store. |
 | ChromaDB | `perpetual_memory.py`, `tools/base_tools.lookup_chroma_context`, maintenance scripts | On-disk collections `kuro_chromadb/`. |
@@ -1023,6 +1260,7 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
 | NewsAPI (optional) | `openclaw_skills/market_analysis/market_analysis.py` (`get_market_news`) | Requires `NEWSAPI_API_KEY`; when unset the skill returns `articles: []` gracefully. |
 | Metaculus (prediction markets) | `openclaw_skills/prediction_market_scan/prediction_market_scan.py` (→ Chancellor tool + nightly `_run_prediction_scan_nightly`) | Requires `METACULUS_API_TOKEN` or the `KURO_PREDICTION_MARKET_DEMO=1` seeded path. |
 | Stooq (ticker price CSV) | `openclaw_skills/market_analysis/market_analysis.py` (`get_ticker_price`) | No auth; public CSV endpoint at `https://stooq.com/q/d/l/`. |
+| yfinance (optional) | `price_ticker_worker.py` | Optional quantitative ticker anchor; missing dependency now returns a controlled error and `KURO_PRICE_TICKER_TIMEOUT_S` bounds upstream waits. |
 
 | Arize Phoenix + OpenTelemetry | `observability.py` | Phoenix UI served from `phoenix_data/`; OTel exports traces for every LangGraph node via `trace_node`. |
 
@@ -1090,6 +1328,23 @@ semantics, and the presence of both indexes via `PRAGMA index_list`.
 
 ## Risks / Blind Spots
 
+- **Enterprise V2 rollout is opt-in**: Memory V3, Chat V2, Provider
+  Registry V2, Tools V2, Market Sentinel V2, Telegram V2, API V2, Frontend
+  V2, and Enterprise Observability default off. Production behavior remains
+  legacy until flags are intentionally enabled and observed.
+- **Large-enterprise blockers**: current storage remains SQLite-first,
+  tenancy is workspace/user-scoped but not full tenant isolation, RBAC is
+  still mostly admin-username based, SSO/OIDC is absent, and telemetry is
+  local/Phoenix-first rather than an external OpenTelemetry collector.
+- **Provider registry readiness**: Gemini remains the known primary provider.
+  OpenAI/Anthropic/DeepSeek adapters are governed by key presence and tests,
+  but need live production validation before being used as critical fallbacks.
+- **Frontend V2 scope**: Chat Workspace V2 is feature-flagged and covered by
+  static/template tests; browser smoke testing is still recommended before
+  making it the default operator UI.
+- **Operational docs are pilot-grade**: `docker-compose.yml` and
+  `docs/deployment/*` are enough for a single-VM/small pilot, not a complete
+  HA/Kubernetes/regulated-enterprise runbook.
 - **Dynamic OpenClaw skill loading**: skills under
   [`openclaw_skills/`](openclaw_skills/) are discovered at runtime by the
   external OpenClaw process; this map only lists the two shipped with the
