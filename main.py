@@ -96,6 +96,7 @@ from kuro_backend import backup_manager
 from kuro_backend import persona_history_admin
 from kuro_backend import version as kuro_version
 from kuro_backend import proactive_greeting
+from kuro_backend.enterprise_flags import get_enterprise_flag_snapshot
 from kuro_backend.runtime.runtime_context import resolve_runtime_context
 from kuro_backend.runtime.runtime_registry import RuntimeRegistry
 from kuro_backend.output.schema_registry import SchemaRegistry
@@ -1153,6 +1154,7 @@ PUBLIC_API_ROUTES = [
     "/api/auth/verify",
     "/api/auth/stats",
     "/api/auth/logout",
+    "/api/capabilities",
 ]
 
 
@@ -1265,6 +1267,19 @@ async def get_current_user(request: Request):
         "username": username,
         "is_admin": username == os.getenv("ADMIN_USERNAME", "Pantronux"),
     }
+
+
+@app.get("/api/capabilities")
+async def get_public_capabilities():
+    """Return public-safe feature availability without internal topology."""
+    return api_success(data=get_enterprise_flag_snapshot(admin=False))
+
+
+@app.get("/api/admin/enterprise-flags")
+async def get_admin_enterprise_flags(request: Request):
+    """Return enterprise flag status for authenticated admins only."""
+    require_admin_user(request)
+    return api_success(data=get_enterprise_flag_snapshot(admin=True))
 
 
 @app.get("/api/history")

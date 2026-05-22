@@ -26,7 +26,33 @@ PRIMARY_MODEL = "gemini-3-flash-preview"
 # to save latency and token costs, while preserving 3-flash for the primary responses.
 CLASSIFIER_MODEL = "gemini-2.5-flash"  # For fact classification and internal routing tasks
 
+
+def _env_bool(name: str, default: str = "false") -> bool:
+    return os.getenv(name, default).strip().lower() in ("1", "true", "yes", "on")
+
+
 class Settings:
+    # -----------------------------------------------------------------
+    # Enterprise Refactor Control Plane (Phase 0)
+    # -----------------------------------------------------------------
+    # All enterprise refactor paths default off to preserve current runtime
+    # behavior until each future phase explicitly gates a replacement path.
+    KURO_ENTERPRISE_REFACTOR_ENABLED: bool = _env_bool("KURO_ENTERPRISE_REFACTOR_ENABLED", "false")
+    KURO_MEMORY_V3_ENABLED: bool = _env_bool("KURO_MEMORY_V3_ENABLED", "false")
+    KURO_STORAGE_V2_ENABLED: bool = _env_bool("KURO_STORAGE_V2_ENABLED", "false")
+    KURO_CHAT_V2_ENABLED: bool = _env_bool("KURO_CHAT_V2_ENABLED", "false")
+    KURO_MARKET_SENTINEL_V2_ENABLED: bool = _env_bool("KURO_MARKET_SENTINEL_V2_ENABLED", "false")
+    KURO_TELEGRAM_V2_ENABLED: bool = _env_bool("KURO_TELEGRAM_V2_ENABLED", "false")
+    KURO_PROVIDER_REGISTRY_V2_ENABLED: bool = _env_bool("KURO_PROVIDER_REGISTRY_V2_ENABLED", "false")
+    KURO_AGENT_TOOLS_V2_ENABLED: bool = _env_bool("KURO_AGENT_TOOLS_V2_ENABLED", "false")
+    KURO_TASKS_V2_ENABLED: bool = _env_bool("KURO_TASKS_V2_ENABLED", "false")
+    KURO_DEEP_RESEARCH_V2_ENABLED: bool = _env_bool("KURO_DEEP_RESEARCH_V2_ENABLED", "false")
+    KURO_WEB_SEARCH_V2_ENABLED: bool = _env_bool("KURO_WEB_SEARCH_V2_ENABLED", "false")
+    KURO_FRONTEND_V2_ENABLED: bool = _env_bool("KURO_FRONTEND_V2_ENABLED", "false")
+    KURO_ADMIN_SETTINGS_V2_ENABLED: bool = _env_bool("KURO_ADMIN_SETTINGS_V2_ENABLED", "false")
+    KURO_ENTERPRISE_OBSERVABILITY_ENABLED: bool = _env_bool("KURO_ENTERPRISE_OBSERVABILITY_ENABLED", "false")
+    KURO_API_V2_ENABLED: bool = _env_bool("KURO_API_V2_ENABLED", "false")
+
     # -----------------------------------------------------------------
     # Chat Context Configuration
     # -----------------------------------------------------------------
@@ -118,6 +144,15 @@ class Settings:
     PVE_TOKEN_ID: str = os.getenv("PVE_TOKEN_ID")
     PVE_TOKEN_SECRET: str = os.getenv("PVE_TOKEN_SECRET")
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY")
+    OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
+    ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
+    DEEPSEEK_API_KEY: str = os.getenv("DEEPSEEK_API_KEY", "")
+    KURO_DEFAULT_PROVIDER: str = os.getenv("KURO_DEFAULT_PROVIDER", "gemini")
+    KURO_DEFAULT_MODEL_ALIAS: str = os.getenv("KURO_DEFAULT_MODEL_ALIAS", "gemini_fast")
+    KURO_MODEL_GEMINI_FAST: str = os.getenv("KURO_MODEL_GEMINI_FAST", "gemini-3-flash-preview")
+    KURO_MODEL_OPENAI_NANO: str = os.getenv("KURO_MODEL_OPENAI_NANO", "gpt-5.4-nano")
+    KURO_MODEL_CLAUDE_FAST: str = os.getenv("KURO_MODEL_CLAUDE_FAST", "claude-haiku-4-5")
+    KURO_MODEL_DEEPSEEK_FAST: str = os.getenv("KURO_MODEL_DEEPSEEK_FAST", "deepseek-v4-flash")
     MODEL_NAME: str = os.getenv("MODEL_NAME", PRIMARY_MODEL)
     TELEGRAM_TOKEN: str = os.getenv("TELEGRAM_TOKEN")
     TELEGRAM_CHAT_ID: str = os.getenv("TELEGRAM_CHAT_ID")
