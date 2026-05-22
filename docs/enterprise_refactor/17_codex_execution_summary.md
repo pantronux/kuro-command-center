@@ -108,9 +108,30 @@ All stores are additive. No destructive data migration was introduced.
 - SSO/OIDC, secrets management, HA deployment, and compliance packs remain
   future work.
 
+## Post-Phase 14 Add-on: Ollama Local Provider
+
+The Ollama provider adapter was added after the main enterprise prompt pack as
+a safe Provider Registry V2 extension:
+
+- `kuro_backend/providers/ollama_provider.py`
+- `ollama_local` model alias
+- `KURO_OLLAMA_*` and `KURO_LOCAL_MODEL_ROUTING_ENABLED` settings
+- Admin routes:
+  - `GET /api/admin/providers/ollama/health`
+  - `GET /api/admin/providers/ollama/models`
+  - `POST /api/admin/providers/ollama/smoke-test`
+- Tests:
+  - `tests/test_provider_ollama.py`
+  - `tests/test_provider_ollama_smoke_contract.py`
+- Docs:
+  - `docs/enterprise_refactor/provider_ollama_adapter.md`
+
+Ollama remains disabled by default and does not contact the local server at
+startup.
+
 ## Verification Result
 
 ```bash
 python3 -m compileall kuro_backend main.py
-pytest tests/ -x --tb=short  # 567 passed, 166 warnings
+pytest tests/ -x --tb=short  # 581 passed, 170 warnings
 ```

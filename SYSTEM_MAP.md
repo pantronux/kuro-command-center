@@ -98,7 +98,8 @@ Kuro AI is your **Intelligent Personal Sovereign**—a sophisticated digital com
   - `kuro_backend/chat_v2/` for additive chat/session routes, SSE streaming,
     attachment contracts, session settings, and telemetry.
   - `kuro_backend/providers/` for provider adapters, model alias registry,
-    fallback routing, usage metadata, and streaming normalization.
+    fallback routing, usage metadata, streaming normalization, and the optional
+    local Ollama adapter (`ollama_local`, default off).
   - `kuro_backend/tools_v2/` for governed tools, approvals, audit log,
     Deep Research V2 jobs, durable tasks, reminders, agent mode, and web search.
   - `kuro_backend/market_v2/` for source registry, collection, freshness,
@@ -691,6 +692,8 @@ artefacts are excluded — see **Exclusions** at the bottom of this section.
 │   ├── test_memory_v3_retrieval.py
 │   ├── test_chat_v2.py
 │   ├── test_provider_registry_v2.py
+│   ├── test_provider_ollama.py
+│   ├── test_provider_ollama_smoke_contract.py
 │   ├── test_tools_v2.py
 │   ├── test_market_v2.py
 │   ├── test_telegram_v2.py
@@ -749,6 +752,7 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
   `/api/capabilities`, `/api/admin/enterprise-flags`,
   `/api/admin/storage/*`, `/api/admin/memory-v3/*`,
   `/api/chat/v2/stream`, `/api/models`, `/api/admin/providers*`,
+  `/api/admin/providers/ollama/*`,
   `/api/tools`, `/api/deep-research/jobs`, `/api/tasks`,
   `/api/market-v2/*`, `/api/telegram/webhook`, `/api/admin/telegram-v2/*`,
   `/api/v2/*`, `/api/admin/observability/*`,
@@ -772,8 +776,10 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
   `create_chat_v2_router`, session settings helpers, attachment contracts,
   streaming event helpers, and Chat V2 telemetry.
 - [`kuro_backend/providers/`](kuro_backend/providers/) — *public*:
-  provider adapters for Gemini/OpenAI/Anthropic/DeepSeek, model alias
-  registry, fallback router, streaming adapter, and usage summaries.
+  provider adapters for Gemini/OpenAI/Anthropic/DeepSeek/Ollama, model alias
+  registry, fallback router, streaming adapter, local routing guard, and usage
+  summaries. `ollama_provider.py` uses direct HTTP to native Ollama
+  `/api/chat` and optional OpenAI-compatible `/v1/chat/completions`.
 - [`kuro_backend/memory_v3/`](kuro_backend/memory_v3/) — *public*:
   `write_memory_event`, retrieval reader helpers, provenance builders,
   conflict detection, privacy redaction, retention, and health snapshots.
@@ -1100,7 +1106,8 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
   `test_enterprise_refactor_baseline.py`, `test_enterprise_feature_flags.py`,
   `test_storage_v2.py`, `test_memory_v3_core.py`,
   `test_memory_v3_retrieval.py`, `test_chat_v2.py`,
-  `test_provider_registry_v2.py`, `test_tools_v2.py`,
+  `test_provider_registry_v2.py`, `test_provider_ollama.py`,
+  `test_provider_ollama_smoke_contract.py`, `test_tools_v2.py`,
   `test_market_v2.py`, `test_telegram_v2.py`, `test_api_v2.py`,
   `test_frontend_v2.py`, `test_enterprise_observability.py`,
   `test_enterprise_ops.py`, and `test_performance_bugfix_sweep.py`.
@@ -1116,7 +1123,14 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
     `DEEPSEEK_API_KEY`, `KURO_DEFAULT_PROVIDER`,
     `KURO_DEFAULT_MODEL_ALIAS`, `KURO_PROVIDER_FALLBACK_ALIASES`,
     `KURO_MODEL_GEMINI_FAST`, `KURO_MODEL_OPENAI_NANO`,
-    `KURO_MODEL_CLAUDE_FAST`, `KURO_MODEL_DEEPSEEK_FAST`.
+    `KURO_MODEL_CLAUDE_FAST`, `KURO_MODEL_DEEPSEEK_FAST`,
+    `KURO_MODEL_OLLAMA_LOCAL`.
+  - Ollama local provider: `KURO_OLLAMA_ENABLED`,
+    `KURO_OLLAMA_BASE_URL`, `KURO_OLLAMA_OPENAI_BASE_URL`,
+    `KURO_OLLAMA_TIMEOUT_S`, `KURO_OLLAMA_STREAM_TIMEOUT_S`,
+    `KURO_OLLAMA_DEFAULT_MODEL`, `KURO_OLLAMA_USE_OPENAI_COMPAT`,
+    `KURO_OLLAMA_ALLOW_PUBLIC_MODEL_LIST`,
+    `KURO_LOCAL_MODEL_ROUTING_ENABLED`.
   - Enterprise feature flags: `KURO_ENTERPRISE_REFACTOR_ENABLED`,
     `KURO_MEMORY_V3_ENABLED`, `KURO_STORAGE_V2_ENABLED`,
     `KURO_CHAT_V2_ENABLED`, `KURO_MARKET_SENTINEL_V2_ENABLED`,
@@ -1248,7 +1262,8 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
 | Integration | Call sites | Notes |
 | --- | --- | --- |
 | Google Gemini (`google-genai`) | `langgraph_core.py`, `core.py`, `memory_coordinator.py` (summariser), `dreaming_worker.py` | Primary LLM; persona-specific configs in `personas.py`. |
-| Provider Registry V2 | `providers/registry.py`, `providers/router.py`, `chat_v2/service.py` | Alias-based routing across Gemini/OpenAI/Anthropic/DeepSeek; all non-Gemini providers remain unavailable unless their API key env is configured. |
+| Provider Registry V2 | `providers/registry.py`, `providers/router.py`, `chat_v2/service.py` | Alias-based routing across Gemini/OpenAI/Anthropic/DeepSeek/Ollama; cloud providers require keys, while Ollama requires explicit local enablement. |
+| Ollama local provider (optional) | `providers/ollama_provider.py`, `/api/admin/providers/ollama/*` | Direct HTTP to local Ollama. Disabled by default, no startup contact, public routes do not expose base URL or raw local model inventory. |
 | Static Gemini list pricing (USD) | `pricing.py` (→ `observability.track_token_usage` → `finance_db.add_api_usage`) | Approximate per-1K token map for ledgered `api_usage_daily`; unknown models log + record `0.0` cost. |
 | Mem0 | `perpetual_memory.py` (via `memory_coordinator.safe_mem0_retrieve` + `execute_mem0_extract_task`) | Long-term semantic memory store. |
 | ChromaDB | `perpetual_memory.py`, `tools/base_tools.lookup_chroma_context`, maintenance scripts | On-disk collections `kuro_chromadb/`. |
@@ -1339,6 +1354,10 @@ semantics, and the presence of both indexes via `PRAGMA index_list`.
 - **Provider registry readiness**: Gemini remains the known primary provider.
   OpenAI/Anthropic/DeepSeek adapters are governed by key presence and tests,
   but need live production validation before being used as critical fallbacks.
+- **Ollama local model limits**: `ollama_local` is useful for local/private
+  drafts and cost-saving tasks, but it is disabled by default, must not be
+  treated as current knowledge without RAG/web grounding, and cannot execute
+  tool-like output outside governed Tool Runtime V2.
 - **Frontend V2 scope**: Chat Workspace V2 is feature-flagged and covered by
   static/template tests; browser smoke testing is still recommended before
   making it the default operator UI.

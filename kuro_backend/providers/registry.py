@@ -15,6 +15,7 @@ from kuro_backend.providers.base import BaseProvider
 from kuro_backend.providers.deepseek_provider import DeepSeekProvider
 from kuro_backend.providers.errors import ModelAliasError, ProviderSafetyRefusal, ProviderUnavailableError
 from kuro_backend.providers.gemini_provider import GeminiProvider
+from kuro_backend.providers.ollama_provider import OllamaProvider
 from kuro_backend.providers.openai_provider import OpenAIProvider
 from kuro_backend.providers.schemas import (
     ModelAlias,
@@ -50,6 +51,11 @@ MODEL_ALIAS_CONFIG: Dict[str, Dict[str, str]] = {
         "settings_attr": "KURO_MODEL_DEEPSEEK_FAST",
         "display_name": "DeepSeek Fast",
     },
+    "ollama_local": {
+        "provider": "ollama",
+        "settings_attr": "KURO_MODEL_OLLAMA_LOCAL",
+        "display_name": "Local Ollama",
+    },
 }
 
 
@@ -58,11 +64,16 @@ PROVIDER_CLASSES: Dict[str, Type[BaseProvider]] = {
     "openai": OpenAIProvider,
     "anthropic": AnthropicProvider,
     "deepseek": DeepSeekProvider,
+    "ollama": OllamaProvider,
 }
 
 
 def is_provider_registry_enabled() -> bool:
     return bool(getattr(settings, "KURO_PROVIDER_REGISTRY_V2_ENABLED", False))
+
+
+def is_local_model_routing_enabled() -> bool:
+    return bool(getattr(settings, "KURO_LOCAL_MODEL_ROUTING_ENABLED", False))
 
 
 class ProviderRegistryV2:
@@ -283,7 +294,14 @@ class ProviderRegistryV2:
             for part in str(os.getenv("KURO_PROVIDER_FALLBACK_ALIASES", "gemini_fast")).split(",")
             if part.strip()
         ]
-        return list(dict.fromkeys([primary, *(fallback_aliases or configured_fallbacks)]))
+        aliases = list(dict.fromkeys([primary, *(fallback_aliases or configured_fallbacks)]))
+        if not is_local_model_routing_enabled():
+            return [
+                alias
+                for index, alias in enumerate(aliases)
+                if index == 0 or MODEL_ALIAS_CONFIG.get(alias, {}).get("provider") != "ollama"
+            ]
+        return aliases
 
 
 _REGISTRY: Optional[ProviderRegistryV2] = None

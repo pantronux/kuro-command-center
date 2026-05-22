@@ -29,6 +29,7 @@ _PROVIDER_KEY_ATTRS: dict[str, str] = {
     "openai": "OPENAI_API_KEY",
     "anthropic": "ANTHROPIC_API_KEY",
     "deepseek": "DEEPSEEK_API_KEY",
+    "ollama": "KURO_OLLAMA_ENABLED",
 }
 
 _MODEL_ALIAS_ATTRS: dict[str, str] = {
@@ -36,6 +37,7 @@ _MODEL_ALIAS_ATTRS: dict[str, str] = {
     "openai_nano": "KURO_MODEL_OPENAI_NANO",
     "claude_fast": "KURO_MODEL_CLAUDE_FAST",
     "deepseek_fast": "KURO_MODEL_DEEPSEEK_FAST",
+    "ollama_local": "KURO_MODEL_OLLAMA_LOCAL",
 }
 
 
@@ -51,6 +53,8 @@ def _normalize_flag_name(flag_name: str) -> Optional[str]:
 
 
 def _has_value(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
     return bool(str(value or "").strip())
 
 
@@ -139,6 +143,10 @@ def get_enterprise_flag_snapshot(admin: bool = False) -> Dict[str, Any]:
             },
             "provider_registry": {
                 "available": False,
+                "v2_enabled": flags["KURO_PROVIDER_REGISTRY_V2_ENABLED"],
+            },
+            "local_provider": {
+                "available": bool(getattr(settings, "KURO_OLLAMA_ENABLED", False)),
                 "v2_enabled": flags["KURO_PROVIDER_REGISTRY_V2_ENABLED"],
             },
             "agent_actions": {

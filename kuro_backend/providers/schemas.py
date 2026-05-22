@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field, field_validator
 
 
-ProviderId = Literal["gemini", "openai", "anthropic", "deepseek"]
+ProviderId = Literal["gemini", "openai", "anthropic", "deepseek", "ollama"]
 ProviderEventType = Literal[
     "token",
     "tool_call_start",
@@ -103,4 +103,3 @@ class ProviderHealth(BaseModel):
     enabled: bool = False
     providers: Dict[str, ProviderStatus] = Field(default_factory=dict)
     aliases: Dict[str, ModelAlias] = Field(default_factory=dict)
-
