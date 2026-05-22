@@ -641,6 +641,38 @@ def _mount_chat_v2_router(target_app: FastAPI) -> bool:
             trace_id = str(kwargs.get("trace_id") or f"chatv2_{uuid.uuid4().hex}")
             user_info = auth_db.get_user(username) or {}
             master_name = user_info.get("master_name", "Master Pantronux")
+            if bool(getattr(settings, "KURO_PROVIDER_REGISTRY_V2_ENABLED", False)):
+                try:
+                    from kuro_backend.providers.registry import get_provider_registry
+                    from kuro_backend.providers.schemas import ProviderRequest
+
+                    provider_request = ProviderRequest.from_prompt(
+                        message,
+                        model_alias=str(getattr(settings, "KURO_DEFAULT_MODEL_ALIAS", "gemini_fast")),
+                        temperature=float(kwargs.get("temperature") or 0.7),
+                        max_output_tokens=int(kwargs.get("max_output_tokens") or 8192),
+                        metadata={
+                            "persona": persona,
+                            "username": username,
+                            "chat_id": chat_id,
+                            "source": "chat_v2",
+                        },
+                        trace_id=trace_id,
+                    )
+                    async for event in get_provider_registry().route_stream(provider_request):
+                        if event.error:
+                            raise RuntimeError(event.error)
+                        if event.done:
+                            return
+                        safe_chunk = sanitize_stream_chunk(event.delta or event.content)
+                        if safe_chunk:
+                            yield safe_chunk
+                    return
+                except Exception as provider_exc:
+                    logger.warning(
+                        "[CHAT_V2] provider registry path failed; falling back to legacy stream: %s",
+                        provider_exc,
+                    )
             async for chunk in process_chat_with_graph_stream(
                 message,
                 image_paths=None,
@@ -672,11 +704,27 @@ def _mount_chat_v2_router(target_app: FastAPI) -> bool:
         return False
 
 
+def _mount_provider_registry_v2_router(target_app: FastAPI) -> bool:
+    """Mount Provider Registry V2 admin/public routes."""
+    try:
+        from kuro_backend.providers.router import create_provider_registry_router
+
+        target_app.include_router(
+            create_provider_registry_router(admin_dependency=require_admin_user)
+        )
+        logger.info("[PROVIDER_REGISTRY_V2] Router mounted")
+        return True
+    except Exception as exc:
+        logger.exception("[PROVIDER_REGISTRY_V2] Failed to mount router: %s", exc)
+        return False
+
+
 # --- FastAPI App ---
 app = FastAPI(title="Kuro AI Web Dashboard")
 app.add_middleware(TraceMiddleware)
 _mount_playground_router_if_enabled(app)
 _mount_chat_v2_router(app)
+_mount_provider_registry_v2_router(app)
 
 
 @app.on_event("startup")
