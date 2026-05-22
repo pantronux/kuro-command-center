@@ -770,6 +770,27 @@ def _mount_telegram_v2_router(target_app: FastAPI) -> bool:
         return False
 
 
+def _mount_api_v2_controls(target_app: FastAPI) -> bool:
+    """Mount additive API V2 middleware and control-plane routes."""
+    try:
+        from kuro_backend.api_v2 import create_api_v2_router
+        from kuro_backend.api_v2.middleware import install_api_v2_middleware
+
+        install_api_v2_middleware(target_app)
+        target_app.include_router(
+            create_api_v2_router(
+                auth_dependency=validate_token_dependency,
+                admin_dependency=require_admin_user,
+                app_for_openapi=target_app,
+            )
+        )
+        logger.info("[API_V2] Middleware and control routes mounted")
+        return True
+    except Exception as exc:
+        logger.exception("[API_V2] Failed to mount controls: %s", exc)
+        return False
+
+
 # --- FastAPI App ---
 app = FastAPI(title="Kuro AI Web Dashboard")
 app.add_middleware(TraceMiddleware)
@@ -779,6 +800,7 @@ _mount_provider_registry_v2_router(app)
 _mount_tools_v2_router(app)
 _mount_market_v2_router(app)
 _mount_telegram_v2_router(app)
+_mount_api_v2_controls(app)
 
 
 @app.on_event("startup")
