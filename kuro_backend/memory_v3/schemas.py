@@ -190,6 +190,46 @@ class MemoryReadResult(BaseModel):
     access_logged: bool = False
 
 
+class MemoryCitation(BaseModel):
+    memory_id: str
+    source_type: str = "unknown"
+    source_id: str = ""
+    event_id: str = ""
+    trace_id: str = ""
+    reliability: float = Field(default=0.35, ge=0.0, le=1.0)
+    created_at: str = ""
+
+
+class MemoryRetrievalDiagnostics(BaseModel):
+    candidate_count: int = 0
+    selected_memory_count: int = 0
+    dropped_expired_count: int = 0
+    conflict_count: int = 0
+    suspicious_memory_count: int = 0
+    latency_ms: float = 0.0
+    trace_id: str = ""
+
+
+class MemoryRetrievalCandidate(BaseModel):
+    item: MemoryItem
+    score: float = Field(default=0.0, ge=0.0)
+    components: Dict[str, float] = Field(default_factory=dict)
+    citation: MemoryCitation
+    suspicious: bool = False
+    suspicion_reasons: List[str] = Field(default_factory=list)
+    conflict_warning: Optional[str] = None
+    freshness_note: Optional[str] = None
+
+
+class MemoryContextPack(BaseModel):
+    context_text: str = ""
+    candidates: List[MemoryRetrievalCandidate] = Field(default_factory=list)
+    selected_memory_ids: List[str] = Field(default_factory=list)
+    citations: List[MemoryCitation] = Field(default_factory=list)
+    diagnostics: MemoryRetrievalDiagnostics = Field(default_factory=MemoryRetrievalDiagnostics)
+    grouped_counts: Dict[str, int] = Field(default_factory=dict)
+
+
 class MemoryConflict(BaseModel):
     conflict_id: str = Field(default_factory=lambda: new_id("mconf"))
     memory_id_a: str

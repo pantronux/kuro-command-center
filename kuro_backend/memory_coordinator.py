@@ -1180,6 +1180,66 @@ def _build_ingestion_context_block(evidence_items: Sequence[Dict[str, Any]]) -> 
     return "\n".join(lines)
 
 
+def _memory_v3_enabled() -> bool:
+    return bool(getattr(settings, "KURO_MEMORY_V3_ENABLED", False))
+
+
+def _memory_v3_token_budget(context_budget: Any) -> int:
+    layer2_tokens = int(getattr(context_budget, "layer2_tokens", 1200) or 1200)
+    configured = int(os.getenv("KURO_MEMORY_V3_CONTEXT_TOKENS", str(layer2_tokens)))
+    return max(120, min(1600, configured))
+
+
+def _build_memory_v3_context_pack_for_llm(
+    user_input: str,
+    persona_mode: str,
+    *,
+    username: str,
+    chat_id: Optional[str],
+    runtime_id: str,
+    context_budget: Any,
+) -> Any:
+    if not _memory_v3_enabled():
+        return None
+    if not chat_id:
+        logger.warning("[MEMORY_COORD] Memory V3 context skipped because chat_id is missing")
+        return None
+    try:
+        from kuro_backend.memory_v3.reader import MemoryV3Reader
+        from kuro_backend.memory_v3.schemas import MemoryReadRequest
+
+        trace_material = "|".join(
+            [
+                str(username or ""),
+                str(runtime_id or ""),
+                str(persona_mode or ""),
+                str(chat_id or ""),
+                str(user_input or "")[:256],
+                str(time.time_ns()),
+            ]
+        )
+        context_limit = max(1, min(100, int(os.getenv("KURO_MEMORY_V3_CONTEXT_LIMIT", "12"))))
+        request = MemoryReadRequest(
+            workspace_id="default",
+            username=username,
+            runtime_id=runtime_id,
+            persona_scope=persona_mode,
+            chat_id=chat_id,
+            query=user_input or "",
+            limit=context_limit,
+            include_cross_chat=False,
+            trace_id="memv3ctx_" + hashlib.sha256(trace_material.encode("utf-8")).hexdigest()[:16],
+        )
+        return MemoryV3Reader().retrieve(
+            request,
+            actor_username=username,
+            token_budget=_memory_v3_token_budget(context_budget),
+        )
+    except Exception as exc:
+        logger.warning("[MEMORY_COORD] Memory V3 retrieval failed; using legacy context: %s", exc)
+        return None
+
+
 def build_context_for_llm(
     user_input: str,
     persona_mode: str,
@@ -1333,7 +1393,24 @@ def build_context_for_llm(
             finance_block = ""
             market_block = ""
 
-    return {
+    memory_v3_context_pack = _build_memory_v3_context_pack_for_llm(
+        user_input,
+        persona_mode,
+        username=username,
+        chat_id=chat_id,
+        runtime_id=runtime_id,
+        context_budget=budget,
+    )
+    memory_v3_context_block = ""
+    if memory_v3_context_pack and getattr(memory_v3_context_pack, "context_text", ""):
+        memory_v3_context_block = str(memory_v3_context_pack.context_text)
+        memory_injection = (
+            f"{memory_v3_context_block}\n\n{memory_injection}"
+            if memory_injection
+            else memory_v3_context_block
+        )
+
+    result = {
         "recent_messages": recent_messages,
         "memory_injection": memory_injection,
         "mem0_context_block": mem0_context_block,
@@ -1344,6 +1421,15 @@ def build_context_for_llm(
         "finance_block": finance_block,
         "market_block": market_block,
     }
+    if memory_v3_context_pack:
+        result["memory_v3_context_block"] = memory_v3_context_block
+        result["memory_v3_context_pack"] = {
+            "selected_memory_ids": list(memory_v3_context_pack.selected_memory_ids),
+            "citations": [citation.model_dump() for citation in memory_v3_context_pack.citations],
+            "diagnostics": memory_v3_context_pack.diagnostics.model_dump(),
+            "grouped_counts": dict(memory_v3_context_pack.grouped_counts),
+        }
+    return result
 
 
 async def build_context_for_llm_async(
