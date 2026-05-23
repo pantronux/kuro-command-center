@@ -18,7 +18,9 @@ def test_v1_dashboard_uses_dark_gray_redesign_shell():
 
     assert 'class="kuro-redesign-v1' in html
     assert "/static/css/index_revamp.css" in html
+    assert "index_revamp.css?v=20260523-9" in html
     assert "id=\"composerActionMenu\"" in html
+    assert "profile-menu-trigger" in html
     assert "<span>K</span>" in html
     assert '<img src="/profile/kuro_avatar.png"' not in html
 
@@ -30,6 +32,12 @@ def test_v1_dashboard_uses_dark_gray_redesign_shell():
     assert "body.kuro-redesign-v1 .hidden" in revamp_css
     assert "#welcomeScreen > div.welcome:first-child" in revamp_css
     assert '#sidebar.sidebar[data-collapsed="true"]' in revamp_css
+    assert "Prototype skin pass" in revamp_css
+    assert "--bg-primary: #1a1a1f" in revamp_css
+    assert "sidebar-collapsed-shell" in revamp_css
+    assert "--conversation-width: 900px" in revamp_css
+    assert "#stopGeneratingBtn.hidden" in revamp_css
+    assert "#chatContainer > .flex-row-reverse" in revamp_css
 
 
 def test_v1_dashboard_is_the_only_frontend_shell():
@@ -79,6 +87,7 @@ def test_v1_redesign_keeps_persona_and_existing_tool_navigation():
     assert "href=\"/market\"" in html
     assert "href=\"/tutorial\"" in html
     assert "composerActionMenu" in js
+    assert "elements.sendBtn?.classList.add('hidden')" in js
     assert "loadComposerModelAliases" in js
     assert "model_alias" in js
     assert "openFilesModal()" in js

@@ -114,6 +114,47 @@ def test_legacy_stream_still_works_when_flag_false(monkeypatch):
     assert events[-1]["data"] == {"done": True}
 
 
+def test_legacy_stream_accepts_tool_context_and_persists_session_settings(monkeypatch):
+    captured: Dict[str, Any] = {}
+
+    async def _fake_stream(message: str, *args, **kwargs):
+        captured["message"] = message
+        yield "tool-context-ok"
+
+    monkeypatch.setattr(main, "process_chat_with_graph_stream", _fake_stream)
+    client = _auth_client(monkeypatch)
+    chat_id = "tool_context_stream_12345"
+
+    response = client.post(
+        "/api/chat/stream",
+        data={
+            "message": "cek riset",
+            "persona": "consultant",
+            "chat_id": chat_id,
+            "model_alias": "gemini_fast",
+            "temperature": "0.3",
+            "tools_enabled": "true",
+            "web_search_enabled": "true",
+            "deep_research_enabled": "true",
+            "tool_context": "## Web Search\nStatus: success\nSources: example",
+        },
+        cookies={main.COOKIE_NAME: "Bearer dummy"},
+    )
+
+    assert response.status_code == 200
+    assert "[Tool Runtime Context]" in captured["message"]
+    events = _parse_sse(response.text)
+    complete_event = next(event for event in events if event["event"] == "complete")
+    assert complete_event["data"]["meta"]["tools"]["web_search_enabled"] is True
+    settings = chat_history.get_session_settings(chat_id, "Pantronux")
+    assert settings is not None
+    assert settings["model_alias"] == "gemini_fast"
+    assert settings["temperature"] == 0.3
+    assert settings["tools_enabled"] is True
+    assert settings["web_search_enabled"] is True
+    assert settings["mode"] == "research"
+
+
 def test_chat_v2_stream_emits_done(monkeypatch):
     monkeypatch.setattr(main.settings, "KURO_CHAT_V2_ENABLED", True, raising=False)
 

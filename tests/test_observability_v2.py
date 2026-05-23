@@ -114,10 +114,13 @@ def test_runtime_health_returns_403_for_non_admin(monkeypatch):
     assert resp.status_code == 403
 
 
-def test_vocab_sanitizer_replaces_jargon():
-    from kuro_backend.vocabulary.sanitizer import sanitize_response
+def test_vocab_sanitizer_replaces_jargon(monkeypatch):
+    monkeypatch.delenv("KURO_DEV_MODE", raising=False)
+    from importlib import reload
+    from kuro_backend.vocabulary import sanitizer
 
-    result = sanitize_response("Mem0 updated the episodic buffer successfully.")
+    reload(sanitizer)
+    result = sanitizer.sanitize_response("Mem0 updated the episodic buffer successfully.")
     assert "Mem0" not in result
     assert "episodic buffer" not in result.lower()
 

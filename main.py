@@ -1945,6 +1945,15 @@ async def chat_stream_endpoint(
     chat_id: str = Form(None),
     runtime_id: Optional[str] = Query(default=None),
     runtime_id_form: Optional[str] = Form(default=None, alias="runtime_id"),
+    model_alias: Optional[str] = Form(default=None),
+    temperature: Optional[str] = Form(default=None),
+    tools_enabled: Optional[str] = Form(default=None),
+    web_search_enabled: Optional[str] = Form(default=None),
+    deep_research_enabled: Optional[str] = Form(default=None),
+    agent_mode_enabled: Optional[str] = Form(default=None),
+    task_mode_enabled: Optional[str] = Form(default=None),
+    reminder_mode_enabled: Optional[str] = Form(default=None),
+    tool_context: str = Form(""),
 ):
     """V6.0 STREAMING: Handle chat requests with Server-Sent Events (SSE) streaming."""
     from fastapi.responses import StreamingResponse
@@ -1977,6 +1986,47 @@ async def chat_stream_endpoint(
         runtime_id_form=runtime_id_form,
         trace_id=trace_id,
     )
+    tool_feature_flags = {
+        "tools_enabled": _as_env_bool(tools_enabled, False),
+        "web_search_enabled": _as_env_bool(web_search_enabled, False),
+        "deep_research_enabled": _as_env_bool(deep_research_enabled, False),
+        "agent_mode_enabled": _as_env_bool(agent_mode_enabled, False),
+        "task_mode_enabled": _as_env_bool(task_mode_enabled, False),
+        "reminder_mode_enabled": _as_env_bool(reminder_mode_enabled, False),
+    }
+    if any(
+        tool_feature_flags[key]
+        for key in (
+            "web_search_enabled",
+            "deep_research_enabled",
+            "agent_mode_enabled",
+            "task_mode_enabled",
+            "reminder_mode_enabled",
+        )
+    ):
+        tool_feature_flags["tools_enabled"] = True
+
+    chat_mode = "default"
+    if tool_feature_flags["agent_mode_enabled"]:
+        chat_mode = "agent"
+    elif tool_feature_flags["deep_research_enabled"]:
+        chat_mode = "research"
+    elif tool_feature_flags["web_search_enabled"]:
+        chat_mode = "research"
+
+    session_field_updates: Dict[str, Any] = {
+        "mode": chat_mode,
+        "tools_enabled": tool_feature_flags["tools_enabled"],
+        "web_search_enabled": tool_feature_flags["web_search_enabled"],
+    }
+    if model_alias:
+        session_field_updates["model_alias"] = str(model_alias).strip()[:128]
+    if temperature not in (None, ""):
+        try:
+            session_field_updates["temperature"] = max(0.0, min(2.0, float(temperature)))
+        except (TypeError, ValueError):
+            pass
+    chat_history.update_session_fields(session_scope, username, **session_field_updates)
 
     async def event_generator():
         """Generate SSE events for streaming response."""
@@ -2015,7 +2065,11 @@ async def chat_stream_endpoint(
                     if int(buffered.get("id", 0)) > last_event_id:
                         yield str(buffered.get("data", ""))
 
-            meta_payload = {"trace_id": trace_id, "phase": "started"}
+            meta_payload = {
+                "trace_id": trace_id,
+                "phase": "started",
+                "tools": tool_feature_flags,
+            }
             if is_new_session:
                 meta_payload["chat_id"] = session_scope
 
@@ -2160,6 +2214,12 @@ async def chat_stream_endpoint(
             )
             if att_idx:
                 enhanced_message += "\n\n" + att_idx
+            clean_tool_context = str(tool_context or "").strip()
+            if clean_tool_context:
+                enhanced_message += (
+                    "\n\n[Tool Runtime Context]\n"
+                    + clean_tool_context[:12000]
+                )
             if image_paths:
                 memory_manager.set_runtime_context_value(
                     "last_accessed_file", image_paths[-1]
@@ -2310,6 +2370,7 @@ async def chat_stream_endpoint(
                     "ttfb_ms": first_chunk_ms,
                     "total_ms": total_ms,
                     "timings": stream_metrics,
+                    "tools": tool_feature_flags,
                     "output_schema_valid": bool(
                         stream_metrics.get("output_schema_valid", False)
                     ),

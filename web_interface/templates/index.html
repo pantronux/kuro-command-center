@@ -266,7 +266,7 @@
         html,
         html.dark,
         html body.kuro-redesign-v1 {
-            background: #1a1a1a !important;
+            background: #1a1a1f !important;
             color: #f5f5f5 !important;
         }
 
@@ -275,17 +275,17 @@
         body.kuro-redesign-v1 #welcomeScreen,
         body.kuro-redesign-v1 #chatContainer,
         body.kuro-redesign-v1 #playgroundPanel {
-            background: #1a1a1a !important;
+            background: #1a1a1f !important;
             color: #f5f5f5 !important;
         }
 
         body.kuro-redesign-v1 #sidebar,
         body.kuro-redesign-v1 .glass-sidebar {
-            background: #212121 !important;
+            background: #18181d !important;
         }
 
         body.kuro-redesign-v1 .glass-header {
-            background: rgba(26, 26, 26, 0.98) !important;
+            background: rgba(24, 24, 29, 0.98) !important;
         }
 
         body.kuro-redesign-v1 .bg-white,
@@ -297,13 +297,13 @@
         body.kuro-redesign-v1 .dark\:bg-gray-700,
         body.kuro-redesign-v1 .dark\:bg-gray-800,
         body.kuro-redesign-v1 .dark\:bg-gray-900 {
-            background-color: #2a2a2a !important;
+            background-color: #2a2a32 !important;
             color: #f5f5f5 !important;
         }
 
         body.kuro-redesign-v1 #mainInputArea,
         body.kuro-redesign-v1 .glass-panel {
-            background: #1a1a1a !important;
+            background: #1a1a1f !important;
         }
 
         body.kuro-redesign-v1 #playgroundPanel input,
@@ -313,14 +313,14 @@
         body.kuro-redesign-v1 #playgroundIntegrityOverview,
         body.kuro-redesign-v1 #playgroundHistoryList,
         body.kuro-redesign-v1 #playgroundHistoryDetail {
-            background: #2a2a2a !important;
-            border-color: #2f2f2f !important;
+            background: #2a2a32 !important;
+            border-color: #2e2e38 !important;
             color: #f5f5f5 !important;
         }
     </style>
 
     <!-- Index-only revamp source of truth. Loaded after legacy styles to prevent cascade regressions. -->
-    <link rel="stylesheet" href="/static/css/index_revamp.css?v=20260523-1">
+    <link rel="stylesheet" href="/static/css/index_revamp.css?v=20260523-9">
 </head>
 
 <body class="kuro-redesign-v1 min-h-screen transition-colors duration-300">
@@ -493,8 +493,8 @@
                         <span class="kuro-avatar-fallback">K</span>
                     </div>
                     <div>
-                        <p class="label text-xs text-gray-500 dark:text-gray-400 leading-tight">Consultant</p>
-                        <h2 class="title text-xl font-semibold text-gray-800 dark:text-white leading-tight">Default Chat</h2>
+                        <p id="headerPersonaLabel" class="label text-xs text-gray-500 dark:text-gray-400 leading-tight">Consultant</p>
+                        <h2 id="headerChatTitle" class="title text-xl font-semibold text-gray-800 dark:text-white leading-tight">Default Chat</h2>
                     </div>
                 </div>
 
@@ -520,19 +520,15 @@
                         class="header-icon-btn">
                         <i data-lucide="search" class="w-5 h-5 text-gray-600 dark:text-gray-300"></i>
                     </button>
-                    <!-- Dark Mode Toggle -->
-                    <button id="darkModeToggle" aria-label="Toggle dark mode"
-                        class="header-icon-btn">
-                        <i data-lucide="sun" class="w-5 h-5 text-gray-600 dark:hidden"></i>
-                        <i data-lucide="moon" class="w-5 h-5 text-gray-300 hidden dark:block"></i>
-                    </button>
                     <!-- User Account Dropdown -->
                     <div class="relative ml-2 pl-2 border-l border-gray-300 dark:border-gray-600">
                         <button id="userDropdownToggle"
-                            class="profile-btn focus:outline-none">
-                            <div class="profile-initial">
+                            class="profile-btn profile-menu-trigger focus:outline-none">
+                            <span class="profile-initial">
                                 {{ display_name[0]|upper }}
-                            </div>
+                            </span>
+                            <span class="profile-name">{{ display_name }}</span>
+                            <i data-lucide="chevron-down" class="profile-chevron w-4 h-4"></i>
                         </button>
 
                         <!-- Dropdown Menu -->
@@ -905,26 +901,6 @@
                                     <i data-lucide="bell" class="w-4 h-4"></i>
                                     <span>Reminder</span>
                                 </button>
-                                <button type="button" data-composer-action="market_page"
-                                    class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
-                                    <i data-lucide="line-chart" class="w-4 h-4"></i>
-                                    <span>Market Sentinel</span>
-                                </button>
-                                <button type="button" data-composer-action="intelligence_page"
-                                    class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
-                                    <i data-lucide="radar" class="w-4 h-4"></i>
-                                    <span>Intelligence Hub</span>
-                                </button>
-                                <button type="button" data-composer-action="tutorial_page"
-                                    class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
-                                    <i data-lucide="book-open" class="w-4 h-4"></i>
-                                    <span>Tutorial</span>
-                                </button>
-                                <button type="button" data-composer-action="playground_mode"
-                                    class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
-                                    <i data-lucide="flask-conical" class="w-4 h-4"></i>
-                                    <span>Playground</span>
-                                </button>
                             </div>
                         </div>
 
@@ -1010,26 +986,6 @@
                                 class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
                                 <i data-lucide="bell" class="w-4 h-4"></i>
                                 <span>Reminder</span>
-                            </button>
-                            <button type="button" data-composer-action="market_page"
-                                class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
-                                <i data-lucide="line-chart" class="w-4 h-4"></i>
-                                <span>Market Sentinel</span>
-                            </button>
-                            <button type="button" data-composer-action="intelligence_page"
-                                class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
-                                <i data-lucide="radar" class="w-4 h-4"></i>
-                                <span>Intelligence Hub</span>
-                            </button>
-                            <button type="button" data-composer-action="tutorial_page"
-                                class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
-                                <i data-lucide="book-open" class="w-4 h-4"></i>
-                                <span>Tutorial</span>
-                            </button>
-                            <button type="button" data-composer-action="playground_mode"
-                                class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
-                                <i data-lucide="flask-conical" class="w-4 h-4"></i>
-                                <span>Playground</span>
                             </button>
                         </div>
                     </div>
@@ -1446,7 +1402,7 @@
     </script>
 
     <!-- Custom JS -->
-    <script src="/static/js/app.js"></script>
+    <script src="/static/js/app.js?v=20260523-9"></script>
 
 </body>
 

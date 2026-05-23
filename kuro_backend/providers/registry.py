@@ -44,7 +44,7 @@ MODEL_ALIAS_CONFIG: Dict[str, Dict[str, str]] = {
     "claude_fast": {
         "provider": "anthropic",
         "settings_attr": "KURO_MODEL_CLAUDE_FAST",
-        "display_name": "Claude Fast",
+        "display_name": "Claude Haiku",
     },
     "deepseek_fast": {
         "provider": "deepseek",

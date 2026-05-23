@@ -44,10 +44,33 @@ const CONFIG = {
 const MODEL_ALIAS_FALLBACK = [
     { alias: 'gemini_fast', display_name: 'Gemini Flash' },
     { alias: 'openai_nano', display_name: 'OpenAI Nano' },
-    { alias: 'claude_fast', display_name: 'Claude Fast' },
+    { alias: 'claude_fast', display_name: 'Claude Haiku' },
     { alias: 'deepseek_fast', display_name: 'DeepSeek Fast' },
     { alias: 'ollama_local', display_name: 'Ollama Local' },
 ];
+
+const COMPOSER_FEATURE_STORAGE_KEY = 'kuro_composer_feature_state_v1';
+const COMPOSER_FEATURE_DEFAULTS = {
+    deep_research: false,
+    web_search: false,
+    agent_mode: false,
+    task_mode: false,
+    reminder_mode: false,
+};
+const COMPOSER_FEATURE_LABELS = {
+    deep_research: 'Deep Research',
+    web_search: 'Web Search',
+    agent_mode: 'Agent Mode',
+    task_mode: 'Task',
+    reminder_mode: 'Reminder',
+};
+const COMPOSER_ACTION_TO_TOOL_ID = {
+    deep_research: 'deep_research',
+    web_search: 'web_search',
+    agent_mode: 'agent_mode',
+    task_mode: 'create_task',
+    reminder_mode: 'create_reminder',
+};
 
 // ============================================
 // Authentication Helper Functions (Cookie-Based)
@@ -120,6 +143,8 @@ let selectedModelAlias = localStorage.getItem('kuro_model_alias') || 'gemini_fas
 let availableModelAliases = [...MODEL_ALIAS_FALLBACK];
 let pendingRenameChatId = null;
 let pendingDeleteChatId = null;
+let composerFeatureState = loadComposerFeatureState();
+let composerToolAvailability = null;
 
 // Infinite Scroll State
 let chatOffset = 0;
@@ -184,6 +209,87 @@ function queueComposerPrompt(prefixText) {
     targetInput.value = current ? `${current}\n${cleanPrefix}` : cleanPrefix;
     targetInput.dispatchEvent(new Event('input'));
     targetInput.focus();
+}
+
+function loadComposerFeatureState() {
+    try {
+        const parsed = JSON.parse(localStorage.getItem(COMPOSER_FEATURE_STORAGE_KEY) || '{}');
+        return { ...COMPOSER_FEATURE_DEFAULTS, ...(parsed || {}) };
+    } catch (_) {
+        return { ...COMPOSER_FEATURE_DEFAULTS };
+    }
+}
+
+function saveComposerFeatureState() {
+    try {
+        localStorage.setItem(COMPOSER_FEATURE_STORAGE_KEY, JSON.stringify(composerFeatureState));
+    } catch (_) {
+        // Non-critical: feature toggles still work for this page session.
+    }
+}
+
+function getActiveComposerFeatures() {
+    return Object.keys(COMPOSER_FEATURE_DEFAULTS).filter((action) => Boolean(composerFeatureState[action]));
+}
+
+function isComposerFeatureAvailable(action) {
+    if (!composerToolAvailability) return true;
+    const toolId = COMPOSER_ACTION_TO_TOOL_ID[action];
+    return !toolId || composerToolAvailability.has(toolId);
+}
+
+function updateComposerFeatureIndicators() {
+    const activeActions = getActiveComposerFeatures();
+    document.querySelectorAll('[data-composer-action]').forEach((button) => {
+        const action = button.dataset.composerAction;
+        if (!Object.prototype.hasOwnProperty.call(COMPOSER_FEATURE_DEFAULTS, action)) return;
+
+        const available = isComposerFeatureAvailable(action);
+        const active = available && Boolean(composerFeatureState[action]);
+        button.classList.toggle('composer-feature-active', active);
+        button.toggleAttribute('disabled', !available);
+        button.setAttribute('aria-pressed', active ? 'true' : 'false');
+        button.title = available
+            ? `${COMPOSER_FEATURE_LABELS[action]} ${active ? 'active' : 'inactive'}`
+            : `${COMPOSER_FEATURE_LABELS[action]} belum aktif di backend`;
+    });
+
+    [elements?.uploadBtn, elements?.welcomeUploadBtn].forEach((button) => {
+        if (!button) return;
+        button.classList.toggle('has-active-features', activeActions.length > 0);
+        button.title = activeActions.length
+            ? `Active tools: ${activeActions.map((action) => COMPOSER_FEATURE_LABELS[action]).join(', ')}`
+            : 'Open tools';
+    });
+}
+
+function toggleComposerFeature(action) {
+    if (!Object.prototype.hasOwnProperty.call(COMPOSER_FEATURE_DEFAULTS, action)) return;
+    if (!isComposerFeatureAvailable(action)) {
+        showNotification(`${COMPOSER_FEATURE_LABELS[action]} belum tersedia dari backend.`, 'error');
+        return;
+    }
+    composerFeatureState[action] = !composerFeatureState[action];
+    saveComposerFeatureState();
+    updateComposerFeatureIndicators();
+    showNotification(
+        `${COMPOSER_FEATURE_LABELS[action]} ${composerFeatureState[action] ? 'aktif' : 'nonaktif'}`,
+        composerFeatureState[action] ? 'success' : 'info'
+    );
+}
+
+async function loadComposerToolAvailability() {
+    try {
+        const response = await authFetch(`${CONFIG.API_BASE}/tools?runtime_id=sovereign&workspace_id=default`);
+        if (!response.ok) return;
+        const payload = await response.json();
+        const tools = Array.isArray(payload?.data) ? payload.data : [];
+        composerToolAvailability = new Set(tools.map((tool) => tool.tool_id).filter(Boolean));
+    } catch (_) {
+        composerToolAvailability = null;
+    } finally {
+        updateComposerFeatureIndicators();
+    }
 }
 
 function openComposerActionDestination(url) {
@@ -270,19 +376,19 @@ function handleComposerAction(action) {
             openFilesModal();
             return;
         case 'deep_research':
-            queueComposerPrompt('Deep research:');
+            toggleComposerFeature(action);
             return;
         case 'web_search':
-            queueComposerPrompt('Web search:');
+            toggleComposerFeature(action);
             return;
         case 'agent_mode':
-            queueComposerPrompt('Agent mode:');
+            toggleComposerFeature(action);
             return;
         case 'task_mode':
-            queueComposerPrompt('Task:');
+            toggleComposerFeature(action);
             return;
         case 'reminder_mode':
-            queueComposerPrompt('Reminder:');
+            toggleComposerFeature(action);
             return;
         case 'market_page':
             openComposerActionDestination('/market');
@@ -301,6 +407,158 @@ function handleComposerAction(action) {
     }
 }
 
+function truncateForToolInput(value, maxLength) {
+    const text = String(value || '').trim();
+    if (text.length <= maxLength) return text;
+    return `${text.slice(0, Math.max(0, maxLength - 3)).trim()}...`;
+}
+
+function buildComposerToolInput(action, message) {
+    const cleanMessage = String(message || '').trim();
+    const workspaceId = currentChatId || 'default';
+    switch (action) {
+        case 'web_search':
+            return {
+                query: truncateForToolInput(cleanMessage, 1000),
+                search_type: 'search',
+                max_results: 5,
+            };
+        case 'deep_research':
+            return {
+                query: truncateForToolInput(cleanMessage, 2000),
+                workspace_id: workspaceId,
+                max_sources: 5,
+            };
+        case 'agent_mode':
+            return {
+                goal: truncateForToolInput(cleanMessage, 4000),
+                requested_steps: 5,
+                allowed_tool_ids: ['web_search', 'deep_research', 'create_task', 'create_reminder'],
+            };
+        case 'task_mode':
+            return {
+                title: truncateForToolInput(cleanMessage.split('\n')[0] || cleanMessage, 500) || 'Untitled task',
+                description: cleanMessage,
+                source_chat_id: currentChatId || null,
+                metadata: {
+                    source: 'web_composer',
+                    persona: selectedPersona,
+                    model_alias: selectedModelAlias,
+                },
+            };
+        case 'reminder_mode':
+            return {
+                remind_at: truncateForToolInput(cleanMessage, 128) || 'manual follow-up',
+                channel: 'web',
+                metadata: {
+                    source: 'web_composer',
+                    text: cleanMessage,
+                    source_chat_id: currentChatId || '',
+                    persona: selectedPersona,
+                },
+            };
+        default:
+            return {};
+    }
+}
+
+async function executeComposerTool(action, message) {
+    const toolId = COMPOSER_ACTION_TO_TOOL_ID[action];
+    if (!toolId) return null;
+    const input = buildComposerToolInput(action, message);
+    const response = await authFetch(`${CONFIG.API_BASE}/tools/${encodeURIComponent(toolId)}/execute`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            input,
+            runtime_id: 'sovereign',
+            workspace_id: currentChatId || 'default',
+            trace_id: `ui_tool_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+            metadata: {
+                source: 'web_composer',
+                action,
+                chat_id: currentChatId || '',
+                persona: selectedPersona,
+            },
+        }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+        const detail = payload?.detail || payload?.error?.message || `Tool request failed (${response.status})`;
+        throw new Error(detail);
+    }
+    return payload?.data || payload;
+}
+
+function summarizeComposerToolResult(result) {
+    if (!result) return 'No result.';
+    const status = result.status || (result.ok ? 'success' : 'unknown');
+    if (result.approval_required) {
+        return `Approval required. approval_id=${result.approval_id || '-'}`;
+    }
+    if (result.error?.message) {
+        return `Error: ${result.error.message}`;
+    }
+    const output = result.output || {};
+    if (Array.isArray(result.sources) && result.sources.length) {
+        const sources = result.sources.slice(0, 5).map((source, index) => {
+            const title = source.title || source.url || `Source ${index + 1}`;
+            const url = source.url ? ` (${source.url})` : '';
+            return `${index + 1}. ${title}${url}`;
+        });
+        return `Status: ${status}\nSources:\n${sources.join('\n')}`;
+    }
+    if (output.task?.task_id) {
+        return `Status: ${status}\nCreated task: ${output.task.title || output.task.task_id} (${output.task.task_id})`;
+    }
+    if (output.reminder?.reminder_id) {
+        return `Status: ${status}\nCreated reminder: ${output.reminder.remind_at || output.reminder.reminder_id} (${output.reminder.reminder_id})`;
+    }
+    if (output.job?.job_id) {
+        const report = output.job.report_markdown ? `\nReport preview:\n${truncateForToolInput(output.job.report_markdown, 1800)}` : '';
+        return `Status: ${status}\nDeep research job: ${output.job.job_id}\nJob status: ${output.job.status || '-'}${report}`;
+    }
+    const serialized = JSON.stringify(output || result, null, 2);
+    return `Status: ${status}\n${truncateForToolInput(serialized, 2000)}`;
+}
+
+async function runComposerFeatureTools(message, activeActions) {
+    const results = [];
+    for (const action of activeActions) {
+        if (!isComposerFeatureAvailable(action)) {
+            results.push({
+                action,
+                label: COMPOSER_FEATURE_LABELS[action],
+                ok: false,
+                summary: 'Tool is not visible from backend for this user/runtime.',
+            });
+            continue;
+        }
+        try {
+            const result = await executeComposerTool(action, message);
+            results.push({
+                action,
+                label: COMPOSER_FEATURE_LABELS[action],
+                ok: Boolean(result?.ok),
+                status: result?.status || 'unknown',
+                summary: summarizeComposerToolResult(result),
+            });
+        } catch (error) {
+            results.push({
+                action,
+                label: COMPOSER_FEATURE_LABELS[action],
+                ok: false,
+                status: 'error',
+                summary: error?.message || String(error),
+            });
+        }
+    }
+    const context = results.map((item) => (
+        `## ${item.label}\nStatus: ${item.status || (item.ok ? 'success' : 'error')}\n${item.summary || ''}`
+    )).join('\n\n');
+    return { results, context };
+}
+
 // ============================================
 // DOM Elements
 // ============================================
@@ -314,7 +572,6 @@ const elements = {
     fileInput: document.getElementById('fileInput'),
     filePreview: document.getElementById('filePreview'),
     dropOverlay: document.getElementById('dropOverlay'),
-    darkModeToggle: document.getElementById('darkModeToggle'),
     sidebar: document.getElementById('sidebar'),
     mainContent: document.getElementById('mainContent'),
     openSidebar: document.getElementById('openSidebar'),
@@ -448,6 +705,8 @@ const elements = {
     newChatBtn: document.getElementById('newChatBtn'),
     sidebarChatSearch: document.getElementById('sidebarChatSearch'),
     sidebarSessionsMore: document.getElementById('sidebarSessionsMore'),
+    headerPersonaLabel: document.getElementById('headerPersonaLabel'),
+    headerChatTitle: document.getElementById('headerChatTitle'),
     chatRenameModal: document.getElementById('chatRenameModal'),
     chatRenameInput: document.getElementById('chatRenameInput'),
     chatRenameCancelBtn: document.getElementById('chatRenameCancelBtn'),
@@ -550,6 +809,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     loadTheme();
     setupEventListeners();
+    updateComposerFeatureIndicators();
     setupAutoResize();
     setupInfiniteScroll();
     renderModelSelectorOptions(MODEL_ALIAS_FALLBACK);
@@ -559,6 +819,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     kuroRestoreUIMode();
     kuroConnectDashboardWS();
     applyRuntimeMode(runtimeMode);
+    await loadComposerToolAvailability();
     const deniedFlag = new URLSearchParams(window.location.search).get('access_denied');
     if (deniedFlag === 'admin') {
         showToast('Akses ditolak: halaman ini hanya untuk Administrator.', 'error');
@@ -597,6 +858,7 @@ function setupEventListeners() {
         elements.welcomeUploadBtn.addEventListener('click', (event) => {
             event.preventDefault();
             event.stopPropagation();
+            elements.userDropdownMenu?.classList.add('hidden');
             toggleComposerMenu(elements.welcomeComposerActionMenu || elements.composerActionMenu);
         });
         // Auto resize welcome input
@@ -612,6 +874,7 @@ function setupEventListeners() {
 
     elements.uploadBtn.addEventListener('click', (event) => {
         event.stopPropagation();
+        elements.userDropdownMenu?.classList.add('hidden');
         if (elements.composerActionMenu) {
             toggleComposerMenu(elements.composerActionMenu);
         } else {
@@ -633,10 +896,14 @@ function setupEventListeners() {
         const clickedOnWelcomeUpload = elements.welcomeUploadBtn?.contains(event.target);
         const clickedOnMainMenu = elements.composerActionMenu?.contains(event.target);
         const clickedOnWelcomeMenu = elements.welcomeComposerActionMenu?.contains(event.target);
-        if (clickedOnMainUpload || clickedOnWelcomeUpload || clickedOnMainMenu || clickedOnWelcomeMenu) {
+        const clickedOnChatMenuTrigger = event.target.closest('[data-chat-session-menu-trigger]');
+        const clickedOnChatMenu = event.target.closest('[data-chat-session-menu]');
+        if (clickedOnMainUpload || clickedOnWelcomeUpload || clickedOnMainMenu || clickedOnWelcomeMenu ||
+            clickedOnChatMenuTrigger || clickedOnChatMenu) {
             return;
         }
         closeComposerMenus();
+        closeChatSessionMenus();
     });
     elements.fileInput.addEventListener('change', handleFileSelect);
 
@@ -651,7 +918,6 @@ function setupEventListeners() {
     elements.messageInput.addEventListener('paste', handlePaste);
 
     setupDragAndDrop();
-    elements.darkModeToggle.addEventListener('click', toggleDarkMode);
 
     elements.openSidebar.addEventListener('click', () => {
         elements.sidebar.classList.remove('-translate-x-full');
@@ -751,20 +1017,26 @@ function setupEventListeners() {
 
     if (elements.newChatBtn) {
         elements.newChatBtn.addEventListener('click', () => {
+            ensureNormalModeForChatNavigation();
             startNewChat();
             if (window.innerWidth < 1024) closeSidebar();
         });
     }
     if (elements.sidebarChatSearch) {
         elements.sidebarChatSearch.addEventListener('input', (event) => {
+            if (runtimeMode === 'playground') return;
             sessionSearchQuery = (event.target.value || '').trim().toLowerCase();
             renderChatSessions();
         });
     }
     if (elements.sidebarSessionsMore) {
         elements.sidebarSessionsMore.addEventListener('click', () => {
+            ensureNormalModeForChatNavigation();
             loadChatSessions();
         });
+    }
+    if (elements.chatSessionsList) {
+        elements.chatSessionsList.addEventListener('click', handleChatSessionMenuClick, true);
     }
     if (elements.chatRenameCancelBtn) {
         elements.chatRenameCancelBtn.addEventListener('click', closeChatRenameModal);
@@ -803,6 +1075,7 @@ function setupEventListeners() {
     if (elements.userDropdownToggle) {
         elements.userDropdownToggle.addEventListener('click', (e) => {
             e.stopPropagation();
+            closeComposerMenus();
             elements.userDropdownMenu.classList.toggle('hidden');
         });
 
@@ -1021,6 +1294,32 @@ function updatePersonaUI() {
     });
 
     if (elements.activePersonaName) elements.activePersonaName.textContent = personaName;
+    updateConversationHeader();
+}
+
+function getActivePersonaDisplayName() {
+    return elements.activePersonaName?.textContent?.trim()
+        || selectedPersona.charAt(0).toUpperCase() + selectedPersona.slice(1);
+}
+
+function updateConversationHeader() {
+    if (elements.headerPersonaLabel) {
+        elements.headerPersonaLabel.textContent = getActivePersonaDisplayName();
+    }
+    if (!elements.headerChatTitle) return;
+
+    if (runtimeMode === 'playground') {
+        elements.headerChatTitle.textContent = 'Playground Runtime';
+        return;
+    }
+
+    if (!currentChatId) {
+        elements.headerChatTitle.textContent = 'New Chat';
+        return;
+    }
+
+    const activeSession = chatSessions.find((session) => session.chat_id === currentChatId);
+    elements.headerChatTitle.textContent = activeSession?.title || 'Default Chat';
 }
 
 function toggleChatDrawer(force) {
@@ -1104,6 +1403,7 @@ async function loadChatSessions() {
         const result = await response.json();
         if (result.status === 'success') {
             chatSessions = result.data;
+            updateConversationHeader();
             renderChatSessions();
         }
     } catch (error) {
@@ -1140,19 +1440,31 @@ function renderChatSessions() {
              onclick="selectChatSession('${session.chat_id}')" data-chat-id="${session.chat_id}">
             <i data-lucide="${session.is_pinned ? 'pin' : 'message-circle'}" class="w-4 h-4 flex-shrink-0 ${session.is_pinned ? 'text-emerald-500 fill-emerald-500/20' : ''}"></i>
             <span class="chat-item-name text-sm font-medium truncate flex-1">${escapeHtml(session.title || 'New Chat')}</span>
-            <div class="chat-item-actions session-actions flex items-center opacity-0 group-hover:opacity-100 transition-opacity bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-lg px-1 shadow-sm">
-                <button onclick="event.stopPropagation(); togglePinChatSession('${session.chat_id}', ${!!session.is_pinned})" class="p-1.5 hover:text-emerald-500 transition-colors" title="${session.is_pinned ? 'Unpin' : 'Pin'}">
-                    <i data-lucide="${session.is_pinned ? 'pin-off' : 'pin'}" class="w-3 h-3"></i>
+            <div class="session-menu-wrap" onclick="event.stopPropagation()">
+                <button type="button" data-chat-session-menu-trigger
+                    class="chat-item-menu-trigger p-1.5 text-gray-500 hover:text-gray-200 transition-colors rounded-md" 
+                    aria-haspopup="menu"
+                    title="More actions">
+                    <i data-lucide="more-vertical" class="w-3.5 h-3.5"></i>
                 </button>
-                <button onclick="event.stopPropagation(); renameChatSession('${session.chat_id}')" class="p-1.5 hover:text-blue-500 transition-colors" title="Rename">
-                    <i data-lucide="pencil" class="w-3 h-3"></i>
-                </button>
-                <button onclick="event.stopPropagation(); openExportModal('${session.chat_id}')" class="p-1.5 hover:text-amber-500 transition-colors" title="Export">
-                    <i data-lucide="download" class="w-3 h-3"></i>
-                </button>
-                <button onclick="event.stopPropagation(); deleteChatSession('${session.chat_id}')" class="p-1.5 hover:text-red-500 transition-colors" title="Delete">
-                    <i data-lucide="trash-2" class="w-3 h-3"></i>
-                </button>
+                <div data-chat-session-menu class="chat-item-actions session-actions absolute z-20" data-chat-id="${session.chat_id}">
+                    <button type="button" data-chat-session-action="pin" data-chat-id="${session.chat_id}" data-chat-pinned="${!!session.is_pinned}" class="session-action-btn justify-start" title="${session.is_pinned ? 'Unpin' : 'Pin'}">
+                        <i data-lucide="${session.is_pinned ? 'pin-off' : 'pin'}" class="w-3.5 h-3.5"></i>
+                        <span>${session.is_pinned ? 'Unpin' : 'Pin'}</span>
+                    </button>
+                    <button type="button" data-chat-session-action="rename" data-chat-id="${session.chat_id}" class="session-action-btn justify-start" title="Rename">
+                        <i data-lucide="pencil" class="w-3.5 h-3.5"></i>
+                        <span>Rename</span>
+                    </button>
+                    <button type="button" data-chat-session-action="export" data-chat-id="${session.chat_id}" class="session-action-btn justify-start" title="Export">
+                        <i data-lucide="download" class="w-3.5 h-3.5"></i>
+                        <span>Export</span>
+                    </button>
+                    <button type="button" data-chat-session-action="delete" data-chat-id="${session.chat_id}" class="session-action-btn session-action-delete justify-start" title="Delete">
+                        <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                        <span>Delete</span>
+                    </button>
+                </div>
             </div>
         </div>
     `).join('');
@@ -1174,13 +1486,106 @@ function renderChatSessions() {
         </section>
     `;
     lucide.createIcons();
+    bindChatSessionMenuControls();
 }
 
+function closeChatSessionMenus() {
+    if (elements.chatSessionsList?.contains(document.activeElement)) {
+        document.activeElement.blur();
+    }
+}
+
+function toggleChatSessionMenu(event) {
+    event?.stopPropagation();
+    event?.preventDefault();
+    toggleChatSessionMenuFromTrigger(event?.currentTarget);
+}
+
+function toggleChatSessionMenuFromTrigger(trigger) {
+    trigger?.focus();
+}
+
+function handleChatSessionMenuClick(event) {
+    const trigger = event.target.closest('[data-chat-session-menu-trigger]');
+    if (trigger && elements.chatSessionsList.contains(trigger)) {
+        event.preventDefault();
+        event.stopPropagation();
+        toggleChatSessionMenuFromTrigger(trigger);
+        return;
+    }
+
+    const actionButton = event.target.closest('[data-chat-session-action]');
+    if (!actionButton || !elements.chatSessionsList.contains(actionButton)) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    const chatId = actionButton.dataset.chatId;
+    const action = actionButton.dataset.chatSessionAction;
+    const wasPinned = actionButton.dataset.chatPinned === 'true';
+    closeChatSessionMenus();
+
+    if (action === 'pin') {
+        togglePinChatSession(chatId, wasPinned);
+    } else if (action === 'rename') {
+        renameChatSession(chatId);
+    } else if (action === 'export') {
+        openExportModal(chatId);
+    } else if (action === 'delete') {
+        deleteChatSession(chatId);
+    }
+}
+
+function bindChatSessionMenuControls() {
+    if (!elements.chatSessionsList) return;
+
+    elements.chatSessionsList.querySelectorAll('[data-chat-session-menu-trigger]').forEach((trigger) => {
+        trigger.onpointerdown = (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+        };
+        trigger.onclick = (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            toggleChatSessionMenuFromTrigger(trigger);
+        };
+    });
+
+    elements.chatSessionsList.querySelectorAll('[data-chat-session-action]').forEach((actionButton) => {
+        actionButton.onpointerdown = (event) => {
+            event.stopPropagation();
+        };
+        actionButton.onclick = (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const chatId = actionButton.dataset.chatId;
+            const action = actionButton.dataset.chatSessionAction;
+            const wasPinned = actionButton.dataset.chatPinned === 'true';
+            closeChatSessionMenus();
+
+            if (action === 'pin') {
+                togglePinChatSession(chatId, wasPinned);
+            } else if (action === 'rename') {
+                renameChatSession(chatId);
+            } else if (action === 'export') {
+                openExportModal(chatId);
+            } else if (action === 'delete') {
+                deleteChatSession(chatId);
+            }
+        };
+    });
+}
+
+window.toggleChatSessionMenu = toggleChatSessionMenu;
+window.closeChatSessionMenus = closeChatSessionMenus;
+
 function startNewChat() {
+    closeChatSessionMenus();
+    ensureNormalModeForChatNavigation();
     if (currentChatId) {
         saveDraft(currentChatId, elements.messageInput.value);
     }
     currentChatId = null;
+    updateConversationHeader();
     chatHistory = [];
     chatOffset = 0;
     hasMoreMessages = true;
@@ -1200,6 +1605,8 @@ function startNewChat() {
 }
 
 async function selectChatSession(chatId) {
+    closeChatSessionMenus();
+    ensureNormalModeForChatNavigation();
     if (currentChatId === chatId) return;
 
     // Save current draft before switching
@@ -1207,6 +1614,7 @@ async function selectChatSession(chatId) {
         saveDraft(currentChatId, elements.messageInput.value);
     }
     currentChatId = chatId;
+    updateConversationHeader();
     // Restore draft if any
     if (elements.messageInput) {
         elements.messageInput.value = loadDraft(chatId);
@@ -1227,6 +1635,7 @@ async function selectChatSession(chatId) {
 }
 
 async function deleteChatSession(chatId) {
+    ensureNormalModeForChatNavigation();
     pendingDeleteChatId = chatId;
     const session = chatSessions.find(s => s.chat_id === chatId);
     if (elements.chatDeleteMessage) {
@@ -1271,6 +1680,7 @@ async function submitChatDelete() {
 }
 
 async function renameChatSession(chatId) {
+    ensureNormalModeForChatNavigation();
     const session = chatSessions.find(s => s.chat_id === chatId);
     pendingRenameChatId = chatId;
     if (elements.chatRenameInput) {
@@ -1312,6 +1722,9 @@ async function submitChatRename() {
             body: JSON.stringify({ title: newTitle })
         });
         if (response.ok) {
+            if (session) session.title = newTitle;
+            updateConversationHeader();
+            renderChatSessions();
             loadChatSessions();
         }
     } catch (error) {
@@ -1332,6 +1745,7 @@ function toggleSidebarCollapse() {
 function applySidebarCollapse(collapsed) {
     elements.sidebar.setAttribute('data-collapsed', collapsed);
     elements.mainContent.classList.toggle('sidebar-collapsed', collapsed);
+    document.body.classList.toggle('sidebar-collapsed-shell', collapsed);
     elements.minimizeSidebar.classList.toggle('collapsed', collapsed);
     localStorage.setItem('kuro-sidebar-collapsed', collapsed);
 
@@ -1485,15 +1899,16 @@ async function loadMoreMessages() {
 // Dark Mode
 // ============================================
 function loadTheme() {
-    const savedTheme = localStorage.getItem('kuro-theme');
-    if (savedTheme === 'dark' || (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
-        document.documentElement.classList.add('dark');
-    }
+    localStorage.setItem('kuro-theme', 'dark');
+    document.documentElement.classList.add('dark');
+}
+
+function syncDarkModeToggleIcons() {
+    return;
 }
 
 function toggleDarkMode() {
-    document.documentElement.classList.toggle('dark');
-    localStorage.setItem('kuro-theme', document.documentElement.classList.contains('dark') ? 'dark' : 'light');
+    loadTheme();
 }
 
 // ============================================
@@ -1694,6 +2109,7 @@ function kuroConnectDashboardWS() {
                     const session = chatSessions.find(s => s.chat_id === chat_id);
                     if (session) {
                         session.title = title;
+                        updateConversationHeader();
                         renderChatSessions();
                     }
                 }
@@ -1889,6 +2305,12 @@ function isPlaygroundAuthorizedUser() {
     return (window.KURO_USER_CONTEXT?.username || '').trim() === 'Pantronux';
 }
 
+function ensureNormalModeForChatNavigation() {
+    if (runtimeMode === 'playground') {
+        applyRuntimeMode('normal');
+    }
+}
+
 function applyRuntimeMode(mode) {
     const wantsPlayground = mode === 'playground';
     if (wantsPlayground && !isPlaygroundAuthorizedUser()) {
@@ -1922,7 +2344,10 @@ function applyRuntimeMode(mode) {
         elements.playgroundModeBtn.classList.toggle('dark:hover:bg-gray-600', !active);
     }
 
+    document.body.classList.toggle('runtime-mode-playground', runtimeMode === 'playground');
+
     if (runtimeMode === 'playground') {
+        updateConversationHeader();
         if (elements.playgroundPanel) elements.playgroundPanel.classList.remove('hidden');
         if (elements.welcomeScreen) elements.welcomeScreen.classList.add('hidden');
         if (elements.chatContainer) elements.chatContainer.classList.add('hidden');
@@ -1936,6 +2361,7 @@ function applyRuntimeMode(mode) {
     }
 
     if (elements.playgroundPanel) elements.playgroundPanel.classList.add('hidden');
+    updateConversationHeader();
     if (currentChatId) {
         if (elements.welcomeScreen) elements.welcomeScreen.classList.add('hidden');
         if (elements.chatContainer) elements.chatContainer.classList.remove('hidden');
@@ -2567,6 +2993,7 @@ async function sendMessage(isFromWelcome = false) {
     const sendBtnElement = isFromWelcome ? elements.welcomeSendBtn : elements.sendBtn;
     const message = inputElement.value.trim();
 
+    if (runtimeMode === 'playground') return;
     if (!message && selectedFiles.length === 0) return;
     if (isProcessing) return;
 
@@ -2638,20 +3065,53 @@ async function sendMessage(isFromWelcome = false) {
     const stopBtn = document.getElementById('stopGeneratingBtn');
     const abortController = new AbortController();
     if (stopBtn) {
+        elements.sendBtn?.classList.add('hidden');
         stopBtn.classList.remove('hidden');
         stopBtn.onclick = () => {
             abortController.abort();
             stopBtn.classList.add('hidden');
+            elements.sendBtn?.classList.remove('hidden');
         };
     }
 
     try {
+        const activeComposerActions = getActiveComposerFeatures();
+        let toolContext = '';
+        let toolResults = [];
+        if (activeComposerActions.length) {
+            const activeLabels = activeComposerActions.map((action) => COMPOSER_FEATURE_LABELS[action]).join(', ');
+            const indicator = aiMessageDiv.querySelector('#thinkingIndicator');
+            if (indicator) indicator.classList.add('hidden');
+            streamingContent.textContent = `Running ${activeLabels}...`;
+            const toolRun = await runComposerFeatureTools(message || filesToSend.map((file) => file.name).join(', '), activeComposerActions);
+            toolContext = toolRun.context;
+            toolResults = toolRun.results;
+            streamingContent.textContent = '';
+            const successful = toolResults.filter((result) => result.ok).length;
+            const approvalRequired = toolResults.some((result) => String(result.summary || '').includes('Approval required'));
+            if (successful || approvalRequired) {
+                showNotification(
+                    approvalRequired ? 'Tool Runtime menunggu approval untuk salah satu aksi.' : `Tool Runtime selesai: ${successful}/${toolResults.length}`,
+                    approvalRequired ? 'info' : 'success'
+                );
+            } else if (toolResults.length) {
+                showNotification('Tool Runtime belum berhasil. Detail dikirim ke chat untuk recovery.', 'error');
+            }
+        }
+
         const formData = new FormData();
         formData.append('message', message);
         formData.append('persona', selectedPersona);
         if (currentChatId) formData.append('chat_id', currentChatId);
         if (selectedModelAlias) formData.append('model_alias', selectedModelAlias);
         if (elements.temperatureSlider?.value) formData.append('temperature', String(elements.temperatureSlider.value));
+        formData.append('tools_enabled', String(activeComposerActions.length > 0));
+        formData.append('web_search_enabled', String(Boolean(composerFeatureState.web_search)));
+        formData.append('deep_research_enabled', String(Boolean(composerFeatureState.deep_research)));
+        formData.append('agent_mode_enabled', String(Boolean(composerFeatureState.agent_mode)));
+        formData.append('task_mode_enabled', String(Boolean(composerFeatureState.task_mode)));
+        formData.append('reminder_mode_enabled', String(Boolean(composerFeatureState.reminder_mode)));
+        if (toolContext) formData.append('tool_context', toolContext);
         filesToSend.forEach(file => formData.append('files', file));
 
         // STEP 2: Fetch the streaming endpoint
@@ -2765,6 +3225,7 @@ async function sendMessage(isFromWelcome = false) {
                         streamMeta = data;
                         if (data && data.chat_id) {
                             currentChatId = data.chat_id;
+                            updateConversationHeader();
                             // Re-load sessions to show the new one
                             loadChatSessions();
                         }
@@ -2819,6 +3280,7 @@ async function sendMessage(isFromWelcome = false) {
             saveDraft(currentChatId, '');
         }
         if (stopBtn) stopBtn.classList.add('hidden');
+        elements.sendBtn?.classList.remove('hidden');
         isProcessing = false;
         if (elements.sendBtn) elements.sendBtn.disabled = false;
         if (elements.welcomeSendBtn) elements.welcomeSendBtn.disabled = false;
@@ -4370,6 +4832,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // ============================================
 
 async function togglePinChatSession(chatId, currentlyPinned) {
+    ensureNormalModeForChatNavigation();
     const endpoint = currentlyPinned ? 'unpin' : 'pin';
     try {
         const response = await authFetch(`${CONFIG.API_BASE}/chats/${chatId}/${endpoint}`, { method: 'POST' });
@@ -4536,6 +4999,8 @@ async function exportChatSession(chatId) {
 }
 
 function openExportModal(chatId) {
+    ensureNormalModeForChatNavigation();
+
     if (!elements.exportModal) return;
     elements.exportModal.dataset.chatId = chatId;
     elements.exportTargetLabel.textContent = `Chat Session: ${chatId}`;

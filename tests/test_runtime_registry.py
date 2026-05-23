@@ -55,7 +55,8 @@ def test_sovereign_fallback_for_unknown_runtime():
     assert ctx.runtime_id == "sovereign"
 
 
-def test_none_runtime_defaults_to_sovereign_with_warning(caplog):
+def test_none_runtime_defaults_to_sovereign_with_warning(caplog, monkeypatch):
+    monkeypatch.setenv("KURO_V2_STRICT_MODE", "false")
     with caplog.at_level("WARNING"):
         ctx = resolve_runtime_context(None)
     assert ctx.runtime_id == "sovereign"

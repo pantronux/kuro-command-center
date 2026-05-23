@@ -2411,10 +2411,10 @@ def response_node(state: KuroState) -> Dict[str, Any]:
                                 provider_response = local_executor.submit(
                                     _run_provider_route
                                 ).result(timeout=max(10, _NODE_TIMEOUT_S))
-                        response_text = (
-                            provider_response.content
-                            or "Maaf, Pantronux. Kuro tidak dapat menghasilkan respons yang valid."
-                        )
+                        provider_content = (provider_response.content or "").strip()
+                        if not provider_content:
+                            raise RuntimeError("provider returned empty content")
+                        response_text = provider_content
                         provider_used = provider_response.provider or "gemini"
                         provider_path_used = True
                 except Exception as provider_exc:
