@@ -46,6 +46,7 @@ SECTION_QUOTAS: Final[Mapping[str, int]] = {
     "referent":         700,
     "finance":          450,
     "market":           350,
+    "playground_advisor": 900,
     # catch-all bucket for ad-hoc blocks not matching the above
     "other":            500,
 }
@@ -56,6 +57,7 @@ SECTION_QUOTAS: Final[Mapping[str, int]] = {
 # (V5.5) L3 immutability contract.
 _TRIM_PRIORITY: Final[tuple[str, ...]] = (
     "tool_result",
+    "playground_advisor",
     "mem0",
     "finance",
     "market",
@@ -131,6 +133,7 @@ _LAYER3_SECTIONS: Final[tuple[str, ...]] = ("ssot_factual",)
 _FIXED_SECTIONS: Final[Mapping[str, int]] = {
     # Non-layer buckets keep small, fixed quotas independent of persona.
     "tool_result": 600,
+    "playground_advisor": 900,
     "other":       500,
 }
 

@@ -52,6 +52,32 @@ def test_session_pinning():
     session = chat_history.get_session(chat_id)
     assert session["is_pinned"] == 0
 
+def test_session_linked_playground_session_id_set_and_clear():
+    chat_id = "test_playground_link_1"
+    username = "Pantronux"
+    persona = "advisor"
+
+    chat_history.create_session(chat_id, username, persona)
+    session = chat_history.get_session(chat_id, username=username)
+    assert "linked_playground_session_id" in session
+    assert session["linked_playground_session_id"] is None
+
+    assert chat_history.update_session_fields(
+        chat_id,
+        username,
+        linked_playground_session_id="pg-session-1",
+    )
+    session = chat_history.get_session(chat_id, username=username)
+    assert session["linked_playground_session_id"] == "pg-session-1"
+
+    assert chat_history.update_session_fields(
+        chat_id,
+        username,
+        linked_playground_session_id=None,
+    )
+    session = chat_history.get_session(chat_id, username=username)
+    assert session["linked_playground_session_id"] is None
+
 def test_message_editing_and_truncation():
     chat_id = "test_edit_1"
     username = "Pantronux"

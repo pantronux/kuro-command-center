@@ -100,6 +100,12 @@ def test_v1_redesign_keeps_persona_and_existing_tool_navigation():
     assert "model_alias" in js
     assert "openFilesModal()" in js
     assert "navAdminSettings" in js
+    assert "function generateClientChatId()" in js
+    assert "const isFirstTurnInNewChat = !currentChatId" in js
+    assert "formData.append('chat_id', currentChatId)" in js
+    assert "const requestChatId = currentChatId" in js
+    assert "if (requestChatId !== currentChatId) return" in js
+    assert "resetActiveConversationSurface({ showWelcome: true, focusWelcome: false })" in js
 
 
 def test_v1_redesign_quiets_optional_proactive_reconnect_poll():

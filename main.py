@@ -166,7 +166,8 @@ _check_telegram_rate_limit = telegram_center.check_rate_limit
 
 
 class ChatSessionUpdate(BaseModel):
-    title: str
+    title: Optional[str] = None
+    linked_playground_session_id: Optional[str] = Field(default=None, max_length=128)
 
 
 class MessageEditRequest(BaseModel):
@@ -570,6 +571,54 @@ def _is_qa_playground_enabled() -> bool:
     return _as_env_bool(os.getenv("KURO_QA_PLAYGROUND_ENABLED"), True)
 
 
+_PLAYGROUND_ADVISOR_CONTEXT_INSTRUCTION = (
+    "Interpret the Playground Advisor Context as observable forensic artifacts only. "
+    "Separate raw evidence, canonical trace, schema/mapping drift, semantic divergence, "
+    "artifact-surface divergence, and forensic reconstruction implications. Do not claim "
+    "access to hidden chain-of-thought, model intent, model weights, or private provider "
+    "internals. If evidence is incomplete, state what is missing."
+)
+
+
+def _build_playground_advisor_context_block(
+    *,
+    app_obj: FastAPI,
+    persona: str,
+    chat_id: Optional[str],
+    username: str,
+    workflow_mode: str = "quick",
+) -> str:
+    if memory_manager.normalize_persona(persona) != "advisor" or not chat_id:
+        return ""
+    session = chat_history.get_session(chat_id, username=username)
+    linked_session_id = str((session or {}).get("linked_playground_session_id") or "").strip()
+    if not linked_session_id:
+        return ""
+    service = getattr(getattr(app_obj, "state", None), "playground_service", None)
+    if service is None:
+        return ""
+    try:
+        service.assert_api_enabled()
+        context = service.build_advisor_context(
+            session_id=linked_session_id,
+            workflow_mode=workflow_mode,
+        )
+    except Exception as exc:
+        logger.debug(
+            "[KPR_ADVISOR_CONTEXT] skipped chat_id=%s playground_session_id=%s: %s",
+            chat_id,
+            linked_session_id,
+            exc,
+        )
+        return ""
+    context_json = json.dumps(context, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return (
+        "[PLAYGROUND_ADVISOR_CONTEXT]\n"
+        f"{_PLAYGROUND_ADVISOR_CONTEXT_INSTRUCTION}\n"
+        f"{context_json}"
+    )
+
+
 def _mount_playground_router_if_enabled(
     target_app: FastAPI,
     enabled_override: Optional[bool] = None,
@@ -615,6 +664,12 @@ def _mount_chat_v2_router(target_app: FastAPI) -> bool:
             trace_id = str(kwargs.get("trace_id") or f"chatv2_{uuid.uuid4().hex}")
             user_info = auth_db.get_user(username) or {}
             master_name = user_info.get("master_name", "Master Pantronux")
+            advisor_context_block = _build_playground_advisor_context_block(
+                app_obj=target_app,
+                persona=persona,
+                chat_id=chat_id,
+                username=username,
+            )
             if bool(getattr(settings, "KURO_PROVIDER_REGISTRY_V2_ENABLED", False)):
                 try:
                     from kuro_backend.providers.registry import get_provider_registry
@@ -625,6 +680,7 @@ def _mount_chat_v2_router(target_app: FastAPI) -> bool:
                         model_alias=str(getattr(settings, "KURO_DEFAULT_MODEL_ALIAS", "gemini_fast")),
                         temperature=float(kwargs.get("temperature") or 0.7),
                         max_output_tokens=int(kwargs.get("max_output_tokens") or 8192),
+                        system_instruction=advisor_context_block,
                         metadata={
                             "persona": persona,
                             "username": username,
@@ -660,6 +716,7 @@ def _mount_chat_v2_router(target_app: FastAPI) -> bool:
                 chat_id=chat_id,
                 runtime_id="sovereign",
                 runtime_namespace="kuro.sovereign",
+                advisor_context_block=advisor_context_block,
             ):
                 safe_chunk = sanitize_stream_chunk(chunk)
                 if safe_chunk:
@@ -1876,6 +1933,13 @@ async def chat_endpoint(
         if not session_scope.startswith("legacy_"):
             asyncio.create_task(_maybe_generate_title(session_scope, message))
 
+        advisor_context_block = _build_playground_advisor_context_block(
+            app_obj=request.app,
+            persona=resolved_persona,
+            chat_id=session_scope,
+            username=username,
+        )
+
         # Process with AI core using LangGraph (with vision if images uploaded)
         response = process_chat_with_graph(
             enhanced_message,
@@ -1889,6 +1953,7 @@ async def chat_endpoint(
             chat_id=session_scope,
             runtime_id=ctx.runtime_id,
             runtime_namespace=ctx.memory_namespace,
+            advisor_context_block=advisor_context_block,
         )
 
         # Save AI response to chat history
@@ -2273,6 +2338,12 @@ async def chat_stream_endpoint(
 
             # V6.0: Stream response - no guardrail overhead, direct LLM response
             full_response = []
+            advisor_context_block = _build_playground_advisor_context_block(
+                app_obj=request.app,
+                persona=resolved_persona,
+                chat_id=session_scope,
+                username=username,
+            )
 
             async for chunk in process_chat_with_graph_stream(
                 enhanced_message,
@@ -2287,6 +2358,7 @@ async def chat_stream_endpoint(
                 chat_id=session_scope,
                 runtime_id=ctx.runtime_id,
                 runtime_namespace=ctx.memory_namespace,
+                advisor_context_block=advisor_context_block,
             ):
                 safe_chunk = sanitize_stream_chunk(chunk)
                 if not safe_chunk:
@@ -3089,16 +3161,36 @@ async def get_chat_messages_page(
 
 @app.put("/api/chats/{chat_id}")
 async def update_chat_title(request: Request, chat_id: str, update: ChatSessionUpdate):
-    """Update chat session title."""
+    """Update chat session title and lightweight session metadata."""
     token = get_token_from_cookie(request)
-    if not validate_token(token):
+    user = validate_token(token)
+    if not user:
         raise HTTPException(status_code=401, detail="Unauthorized")
+    username = user.get("username")
+    if not chat_history.get_session(chat_id, username=username):
+        raise HTTPException(status_code=404, detail="Chat session not found")
 
-    success = chat_history.update_session_title(chat_id, update.title)
+    fields_set = getattr(update, "model_fields_set", None)
+    if fields_set is None:
+        fields_set = getattr(update, "__fields_set__", set())
+
+    updates: Dict[str, Any] = {}
+    if "title" in fields_set and update.title is not None:
+        title = str(update.title).strip()
+        if title:
+            updates["title"] = title[:120]
+    if "linked_playground_session_id" in fields_set:
+        linked = update.linked_playground_session_id
+        updates["linked_playground_session_id"] = str(linked).strip() if linked else None
+
+    if not updates:
+        return api_error("Tidak ada perubahan sesi chat.")
+
+    success = chat_history.update_session_fields(chat_id, username, **updates)
     if success:
-        return api_success(message="Judul chat diperbarui.")
+        return api_success(message="Sesi chat diperbarui.")
     else:
-        return api_error("Gagal memperbarui judul chat.")
+        return api_error("Gagal memperbarui sesi chat.")
 
 
 @app.delete("/api/chats/{chat_id}")

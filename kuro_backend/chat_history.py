@@ -400,6 +400,7 @@ def _init_db_locked():
             ("tools_enabled", "INTEGER NOT NULL DEFAULT 1"),
             ("web_search_enabled", "INTEGER NOT NULL DEFAULT 0"),
             ("memory_v3_enabled", "INTEGER NOT NULL DEFAULT 0"),
+            ("linked_playground_session_id", "TEXT DEFAULT NULL"),
         ]:
             add_column_if_missing(conn, "chat_sessions", col, ddl)
 
@@ -1023,6 +1024,7 @@ def update_session_fields(
         "tools_enabled",
         "web_search_enabled",
         "memory_v3_enabled",
+        "linked_playground_session_id",
         "archived_at",
         "deleted_at",
     }

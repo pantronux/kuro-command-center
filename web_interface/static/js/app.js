@@ -143,6 +143,7 @@ let selectedModelAlias = localStorage.getItem('kuro_model_alias') || 'gemini_fas
 let availableModelAliases = [...MODEL_ALIAS_FALLBACK];
 let pendingRenameChatId = null;
 let pendingDeleteChatId = null;
+let pendingPlaygroundLinkChatId = null;
 let composerFeatureState = loadComposerFeatureState();
 let composerToolAvailability = null;
 
@@ -707,6 +708,7 @@ const elements = {
     sidebarSessionsMore: document.getElementById('sidebarSessionsMore'),
     headerPersonaLabel: document.getElementById('headerPersonaLabel'),
     headerChatTitle: document.getElementById('headerChatTitle'),
+    headerPlaygroundLink: document.getElementById('headerPlaygroundLink'),
     chatRenameModal: document.getElementById('chatRenameModal'),
     chatRenameInput: document.getElementById('chatRenameInput'),
     chatRenameCancelBtn: document.getElementById('chatRenameCancelBtn'),
@@ -715,6 +717,11 @@ const elements = {
     chatDeleteMessage: document.getElementById('chatDeleteMessage'),
     chatDeleteCancelBtn: document.getElementById('chatDeleteCancelBtn'),
     chatDeleteConfirmBtn: document.getElementById('chatDeleteConfirmBtn'),
+    chatPlaygroundLinkModal: document.getElementById('chatPlaygroundLinkModal'),
+    chatPlaygroundLinkInput: document.getElementById('chatPlaygroundLinkInput'),
+    chatPlaygroundLinkCancelBtn: document.getElementById('chatPlaygroundLinkCancelBtn'),
+    chatPlaygroundLinkClearBtn: document.getElementById('chatPlaygroundLinkClearBtn'),
+    chatPlaygroundLinkSaveBtn: document.getElementById('chatPlaygroundLinkSaveBtn'),
     personaAccordionBtn: document.getElementById('personaAccordionBtn'),
     personaAccordionContent: document.getElementById('personaAccordionContent'),
     personaChevron: document.getElementById('personaChevron'),
@@ -1063,6 +1070,26 @@ function setupEventListeners() {
             if (event.target === elements.chatDeleteModal) closeChatDeleteModal();
         });
     }
+    if (elements.chatPlaygroundLinkCancelBtn) {
+        elements.chatPlaygroundLinkCancelBtn.addEventListener('click', closePlaygroundLinkModal);
+    }
+    if (elements.chatPlaygroundLinkSaveBtn) {
+        elements.chatPlaygroundLinkSaveBtn.addEventListener('click', () => submitPlaygroundLink(false));
+    }
+    if (elements.chatPlaygroundLinkClearBtn) {
+        elements.chatPlaygroundLinkClearBtn.addEventListener('click', () => submitPlaygroundLink(true));
+    }
+    if (elements.chatPlaygroundLinkModal) {
+        elements.chatPlaygroundLinkModal.addEventListener('click', (event) => {
+            if (event.target === elements.chatPlaygroundLinkModal) closePlaygroundLinkModal();
+        });
+    }
+    if (elements.chatPlaygroundLinkInput) {
+        elements.chatPlaygroundLinkInput.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') submitPlaygroundLink(false);
+            if (event.key === 'Escape') closePlaygroundLinkModal();
+        });
+    }
     if (elements.chatDeleteConfirmBtn) {
         elements.chatDeleteConfirmBtn.addEventListener('click', submitChatDelete);
     }
@@ -1306,20 +1333,34 @@ function updateConversationHeader() {
     if (elements.headerPersonaLabel) {
         elements.headerPersonaLabel.textContent = getActivePersonaDisplayName();
     }
+    const setPlaygroundLink = (value) => {
+        if (!elements.headerPlaygroundLink) return;
+        const clean = (value || '').trim();
+        if (!clean) {
+            elements.headerPlaygroundLink.textContent = '';
+            elements.headerPlaygroundLink.classList.add('hidden');
+            return;
+        }
+        elements.headerPlaygroundLink.textContent = `Playground: ${clean}`;
+        elements.headerPlaygroundLink.classList.remove('hidden');
+    };
     if (!elements.headerChatTitle) return;
 
     if (runtimeMode === 'playground') {
         elements.headerChatTitle.textContent = 'Playground Runtime';
+        setPlaygroundLink('');
         return;
     }
 
     if (!currentChatId) {
         elements.headerChatTitle.textContent = 'New Chat';
+        setPlaygroundLink('');
         return;
     }
 
     const activeSession = chatSessions.find((session) => session.chat_id === currentChatId);
-    elements.headerChatTitle.textContent = activeSession?.title || 'Default Chat';
+    elements.headerChatTitle.textContent = activeSession?.title || 'New Chat';
+    setPlaygroundLink(activeSession?.linked_playground_session_id || '');
 }
 
 function toggleChatDrawer(force) {
@@ -1456,6 +1497,12 @@ function renderChatSessions() {
                         <i data-lucide="pencil" class="w-3.5 h-3.5"></i>
                         <span>Rename</span>
                     </button>
+                    ${selectedPersona === 'advisor' ? `
+                    <button type="button" data-chat-session-action="link-playground" data-chat-id="${session.chat_id}" class="session-action-btn justify-start" title="Link Playground">
+                        <i data-lucide="link" class="w-3.5 h-3.5"></i>
+                        <span>${session.linked_playground_session_id ? 'Edit Playground Link' : 'Link Playground'}</span>
+                    </button>
+                    ` : ''}
                     <button type="button" data-chat-session-action="export" data-chat-id="${session.chat_id}" class="session-action-btn justify-start" title="Export">
                         <i data-lucide="download" class="w-3.5 h-3.5"></i>
                         <span>Export</span>
@@ -1528,6 +1575,8 @@ function handleChatSessionMenuClick(event) {
         togglePinChatSession(chatId, wasPinned);
     } else if (action === 'rename') {
         renameChatSession(chatId);
+    } else if (action === 'link-playground') {
+        linkPlaygroundSession(chatId);
     } else if (action === 'export') {
         openExportModal(chatId);
     } else if (action === 'delete') {
@@ -1566,6 +1615,8 @@ function bindChatSessionMenuControls() {
                 togglePinChatSession(chatId, wasPinned);
             } else if (action === 'rename') {
                 renameChatSession(chatId);
+            } else if (action === 'link-playground') {
+                linkPlaygroundSession(chatId);
             } else if (action === 'export') {
                 openExportModal(chatId);
             } else if (action === 'delete') {
@@ -1584,21 +1635,7 @@ function startNewChat() {
     if (currentChatId) {
         saveDraft(currentChatId, elements.messageInput.value);
     }
-    currentChatId = null;
-    updateConversationHeader();
-    chatHistory = [];
-    chatOffset = 0;
-    hasMoreMessages = true;
-    elements.chatContainer.innerHTML = '';
-    elements.messageInput.value = '';
-
-    elements.chatContainer.classList.add('hidden');
-    if (elements.mainInputArea) elements.mainInputArea.classList.add('hidden');
-    if (elements.welcomeScreen) {
-        elements.welcomeScreen.classList.remove('hidden');
-        elements.welcomeInput.value = '';
-        setTimeout(() => elements.welcomeInput.focus(), 100);
-    }
+    resetActiveConversationSurface({ showWelcome: true, focusWelcome: true });
 
     renderChatSessions();
     lucide.createIcons();
@@ -1734,6 +1771,60 @@ async function submitChatRename() {
     }
 }
 
+async function linkPlaygroundSession(chatId) {
+    ensureNormalModeForChatNavigation();
+    const session = chatSessions.find(s => s.chat_id === chatId);
+    pendingPlaygroundLinkChatId = chatId;
+    if (elements.chatPlaygroundLinkInput) {
+        elements.chatPlaygroundLinkInput.value = session?.linked_playground_session_id || '';
+    }
+    if (elements.chatPlaygroundLinkModal) {
+        elements.chatPlaygroundLinkModal.classList.remove('hidden');
+        elements.chatPlaygroundLinkModal.classList.add('flex');
+        setTimeout(() => {
+            elements.chatPlaygroundLinkInput?.focus();
+            elements.chatPlaygroundLinkInput?.select();
+        }, 50);
+    }
+}
+
+function closePlaygroundLinkModal() {
+    pendingPlaygroundLinkChatId = null;
+    if (!elements.chatPlaygroundLinkModal) return;
+    elements.chatPlaygroundLinkModal.classList.add('hidden');
+    elements.chatPlaygroundLinkModal.classList.remove('flex');
+}
+
+async function submitPlaygroundLink(clear = false) {
+    const chatId = pendingPlaygroundLinkChatId;
+    if (!chatId) return;
+    const session = chatSessions.find(s => s.chat_id === chatId);
+    const value = clear ? '' : (elements.chatPlaygroundLinkInput?.value || '').trim();
+    const payload = { linked_playground_session_id: value || null };
+
+    try {
+        const response = await authFetch(`${CONFIG.API_BASE}/chats/${chatId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        if (response.ok) {
+            if (session) session.linked_playground_session_id = payload.linked_playground_session_id;
+            updateConversationHeader();
+            renderChatSessions();
+            loadChatSessions();
+            showNotification(payload.linked_playground_session_id ? 'Playground session linked' : 'Playground link cleared', 'success');
+        } else {
+            showNotification('Failed to update Playground link', 'error');
+        }
+    } catch (error) {
+        console.error('Playground link update failed:', error);
+        showNotification('Failed to update Playground link', 'error');
+    } finally {
+        closePlaygroundLinkModal();
+    }
+}
+
 // ============================================
 // Sidebar Collapse Toggle (Desktop)
 // ============================================
@@ -1798,15 +1889,21 @@ function handleScroll() {
 
 async function kuroLoadHistory(isInitial = false) {
     if (isLoadingMore) return;
+    const requestChatId = currentChatId;
+    if (!requestChatId) {
+        hasMoreMessages = false;
+        if (isInitial && elements.chatContainer) {
+            elements.chatContainer.innerHTML = '';
+        }
+        return;
+    }
     if (isInitial) {
         chatOffset = 0;
         hasMoreMessages = true;
         chatHistory = [];
         elements.chatContainer.innerHTML = '';
-        if (currentChatId) {
-            chatOldestMessageIdBySession[currentChatId] = null;
-            chatHasMoreBySession[currentChatId] = true;
-        }
+        chatOldestMessageIdBySession[requestChatId] = null;
+        chatHasMoreBySession[requestChatId] = true;
     }
     if (!hasMoreMessages) return;
 
@@ -1817,21 +1914,22 @@ async function kuroLoadHistory(isInitial = false) {
     const previousScrollTop = elements.chatContainer.scrollTop;
 
     try {
-        if (currentChatId) {
-            const beforeId = !isInitial ? chatOldestMessageIdBySession[currentChatId] : null;
+        if (requestChatId) {
+            const beforeId = !isInitial ? chatOldestMessageIdBySession[requestChatId] : null;
             const params = new URLSearchParams({
                 limit: String(CONFIG.CHAT_PAGE_SIZE),
             });
             if (beforeId) params.set('before_id', String(beforeId));
-            const response = await authFetch(`${CONFIG.API_BASE}/chats/${encodeURIComponent(currentChatId)}/messages?${params.toString()}`);
+            const response = await authFetch(`${CONFIG.API_BASE}/chats/${encodeURIComponent(requestChatId)}/messages?${params.toString()}`);
             const payload = await response.json();
+            if (requestChatId !== currentChatId) return;
             const page = payload?.data || payload || {};
             const messages = Array.isArray(page.messages) ? page.messages : [];
 
             if (messages.length > 0) {
                 hasMoreMessages = Boolean(page.has_more);
-                chatHasMoreBySession[currentChatId] = hasMoreMessages;
-                chatOldestMessageIdBySession[currentChatId] = page.oldest_id || messages[0]?.id || null;
+                chatHasMoreBySession[requestChatId] = hasMoreMessages;
+                chatOldestMessageIdBySession[requestChatId] = page.oldest_id || messages[0]?.id || null;
 
                 [...messages].reverse().forEach((msg) => {
                     const role = msg.role === 'user' ? 'user' : 'ai';
@@ -1858,32 +1956,15 @@ async function kuroLoadHistory(isInitial = false) {
                 }
             } else {
                 hasMoreMessages = false;
-                chatHasMoreBySession[currentChatId] = false;
-                if (isInitial) startNewChat();
-            }
-        } else {
-            let url = `${CONFIG.API_BASE}/history?limit=${CONFIG.CHAT_PAGE_SIZE}&offset=${chatOffset}&platform=web&persona=${encodeURIComponent(selectedPersona)}`;
-            const response = await authFetch(url);
-            const data = await response.json();
-            if (data.status === 'success' && data.history.length > 0) {
-                chatOffset += data.history.length;
-                hasMoreMessages = data.has_more;
-                data.history.forEach((msg) => {
-                    const role = msg.role === 'user' ? 'user' : 'ai';
-                    const attachments = Array.isArray(msg.attachments) ? msg.attachments : (typeof msg.attachments === 'string' ? JSON.parse(msg.attachments) : []);
-                    prependMessageToChat(role, msg.content, attachments, msg.id, {
-                        is_edited: msg.is_edited,
-                        is_bookmarked: msg.is_bookmarked,
-                        is_regenerated: msg.is_regenerated,
-                        export_suggestions: msg.export_suggestions || [],
-                        timestamp: msg.timestamp,
-                    });
-                });
-                if (isInitial) {
-                    scrollToBottom();
+                chatHasMoreBySession[requestChatId] = false;
+                if (isInitial && requestChatId === currentChatId) {
+                    if (elements.chatContainer) {
+                        elements.chatContainer.innerHTML = '';
+                        elements.chatContainer.classList.add('hidden');
+                    }
+                    if (elements.mainInputArea) elements.mainInputArea.classList.add('hidden');
+                    if (elements.welcomeScreen) elements.welcomeScreen.classList.remove('hidden');
                 }
-            } else {
-                hasMoreMessages = false;
             }
         }
     } catch (error) {
@@ -2401,6 +2482,41 @@ function resolvePlaygroundSessionId(payload) {
         if (typeof nested === 'string' && nested) return nested;
     }
     return null;
+}
+
+function generateClientChatId() {
+    const randomId = (window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`)
+        .replace(/[^a-zA-Z0-9]/g, '')
+        .slice(0, 24);
+    return `chat_${randomId || Date.now()}`;
+}
+
+function resetActiveConversationSurface({ showWelcome = true, focusWelcome = false } = {}) {
+    currentChatId = null;
+    chatHistory = [];
+    chatOffset = 0;
+    hasMoreMessages = true;
+    if (elements.chatContainer) {
+        elements.chatContainer.innerHTML = '';
+        elements.chatContainer.scrollTop = 0;
+        elements.chatContainer.classList.add('hidden');
+    }
+    if (elements.messageInput) {
+        elements.messageInput.value = '';
+        elements.messageInput.dispatchEvent(new Event('input'));
+    }
+    if (elements.welcomeInput) {
+        elements.welcomeInput.value = '';
+        elements.welcomeInput.style.height = 'auto';
+    }
+    if (elements.mainInputArea) elements.mainInputArea.classList.add('hidden');
+    if (elements.welcomeScreen) {
+        elements.welcomeScreen.classList.toggle('hidden', !showWelcome);
+        if (showWelcome && focusWelcome) {
+            setTimeout(() => elements.welcomeInput?.focus(), 100);
+        }
+    }
+    updateConversationHeader();
 }
 
 function formatPlaygroundError(action, response, payload) {
@@ -3002,10 +3118,22 @@ async function sendMessage(isFromWelcome = false) {
     if (isProcessing) return;
 
     isProcessing = true;
+    const isFirstTurnInNewChat = !currentChatId;
+    if (isFirstTurnInNewChat) {
+        currentChatId = generateClientChatId();
+        chatHistory = [];
+        chatOffset = 0;
+        hasMoreMessages = true;
+        chatOldestMessageIdBySession[currentChatId] = null;
+        chatHasMoreBySession[currentChatId] = true;
+        updateConversationHeader();
+        renderChatSessions();
+    }
     if (elements.sendBtn) elements.sendBtn.disabled = true;
     if (elements.welcomeSendBtn) elements.welcomeSendBtn.disabled = true;
 
-    if (isFromWelcome) {
+    if (isFromWelcome || isFirstTurnInNewChat) {
+        elements.chatContainer.innerHTML = '';
         if (elements.welcomeScreen) elements.welcomeScreen.classList.add('hidden');
         elements.chatContainer.classList.remove('hidden');
         if (elements.mainInputArea) elements.mainInputArea.classList.remove('hidden');
@@ -3106,7 +3234,7 @@ async function sendMessage(isFromWelcome = false) {
         const formData = new FormData();
         formData.append('message', message);
         formData.append('persona', selectedPersona);
-        if (currentChatId) formData.append('chat_id', currentChatId);
+        formData.append('chat_id', currentChatId);
         if (selectedModelAlias) formData.append('model_alias', selectedModelAlias);
         if (elements.temperatureSlider?.value) formData.append('temperature', String(elements.temperatureSlider.value));
         formData.append('tools_enabled', String(activeComposerActions.length > 0));
@@ -3228,7 +3356,12 @@ async function sendMessage(isFromWelcome = false) {
                     } else if (eventType === 'meta') {
                         streamMeta = data;
                         if (data && data.chat_id) {
+                            const previousChatId = currentChatId;
                             currentChatId = data.chat_id;
+                            if (previousChatId && previousChatId !== currentChatId) {
+                                chatOldestMessageIdBySession[currentChatId] = chatOldestMessageIdBySession[previousChatId] || null;
+                                chatHasMoreBySession[currentChatId] = chatHasMoreBySession[previousChatId] !== false;
+                            }
                             updateConversationHeader();
                             // Re-load sessions to show the new one
                             loadChatSessions();
@@ -4478,7 +4611,8 @@ async function applyPersona() {
             showNotification(`Persona changed to ${personaLabels[selectedPersona]}`, 'success');
             localStorage.setItem('kuro-persona', selectedPersona);
             setPersonaInUrl(selectedPersona, true);
-            await loadChatHistory();
+            resetActiveConversationSurface({ showWelcome: true, focusWelcome: true });
+            await loadChatSessions();
         } else {
             showNotification('Failed to change persona: ' + data.message, 'error');
         }
@@ -4516,7 +4650,8 @@ async function loadPersona() {
 
     // Use the new UI updater for the sidebar accordion
     updatePersonaUI();
-    await loadChatHistory();
+    resetActiveConversationSurface({ showWelcome: true, focusWelcome: false });
+    await loadChatSessions();
 }
 
 // ============================================

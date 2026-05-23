@@ -699,6 +699,7 @@ class KuroState(TypedDict):
     # --- Advisor Research fields (V1.0.0 Beta 4) ---
     research_sources_block: str          # [RESEARCH_SOURCES] formatted block, empty string if not populated
     research_intent_detected: bool       # True if advisor_research_node was triggered
+    advisor_context_block: str           # Optional linked Playground Advisor Context for this turn
     ingestion_sources: List[Dict]        # Owner-scoped ingestion evidence selected for this turn
     # --- Sovereign Chat features (V1.0.0 Beta 5) ---
     message_count_before: int            # Session message count before the current turn
@@ -2340,6 +2341,9 @@ def response_node(state: KuroState) -> Dict[str, Any]:
         research_sources_block = state.get("research_sources_block")
         if research_sources_block:
             sections["research_sources"] = research_sources_block
+        advisor_context_block = (state.get("advisor_context_block") or "").strip()
+        if advisor_context_block:
+            sections["playground_advisor"] = "\n\n" + advisor_context_block
 
         if context_budget is not None:
             budgeted = token_budget.apply_persona_budget(sections, context_budget)
@@ -2347,6 +2351,7 @@ def response_node(state: KuroState) -> Dict[str, Any]:
             budgeted = token_budget.apply_section_budget(sections)
         ordered_names = (
             "referent",
+            "playground_advisor",
             "mem0",
             "ingestion",
             "memory_injection",
@@ -3420,6 +3425,7 @@ async def process_chat_with_graph_stream(
     chat_id: Optional[str] = None,
     runtime_id: Optional[str] = None,
     runtime_namespace: Optional[str] = None,
+    advisor_context_block: str = "",
 ) -> AsyncGenerator[str, None]:
     """
     V5.5 STREAMING: Graph runs in asyncio.to_thread (sync stream) so the event loop can serve SSE.
@@ -3441,6 +3447,7 @@ async def process_chat_with_graph_stream(
     resolved_runtime_namespace = str(
         runtime_namespace or f"kuro.{resolved_runtime_id}"
     )
+    advisor_context_block = str(advisor_context_block or "").strip()
     resolved_trace_id = str(trace_id or f"trace_{uuid.uuid4().hex[:16]}")
     runtime_config = RuntimeRegistry.get(resolved_runtime_id)
     runtime_contract_id = runtime_config.structured_output_contract
@@ -3489,7 +3496,7 @@ async def process_chat_with_graph_stream(
 
         # P3.1 — Semantic cache lookup BEFORE committing to any LLM path.
         # Disabled by default; opt-in via KURO_SEMANTIC_CACHE_ENABLED.
-        if not image_paths:
+        if not image_paths and not advisor_context_block:
             from kuro_backend import semantic_cache
             cached_response = semantic_cache.lookup(
                 message,
@@ -3580,6 +3587,12 @@ async def process_chat_with_graph_stream(
             prefix = message
             if ref_block:
                 prefix = f"{message}\n\n{ref_block}"
+            if advisor_context_block:
+                advisor_context_for_prompt = token_budget.trim_section(
+                    "playground_advisor",
+                    "\n\n" + advisor_context_block,
+                )
+                prefix = f"{prefix}{advisor_context_for_prompt}"
             full_message = f"{prefix}{memory_injection}"
             system_prompt = get_system_instruction(
                 persona_override=persona_mode,
@@ -3794,6 +3807,7 @@ async def process_chat_with_graph_stream(
             "epistemic_labels": {},
             "research_sources_block": "",
             "research_intent_detected": False,
+            "advisor_context_block": advisor_context_block,
             "ingestion_sources": [],
             # Canvas 2 defaults
             "active_goals": [],
@@ -4017,6 +4031,7 @@ def process_chat_with_graph(
     chat_id: Optional[str] = None,
     runtime_id: Optional[str] = None,
     runtime_namespace: Optional[str] = None,
+    advisor_context_block: str = "",
 ) -> str:
     """
     Process chat message using LangGraph state machine.
@@ -4036,6 +4051,7 @@ def process_chat_with_graph(
     resolved_runtime_namespace = str(
         runtime_namespace or f"kuro.{resolved_runtime_id}"
     )
+    advisor_context_block = str(advisor_context_block or "").strip()
     
     try:
         approval_response = _maybe_handle_pending_approval(message, approval_scope)
@@ -4050,7 +4066,7 @@ def process_chat_with_graph(
         )
 
         # P3.1 — semantic cache lookup on the sync path as well.
-        if not image_paths:
+        if not image_paths and not advisor_context_block:
             from kuro_backend import semantic_cache
             cached_response = semantic_cache.lookup(
                 message,
@@ -4130,6 +4146,7 @@ def process_chat_with_graph(
             # Anti-Halusinasi defaults
             "_autorag_notification": "",
             "epistemic_labels": {},
+            "advisor_context_block": advisor_context_block,
             # Canvas 2 defaults
             "active_goals": [],
             "goal_context_block": "",

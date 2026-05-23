@@ -497,6 +497,7 @@
                     <div>
                         <p id="headerPersonaLabel" class="label text-xs text-gray-500 dark:text-gray-400 leading-tight">Consultant</p>
                         <h2 id="headerChatTitle" class="title text-xl font-semibold text-gray-800 dark:text-white leading-tight">Default Chat</h2>
+                        <p id="headerPlaygroundLink" class="hidden text-[11px] text-emerald-600 dark:text-emerald-300 leading-tight font-mono truncate"></p>
                     </div>
                 </div>
 
@@ -1053,6 +1054,18 @@
         </div>
     </div>
 
+    <div id="chatPlaygroundLinkModal" class="modal-backdrop hidden fixed inset-0 z-[80] items-center justify-center">
+        <div class="modal">
+            <h3>Link Playground session</h3>
+            <input id="chatPlaygroundLinkInput" class="modal-input" type="text" maxlength="128" placeholder="Playground session ID">
+            <div class="modal-actions">
+                <button id="chatPlaygroundLinkCancelBtn" type="button" class="btn-cancel">Cancel</button>
+                <button id="chatPlaygroundLinkClearBtn" type="button" class="btn-cancel">Clear</button>
+                <button id="chatPlaygroundLinkSaveBtn" type="button" class="btn-save">Save</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Drag & Drop Overlay -->
     <div id="dropOverlay"
         class="fixed inset-0 z-[100] bg-emerald-500/20 dark:bg-emerald-500/30 backdrop-blur-sm flex items-center justify-center hidden">
@@ -1404,7 +1417,7 @@
     </script>
 
     <!-- Custom JS -->
-    <script src="/static/js/app.js?v=20260523-10"></script>
+    <script src="/static/js/app.js?v=20260523-11"></script>
 
 </body>
 

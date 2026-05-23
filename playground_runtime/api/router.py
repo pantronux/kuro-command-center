@@ -219,6 +219,21 @@ def create_playground_router(
         except PlaygroundError as exc:
             raise HTTPException(status_code=_status_for_playground_error(exc), detail=str(exc)) from exc
 
+    @router.get("/sessions/{session_id}/advisor-context")
+    def advisor_context(
+        session_id: str,
+        workflow_mode: str = Query(default="quick"),
+        _user: dict = Depends(admin_dependency),
+    ):
+        _guard_enabled()
+        try:
+            return service.build_advisor_context(
+                session_id=session_id,
+                workflow_mode=workflow_mode,
+            )
+        except PlaygroundError as exc:
+            raise HTTPException(status_code=_status_for_playground_error(exc), detail=str(exc)) from exc
+
     @router.get("/sessions/{session_id}/executions/{execution_id}/integrity-detail")
     def execution_integrity_detail(session_id: str, execution_id: str, _user: dict = Depends(admin_dependency)):
         _guard_enabled()

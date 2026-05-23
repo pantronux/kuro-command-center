@@ -721,6 +721,169 @@ class PlaygroundRuntimeService:
             "snapshot_trust_rows": snapshot_trust_rows,
         }
 
+    def build_advisor_context(self, *, session_id: str, workflow_mode: str = "quick") -> dict:
+        session = self._require_session(session_id)
+        mode = self._normalize_workflow_mode(workflow_mode)
+        history = self.get_session_history(session_id=session_id)
+        trace_rows = [self._decode_canonical_trace_row(row) for row in self.list_session_traces(session_id=session_id)]
+        integrity_overview = self.build_integrity_overview(session_id=session_id, workflow_mode=mode)
+
+        try:
+            lineage = self.build_transformation_lineage(session_id=session_id)
+            lineage_summary = {
+                "available": True,
+                "node_count": len(lineage.get("nodes") or []),
+                "edge_count": len(lineage.get("edges") or []),
+            }
+        except Exception:
+            lineage_summary = {
+                "available": False,
+                "node_count": 0,
+                "edge_count": 0,
+            }
+
+        history_session = history.get("session") or {}
+        integrity_status = str(
+            session.get("session_integrity_status")
+            or history_session.get("session_integrity_status")
+            or "unknown"
+        ).upper()
+        if integrity_status not in {"VERIFIED", "UNVERIFIED", "FAILED"}:
+            integrity_status = "UNKNOWN"
+
+        execution_rows = {
+            row.get("execution_id"): row
+            for row in history.get("executions", [])
+            if row.get("execution_id")
+        }
+        providers = sorted({str(row.get("provider_id")) for row in trace_rows if row.get("provider_id")})
+        if not providers:
+            providers = sorted(
+                {
+                    str(row.get("provider_id"))
+                    for row in history.get("executions", [])
+                    if row.get("provider_id")
+                }
+            )
+
+        prompt_sha256 = None
+        dataset_version = None
+        for row in trace_rows or history.get("executions", []):
+            prompt_sha256 = row.get("prompt_sha256")
+            dataset_version = row.get("dataset_version")
+            if prompt_sha256:
+                break
+
+        def _first_not_none(value: Any, fallback: Any) -> Any:
+            return value if value is not None else fallback
+
+        executions = []
+        for trace in trace_rows:
+            extra = trace.get("extra_fields_json")
+            if not isinstance(extra, dict):
+                extra = {}
+            execution = execution_rows.get(trace.get("execution_id"), {})
+            grounding_chunks = trace.get("grounding_chunks_json") or []
+            citation_objects = trace.get("citation_objects_json") or []
+            executions.append(
+                {
+                    "execution_id": trace.get("execution_id"),
+                    "trace_id": trace.get("id") or trace.get("trace_id"),
+                    "provider_id": trace.get("provider_id"),
+                    "model_id": trace.get("model_id"),
+                    "schema_version": trace.get("schema_version"),
+                    "environment": self._advisor_provider_environment(trace.get("provider_id")),
+                    "finish_reason": _first_not_none(trace.get("finish_reason"), execution.get("finish_reason")),
+                    "token_usage": {
+                        "input_tokens": _first_not_none(trace.get("input_tokens"), execution.get("input_tokens")),
+                        "output_tokens": _first_not_none(trace.get("output_tokens"), execution.get("output_tokens")),
+                        "total_tokens": _first_not_none(trace.get("total_tokens"), execution.get("total_tokens")),
+                    },
+                    "latency_ms": _first_not_none(trace.get("latency_ms"), execution.get("latency_ms")),
+                    "forensic_flags": trace.get("forensic_flags_json") or [],
+                    "normalization_warnings": trace.get("normalization_warnings_json") or [],
+                    "provider_specific_artifact": {
+                        "type": extra.get("provider_specific_artifact_type"),
+                        "origin": extra.get("provider_specific_artifact_origin")
+                        or extra.get("visible_reasoning_trace_origin")
+                        or extra.get("reasoning_signature_origin"),
+                        "human_readable": extra.get("provider_specific_artifact_human_readable"),
+                    },
+                    "visible_reasoning_artifact_present": self._advisor_has_value(extra.get("visible_reasoning_trace")),
+                    "opaque_reasoning_signature_present": self._advisor_has_value(extra.get("provider_thought_signature"))
+                    or self._advisor_has_value(extra.get("opaque_reasoning_signature")),
+                    "system_fingerprint_present": self._advisor_has_value(extra.get("system_fingerprint")),
+                    "grounding_present": bool(grounding_chunks),
+                    "citations_present": bool(citation_objects),
+                    "response_preview": self._advisor_response_preview(trace.get("response_text")),
+                }
+            )
+
+        semantic_divergence = []
+        divergence_items = (history.get("semantic_divergence") or {}).get("items") or []
+        for row in divergence_items:
+            metadata_delta = row.get("metadata_surface_delta")
+            if not isinstance(metadata_delta, dict):
+                metadata_delta = {}
+            semantic_divergence.append(
+                {
+                    "left_trace_id": row.get("left_trace_id"),
+                    "right_trace_id": row.get("right_trace_id"),
+                    "classification_label_left": row.get("classification_label_left"),
+                    "classification_label_right": row.get("classification_label_right"),
+                    "classification_agreement": row.get("classification_agreement"),
+                    "contradiction_detected": row.get("contradiction_detected"),
+                    "semantic_overlap": row.get("semantic_overlap"),
+                    "claim_overlap": row.get("claim_overlap"),
+                    "rationale_overlap": row.get("rationale_overlap"),
+                    "output_length_delta": row.get("output_length_delta"),
+                    "token_delta": row.get("token_delta"),
+                    "latency_delta_ms": row.get("latency_delta_ms"),
+                    "metadata_surface_delta": {
+                        "left_only": metadata_delta.get("left_only") or [],
+                        "right_only": metadata_delta.get("right_only") or [],
+                        "delta_count": metadata_delta.get("delta_count", 0),
+                    },
+                    "visible_reasoning_delta": row.get("visible_reasoning_delta"),
+                    "provider_specific_artifact_delta": row.get("provider_specific_artifact_delta"),
+                }
+            )
+
+        return {
+            "context_type": "playground_advisor_context",
+            "session": {
+                "session_id": history_session.get("session_id") or session.get("id"),
+                "mode": history_session.get("mode") or session.get("mode"),
+                "status": history_session.get("status") or session.get("status"),
+                "created_at_utc": history_session.get("created_at_utc") or session.get("created_at_utc"),
+                "integrity_status": integrity_status,
+            },
+            "prompt": {
+                "prompt_sha256": prompt_sha256,
+                "dataset_version": dataset_version,
+            },
+            "providers": providers,
+            "executions": executions,
+            "semantic_divergence": semantic_divergence,
+            "integrity_overview": {
+                "metrics": integrity_overview.get("metrics") or {},
+                "alerts": integrity_overview.get("alerts") or [],
+            },
+            "transformation_lineage": lineage_summary,
+            "forensic_interpretation_hints": [
+                "Separate semantic agreement from artifact-surface divergence.",
+                "Do not treat visible reasoning artifacts as true hidden chain-of-thought.",
+                "Do not treat opaque provider thought signatures as human-readable reasoning.",
+                "Raw evidence is preserved in Playground but omitted from Advisor Context by default.",
+                "Canonical traces are derived forensic representations and should remain traceable to raw evidence.",
+            ],
+            "limitations": [
+                "Advisor Context is derived only from observable Playground artifacts.",
+                "It does not provide model intent, model weights, hidden reasoning, or private provider internals.",
+                "Raw evidence can be inspected through existing Playground artifact endpoints, not dumped into Advisor prompt context by default.",
+            ],
+        }
+
     def build_session_json_artifact(
         self,
         session_id: str,
@@ -1653,6 +1816,30 @@ class PlaygroundRuntimeService:
             return json.loads(raw)
         except Exception:
             return default
+
+    @staticmethod
+    def _advisor_provider_environment(provider_id: Any) -> str:
+        provider = str(provider_id or "").strip().lower()
+        if provider == "ollama":
+            return "local"
+        if provider in {"gemini", "openai", "anthropic", "deepseek"}:
+            return "cloud"
+        return "unknown"
+
+    @staticmethod
+    def _advisor_has_value(value: Any) -> bool:
+        if value is None:
+            return False
+        if isinstance(value, str):
+            return bool(value.strip())
+        return bool(value)
+
+    @staticmethod
+    def _advisor_response_preview(text: Any, limit: int = 240) -> str:
+        normalized = " ".join(str(text or "").split())
+        if len(normalized) <= limit:
+            return normalized
+        return normalized[: max(0, limit - 3)].rstrip() + "..."
 
     def _decode_raw_evidence_row(self, row: dict) -> dict:
         return {
