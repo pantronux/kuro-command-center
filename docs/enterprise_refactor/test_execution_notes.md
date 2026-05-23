@@ -7,6 +7,7 @@ Scope:
 - V2 architecture/deployment documentation continuity
 - V3 enterprise refactor documentation continuity
 - Current single-shell V1 redesign with Tool Runtime V2 composer wiring
+- Final prototype cleanup after merging the visual direction into the main shell
 
 ## Commands Executed
 
@@ -15,6 +16,8 @@ python3 -m compileall kuro_backend main.py
 python3 -m pytest tests/test_version.py -q
 python3 -m pytest tests/test_chat_v2.py::test_legacy_stream_accepts_tool_context_and_persists_session_settings tests/test_tools_v2.py -x --tb=short
 python3 -m pytest tests/ -x --tb=short -k "frontend or template or ui"
+python3 -m pytest tests/ -x --tb=short
+python3 -m pytest tests/test_frontend_v1_redesign.py -q
 python3 -m pytest tests/ -x --tb=short
 ```
 
@@ -33,6 +36,8 @@ Result: skipped because `ruff` is not installed in this environment.
 - Tool Runtime + legacy stream targeted gate: `11 passed`.
 - Frontend/template/UI subset: `78 passed, 507 deselected`.
 - Full regression suite: `585 passed`.
+- Post-cleanup V1 frontend shell contract: `5 passed`.
+- Post-cleanup full regression suite: `578 passed`.
 
 ## Fixes Applied During This Test Pass
 
@@ -49,6 +54,8 @@ Result: skipped because `ruff` is not installed in this environment.
 - Made two tests deterministic under locally enabled `.env` flags:
   - vocabulary sanitizer now explicitly tests with dev mode off
   - runtime fallback test now explicitly tests with strict mode off
+- Removed UI V2 reference/prototype scaffolding from the main line after the
+  production V1 runtime shell absorbed the design direction.
 
 ## Documentation Coverage
 
@@ -69,6 +76,7 @@ Verified final enterprise docs exist:
 - `docs/enterprise_refactor/18_next_improvement_backlog.md`
 
 Verified architecture docs directory is present with current and target runtime maps.
+Verified prototype-only UI reference directories are no longer present in the main line.
 
 ## Residual Warnings
 

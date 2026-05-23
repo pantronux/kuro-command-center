@@ -1260,7 +1260,8 @@ body.kuro-redesign-v1 select:focus-visible {
 
 /* ============================================
    Prototype skin pass
-   Source direction: Kuro-UI-Prototype-main/artifacts/kuro-ai.
+   Source direction: finalized dark-gray prototype language, now folded into
+   the production V1 runtime shell.
    This block intentionally sits last: it skins the live V1 DOM while keeping
    the existing IDs, JS handlers, chat runtime, persona state, and playground
    backend hooks untouched.

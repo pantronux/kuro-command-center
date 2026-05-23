@@ -11,6 +11,7 @@ This supports moving toward one main production-ready Kuro version that combines
 - V2 architecture and deployment documentation continuity
 - V3 enterprise refactor functionality
 - Current single-shell UI with production wiring to existing backend runtimes
+- No temporary UI V2 reference/prototype scaffolding in the main production path
 
 ## Acceptance Gate Results
 
@@ -21,6 +22,8 @@ This supports moving toward one main production-ready Kuro version that combines
 | Tool Runtime + stream targeted | `python3 -m pytest tests/test_chat_v2.py::test_legacy_stream_accepts_tool_context_and_persists_session_settings tests/test_tools_v2.py -x --tb=short` | `11 passed` |
 | Frontend/template/UI subset | `python3 -m pytest tests/ -x --tb=short -k "frontend or template or ui"` | `78 passed, 507 deselected` |
 | Full regression suite | `python3 -m pytest tests/ -x --tb=short` | `585 passed` |
+| Post-cleanup V1 frontend shell contract | `python3 -m pytest tests/test_frontend_v1_redesign.py -q` | `5 passed` |
+| Post-cleanup full regression suite | `python3 -m pytest tests/ -x --tb=short` | `578 passed` |
 
 Optional lint:
 - `ruff check .` was not executed because `ruff` is not installed in this environment.
@@ -54,6 +57,11 @@ Optional lint:
 
 5. Two tests were sensitive to locally enabled `.env` flags.
    - Fixed by making those tests explicitly define the required env state.
+
+6. Prototype scaffolding remained after the visual direction was folded into V1.
+   - Removed `docs/ui_v2_reference/`.
+   - Removed `web_interface/prototypes/`.
+   - Removed the prototype-porting prompt and reference-only test.
 
 ## Production Readiness Notes
 

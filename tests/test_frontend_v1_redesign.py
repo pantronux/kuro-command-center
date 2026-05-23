@@ -47,6 +47,8 @@ def test_v1_dashboard_is_the_only_frontend_shell():
     assert not (ROOT / "web_interface" / "templates" / "index_v2.html").exists()
     assert not (ROOT / "web_interface" / "static" / "css" / "v2.css").exists()
     assert not (ROOT / "web_interface" / "static" / "js" / "v2").exists()
+    assert not (ROOT / "web_interface" / "prototypes").exists()
+    assert not (ROOT / "docs" / "ui_v2_reference").exists()
     assert 'return "index.html"' in main
     assert "KURO_FRONTEND_V2_ENABLED" not in main
     assert "index_v2" not in main
