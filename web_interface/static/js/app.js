@@ -1746,11 +1746,15 @@ function applySidebarCollapse(collapsed) {
     elements.sidebar.setAttribute('data-collapsed', collapsed);
     elements.mainContent.classList.toggle('sidebar-collapsed', collapsed);
     document.body.classList.toggle('sidebar-collapsed-shell', collapsed);
-    elements.minimizeSidebar.classList.toggle('collapsed', collapsed);
+    if (elements.minimizeSidebar) {
+        elements.minimizeSidebar.classList.toggle('collapsed', collapsed);
+        elements.minimizeSidebar.setAttribute('aria-label', collapsed ? 'Show sidebar' : 'Hide sidebar');
+        elements.minimizeSidebar.setAttribute('title', collapsed ? 'Show sidebar' : 'Hide sidebar');
+    }
     localStorage.setItem('kuro-sidebar-collapsed', collapsed);
 
     // Update icon
-    const icon = elements.minimizeSidebar.querySelector('i');
+    const icon = elements.minimizeSidebar?.querySelector('i');
     if (icon) {
         icon.setAttribute('data-lucide', collapsed ? 'panel-left-open' : 'panel-left-close');
         lucide.createIcons();

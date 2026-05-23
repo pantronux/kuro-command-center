@@ -1773,3 +1773,71 @@ body.kuro-redesign-v1 .session-item:hover {
         max-width: 116px !important;
     }
 }
+
+/* Keep the sidebar restore control visible after the rail is collapsed. */
+body.kuro-redesign-v1 #minimizeSidebar.sidebar-collapse-toggle {
+    width: 34px !important;
+    height: 34px !important;
+    min-width: 34px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    border: 1px solid transparent !important;
+    border-radius: var(--radius-sm) !important;
+    background: transparent !important;
+    color: var(--text-secondary) !important;
+    position: relative !important;
+    z-index: 6 !important;
+}
+
+body.kuro-redesign-v1 #minimizeSidebar.sidebar-collapse-toggle:hover,
+body.kuro-redesign-v1 #minimizeSidebar.sidebar-collapse-toggle:focus-visible {
+    background: var(--bg-tertiary) !important;
+    border-color: var(--border-subtle) !important;
+    color: var(--text-primary) !important;
+}
+
+body.kuro-redesign-v1 #minimizeSidebar.sidebar-collapse-toggle i,
+body.kuro-redesign-v1 #minimizeSidebar.sidebar-collapse-toggle svg {
+    width: 18px !important;
+    height: 18px !important;
+    color: currentColor !important;
+    stroke: currentColor !important;
+}
+
+body.kuro-redesign-v1 #sidebar.sidebar[data-collapsed="true"] .sidebar-logo {
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 10px !important;
+    padding: 8px 0 14px !important;
+}
+
+body.kuro-redesign-v1 #sidebar.sidebar[data-collapsed="true"] .sidebar-logo-area {
+    justify-content: center !important;
+}
+
+body.kuro-redesign-v1 #sidebar.sidebar[data-collapsed="true"] .sidebar-logo > .flex:last-child {
+    display: flex !important;
+}
+
+body.kuro-redesign-v1 #sidebar.sidebar[data-collapsed="true"] #minimizeSidebar.sidebar-collapse-toggle {
+    display: inline-flex !important;
+    width: 36px !important;
+    height: 36px !important;
+    min-width: 36px !important;
+    background: var(--bg-tertiary) !important;
+    border-color: var(--border-subtle) !important;
+}
+
+@media (min-width: 1024px) {
+    body.kuro-redesign-v1 #closeSidebar {
+        display: none !important;
+    }
+}
+
+@media (max-width: 1023px) {
+    body.kuro-redesign-v1 #minimizeSidebar.sidebar-collapse-toggle {
+        display: none !important;
+    }
+}

@@ -13,6 +13,17 @@ KURO_BACKUP_DIR=/opt/kuro/backups
 JWT_SECRET_KEY=<long random value>
 ```
 
+For the stable runtime posture, start from the production-style template:
+
+```bash
+cp .env.production.example .env
+```
+
+That template enables the completed Kuro runtime flags while keeping them as
+rollback switches. If a subsystem regresses, flip its specific `KURO_*_ENABLED`
+flag to `false` and restart instead of reverting code first. Keep
+`KURO_DEV_MODE=false` on this profile.
+
 Store `.env` outside web-accessible paths and restrict permissions:
 
 ```bash

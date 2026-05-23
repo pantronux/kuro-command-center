@@ -41,7 +41,7 @@ if "phoenix" not in sys.modules:
     sys.modules["phoenix"] = fake_phoenix
 
 import main
-from kuro_backend.enterprise_ops.deployment_profiles import DEPLOYMENT_PROFILES
+from kuro_backend.enterprise_ops.deployment_profiles import DEPLOYMENT_PROFILES, STABLE_RUNTIME_FLAGS
 from kuro_backend.enterprise_ops.startup_validation import (
     log_startup_validation,
     validate_startup_environment,
@@ -78,6 +78,35 @@ def test_env_example_contains_required_keys():
     assert "Bearer " not in env_example
 
 
+def test_production_env_example_uses_stable_flags_without_secrets():
+    env_text = (PROJECT_ROOT / ".env.production.example").read_text(encoding="utf-8")
+
+    required_keys = [
+        "KURO_DEPLOYMENT_PROFILE",
+        "JWT_SECRET_KEY",
+        "GEMINI_API_KEY",
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "TELEGRAM_TOKEN",
+        "TELEGRAM_CHAT_ID",
+        "OPENCLAW_ENABLED",
+        "KURO_BACKUP_ENABLED",
+    ]
+    for key in required_keys:
+        assert f"{key}=" in env_text
+
+    for flag, enabled in STABLE_RUNTIME_FLAGS.items():
+        expected = "true" if enabled else "false"
+        assert f"{flag}={expected}" in env_text
+
+    assert "KURO_DEV_MODE=false" in env_text
+    assert "OPENCLAW_ENABLED=false" in env_text
+    assert "sk-" not in env_text
+    assert "Bearer " not in env_text
+    assert "dummy-" not in env_text
+
+
 def test_deployment_profiles_exist():
     assert set(DEPLOYMENT_PROFILES) == {
         "local-dev",
@@ -87,6 +116,22 @@ def test_deployment_profiles_exist():
         "enterprise-pilot",
     }
     assert DEPLOYMENT_PROFILES["enterprise-pilot"].recommended_flags["KURO_BACKUP_ENABLED"] is True
+
+
+def test_stable_profiles_recommend_completed_runtime_flags():
+    for profile_id in ("single-vm", "staging", "enterprise-pilot"):
+        flags = DEPLOYMENT_PROFILES[profile_id].recommended_flags
+        for flag, enabled in STABLE_RUNTIME_FLAGS.items():
+            assert flags[flag] is enabled
+
+
+def test_local_dev_profile_remains_conservative():
+    flags = DEPLOYMENT_PROFILES["local-dev"].recommended_flags
+
+    assert flags["KURO_API_V2_ENABLED"] is False
+    assert flags["KURO_ENTERPRISE_OBSERVABILITY_ENABLED"] is False
+    assert "KURO_MEMORY_V3_ENABLED" not in flags
+    assert "KURO_DEV_MODE" not in flags
 
 
 def test_startup_validation_masks_secrets():

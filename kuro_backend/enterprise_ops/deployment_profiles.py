@@ -6,6 +6,30 @@ from dataclasses import dataclass, field
 from typing import Dict, Tuple
 
 
+STABLE_RUNTIME_FLAGS: Dict[str, bool] = {
+    "KURO_PLAYGROUND_ENABLED": True,
+    "KURO_PLAYGROUND_API_ENABLED": True,
+    "KURO_V2_STRICT_MODE": True,
+    "KURO_PROVIDER_ROUTER_ENABLED": True,
+    "KURO_DEV_MODE": False,
+    "KURO_ENTERPRISE_REFACTOR_ENABLED": True,
+    "KURO_MEMORY_V3_ENABLED": True,
+    "KURO_STORAGE_V2_ENABLED": True,
+    "KURO_CHAT_V2_ENABLED": True,
+    "KURO_MARKET_SENTINEL_V2_ENABLED": True,
+    "KURO_TELEGRAM_V2_ENABLED": True,
+    "KURO_PROVIDER_REGISTRY_V2_ENABLED": True,
+    "KURO_AGENT_TOOLS_V2_ENABLED": True,
+    "KURO_TASKS_V2_ENABLED": True,
+    "KURO_DEEP_RESEARCH_V2_ENABLED": True,
+    "KURO_WEB_SEARCH_V2_ENABLED": True,
+    "KURO_ADMIN_SETTINGS_V2_ENABLED": True,
+    "KURO_ENTERPRISE_OBSERVABILITY_ENABLED": True,
+    "KURO_API_V2_ENABLED": True,
+    "OPENCLAW_ENABLED": False,
+}
+
+
 @dataclass(frozen=True)
 class DeploymentProfile:
     profile_id: str
@@ -48,8 +72,7 @@ DEPLOYMENT_PROFILES: Dict[str, DeploymentProfile] = {
         required_env=("JWT_SECRET_KEY", "WORKING_DIR"),
         optional_env=("GEMINI_API_KEY", "TELEGRAM_TOKEN", "TELEGRAM_CHAT_ID", "SERPER_API_KEY"),
         recommended_flags={
-            "KURO_API_V2_ENABLED": True,
-            "KURO_ENTERPRISE_OBSERVABILITY_ENABLED": True,
+            **STABLE_RUNTIME_FLAGS,
             "KURO_BACKUP_ENABLED": True,
         },
         notes=("Mount WORKING_DIR and backups on persistent storage.", "Restrict Phoenix to trusted networks."),
@@ -73,8 +96,7 @@ DEPLOYMENT_PROFILES: Dict[str, DeploymentProfile] = {
         required_env=("JWT_SECRET_KEY", "WORKING_DIR"),
         optional_env=("GEMINI_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "SERPER_API_KEY"),
         recommended_flags={
-            "KURO_API_V2_ENABLED": True,
-            "KURO_ENTERPRISE_OBSERVABILITY_ENABLED": True,
+            **STABLE_RUNTIME_FLAGS,
         },
         notes=("Use non-production Telegram chats.", "Run backup restore verification before promotion."),
     ),
@@ -93,8 +115,7 @@ DEPLOYMENT_PROFILES: Dict[str, DeploymentProfile] = {
             "TELEGRAM_CHAT_ID",
         ),
         recommended_flags={
-            "KURO_API_V2_ENABLED": True,
-            "KURO_ENTERPRISE_OBSERVABILITY_ENABLED": True,
+            **STABLE_RUNTIME_FLAGS,
             "KURO_BACKUP_ENABLED": True,
         },
         notes=("Review secrets rotation.", "Verify backups and admin access before go-live."),

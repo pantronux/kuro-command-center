@@ -46,9 +46,16 @@ from kuro_backend import enterprise_flags
 def _clean_env() -> dict[str, str]:
     env = os.environ.copy()
     env["PYTHONPATH"] = str(PROJECT_ROOT)
+    env["PYTHON_DOTENV_DISABLED"] = "1"
     for flag in enterprise_flags.ENTERPRISE_FLAG_NAMES:
         env[flag] = ""
-    for key in ("GEMINI_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY"):
+    for key in (
+        "GEMINI_API_KEY",
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "KURO_OLLAMA_ENABLED",
+    ):
         env[key] = ""
     return env
 

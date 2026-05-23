@@ -320,7 +320,7 @@
     </style>
 
     <!-- Index-only revamp source of truth. Loaded after legacy styles to prevent cascade regressions. -->
-    <link rel="stylesheet" href="/static/css/index_revamp.css?v=20260523-9">
+    <link rel="stylesheet" href="/static/css/index_revamp.css?v=20260523-10">
 </head>
 
 <body class="kuro-redesign-v1 min-h-screen transition-colors duration-300">
@@ -361,8 +361,10 @@
                     <div class="flex items-center gap-1">
                         <!-- Minimize button (desktop only) -->
                         <button id="minimizeSidebar"
-                            class="hidden lg:flex p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                            title="Minimize sidebar">
+                            type="button"
+                            class="sidebar-collapse-toggle p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                            title="Hide sidebar"
+                            aria-label="Hide sidebar">
                             <i data-lucide="panel-left-close" class="w-5 h-5 text-gray-600 dark:text-gray-300"></i>
                         </button>
                         <button id="closeSidebar"
@@ -1402,7 +1404,7 @@
     </script>
 
     <!-- Custom JS -->
-    <script src="/static/js/app.js?v=20260523-9"></script>
+    <script src="/static/js/app.js?v=20260523-10"></script>
 
 </body>
 

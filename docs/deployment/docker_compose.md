@@ -13,7 +13,9 @@ cp .env.example .env
 chmod 600 .env
 ```
 
-Fill real secrets only in `.env`.
+Fill real secrets only in `.env`. For staging-like or production-like Compose
+runs, copy `.env.production.example` instead; it enables stable runtime flags
+and keeps `OPENCLAW_ENABLED=false` until the daemon is deployed.
 
 ## Run App
 

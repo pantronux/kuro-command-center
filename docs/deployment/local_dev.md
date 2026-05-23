@@ -15,6 +15,10 @@ JWT_SECRET_KEY=<local random value>
 Provider keys, Telegram, Serper, and OpenClaw are optional. Missing optional
 keys should produce startup warnings only.
 
+Local development intentionally keeps most enterprise/stable runtime flags off
+unless a developer enables them in `.env`. Use `.env.production.example` only
+when you want to mirror staging or pilot behavior locally.
+
 ## Run
 
 ```bash

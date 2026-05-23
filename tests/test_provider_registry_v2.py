@@ -128,10 +128,12 @@ def test_missing_keys_do_not_break_startup(monkeypatch):
     monkeypatch.setattr(main.settings, "OPENAI_API_KEY", "", raising=False)
     monkeypatch.setattr(main.settings, "ANTHROPIC_API_KEY", "", raising=False)
     monkeypatch.setattr(main.settings, "DEEPSEEK_API_KEY", "", raising=False)
+    monkeypatch.setattr(main.settings, "KURO_OLLAMA_ENABLED", False, raising=False)
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.delenv("KURO_OLLAMA_ENABLED", raising=False)
 
     health = ProviderRegistryV2().health_check()
 

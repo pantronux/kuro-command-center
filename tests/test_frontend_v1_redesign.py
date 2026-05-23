@@ -18,8 +18,11 @@ def test_v1_dashboard_uses_dark_gray_redesign_shell():
 
     assert 'class="kuro-redesign-v1' in html
     assert "/static/css/index_revamp.css" in html
-    assert "index_revamp.css?v=20260523-9" in html
+    assert "index_revamp.css?v=20260523-10" in html
     assert "id=\"composerActionMenu\"" in html
+    assert "id=\"minimizeSidebar\"" in html
+    assert "sidebar-collapse-toggle" in html
+    assert "title=\"Hide sidebar\"" in html
     assert "profile-menu-trigger" in html
     assert "<span>K</span>" in html
     assert '<img src="/profile/kuro_avatar.png"' not in html
@@ -38,6 +41,9 @@ def test_v1_dashboard_uses_dark_gray_redesign_shell():
     assert "--conversation-width: 900px" in revamp_css
     assert "#stopGeneratingBtn.hidden" in revamp_css
     assert "#chatContainer > .flex-row-reverse" in revamp_css
+    assert "#minimizeSidebar.sidebar-collapse-toggle" in revamp_css
+    assert '#sidebar.sidebar[data-collapsed="true"] #minimizeSidebar' in revamp_css
+    assert "Show sidebar" in APP_JS.read_text(encoding="utf-8")
 
 
 def test_v1_dashboard_is_the_only_frontend_shell():
