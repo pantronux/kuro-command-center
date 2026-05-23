@@ -36,7 +36,6 @@ DEPLOYMENT_PROFILES: Dict[str, DeploymentProfile] = {
         required_env=("JWT_SECRET_KEY",),
         optional_env=("GEMINI_API_KEY", "TELEGRAM_TOKEN", "TELEGRAM_CHAT_ID", "SERPER_API_KEY"),
         recommended_flags={
-            "KURO_FRONTEND_V2_ENABLED": False,
             "KURO_API_V2_ENABLED": False,
             "KURO_ENTERPRISE_OBSERVABILITY_ENABLED": False,
         },
@@ -75,7 +74,6 @@ DEPLOYMENT_PROFILES: Dict[str, DeploymentProfile] = {
         optional_env=("GEMINI_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "SERPER_API_KEY"),
         recommended_flags={
             "KURO_API_V2_ENABLED": True,
-            "KURO_FRONTEND_V2_ENABLED": True,
             "KURO_ENTERPRISE_OBSERVABILITY_ENABLED": True,
         },
         notes=("Use non-production Telegram chats.", "Run backup restore verification before promotion."),
@@ -96,7 +94,6 @@ DEPLOYMENT_PROFILES: Dict[str, DeploymentProfile] = {
         ),
         recommended_flags={
             "KURO_API_V2_ENABLED": True,
-            "KURO_FRONTEND_V2_ENABLED": True,
             "KURO_ENTERPRISE_OBSERVABILITY_ENABLED": True,
             "KURO_BACKUP_ENABLED": True,
         },

@@ -1,0 +1,1375 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kuro AI — V2.1 Runtime Sovereign</title>
+  <style>
+    /* ─── Design Tokens ─── */
+    :root {
+      --bg-primary:     #1a1a1a;
+      --bg-secondary:   #212121;
+      --bg-tertiary:    #2a2a2a;
+      --bg-hover:       #2f2f2f;
+      --bg-active:      #333333;
+      --border-subtle:  #383838;
+      --accent-primary: #0d9488;
+      --accent-hover:   #0f766e;
+      --text-primary:   #f5f5f5;
+      --text-secondary: #a3a3a3;
+      --status-error:   #ef4444;
+      --radius-sm: 6px;
+      --radius-md: 10px;
+      --radius-lg: 14px;
+      --radius-xl: 20px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ─── Layout ─── */
+    .app { display: flex; height: 100vh; overflow: hidden; }
+
+    /* ─── Sidebar ─── */
+    .sidebar {
+      width: 228px;
+      min-width: 228px;
+      background: var(--bg-secondary);
+      border-right: 1px solid var(--border-subtle);
+      display: flex;
+      flex-direction: column;
+      padding: 12px;
+      gap: 8px;
+      overflow: hidden;
+    }
+
+    .sidebar-logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 4px;
+    }
+    .logo-avatar {
+      width: 34px; height: 34px;
+      background: var(--accent-primary);
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 700; font-size: 15px; color: #fff; flex-shrink: 0;
+    }
+    .logo-text { line-height: 1.2; }
+    .logo-text .name { font-weight: 700; font-size: 14px; }
+    .logo-text .sub  { font-size: 11px; color: var(--text-secondary); }
+
+    .btn-new-chat {
+      width: 100%;
+      background: var(--accent-primary);
+      color: #fff;
+      border: none;
+      border-radius: var(--radius-md);
+      padding: 10px 14px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: background .15s;
+      flex-shrink: 0;
+    }
+    .btn-new-chat:hover { background: var(--accent-hover); }
+
+    .search-box {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 8px 10px;
+      flex-shrink: 0;
+    }
+    .search-box input {
+      background: transparent;
+      border: none;
+      outline: none;
+      color: var(--text-primary);
+      font-size: 13px;
+      width: 100%;
+    }
+    .search-box input::placeholder { color: var(--text-secondary); }
+    .search-icon { color: var(--text-secondary); font-size: 13px; }
+
+    .sidebar-section-label {
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      padding: 6px 4px 2px;
+    }
+
+    .chat-list { display: flex; flex-direction: column; gap: 2px; overflow-y: auto; flex: 1; }
+    .chat-list::-webkit-scrollbar { width: 3px; }
+    .chat-list::-webkit-scrollbar-thumb { background: var(--border-subtle); border-radius: 3px; }
+
+    .chat-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 7px 8px;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      font-size: 13px;
+      color: var(--text-primary);
+      transition: background .12s;
+      position: relative;
+    }
+    .chat-item:hover { background: var(--bg-hover); }
+    .chat-item.active {
+      background: var(--bg-active);
+      border-left: 2px solid var(--accent-primary);
+      padding-left: 6px;
+    }
+    .chat-item-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .chat-item-actions {
+      display: flex; gap: 4px;
+      opacity: 0;
+      transition: opacity .12s;
+    }
+    .chat-item:hover .chat-item-actions,
+    .chat-item.active .chat-item-actions { opacity: 1; }
+    .icon-btn {
+      background: none; border: none; color: var(--text-secondary);
+      cursor: pointer; padding: 2px 3px; border-radius: 4px; font-size: 12px;
+      transition: color .12s, background .12s;
+    }
+    .icon-btn:hover { color: var(--text-primary); background: var(--bg-active); }
+
+    .pin-icon { color: var(--accent-primary); font-size: 11px; }
+
+    .btn-more {
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-secondary);
+      border-radius: var(--radius-sm);
+      padding: 5px 14px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: background .12s;
+      align-self: flex-start;
+    }
+    .btn-more:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+    .sidebar-user {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 8px;
+      border-top: 1px solid var(--border-subtle);
+      margin-top: auto; flex-shrink: 0;
+    }
+    .user-avatar {
+      width: 32px; height: 32px;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border-subtle);
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 600; font-size: 13px; color: var(--text-secondary);
+    }
+    .user-info .user-name { font-size: 13px; font-weight: 600; }
+    .user-info .user-role { font-size: 11px; color: var(--text-secondary); }
+
+    /* ─── Main ─── */
+    .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+    /* ─── Header ─── */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 20px;
+      height: 60px;
+      border-bottom: 1px solid var(--border-subtle);
+      flex-shrink: 0;
+      background: var(--bg-secondary);
+    }
+    .header-left .label { font-size: 11px; color: var(--text-secondary); }
+    .header-left .title { font-size: 16px; font-weight: 700; }
+
+    .header-right {
+      display: flex; align-items: center; gap: 8px;
+    }
+    .mode-toggle {
+      display: flex;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-xl);
+      padding: 3px;
+    }
+    .mode-btn {
+      background: none; border: none; color: var(--text-secondary);
+      padding: 5px 14px; border-radius: 20px; font-size: 13px;
+      cursor: pointer; transition: all .15s;
+    }
+    .mode-btn.active {
+      background: var(--accent-primary);
+      color: #fff;
+    }
+    .header-icon-btn {
+      width: 34px; height: 34px;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border-subtle);
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; color: var(--text-secondary); font-size: 14px;
+      transition: background .12s, color .12s;
+    }
+    .header-icon-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+    .profile-btn {
+      width: 34px; height: 34px;
+      background: var(--accent-primary);
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 700; font-size: 14px; color: #fff;
+      cursor: pointer; border: none;
+      position: relative;
+    }
+    .profile-badge {
+      position: absolute; top: -2px; right: -2px;
+      width: 10px; height: 10px;
+      background: var(--status-error);
+      border-radius: 50%;
+      border: 2px solid var(--bg-secondary);
+    }
+    .chevron-btn {
+      background: none; border: none; color: var(--text-secondary);
+      cursor: pointer; padding: 4px; font-size: 12px;
+    }
+
+    /* ─── Chat area ─── */
+    .chat-area {
+      flex: 1; overflow-y: auto;
+      padding: 32px 20px;
+      display: flex; flex-direction: column; gap: 20px;
+    }
+    .chat-area::-webkit-scrollbar { width: 4px; }
+    .chat-area::-webkit-scrollbar-thumb { background: var(--border-subtle); border-radius: 4px; }
+
+    /* Welcome screen */
+    .welcome {
+      flex: 1; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 16px;
+      padding: 40px;
+    }
+    .welcome-avatar {
+      width: 64px; height: 64px;
+      background: var(--accent-primary);
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 700; font-size: 28px; color: #fff;
+    }
+    .welcome h2 { font-size: 26px; font-weight: 700; text-align: center; }
+    .welcome p  { color: var(--text-secondary); font-size: 14px; text-align: center; }
+    .quick-chips {
+      display: flex; flex-wrap: wrap; gap: 10px;
+      justify-content: center; margin-top: 8px;
+    }
+    .chip {
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      padding: 10px 16px;
+      font-size: 13px; cursor: pointer;
+      transition: background .12s, border-color .12s;
+      text-align: center; max-width: 160px;
+    }
+    .chip:hover { background: var(--bg-hover); border-color: var(--accent-primary); }
+
+    /* Messages */
+    .msg-row { display: flex; gap: 12px; align-items: flex-start; }
+    .msg-row.user { justify-content: flex-end; }
+
+    .msg-avatar {
+      width: 32px; height: 32px; border-radius: 50%;
+      background: var(--accent-primary);
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 700; font-size: 13px; color: #fff;
+      flex-shrink: 0; margin-top: 2px;
+    }
+
+    .msg-bubble {
+      max-width: 65%;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      padding: 12px 16px;
+      font-size: 14px; line-height: 1.55;
+    }
+    .msg-row.user .msg-bubble {
+      background: var(--accent-primary);
+      border-color: var(--accent-primary);
+      color: #fff;
+      border-radius: var(--radius-lg) var(--radius-lg) 4px var(--radius-lg);
+    }
+    .msg-row.ai .msg-bubble {
+      border-radius: var(--radius-lg) var(--radius-lg) var(--radius-lg) 4px;
+    }
+
+    /* ─── Composer ─── */
+    .composer-wrap {
+      padding: 12px 16px 16px;
+      flex-shrink: 0;
+    }
+    .composer {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-xl);
+      overflow: hidden;
+    }
+    .composer-attachments {
+      display: flex; gap: 8px;
+      padding: 10px 14px 0;
+      flex-wrap: wrap;
+    }
+    .attachment-chip {
+      display: flex; align-items: center; gap: 6px;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+      padding: 4px 8px;
+      font-size: 12px; color: var(--text-secondary);
+    }
+    .attachment-chip button {
+      background: none; border: none; color: var(--text-secondary);
+      cursor: pointer; font-size: 11px; padding: 0;
+    }
+    .composer-row {
+      display: flex; align-items: center; gap: 8px;
+      padding: 10px 12px;
+    }
+    .composer-add {
+      width: 30px; height: 30px; flex-shrink: 0;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border-subtle);
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; font-size: 16px; color: var(--text-secondary);
+      transition: background .12s, color .12s;
+    }
+    .composer-add:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+    .composer-input {
+      flex: 1;
+      background: transparent;
+      border: none; outline: none;
+      color: var(--text-primary);
+      font-size: 14px;
+      resize: none;
+      max-height: 120px;
+      font-family: inherit;
+    }
+    .composer-input::placeholder { color: var(--text-secondary); }
+
+    .model-selector {
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 6px 10px;
+      font-size: 12px; color: var(--text-secondary);
+      cursor: pointer; white-space: nowrap;
+      display: flex; align-items: center; gap: 4px;
+      transition: background .12s;
+    }
+    .model-selector:hover { background: var(--bg-hover); }
+
+    .send-btn {
+      width: 36px; height: 36px;
+      background: var(--accent-primary);
+      border: none; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; color: #fff; font-size: 16px;
+      transition: background .15s, transform .1s;
+      flex-shrink: 0;
+    }
+    .send-btn:hover { background: var(--accent-hover); transform: scale(1.05); }
+
+    /* ─── Popup / Dropdown Menu ─── */
+    .overlay {
+      position: fixed; inset: 0; z-index: 40;
+    }
+    .dropdown-menu {
+      position: fixed;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      overflow: hidden;
+      z-index: 50;
+      min-width: 160px;
+      box-shadow: 0 8px 32px rgba(0,0,0,.4);
+    }
+    .dropdown-item {
+      display: flex; align-items: center; gap: 8px;
+      padding: 9px 14px;
+      font-size: 13px; cursor: pointer;
+      transition: background .12s;
+    }
+    .dropdown-item:hover { background: var(--bg-hover); }
+    .dropdown-item.danger { color: var(--status-error); }
+    .dropdown-divider { height: 1px; background: var(--border-subtle); margin: 4px 0; }
+
+    /* ─── Plus menu ─── */
+    .plus-menu {
+      position: fixed;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      z-index: 50;
+      min-width: 200px;
+      box-shadow: 0 8px 32px rgba(0,0,0,.4);
+      overflow: hidden;
+    }
+    .plus-menu-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 16px; font-size: 13px; cursor: pointer;
+      transition: background .12s;
+    }
+    .plus-menu-item:hover { background: var(--bg-hover); }
+    .plus-menu-item .mi { color: var(--text-secondary); font-size: 14px; }
+
+    /* ─── Profile dropdown ─── */
+    .profile-dropdown {
+      position: fixed; top: 60px; right: 12px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      z-index: 50; width: 220px;
+      box-shadow: 0 8px 32px rgba(0,0,0,.4);
+      overflow: hidden;
+    }
+    .profile-header {
+      padding: 14px 16px 10px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .profile-header .pname { font-weight: 700; font-size: 14px; }
+    .profile-header .prole { font-size: 12px; color: var(--text-secondary); }
+
+    /* ─── Modal ─── */
+    .modal-backdrop {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,.5);
+      z-index: 60;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .modal {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      padding: 24px;
+      min-width: 340px; max-width: 420px; width: 90%;
+      box-shadow: 0 16px 48px rgba(0,0,0,.5);
+    }
+    .modal h3 { font-size: 17px; font-weight: 700; margin-bottom: 16px; }
+    .modal-input {
+      width: 100%;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      color: var(--text-primary);
+      font-size: 14px; padding: 10px 12px;
+      outline: none; font-family: inherit;
+    }
+    .modal-input:focus { border-color: var(--accent-primary); }
+    .modal-body { font-size: 14px; color: var(--text-secondary); margin-bottom: 20px; }
+    .modal-actions {
+      display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;
+    }
+    .btn-cancel {
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-primary);
+      border-radius: var(--radius-sm);
+      padding: 8px 16px; font-size: 13px; cursor: pointer;
+    }
+    .btn-save {
+      background: var(--accent-primary);
+      border: none; color: #fff;
+      border-radius: var(--radius-sm);
+      padding: 8px 16px; font-size: 13px; cursor: pointer;
+    }
+    .btn-delete {
+      background: var(--status-error);
+      border: none; color: #fff;
+      border-radius: var(--radius-sm);
+      padding: 8px 16px; font-size: 13px; cursor: pointer;
+    }
+
+    /* ─── Deep Research Drawer ─── */
+    .drawer {
+      position: fixed; top: 60px; right: 16px;
+      width: 400px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      z-index: 55;
+      box-shadow: 0 16px 48px rgba(0,0,0,.5);
+      overflow: hidden;
+    }
+    .drawer-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .drawer-header h3 { font-size: 16px; font-weight: 700; }
+    .drawer-body { padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+    .drawer-label { font-size: 13px; font-weight: 500; color: var(--text-secondary); margin-bottom: 6px; }
+    .drawer-input {
+      width: 100%;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      color: var(--text-primary);
+      font-size: 13px; padding: 9px 12px;
+      outline: none; font-family: inherit;
+    }
+    .drawer-input:focus { border-color: var(--accent-primary); }
+    .drawer-advanced {
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      padding: 12px 14px;
+      font-size: 13px; color: var(--text-secondary);
+    }
+    .drawer-footer {
+      display: flex; justify-content: flex-end; gap: 10px;
+      padding: 14px 20px;
+      border-top: 1px solid var(--border-subtle);
+    }
+    .btn-start {
+      background: var(--accent-primary);
+      border: none; color: #fff;
+      border-radius: var(--radius-sm);
+      padding: 9px 18px; font-size: 13px; cursor: pointer;
+      font-weight: 600;
+    }
+
+    /* ─── Market Drawer ─── */
+    .market-drawer {
+      position: absolute;
+      top: 140px; left: 50%;
+      transform: translateX(-30%);
+      width: 380px;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      padding: 20px;
+      display: flex; flex-direction: column; gap: 14px;
+    }
+    .market-drawer h3 { font-size: 16px; font-weight: 700; }
+    .market-result {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      padding: 14px;
+      min-height: 100px;
+      font-size: 13px; color: var(--text-secondary);
+    }
+
+    /* ─── Admin Settings ─── */
+    .admin-panel {
+      position: absolute; inset: 80px 20px 80px 240px;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      display: flex; overflow: hidden;
+    }
+    .admin-nav {
+      width: 220px; flex-shrink: 0;
+      background: var(--bg-secondary);
+      padding: 12px;
+      display: flex; flex-direction: column; gap: 2px;
+      overflow-y: auto;
+    }
+    .admin-nav-item {
+      padding: 9px 12px;
+      border-radius: var(--radius-sm);
+      font-size: 13px; cursor: pointer;
+      transition: background .12s;
+    }
+    .admin-nav-item:hover { background: var(--bg-hover); }
+    .admin-nav-item.active { background: var(--bg-active); color: var(--text-primary); font-weight: 500; }
+    .admin-content { flex: 1; padding: 20px; overflow-y: auto; }
+    .admin-close {
+      position: absolute; top: 12px; right: 12px;
+      width: 30px; height: 30px;
+      background: var(--bg-hover);
+      border: 1px solid var(--border-subtle);
+      border-radius: 50%;
+      cursor: pointer; font-size: 14px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .code-block {
+      background: #0f1117;
+      border-radius: var(--radius-sm);
+      padding: 16px;
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+      color: #94d0ff;
+      line-height: 1.6;
+    }
+
+    /* ─── Playground ─── */
+    .playground-wrap {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      padding: 20px;
+      overflow-y: auto;
+    }
+    .playground-panel {
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+    }
+    .pg-header {
+      background: var(--bg-secondary);
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    .pg-header h4 { font-size: 14px; font-weight: 600; color: var(--accent-primary); }
+    .pg-header p  { font-size: 12px; color: var(--text-secondary); }
+    .pg-grid {
+      display: grid; grid-template-columns: 1fr 1fr 1fr;
+      gap: 0;
+    }
+    .pg-col {
+      padding: 16px;
+      border-right: 1px solid var(--border-subtle);
+    }
+    .pg-col:last-child { border-right: none; }
+    .pg-col h5 { font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 12px; }
+    .pg-input {
+      width: 100%;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      color: var(--text-primary);
+      font-size: 12px; padding: 7px 10px; margin-bottom: 8px;
+      outline: none; font-family: inherit;
+    }
+    .btn-pg {
+      width: 100%; border: none;
+      border-radius: var(--radius-sm);
+      padding: 8px; font-size: 12px; cursor: pointer;
+      margin-bottom: 6px; font-weight: 500;
+    }
+    .btn-pg.teal { background: var(--accent-primary); color: #fff; }
+    .btn-pg.gray { background: var(--bg-hover); color: var(--text-primary); border: 1px solid var(--border-subtle); }
+    .btn-pg.orange { background: #d97706; color: #fff; }
+    .btn-pg.purple { background: #7c3aed; color: #fff; }
+    .btn-pg.blue   { background: #2563eb; color: #fff; }
+    .btn-pg.green  { background: #16a34a; color: #fff; }
+    .pg-checkbox { display: flex; align-items: center; gap: 6px; font-size: 12px; margin-bottom: 6px; }
+    .pg-checkbox input { accent-color: var(--accent-primary); }
+    .pg-output {
+      background: #0f1117;
+      border-top: 1px solid var(--border-subtle);
+      padding: 14px 16px;
+    }
+    .pg-output h5 {
+      font-size: 11px; font-weight: 600;
+      color: var(--accent-primary); letter-spacing: .08em;
+      text-transform: uppercase; margin-bottom: 8px;
+      display: flex; justify-content: space-between;
+    }
+    .pg-output pre {
+      font-family: 'Courier New', monospace;
+      font-size: 12px; color: #94d0ff; line-height: 1.6;
+    }
+    .pg-session-item {
+      padding: 8px 0;
+      border-bottom: 1px solid var(--border-subtle);
+      font-size: 11px;
+    }
+    .pg-session-item .sid { font-family: monospace; color: var(--text-secondary); font-size: 10px; }
+    .pg-session-item .verified { color: var(--accent-primary); font-size: 10px; font-weight: 600; }
+
+    /* ─── Notify cards ─── */
+    .notify-card {
+      position: fixed; right: 16px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      padding: 14px 16px;
+      max-width: 260px;
+      box-shadow: 0 8px 24px rgba(0,0,0,.3);
+      z-index: 45;
+    }
+    .notify-card h4 { font-size: 13px; font-weight: 700; margin-bottom: 5px; }
+    .notify-card p  { font-size: 12px; color: var(--text-secondary); line-height: 1.4; }
+
+    /* ─── Sidebar notice card ─── */
+    .sidebar-notice {
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 10px 12px;
+      margin-top: auto;
+      flex-shrink: 0;
+    }
+    .sidebar-notice h5 { font-size: 12px; font-weight: 600; margin-bottom: 4px; }
+    .sidebar-notice p  { font-size: 11px; color: var(--text-secondary); line-height: 1.4; }
+
+    /* Tab view for quick check */
+    .tab-row {
+      display: flex; border-bottom: 1px solid var(--border-subtle);
+      margin-bottom: 10px;
+    }
+    .tab {
+      padding: 6px 14px; font-size: 12px; cursor: pointer;
+      color: var(--text-secondary);
+      border-bottom: 2px solid transparent;
+      transition: color .12s;
+    }
+    .tab.active { color: var(--accent-primary); border-bottom-color: var(--accent-primary); }
+
+    /* Chat Settings card */
+    .settings-card {
+      position: fixed; right: 16px; bottom: 100px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      padding: 16px;
+      min-width: 260px;
+      box-shadow: 0 8px 24px rgba(0,0,0,.3);
+      z-index: 45;
+    }
+    .settings-card h4 { font-size: 14px; font-weight: 700; margin-bottom: 10px; }
+    .settings-row { font-size: 13px; color: var(--text-secondary); display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+    .temp-slider { accent-color: var(--accent-primary); }
+  </style>
+</head>
+<body>
+<div class="app" id="app">
+
+  <!-- ════ SIDEBAR ════ -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="logo-avatar">K</div>
+      <div class="logo-text">
+        <div class="name">Kuro AI</div>
+        <div class="sub" id="sidebar-sub-label">V2.1 Runtime Sovereign</div>
+      </div>
+    </div>
+
+    <button class="btn-new-chat" onclick="switchView('welcome')">+ New Chat</button>
+
+    <div class="search-box">
+      <span class="search-icon">⌕</span>
+      <input type="text" placeholder="Search chats" />
+    </div>
+
+    <!-- Pinned -->
+    <div class="sidebar-section-label">Pinned</div>
+    <div class="chat-list" style="flex:none;max-height:60px;">
+      <div class="chat-item" onclick="switchView('chat')" oncontextmenu="showCtxMenu(event,'PhD research notes')">
+        <span class="chat-item-name">PhD research notes</span>
+        <div class="chat-item-actions">
+          <span class="pin-icon">📌</span>
+          <button class="icon-btn" onclick="event.stopPropagation();showCtxMenu(event,'PhD research notes')">···</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Recent -->
+    <div class="sidebar-section-label">Recent</div>
+    <div class="chat-list">
+      <div class="chat-item active" onclick="switchView('chat')" oncontextmenu="showCtxMenu(event,'Default Chat')">
+        <span class="chat-item-name">Default Chat</span>
+        <div class="chat-item-actions">
+          <button class="icon-btn" onclick="event.stopPropagation();showCtxMenu(event,'Default Chat')">···</button>
+        </div>
+      </div>
+      <div class="chat-item" onclick="switchView('chat')" oncontextmenu="showCtxMenu(event,'QA smoke canvas3')">
+        <span class="chat-item-name">QA smoke canvas3</span>
+        <div class="chat-item-actions">
+          <button class="icon-btn" onclick="event.stopPropagation();showCtxMenu(event,'QA smoke canvas3')">···</button>
+        </div>
+      </div>
+      <div class="chat-item" onclick="switchView('chat')" oncontextmenu="showCtxMenu(event,'Market Sentinel briefing')">
+        <span class="chat-item-name">Market Sentinel briefing</span>
+        <div class="chat-item-actions">
+          <button class="icon-btn" onclick="event.stopPropagation();showCtxMenu(event,'Market Sentinel briefing')">···</button>
+        </div>
+      </div>
+    </div>
+
+    <button class="btn-more">More</button>
+
+    <div id="sidebar-notice" class="sidebar-notice" style="display:none;">
+      <h5>Prompt 10 Sidebar</h5>
+      <p>Sidebar sekarang fokus ke session list, pinned chats, search, dan new chat saja.</p>
+    </div>
+
+    <div class="sidebar-user">
+      <div class="user-avatar" id="user-avatar-sidebar">A</div>
+      <div class="user-info">
+        <div class="user-name" id="user-name-sidebar">Antok Nugroho</div>
+        <div class="user-role" id="user-role-sidebar">Quality Assurance</div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ════ MAIN ════ -->
+  <div class="main">
+
+    <!-- Header -->
+    <header class="header">
+      <div class="header-left">
+        <div class="label" id="header-label">Consultant</div>
+        <div class="title" id="header-title">Default Chat</div>
+      </div>
+      <div class="header-right">
+        <div class="mode-toggle">
+          <button class="mode-btn active" id="btn-normal" onclick="setMode('normal')">Normal</button>
+          <button class="mode-btn" id="btn-playground" onclick="setMode('playground')">Playground</button>
+        </div>
+        <div class="header-icon-btn" title="Search">⌕</div>
+        <div class="header-icon-btn" title="Toggle theme">☾</div>
+        <button class="profile-btn" id="profile-btn" onclick="toggleProfile()">
+          <span id="profile-initial">A</span>
+          <span class="profile-badge" id="profile-badge" style="display:none;"></span>
+        </button>
+        <button class="chevron-btn" onclick="toggleProfile()">▾</button>
+      </div>
+    </header>
+
+    <!-- ── VIEWS ── -->
+
+    <!-- Chat view -->
+    <div id="view-chat" class="chat-area">
+      <div class="msg-row ai">
+        <div class="msg-avatar">K</div>
+        <div class="msg-bubble">Smoke Canvas3 stage runtime OK. Bukti yang tersedia masih lemah, jadi jawaban ini perlu verifikasi tambahan.</div>
+      </div>
+      <div class="msg-row user">
+        <div class="msg-bubble">uji stabilitas canvas3</div>
+      </div>
+      <div class="msg-row ai">
+        <div class="msg-avatar">K</div>
+        <div class="msg-bubble">Saya akan jalankan audit UI V2, cek delta fitur V1 → V2, lalu adaptasikan fitur lama tanpa mengembalikan avatar/foto.</div>
+      </div>
+      <div class="msg-row user">
+        <div class="msg-bubble">tolong buat UI Agent yang lebih kayak ChatGPT/Claude, tapi tetap Kuro AI.</div>
+      </div>
+      <div class="msg-row ai">
+        <div class="msg-avatar">K</div>
+        <div class="msg-bubble">Target desain: sidebar lengkap, plus menu tunggal, drawer native untuk tools, model selector di composer, welcome screen, dan session controls.</div>
+      </div>
+    </div>
+
+    <!-- Welcome view -->
+    <div id="view-welcome" class="chat-area" style="display:none;">
+      <div class="welcome">
+        <div class="welcome-avatar">K</div>
+        <h2>Selamat datang, Antok.</h2>
+        <p>Apa yang ingin kamu kerjakan hari ini?</p>
+        <div class="quick-chips">
+          <div class="chip" onclick="sendQuick('Rancang QA test plan')">Rancang QA test plan</div>
+          <div class="chip" onclick="sendQuick('Analisis Market Sentinel')">Analisis Market Sentinel</div>
+          <div class="chip" onclick="sendQuick('Buka PhD Research Playground')">Buka PhD Research Playground</div>
+          <div class="chip" onclick="sendQuick('Audit requirement ambigu')">Audit requirement ambigu</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Playground view -->
+    <div id="view-playground" class="playground-wrap" style="display:none;">
+      <div class="playground-panel">
+        <div class="pg-header">
+          <div>
+            <h4>Playground Runtime</h4>
+            <p>Mode ini untuk eksperimen forensic KPR. Chat normal disembunyikan saat mode ini aktif.</p>
+          </div>
+          <button class="btn-pg teal" style="width:auto;padding:6px 14px;">Tutorial</button>
+        </div>
+        <div class="pg-grid">
+          <!-- Session col -->
+          <div class="pg-col">
+            <h5>Session</h5>
+            <div style="font-size:11px;color:var(--text-secondary);margin-bottom:6px;">Mode</div>
+            <select class="pg-input" style="cursor:pointer;">
+              <option>research</option>
+              <option>forensic</option>
+              <option>playground</option>
+            </select>
+            <button class="btn-pg teal">Create Session</button>
+            <input class="pg-input" placeholder="Custom Session ID [A-Za-z0-9_→]" />
+            <div style="display:flex;gap:6px;">
+              <button class="btn-pg gray" style="flex:1;">Reconnect Latest</button>
+              <button class="btn-pg teal" style="flex:1;">Use Custom ID</button>
+            </div>
+            <div style="font-size:11px;color:var(--text-secondary);margin-top:8px;">Active Session: –</div>
+          </div>
+          <!-- Execution col -->
+          <div class="pg-col">
+            <h5>Execution</h5>
+            <div style="font-size:11px;color:var(--text-secondary);margin-bottom:6px;">Providers (Checklist)</div>
+            <div class="pg-checkbox"><input type="checkbox" checked /> openai</div>
+            <div class="pg-checkbox"><input type="checkbox" /> gemini</div>
+            <div class="pg-checkbox"><input type="checkbox" checked /> anthropic</div>
+            <div class="pg-checkbox"><input type="checkbox" /> Geepseek</div>
+            <div class="pg-checkbox"><input type="checkbox" /> ollama</div>
+            <div class="pg-checkbox"><input type="checkbox" /> openai_compat</div>
+            <textarea class="pg-input" rows="3" placeholder="Prompt for playground execution…" style="margin-top:8px;resize:none;"></textarea>
+            <button class="btn-pg teal">Execute</button>
+          </div>
+          <!-- Quick Checks col -->
+          <div class="pg-col">
+            <h5>Quick Checks</h5>
+            <div class="tab-row">
+              <div class="tab active">Health</div>
+              <div class="tab">Providers</div>
+            </div>
+            <button class="btn-pg gray">List Traces</button>
+            <div style="display:flex;gap:6px;margin-bottom:6px;">
+              <select class="pg-input" style="flex:1;cursor:pointer;"><option>quick review</option></select>
+              <button class="btn-pg orange" style="flex:1;">Integrity Overview</button>
+            </div>
+            <div style="display:flex;gap:6px;margin-bottom:6px;">
+              <select class="pg-input" style="flex:1;cursor:pointer;"><option>summary</option></select>
+              <button class="btn-pg purple" style="flex:1;">Load View</button>
+            </div>
+            <div style="display:flex;gap:6px;margin-bottom:6px;">
+              <button class="btn-pg green" style="flex:1;">Verify Snapshot</button>
+              <button class="btn-pg blue" style="flex:1;">Export Bundle</button>
+            </div>
+            <button class="btn-pg gray">Lineage View</button>
+            <div style="font-size:11px;font-weight:600;color:var(--text-secondary);margin:8px 0 4px;text-transform:uppercase;letter-spacing:.06em;">Forensic Integrity Overview</div>
+            <div style="font-size:11px;color:var(--text-secondary);">No integrity overview loaded.</div>
+            <div style="font-size:11px;font-weight:600;color:var(--text-secondary);margin:10px 0 6px;text-transform:uppercase;letter-spacing:.06em;">Session History</div>
+            <div class="pg-session-item">
+              <div class="sid">e39307f9-3eb4-48da-a70a-fd55d34cb342</div>
+              <div>forensic · 2026-05-09T04:20:58.150422+00:00</div>
+              <div class="verified">Integrity: VERIFIED</div>
+            </div>
+            <div class="pg-session-item">
+              <div class="sid">bc9aab2b-3963-4ad2-a77b-fe3b7f5aae70</div>
+              <div>research · 2026-05-09T04:17:23.083353+00:00</div>
+              <div class="verified">Integrity: VERIFIED</div>
+            </div>
+            <div class="pg-session-item">
+              <div class="sid" style="color:var(--text-secondary);">517483fc-a4c5-4c0b-8717-9f2a614de0e8</div>
+            </div>
+          </div>
+        </div>
+        <div class="pg-output">
+          <h5>
+            <span>Playground Output</span>
+            <span style="display:flex;gap:8px;">
+              <button class="btn-pg gray" style="width:auto;padding:3px 10px;font-size:11px;">Copy</button>
+              <button class="btn-pg gray" style="width:auto;padding:3px 10px;font-size:11px;">Download</button>
+              <span style="color:var(--accent-primary);font-size:11px;font-weight:400;">Realtime connected</span>
+            </span>
+          </h5>
+          <pre>{
+  "mode": "playground",
+  "note": "Playground mode active. Use the panel controls to hit /api/playground/*."
+}</pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- Market drawer view -->
+    <div id="view-market" class="chat-area" style="display:none; position:relative;">
+      <div class="market-drawer">
+        <h3>Market Analysis Drawer</h3>
+        <input class="pg-input" value="BBCA.JK" style="width:100%;font-size:14px;padding:10px 12px;" />
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;">
+          <input type="checkbox" /> Include news analysis
+        </label>
+        <button class="btn-pg teal" style="width:auto;align-self:flex-end;padding:9px 20px;font-size:14px;">Analyze</button>
+        <div class="market-result">
+          Inline result, no page jump.<br/>Freshness, sentiment, and source quality rendered here.
+        </div>
+      </div>
+    </div>
+
+    <!-- Admin Settings view -->
+    <div id="view-admin" style="display:none;flex:1;position:relative;overflow:hidden;">
+      <div class="admin-panel">
+        <nav class="admin-nav">
+          <div class="admin-nav-item active" onclick="selectAdmin(this,'System Status')">→ System Status</div>
+          <div class="admin-nav-item" onclick="selectAdmin(this,'Storage Health')">Storage Health</div>
+          <div class="admin-nav-item" onclick="selectAdmin(this,'Memory V3')">Memory V3</div>
+          <div class="admin-nav-item" onclick="selectAdmin(this,'Provider/Model Settings')">Provider/Model Settings</div>
+          <div class="admin-nav-item" onclick="selectAdmin(this,'AI Temperature')">AI Temperature</div>
+          <div class="admin-nav-item" onclick="selectAdmin(this,'Runtime Settings')">Runtime Settings</div>
+          <div class="admin-nav-item" onclick="selectAdmin(this,'Market Sentinel')">Market Sentinel</div>
+          <div class="admin-nav-item" onclick="selectAdmin(this,'Ingestion Center')">Ingestion Center</div>
+          <div class="admin-nav-item" onclick="selectAdmin(this,'Evaluation')">Evaluation</div>
+          <div class="admin-nav-item" onclick="selectAdmin(this,'Backup')">Backup</div>
+          <div class="admin-nav-item" onclick="selectAdmin(this,'Telegram')">Telegram</div>
+          <div class="admin-nav-item" onclick="selectAdmin(this,'Feature Flags')">Feature Flags</div>
+        </nav>
+        <div class="admin-content">
+          <div class="code-block" id="admin-result">{
+  "status": "unavailable",
+  "message": "Not Found",
+  "endpoint": "/api/system/status"
+}</div>
+        </div>
+        <button class="admin-close" onclick="closeAdmin()">✕</button>
+      </div>
+    </div>
+
+    <!-- Composer (hidden in playground) -->
+    <div class="composer-wrap" id="composer-wrap">
+      <div class="composer" id="composer">
+        <div class="composer-attachments" id="attachments-area" style="display:none;">
+          <div class="attachment-chip">📄 research_brief.pdf <button onclick="removeAttachment(this)">✕</button></div>
+          <div class="attachment-chip">📄 qa_notes.md <button onclick="removeAttachment(this)">✕</button></div>
+        </div>
+        <div class="composer-row">
+          <button class="composer-add" onclick="togglePlusMenu(event)" title="Add">+</button>
+          <textarea class="composer-input" id="composer-input" rows="1"
+            placeholder="Message Kuro..."
+            onkeydown="handleEnter(event)"
+            oninput="autoGrow(this)"></textarea>
+          <div class="model-selector" onclick="toggleChatSettings()">
+            <span id="selected-model">Gemini Flash</span> ▾
+          </div>
+          <button class="send-btn" onclick="sendMessage()">➤</button>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /main -->
+</div><!-- /app -->
+
+<!-- ════ OVERLAYS ════ -->
+
+<!-- Context menu -->
+<div class="overlay" id="overlay-ctx" style="display:none;" onclick="closeAll()"></div>
+<div class="dropdown-menu" id="ctx-menu" style="display:none;">
+  <div class="dropdown-item" onclick="openRenameModal()">✏️ Rename</div>
+  <div class="dropdown-item" onclick="closeAll()">📌 Pin</div>
+  <div class="dropdown-divider"></div>
+  <div class="dropdown-item danger" onclick="openDeleteModal()">🗑 Delete</div>
+</div>
+
+<!-- Plus menu -->
+<div class="overlay" id="overlay-plus" style="display:none;" onclick="closeAll()"></div>
+<div class="plus-menu" id="plus-menu" style="display:none;">
+  <div class="plus-menu-item" onclick="addAttachment()"><span class="mi">+</span> Add photos &amp; files</div>
+  <div class="plus-menu-item"><span class="mi">▤</span> Recent files <span style="margin-left:auto;color:var(--text-secondary);">›</span></div>
+  <div class="dropdown-divider"></div>
+  <div class="plus-menu-item" onclick="openDeepResearch()"><span class="mi">⚡</span> Deep Research</div>
+  <div class="plus-menu-item"><span class="mi">⌕</span> Web Search</div>
+  <div class="plus-menu-item"><span class="mi">⚙</span> Agent Mode</div>
+  <div class="dropdown-divider"></div>
+  <div class="plus-menu-item"><span class="mi">✓</span> Task</div>
+  <div class="plus-menu-item"><span class="mi">🔔</span> Reminder</div>
+  <div class="plus-menu-item" onclick="switchView('market')"><span class="mi">▤</span> Market</div>
+  <div class="plus-menu-item" onclick="setMode('playground')"><span class="mi">△</span> Playground</div>
+</div>
+
+<!-- Profile dropdown -->
+<div class="overlay" id="overlay-profile" style="display:none;" onclick="closeAll()"></div>
+<div class="profile-dropdown" id="profile-dropdown" style="display:none;">
+  <div class="profile-header">
+    <div class="pname" id="pd-name">Antok Nugroho</div>
+    <div class="prole" id="pd-role">Quality Assurance</div>
+  </div>
+  <div class="dropdown-item" id="pd-admin" onclick="openAdmin()">⌘ Administrator Setting</div>
+  <div class="dropdown-item"><span style="font-size:11px;">↳</span> Tools</div>
+  <div class="dropdown-item" onclick="toggleChatSettings()">⌘ Model Settings</div>
+  <div class="dropdown-divider"></div>
+  <div class="dropdown-item" onclick="closeAll()"><span style="font-size:11px;">↳</span> Logout</div>
+</div>
+
+<!-- Rename modal -->
+<div class="modal-backdrop" id="modal-rename" style="display:none;" onclick="if(event.target===this)closeAll()">
+  <div class="modal">
+    <h3>Rename chat</h3>
+    <input class="modal-input" id="rename-input" value="Default Chat" />
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeAll()">Cancel</button>
+      <button class="btn-save" onclick="closeAll()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Delete modal -->
+<div class="modal-backdrop" id="modal-delete" style="display:none;" onclick="if(event.target===this)closeAll()">
+  <div class="modal">
+    <h3>Hapus chat ini?</h3>
+    <div class="modal-body">"PhD research notes" akan dihapus permanen. Pinned chat diberi warning ekstra.</div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeAll()">Cancel</button>
+      <button class="btn-delete" onclick="closeAll()">Hapus</button>
+    </div>
+  </div>
+</div>
+
+<!-- Deep Research drawer -->
+<div class="overlay" id="overlay-dr" style="display:none;" onclick="closeAll()"></div>
+<div class="drawer" id="drawer-dr" style="display:none;">
+  <div class="drawer-header">
+    <h3>Deep Research</h3>
+    <button class="icon-btn" onclick="closeAll()" style="font-size:16px;">✕</button>
+  </div>
+  <div class="drawer-body">
+    <div>
+      <div class="drawer-label">Query</div>
+      <input class="drawer-input" placeholder="Autonomous testing strategy for dissertation novelty gap…" />
+    </div>
+    <div>
+      <div class="drawer-label">Advanced options</div>
+      <div class="drawer-advanced">
+        Sources: &nbsp;<label><input type="checkbox" /> Web</label>&nbsp;&nbsp;
+        <label><input type="checkbox" /> Uploaded docs</label><br/>
+        Depth: &nbsp;&nbsp;Standard ▾
+      </div>
+    </div>
+  </div>
+  <div class="drawer-footer">
+    <button class="btn-cancel" onclick="closeAll()">Cancel</button>
+    <button class="btn-start" onclick="closeAll()">Start Research</button>
+  </div>
+</div>
+
+<!-- Chat Settings card -->
+<div class="settings-card" id="settings-card" style="display:none;">
+  <h4>Chat Settings</h4>
+  <div class="settings-row">Model: <select style="background:var(--bg-tertiary);border:1px solid var(--border-subtle);color:var(--text-primary);border-radius:4px;padding:2px 6px;font-size:12px;">
+    <option>Gemini Flash</option>
+    <option>GPT-4o</option>
+    <option>Claude 3.5 Sonnet</option>
+    <option>Gemini Pro</option>
+  </select></div>
+  <div class="settings-row">Temperature: 0.7
+    <input type="range" class="temp-slider" min="0" max="1" step="0.1" value="0.7" style="flex:1;" />
+  </div>
+  <div class="settings-row" style="font-size:11px;">Per-session settings, safe aliases only.</div>
+</div>
+
+<script>
+  /* ─── State ─── */
+  let currentView = 'chat';
+  let isAdmin = true; // toggle to test non-admin state
+
+  /* ─── View switcher ─── */
+  function switchView(v) {
+    currentView = v;
+    document.querySelectorAll('[id^="view-"]').forEach(el => el.style.display = 'none');
+    const el = document.getElementById('view-' + v);
+    if (el) el.style.display = v === 'admin' ? 'flex' : 'flex';
+
+    const composerWrap = document.getElementById('composer-wrap');
+    const headerTitle  = document.getElementById('header-title');
+    const headerLabel  = document.getElementById('header-label');
+
+    composerWrap.style.display = (v === 'admin') ? 'none' : '';
+
+    if (v === 'welcome') {
+      headerTitle.textContent = 'New Chat';
+      document.getElementById('view-welcome').style.display = 'flex';
+      document.getElementById('view-welcome').style.flexDirection = 'column';
+    } else if (v === 'chat') {
+      headerTitle.textContent = 'Default Chat';
+      headerLabel.textContent = 'Consultant';
+    } else if (v === 'market') {
+      headerTitle.textContent = 'Default Chat';
+    } else if (v === 'playground') {
+      headerTitle.textContent = 'Playground Runtime';
+      headerLabel.textContent = '';
+      document.getElementById('view-playground').style.display = 'flex';
+      document.getElementById('view-playground').style.flexDirection = 'column';
+      composerWrap.style.display = 'none';
+    } else if (v === 'admin') {
+      document.getElementById('view-admin').style.display = 'block';
+      composerWrap.style.display = 'none';
+    }
+    closeAll();
+  }
+
+  /* ─── Mode toggle ─── */
+  function setMode(m) {
+    document.getElementById('btn-normal').classList.toggle('active', m === 'normal');
+    document.getElementById('btn-playground').classList.toggle('active', m === 'playground');
+
+    document.getElementById('sidebar-sub-label').textContent =
+      m === 'playground' ? 'Runtime Sovereign' : 'V2.1 Runtime Sovereign';
+    document.getElementById('sidebar-notice').style.display =
+      m === 'playground' ? 'block' : 'none';
+
+    switchView(m === 'playground' ? 'playground' : 'chat');
+  }
+
+  /* ─── Context menu ─── */
+  let ctxTarget = '';
+  function showCtxMenu(e, name) {
+    e.preventDefault(); e.stopPropagation();
+    ctxTarget = name;
+    const m = document.getElementById('ctx-menu');
+    m.style.display = 'block';
+    m.style.left = e.clientX + 'px';
+    m.style.top  = e.clientY + 'px';
+    document.getElementById('overlay-ctx').style.display = 'block';
+  }
+
+  /* ─── Plus menu ─── */
+  function togglePlusMenu(e) {
+    e.stopPropagation();
+    const m = document.getElementById('plus-menu');
+    const showing = m.style.display === 'block';
+    closeAll();
+    if (!showing) {
+      const r = e.target.getBoundingClientRect();
+      m.style.left   = r.left + 'px';
+      m.style.bottom = (window.innerHeight - r.top + 8) + 'px';
+      m.style.top    = 'auto';
+      m.style.display = 'block';
+      document.getElementById('overlay-plus').style.display = 'block';
+    }
+  }
+
+  /* ─── Profile dropdown ─── */
+  function toggleProfile() {
+    const d = document.getElementById('profile-dropdown');
+    const showing = d.style.display === 'block';
+    closeAll();
+    if (!showing) {
+      // show/hide admin item based on role
+      document.getElementById('pd-admin').style.display = isAdmin ? 'flex' : 'none';
+      d.style.display = 'block';
+      document.getElementById('overlay-profile').style.display = 'block';
+    }
+  }
+
+  /* ─── Modals ─── */
+  function openRenameModal() {
+    closeAll();
+    document.getElementById('modal-rename').style.display = 'flex';
+    document.getElementById('rename-input').value = ctxTarget || 'Default Chat';
+    document.getElementById('rename-input').focus();
+  }
+  function openDeleteModal() {
+    closeAll();
+    document.getElementById('modal-delete').style.display = 'flex';
+  }
+
+  /* ─── Deep Research ─── */
+  function openDeepResearch() {
+    closeAll();
+    document.getElementById('drawer-dr').style.display = 'block';
+    document.getElementById('overlay-dr').style.display = 'block';
+  }
+
+  /* ─── Admin ─── */
+  function openAdmin() {
+    closeAll();
+    switchView('admin');
+  }
+  function closeAdmin() { switchView('chat'); }
+  function selectAdmin(el, section) {
+    document.querySelectorAll('.admin-nav-item').forEach(i => i.classList.remove('active'));
+    el.classList.add('active');
+    document.getElementById('admin-result').textContent =
+      `{\n  "section": "${section}",\n  "status": "unavailable",\n  "message": "Not Found",\n  "endpoint": "/api/admin/${section.toLowerCase().replace(/\s+/g,'-')}"\n}`;
+  }
+
+  /* ─── Chat Settings ─── */
+  function toggleChatSettings() {
+    closeAll();
+    const c = document.getElementById('settings-card');
+    c.style.display = c.style.display === 'block' ? 'none' : 'block';
+  }
+
+  /* ─── Close all ─── */
+  function closeAll() {
+    ['overlay-ctx','ctx-menu','overlay-plus','plus-menu',
+     'overlay-profile','profile-dropdown','modal-rename',
+     'modal-delete','overlay-dr','drawer-dr'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.style.display = 'none';
+    });
+  }
+
+  /* ─── Composer ─── */
+  function sendMessage() {
+    const inp = document.getElementById('composer-input');
+    const text = inp.value.trim();
+    if (!text) return;
+
+    if (currentView === 'welcome' || currentView !== 'chat') switchView('chat');
+
+    const area = document.getElementById('view-chat');
+    const userRow = document.createElement('div');
+    userRow.className = 'msg-row user';
+    userRow.innerHTML = `<div class="msg-bubble">${escapeHtml(text)}</div>`;
+    area.appendChild(userRow);
+
+    inp.value = '';
+    inp.style.height = '';
+
+    setTimeout(() => {
+      const aiRow = document.createElement('div');
+      aiRow.className = 'msg-row ai';
+      aiRow.innerHTML = `<div class="msg-avatar">K</div><div class="msg-bubble">Memproses: "${escapeHtml(text)}"…</div>`;
+      area.appendChild(aiRow);
+      area.scrollTop = area.scrollHeight;
+    }, 600);
+
+    area.scrollTop = area.scrollHeight;
+  }
+
+  function sendQuick(text) {
+    document.getElementById('composer-input').value = text;
+    sendMessage();
+  }
+
+  function handleEnter(e) {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+  }
+
+  function autoGrow(el) {
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+  }
+
+  /* ─── Attachments ─── */
+  function addAttachment() {
+    closeAll();
+    document.getElementById('attachments-area').style.display = 'flex';
+  }
+  function removeAttachment(btn) {
+    btn.closest('.attachment-chip').remove();
+    if (!document.querySelector('.attachment-chip'))
+      document.getElementById('attachments-area').style.display = 'none';
+  }
+
+  /* ─── Helpers ─── */
+  function escapeHtml(s) {
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  /* ─── Click outside settings card ─── */
+  document.addEventListener('click', e => {
+    const sc = document.getElementById('settings-card');
+    if (sc.style.display === 'block' && !sc.contains(e.target)) sc.style.display = 'none';
+  });
+</script>
+</body>
+</html>

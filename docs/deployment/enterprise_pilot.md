@@ -7,7 +7,6 @@ Use this profile for a small customer or internal enterprise pilot.
 ```bash
 KURO_DEPLOYMENT_PROFILE=enterprise-pilot
 KURO_API_V2_ENABLED=true
-KURO_FRONTEND_V2_ENABLED=true
 KURO_ENTERPRISE_OBSERVABILITY_ENABLED=true
 KURO_BACKUP_ENABLED=true
 ```

@@ -7,7 +7,6 @@ Use staging for release smoke tests before enabling a feature in a pilot.
 ```bash
 KURO_DEPLOYMENT_PROFILE=staging
 KURO_API_V2_ENABLED=true
-KURO_FRONTEND_V2_ENABLED=true
 KURO_ENTERPRISE_OBSERVABILITY_ENABLED=true
 ```
 

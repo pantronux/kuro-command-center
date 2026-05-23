@@ -7,7 +7,7 @@
   Main Sections: persona picker, chat log, HUD chips bar (market), settings/nav, System Status modal.
   Side Effects: Opens /ws/dashboard WebSocket, polls /api/market/hud on a timer.
 -->
-<html lang="en" class="scroll-smooth">
+<html lang="en" class="scroll-smooth dark">
 
 <head>
     <meta charset="UTF-8">
@@ -25,7 +25,7 @@
     <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
 
-    <!-- Font Awesome (for shield-cat icon) -->
+    <!-- Font Awesome (legacy icon fallback used by older modals/widgets) -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
 
     <!-- Marked.js for Markdown rendering -->
@@ -262,15 +262,72 @@
             overflow-wrap: anywhere;
             line-height: 1.45;
         }
+
+        html,
+        html.dark,
+        html body.kuro-redesign-v1 {
+            background: #1a1a1a !important;
+            color: #f5f5f5 !important;
+        }
+
+        body.kuro-redesign-v1 #mainContent,
+        body.kuro-redesign-v1 #mainContent> :not(header):not(#mainInputArea),
+        body.kuro-redesign-v1 #welcomeScreen,
+        body.kuro-redesign-v1 #chatContainer,
+        body.kuro-redesign-v1 #playgroundPanel {
+            background: #1a1a1a !important;
+            color: #f5f5f5 !important;
+        }
+
+        body.kuro-redesign-v1 #sidebar,
+        body.kuro-redesign-v1 .glass-sidebar {
+            background: #212121 !important;
+        }
+
+        body.kuro-redesign-v1 .glass-header {
+            background: rgba(26, 26, 26, 0.98) !important;
+        }
+
+        body.kuro-redesign-v1 .bg-white,
+        body.kuro-redesign-v1 .bg-gray-50,
+        body.kuro-redesign-v1 .bg-gray-100,
+        body.kuro-redesign-v1 .bg-gray-700,
+        body.kuro-redesign-v1 .bg-gray-800,
+        body.kuro-redesign-v1 .bg-gray-900,
+        body.kuro-redesign-v1 .dark\:bg-gray-700,
+        body.kuro-redesign-v1 .dark\:bg-gray-800,
+        body.kuro-redesign-v1 .dark\:bg-gray-900 {
+            background-color: #2a2a2a !important;
+            color: #f5f5f5 !important;
+        }
+
+        body.kuro-redesign-v1 #mainInputArea,
+        body.kuro-redesign-v1 .glass-panel {
+            background: #1a1a1a !important;
+        }
+
+        body.kuro-redesign-v1 #playgroundPanel input,
+        body.kuro-redesign-v1 #playgroundPanel textarea,
+        body.kuro-redesign-v1 #playgroundPanel select,
+        body.kuro-redesign-v1 #playgroundProviderChecklist,
+        body.kuro-redesign-v1 #playgroundIntegrityOverview,
+        body.kuro-redesign-v1 #playgroundHistoryList,
+        body.kuro-redesign-v1 #playgroundHistoryDetail {
+            background: #2a2a2a !important;
+            border-color: #2f2f2f !important;
+            color: #f5f5f5 !important;
+        }
     </style>
+
+    <!-- Index-only revamp source of truth. Loaded after legacy styles to prevent cascade regressions. -->
+    <link rel="stylesheet" href="/static/css/index_revamp.css?v=20260523-1">
 </head>
 
-<body
-    class="bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900 min-h-screen transition-colors duration-500">
+<body class="kuro-redesign-v1 min-h-screen transition-colors duration-300">
     <div id="kuroModeBanner" class="hidden"></div>
 
     <!-- Animated Background Mesh -->
-    <div class="fixed inset-0 -z-10 overflow-hidden">
+    <div class="fixed inset-0 -z-10 overflow-hidden hidden">
         <div
             class="absolute -top-40 -right-40 w-80 h-80 bg-emerald-300 dark:bg-emerald-900 rounded-full mix-blend-multiply dark:mix-blend-screen filter blur-3xl opacity-30 animate-float">
         </div>
@@ -281,25 +338,22 @@
     </div>
 
     <!-- Main Container -->
-    <div class="flex h-screen overflow-hidden">
+    <div class="app">
 
         <!-- Sidebar -->
         <aside id="sidebar"
-            class="fixed inset-y-0 left-0 z-50 w-72 glass-sidebar transform -translate-x-full lg:translate-x-0 transition-all duration-300 ease-in-out"
+            class="sidebar fixed inset-y-0 left-0 z-50 transform -translate-x-full lg:translate-x-0 transition-all duration-300 ease-in-out"
             data-collapsed="false">
             <div class="flex flex-col h-full">
                 <!-- Logo -->
-                <div
-                    class="flex items-center justify-between p-6 border-b border-glass-border dark:border-glass-borderDark">
+                <div class="sidebar-logo">
                     <div class="flex items-center gap-3 sidebar-logo-area">
-                        <div
-                            class="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center shadow-lg flex-shrink-0">
-                            <!-- Shield-cat icon for Kuro branding -->
-                            <i class="fa-solid fa-shield-cat text-white text-xl"></i>
+                        <div class="logo-avatar kuro-flat-mark">
+                            <span>K</span>
                         </div>
-                        <div class="sidebar-text">
-                            <h1 class="text-lg font-bold text-gray-800 dark:text-white">Kuro AI</h1>
-                            <p class="text-xs text-gray-500 dark:text-gray-400">
+                        <div class="logo-text sidebar-text">
+                            <h1 class="name text-gray-800 dark:text-white">Kuro AI</h1>
+                            <p class="sub text-gray-500 dark:text-gray-400">
                                 <span id="kuroVersionBadge">Pre V.2.0.0 Beta 1 Runtime Sovereign</span>
                             </p>
                         </div>
@@ -318,298 +372,174 @@
                     </div>
                 </div>
 
-                <!-- Navigation -->
-                <nav class="flex-1 p-4 space-y-1 overflow-y-auto">
-                    <!-- Chat & Persona Section -->
-                    <div class="space-y-1">
-                        <div class="flex items-center gap-1 group">
-                            <a href="#" id="navChat"
-                                class="flex-1 flex items-center gap-3 px-4 py-3 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-medium transition-all hover:bg-emerald-500/20"
-                                title="Chat">
-                                <i data-lucide="message-square" class="w-5 h-5 flex-shrink-0"></i>
-                                <span class="sidebar-text">Chat</span>
-                            </a>
-                            <button id="toggleChatDrawer"
-                                class="p-3 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-all text-gray-400 hover:text-emerald-500"
-                                title="Sessions">
-                                <i data-lucide="chevron-right" class="w-5 h-5"></i>
-                            </button>
-                        </div>
+                <!-- Session Sidebar -->
+                <nav class="flex-1 overflow-y-auto custom-scrollbar kuro-session-sidebar" aria-label="Chat sessions">
+                    <button id="newChatBtn"
+                        class="btn-new-chat">
+                        <i data-lucide="plus" class="w-5 h-5"></i>
+                        <span>New Chat</span>
+                    </button>
 
-                        <!-- Persona Accordion -->
-                        <div class="px-2">
-                            <button id="personaAccordionBtn"
-                                class="w-full flex items-center justify-between px-4 py-2 rounded-lg text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-all group">
-                                <div class="flex items-center gap-2">
-                                    <i data-lucide="user-cog" class="w-4 h-4"></i>
-                                    <span>Persona: <span id="activePersonaName"
-                                            class="font-semibold text-emerald-500">Consultant</span></span>
-                                </div>
-                                <i data-lucide="chevron-down" id="personaChevron"
-                                    class="w-4 h-4 transition-transform duration-300"></i>
-                            </button>
+                    <label class="search-box kuro-sidebar-search">
+                        <i data-lucide="search" class="w-4 h-4 text-gray-500 dark:text-gray-400"></i>
+                        <input id="sidebarChatSearch" type="search" placeholder="Search chats"
+                            class="w-full bg-transparent border-none outline-none text-sm text-gray-800 dark:text-white placeholder-gray-400">
+                    </label>
 
-                            <div id="personaAccordionContent"
-                                class="overflow-hidden transition-all duration-300 max-h-0 opacity-0">
-                                <div
-                                    class="p-2 mt-1 space-y-1 bg-gray-50/50 dark:bg-gray-900/20 rounded-xl border border-gray-100 dark:border-gray-800">
-                                    {% if not restricted_persona or restricted_persona == 'consultant' %}
-                                    <button
-                                        class="persona-option-v2 w-full text-left px-3 py-2 rounded-lg text-xs hover:bg-white dark:hover:bg-gray-800 transition-all flex items-center gap-2"
-                                        data-persona="consultant">
-                                        <span class="text-sm">🎯</span>
-                                        <span class="font-medium text-gray-700 dark:text-gray-300">Consultant</span>
-                                    </button>
-                                    {% endif %}
+                    <div class="persona-row">
+                        <button id="personaAccordionBtn"
+                            class="w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-all group">
+                            <div class="flex items-center gap-2 min-w-0">
+                                <i data-lucide="user-cog" class="w-4 h-4 flex-shrink-0"></i>
+                                <span class="truncate">Persona: <span id="activePersonaName"
+                                        class="font-semibold text-emerald-500">Consultant</span></span>
+                            </div>
+                            <i data-lucide="chevron-down" id="personaChevron"
+                                class="w-4 h-4 transition-transform duration-300"></i>
+                        </button>
 
-                                    {% if not restricted_persona or restricted_persona == 'chill' %}
-                                    <button
-                                        class="persona-option-v2 w-full text-left px-3 py-2 rounded-lg text-xs hover:bg-white dark:hover:bg-gray-800 transition-all flex items-center gap-2"
-                                        data-persona="chill">
-                                        <span class="text-sm">😎</span>
-                                        <span class="font-medium text-gray-700 dark:text-gray-300">Chill Wingman</span>
-                                    </button>
-                                    {% endif %}
-
-                                    {% if not restricted_persona or restricted_persona == 'tactical' %}
-                                    <button
-                                        class="persona-option-v2 w-full text-left px-3 py-2 rounded-lg text-xs hover:bg-white dark:hover:bg-gray-800 transition-all flex items-center gap-2"
-                                        data-persona="tactical">
-                                        <span class="text-sm">🔧</span>
-                                        <span class="font-medium text-gray-700 dark:text-gray-300">Tactical Ops</span>
-                                    </button>
-                                    {% endif %}
-
-                                    {% if not restricted_persona or restricted_persona == 'advisor' %}
-                                    <button
-                                        class="persona-option-v2 w-full text-left px-3 py-2 rounded-lg text-xs hover:bg-white dark:hover:bg-gray-800 transition-all flex items-center gap-2"
-                                        data-persona="advisor">
-                                        <span class="text-sm">🧪</span>
-                                        <span class="font-medium text-gray-700 dark:text-gray-300">Advisor</span>
-                                    </button>
-                                    {% endif %}
-
-                                    {% if not restricted_persona or restricted_persona == 'chancellor' %}
-                                    <button
-                                        class="persona-option-v2 w-full text-left px-3 py-2 rounded-lg text-xs hover:bg-white dark:hover:bg-gray-800 transition-all flex items-center gap-2"
-                                        data-persona="chancellor">
-                                        <span class="text-sm">📒</span>
-                                        <span class="font-medium text-gray-700 dark:text-gray-300">Chancellor</span>
-                                    </button>
-                                    {% endif %}
-
-                                    {% if not restricted_persona or restricted_persona == 'auditor' %}
-                                    <button
-                                        class="persona-option-v2 w-full text-left px-3 py-2 rounded-lg text-xs hover:bg-white dark:hover:bg-gray-800 transition-all flex items-center gap-2"
-                                        data-persona="auditor">
-                                        <span class="text-sm">🔍</span>
-                                        <span class="font-medium text-gray-700 dark:text-gray-300">QA Architect</span>
-                                    </button>
-                                    {% endif %}
-                                </div>
+                        <div id="personaAccordionContent"
+                            class="overflow-hidden transition-all duration-300 max-h-0 opacity-0">
+                            <div
+                                class="p-2 mt-1 space-y-1 bg-gray-50/50 dark:bg-gray-900/20 rounded-xl border border-gray-100 dark:border-gray-800">
+                                {% if not restricted_persona or restricted_persona == 'consultant' %}
+                                <button
+                                    class="persona-option-v2 w-full text-left px-3 py-2 rounded-lg text-xs hover:bg-white dark:hover:bg-gray-800 transition-all flex items-center gap-2"
+                                    data-persona="consultant">
+                                    <span class="font-medium text-gray-700 dark:text-gray-300">Consultant</span>
+                                </button>
+                                {% endif %}
+                                {% if not restricted_persona or restricted_persona == 'chill' %}
+                                <button
+                                    class="persona-option-v2 w-full text-left px-3 py-2 rounded-lg text-xs hover:bg-white dark:hover:bg-gray-800 transition-all flex items-center gap-2"
+                                    data-persona="chill">
+                                    <span class="font-medium text-gray-700 dark:text-gray-300">Chill Wingman</span>
+                                </button>
+                                {% endif %}
+                                {% if not restricted_persona or restricted_persona == 'tactical' %}
+                                <button
+                                    class="persona-option-v2 w-full text-left px-3 py-2 rounded-lg text-xs hover:bg-white dark:hover:bg-gray-800 transition-all flex items-center gap-2"
+                                    data-persona="tactical">
+                                    <span class="font-medium text-gray-700 dark:text-gray-300">Tactical Ops</span>
+                                </button>
+                                {% endif %}
+                                {% if not restricted_persona or restricted_persona == 'advisor' %}
+                                <button
+                                    class="persona-option-v2 w-full text-left px-3 py-2 rounded-lg text-xs hover:bg-white dark:hover:bg-gray-800 transition-all flex items-center gap-2"
+                                    data-persona="advisor">
+                                    <span class="font-medium text-gray-700 dark:text-gray-300">Advisor</span>
+                                </button>
+                                {% endif %}
+                                {% if not restricted_persona or restricted_persona == 'chancellor' %}
+                                <button
+                                    class="persona-option-v2 w-full text-left px-3 py-2 rounded-lg text-xs hover:bg-white dark:hover:bg-gray-800 transition-all flex items-center gap-2"
+                                    data-persona="chancellor">
+                                    <span class="font-medium text-gray-700 dark:text-gray-300">Chancellor</span>
+                                </button>
+                                {% endif %}
+                                {% if not restricted_persona or restricted_persona == 'auditor' %}
+                                <button
+                                    class="persona-option-v2 w-full text-left px-3 py-2 rounded-lg text-xs hover:bg-white dark:hover:bg-gray-800 transition-all flex items-center gap-2"
+                                    data-persona="auditor">
+                                    <span class="font-medium text-gray-700 dark:text-gray-300">QA Architect</span>
+                                </button>
+                                {% endif %}
                             </div>
                         </div>
                     </div>
 
-                    <!-- Tools Section -->
-                    <div class="pt-4 pb-2 sidebar-section-label">
-                        <p class="px-4 text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
-                            Tools</p>
+                    <div id="chatSessionsList" class="chat-list-wrap">
+                        <section>
+                            <p class="px-1 text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Pinned</p>
+                            <p class="mt-3 px-1 text-sm text-gray-500 dark:text-gray-400">No pinned chats</p>
+                        </section>
+                        <section>
+                            <p class="px-1 text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Recent</p>
+                            <p class="mt-3 px-1 text-sm text-gray-500 dark:text-gray-400">No recent chats</p>
+                        </section>
                     </div>
-
-                    <a href="/tutorial"
-                        class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-all"
-                        title="Tutorial">
-                        <i data-lucide="book-open" class="w-5 h-5 flex-shrink-0"></i>
-                        <span class="sidebar-text">Tutorial</span>
-                    </a>
-                    <a href="/intelligence"
-                        class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-all"
-                        title="Intelligence Hub">
-                        <i data-lucide="radar" class="w-5 h-5 flex-shrink-0"></i>
-                        <span class="sidebar-text">Intelligence Hub</span>
-                    </a>
-                    <a href="/market"
-                        class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-all"
-                        title="Market Sentinel">
-                        <i data-lucide="line-chart" class="w-5 h-5 flex-shrink-0"></i>
-                        <span class="sidebar-text">Market Sentinel</span>
-                    </a>
-                    {% if is_admin %}
-                    <!-- Ingestion Section -->
-                    <div class="pt-4 pb-2 sidebar-section-label">
-                        <p class="px-4 text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
-                            Ingestion</p>
-                    </div>
-                    <a href="/ingestion"
-                        data-admin-only="true"
-                        class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-all"
-                        title="Ingestion Center">
-                        <i data-lucide="database-zap" class="w-5 h-5 flex-shrink-0"></i>
-                        <span class="sidebar-text">Ingestion Center</span>
-                    </a>
-                    <a href="/ingestion/analytics"
-                        data-admin-only="true"
-                        class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-all"
-                        title="Ingestion Analytics">
-                        <i data-lucide="network" class="w-5 h-5 flex-shrink-0"></i>
-                        <span class="sidebar-text">Ingestion Analytics</span>
-                    </a>
-                    <a href="/ingestion/logs"
-                        data-admin-only="true"
-                        class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-all"
-                        title="Ingestion Logs">
-                        <i data-lucide="clipboard-list" class="w-5 h-5 flex-shrink-0"></i>
-                        <span class="sidebar-text">Ingestion Logs</span>
-                    </a>
-                    {% endif %}
-
-                    <!-- System Section -->
-                    <div class="pt-4 pb-2 sidebar-section-label">
-                        <p class="px-4 text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
-                            System</p>
-                    </div>
-
-                    <a href="#" id="navSystemStatus"
-                        data-admin-only="true"
-                        class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-all"
-                        title="System Status">
-                        <i data-lucide="server" class="w-5 h-5 flex-shrink-0"></i>
-                        <span class="sidebar-text">System Status</span>
-                    </a>
-                    <a href="#" id="navFiles"
-                        class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-all"
-                        title="Uploaded Files">
-                        <i data-lucide="folder-open" class="w-5 h-5 flex-shrink-0"></i>
-                        <span class="sidebar-text">Uploaded Files</span>
-                    </a>
-
-                    <!-- Settings -->
-                    <div class="pt-4 pb-2 sidebar-section-label">
-                        <p class="px-4 text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
-                            Preferences</p>
-                    </div>
-
-                    <a href="#" id="navSettings"
-                        class="nav-item flex items-center gap-3 px-4 py-3 rounded-xl text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-all"
-                        title="Settings">
-                        <i data-lucide="settings" class="w-5 h-5 flex-shrink-0"></i>
-                        <span class="sidebar-text">Settings</span>
-                    </a>
-
-
+                    <button id="sidebarSessionsMore"
+                        class="btn-more inline-flex items-center gap-2">
+                        <i data-lucide="list-plus" class="w-4 h-4"></i>
+                        More
+                    </button>
                 </nav>
 
                 <!-- User Profile -->
-                <div class="p-4 border-t border-glass-border dark:border-glass-borderDark sidebar-user-area">
-                    <div
-                        class="flex items-center gap-3 px-4 py-3 rounded-2xl bg-gray-50/50 dark:bg-gray-900/20 border border-gray-100 dark:border-gray-800">
-                        <div
-                            class="w-10 h-10 rounded-full bg-emerald-500 flex items-center justify-center text-white font-bold flex-shrink-0 shadow-lg shadow-emerald-500/20">
+                <div class="sidebar-user sidebar-user-area">
+                    <div class="flex items-center gap-3 w-full">
+                        <div class="user-avatar">
                             {{ display_name[0]|upper }}
                         </div>
-                        <div class="flex-1 min-w-0 sidebar-text">
-                            <p class="text-sm font-bold text-gray-800 dark:text-white truncate">{{ display_name }}</p>
-                            <p class="text-xs text-gray-500 dark:text-gray-400 truncate">{{ role }}</p>
+                        <div class="user-info flex-1 min-w-0 sidebar-text">
+                            <p class="user-name text-gray-800 dark:text-white truncate">{{ display_name }}</p>
+                            <p class="user-role text-gray-500 dark:text-gray-400 truncate">{{ role }}</p>
                         </div>
-                    </div>
-                </div>
-            </div>
-        </aside>
-
-        <!-- Chat History Drawer (Sessions) -->
-        <aside id="chatDrawer"
-            class="fixed inset-y-0 left-0 z-50 w-72 glass-sidebar border-r border-glass-border dark:border-glass-borderDark transform -translate-x-full transition-all duration-300 ease-in-out">
-            <div class="flex flex-col h-full">
-                <div class="p-4 border-b border-glass-border dark:border-glass-borderDark flex flex-col gap-3">
-                    <button id="backToSidebarBtn"
-                        class="flex items-center gap-2 text-sm text-gray-500 hover:text-emerald-500 transition-colors">
-                        <i data-lucide="chevron-left" class="w-4 h-4"></i>
-                        <span>Back to Menu</span>
-                    </button>
-                    <button id="newChatBtn"
-                        class="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-medium transition-all shadow-lg shadow-emerald-500/20 group">
-                        <i data-lucide="plus"
-                            class="w-5 h-5 group-hover:rotate-90 transition-transform duration-300"></i>
-                        <span>New Chat</span>
-                    </button>
-                </div>
-
-                <div id="chatSessionsList" class="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar">
-                    <!-- Sessions will be loaded here dynamically -->
-                    <div class="flex flex-col items-center justify-center h-full text-gray-400 space-y-2 opacity-50">
-                        <i data-lucide="message-square" class="w-8 h-8"></i>
-                        <p class="text-xs">No sessions yet</p>
                     </div>
                 </div>
             </div>
         </aside>
 
         <!-- Main Content -->
-        <main class="flex-1 flex flex-col lg:ml-72 transition-all duration-300 ease-in-out" id="mainContent">
+        <main class="main transition-all duration-300 ease-in-out" id="mainContent">
             <!-- Header -->
-            <header class="flex items-center justify-between px-6 py-4 glass-header sticky top-0 z-40">
-                <div class="flex items-center gap-4">
+            <header class="header glass-header sticky top-0 z-40">
+                <div class="header-left flex items-center gap-4">
                     <button id="openSidebar"
                         class="lg:hidden p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
                         <i data-lucide="menu" class="w-6 h-6 text-gray-600 dark:text-gray-300"></i>
                     </button>
-                    <!-- V6.1 avatar -->
-                    <div id="kuroAvatar" class="kuro-avatar" title="Kuro — at your service">
-                        <img src="/profile/kuro_avatar.png" alt="Kuro" class="kuro-avatar-img"
-                            onerror="this.style.display='none';this.parentElement.classList.add('kuro-avatar--fallback');">
+                    <div id="kuroAvatar" class="kuro-avatar kuro-avatar--fallback" title="Kuro at your service">
                         <span class="kuro-avatar-fallback">K</span>
                     </div>
-                    <h2 class="text-xl font-semibold text-gray-800 dark:text-white">Chat with Kuro</h2>
+                    <div>
+                        <p class="label text-xs text-gray-500 dark:text-gray-400 leading-tight">Consultant</p>
+                        <h2 class="title text-xl font-semibold text-gray-800 dark:text-white leading-tight">Default Chat</h2>
+                    </div>
                 </div>
 
-                <div class="flex items-center gap-3">
+                <div class="header-right flex items-center gap-3">
                     <!-- Runtime Toggle -->
                     <div id="runtimeModeToggle"
-                        class="flex items-center p-1 rounded-xl bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600">
+                        class="mode-toggle">
                         <button id="normalModeBtn"
                             type="button"
                             onclick="if(window.applyRuntimeMode){window.applyRuntimeMode('normal')}"
-                            class="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 bg-emerald-500 text-white cursor-pointer">
+                            class="mode-btn active bg-emerald-500 text-white">
                             Normal
                         </button>
                         <button id="playgroundModeBtn"
                             type="button"
                             onclick="if(window.applyRuntimeMode){window.applyRuntimeMode('playground')}"
-                            class="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 text-gray-600 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600 cursor-pointer">
+                            class="mode-btn text-gray-600 dark:text-gray-200">
                             Playground
                         </button>
                     </div>
                     <!-- Search Toggle -->
                     <button id="openSearchBtn"
-                        class="p-2 rounded-xl bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-all duration-300">
+                        class="header-icon-btn">
                         <i data-lucide="search" class="w-5 h-5 text-gray-600 dark:text-gray-300"></i>
                     </button>
                     <!-- Dark Mode Toggle -->
                     <button id="darkModeToggle" aria-label="Toggle dark mode"
-                        class="p-2 rounded-xl bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-all duration-300">
+                        class="header-icon-btn">
                         <i data-lucide="sun" class="w-5 h-5 text-gray-600 dark:hidden"></i>
                         <i data-lucide="moon" class="w-5 h-5 text-gray-300 hidden dark:block"></i>
                     </button>
                     <!-- User Account Dropdown -->
                     <div class="relative ml-2 pl-2 border-l border-gray-300 dark:border-gray-600">
                         <button id="userDropdownToggle"
-                            class="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 transition-all duration-300 focus:outline-none">
-                            <div
-                                class="w-8 h-8 rounded-full bg-emerald-500 flex items-center justify-center text-white font-bold text-xs flex-shrink-0">
+                            class="profile-btn focus:outline-none">
+                            <div class="profile-initial">
                                 {{ display_name[0]|upper }}
                             </div>
-                            <span
-                                class="text-sm font-semibold text-emerald-700 dark:text-emerald-400 hidden sm:inline max-w-[120px] truncate">{{
-                                display_name }}</span>
-                            <i data-lucide="chevron-down" class="w-4 h-4 text-emerald-500"></i>
                         </button>
 
                         <!-- Dropdown Menu -->
                         <div id="userDropdownMenu"
-                            class="absolute right-0 mt-2 w-64 bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-gray-100 dark:border-gray-700 hidden z-50 overflow-hidden animate-fade-in">
+                            class="kuro-profile-menu absolute right-0 mt-2 w-80 bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-gray-100 dark:border-gray-700 hidden z-50 overflow-hidden animate-fade-in">
                             <div
-                                class="p-4 border-b border-gray-100 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-900/20">
+                                class="kuro-profile-menu-header p-4 border-b border-gray-100 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-900/20">
                                 <div class="flex items-center gap-3">
                                     <div
                                         class="w-10 h-10 rounded-full bg-emerald-500 flex items-center justify-center text-white font-bold">
@@ -622,24 +552,78 @@
                                     </div>
                                 </div>
                             </div>
-                            <div class="p-2">
-                                <a href="/profile"
-                                    class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-gray-600 dark:text-gray-300 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 hover:text-emerald-600 dark:hover:text-emerald-400 transition-all group">
-                                    <i data-lucide="user"
-                                        class="w-4 h-4 group-hover:scale-110 transition-transform"></i>
-                                    My Profile
-                                </a>
-                                <button id="openChangePasswordModal"
-                                    class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-gray-600 dark:text-gray-300 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 hover:text-emerald-600 dark:hover:text-emerald-400 transition-all group text-left">
-                                    <i data-lucide="key-round"
-                                        class="w-4 h-4 group-hover:scale-110 transition-transform"></i>
-                                    Change Password
+                            <div class="kuro-profile-menu-body p-3 space-y-1">
+                                {% if is_admin %}
+                                <button id="navAdminSettings"
+                                    data-admin-only="true"
+                                    class="kuro-profile-menu-link w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-gray-600 dark:text-gray-300 transition-all group text-left">
+                                    <i data-lucide="command" class="w-4 h-4"></i>
+                                    <span>Administrator Settings</span>
+                                </button>
+                                {% endif %}
+                                <details class="kuro-profile-tools">
+                                    <summary
+                                        class="kuro-profile-menu-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-gray-600 dark:text-gray-300 transition-all cursor-pointer">
+                                        <i data-lucide="wrench" class="w-4 h-4"></i>
+                                        <span class="flex-1">Tools</span>
+                                        <i data-lucide="chevron-right" class="w-4 h-4 kuro-profile-tools-chevron"></i>
+                                    </summary>
+                                    <div class="kuro-profile-submenu mt-1 ml-7 space-y-1">
+                                        <a href="/tutorial"
+                                            class="kuro-profile-submenu-link flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-gray-600 dark:text-gray-300 transition-all">
+                                            <i data-lucide="book-open" class="w-4 h-4"></i>
+                                            Tutorial
+                                        </a>
+                                        <button id="navFiles"
+                                            class="kuro-profile-submenu-link w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-gray-600 dark:text-gray-300 transition-all text-left">
+                                            <i data-lucide="folder-open" class="w-4 h-4"></i>
+                                            Uploaded Files
+                                        </button>
+                                        <a href="/intelligence"
+                                            class="kuro-profile-submenu-link flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-gray-600 dark:text-gray-300 transition-all">
+                                            <i data-lucide="radar" class="w-4 h-4"></i>
+                                            Intelligence Hub
+                                        </a>
+                                        <a href="/market"
+                                            class="kuro-profile-submenu-link flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-gray-600 dark:text-gray-300 transition-all">
+                                            <i data-lucide="line-chart" class="w-4 h-4"></i>
+                                            Market Sentinel
+                                        </a>
+                                        {% if is_admin %}
+                                        <button id="navSystemStatus"
+                                            data-admin-only="true"
+                                            class="kuro-profile-submenu-link w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-gray-600 dark:text-gray-300 transition-all text-left">
+                                            <i data-lucide="server" class="w-4 h-4"></i>
+                                            System Status
+                                        </button>
+                                        <a href="/ingestion"
+                                            data-admin-only="true"
+                                            class="kuro-profile-submenu-link flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-gray-600 dark:text-gray-300 transition-all">
+                                            <i data-lucide="database-zap" class="w-4 h-4"></i>
+                                            Ingestion Center
+                                        </a>
+                                        {% endif %}
+                                    </div>
+                                </details>
+                                <button id="navSettings"
+                                    class="kuro-profile-menu-link w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-gray-600 dark:text-gray-300 transition-all group text-left">
+                                    <i data-lucide="sliders-horizontal" class="w-4 h-4"></i>
+                                    <span>Model Settings</span>
                                 </button>
                                 <button id="openPersonaModal"
-                                    class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-gray-600 dark:text-gray-300 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 hover:text-emerald-600 dark:hover:text-emerald-400 transition-all group text-left">
-                                    <i data-lucide="sparkles"
-                                        class="w-4 h-4 group-hover:scale-110 transition-transform"></i>
-                                    Persona Settings
+                                    class="kuro-profile-menu-link w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-gray-600 dark:text-gray-300 transition-all group text-left">
+                                    <i data-lucide="sparkles" class="w-4 h-4"></i>
+                                    <span>Persona Settings</span>
+                                </button>
+                                <a href="/profile"
+                                    class="kuro-profile-menu-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-gray-600 dark:text-gray-300 transition-all group">
+                                    <i data-lucide="user" class="w-4 h-4"></i>
+                                    <span>My Profile</span>
+                                </a>
+                                <button id="openChangePasswordModal"
+                                    class="kuro-profile-menu-link w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-gray-600 dark:text-gray-300 transition-all group text-left">
+                                    <i data-lucide="key-round" class="w-4 h-4"></i>
+                                    <span>Change Password</span>
                                 </button>
                             </div>
                             <div
@@ -657,8 +641,8 @@
             </header>
 
             <!-- Playground Runtime Panel -->
-            <section id="playgroundPanel" class="hidden p-6 lg:p-8 space-y-4 overflow-y-auto">
-                <div class="rounded-2xl border border-emerald-200 dark:border-emerald-900 bg-emerald-50/70 dark:bg-emerald-900/20 p-4">
+            <section id="playgroundPanel" class="playground-wrap hidden p-6 lg:p-8 space-y-4 overflow-y-auto">
+                <div class="pg-header rounded-2xl border border-emerald-200 dark:border-emerald-900 bg-emerald-50/70 dark:bg-emerald-900/20 p-4">
                     <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                         <div class="min-w-0">
                             <h3 class="text-lg font-bold text-emerald-700 dark:text-emerald-300">Playground Runtime</h3>
@@ -667,44 +651,44 @@
                             </p>
                         </div>
                         <a href="/playground/tutorial"
-                            class="inline-flex items-center justify-center px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold transition-colors whitespace-nowrap">
+                            class="btn-pg teal inline-flex items-center justify-center px-3 py-2 rounded-xl text-white text-sm font-semibold transition-colors whitespace-nowrap">
                             Tutorial
                         </a>
                     </div>
                 </div>
-                <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                    <div class="playground-card rounded-2xl border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-800/70 p-4 space-y-3">
+                <div class="pg-grid grid grid-cols-1 lg:grid-cols-3 gap-4">
+                    <div class="pg-col playground-card rounded-2xl border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-800/70 p-4 space-y-3">
                         <h4 class="font-semibold text-gray-800 dark:text-gray-100">Session</h4>
                         <label class="block text-xs text-gray-500 dark:text-gray-400">Mode</label>
                         <select id="playgroundSessionMode"
-                            class="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 text-sm">
+                            class="pg-input w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 text-sm">
                             <option value="research">research</option>
                             <option value="forensic">forensic</option>
                             <option value="comparative">comparative</option>
                             <option value="ontology">ontology</option>
                         </select>
                         <button id="playgroundCreateSessionBtn"
-                            class="w-full px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-semibold transition-colors">
+                            class="btn-pg teal w-full px-4 py-2 rounded-xl text-white text-sm font-semibold transition-colors">
                             Create Session
                         </button>
                         <input id="playgroundCustomSessionId"
                             type="text"
                             maxlength="80"
                             placeholder="Custom Session ID (A-Za-z0-9._:-)"
-                            class="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 text-xs" />
+                            class="pg-input w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 text-xs" />
                         <div class="grid grid-cols-2 gap-2">
                             <button id="playgroundReconnectLatestBtn"
-                                class="px-3 py-2 rounded-xl bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-100 text-xs font-medium transition-colors">
+                                class="btn-pg gray px-3 py-2 rounded-xl text-gray-800 dark:text-gray-100 text-xs font-medium transition-colors">
                                 Reconnect Latest
                             </button>
                             <button id="playgroundUseCustomSessionBtn"
-                                class="px-3 py-2 rounded-xl bg-teal-500 hover:bg-teal-600 text-white text-xs font-medium transition-colors">
+                                class="btn-pg teal px-3 py-2 rounded-xl text-white text-xs font-medium transition-colors">
                                 Use Custom ID
                             </button>
                         </div>
                         <p class="text-xs text-gray-500 dark:text-gray-400 break-all">Active Session: <span id="playgroundSessionId">-</span></p>
                     </div>
-                    <div class="playground-card rounded-2xl border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-800/70 p-4 space-y-3">
+                    <div class="pg-col playground-card rounded-2xl border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-800/70 p-4 space-y-3">
                         <h4 class="font-semibold text-gray-800 dark:text-gray-100">Execution</h4>
                         <label class="block text-xs text-gray-500 dark:text-gray-400">Providers (Checklist)</label>
                         <div id="playgroundProviderChecklist"
@@ -718,43 +702,43 @@
                         </div>
                         <p class="text-[11px] text-gray-500 dark:text-gray-400">Pilih 1 provider = single execution. Pilih 2+ provider = comparative execution otomatis.</p>
                         <textarea id="playgroundPromptInput" rows="4" placeholder="Prompt for playground execution..."
-                            class="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400 text-sm resize-none"></textarea>
+                            class="pg-input w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400 text-sm resize-none"></textarea>
                         <button id="playgroundExecuteBtn"
-                            class="w-full px-4 py-2 rounded-xl bg-teal-500 hover:bg-teal-600 text-white text-sm font-semibold transition-colors">
+                            class="btn-pg teal w-full px-4 py-2 rounded-xl text-white text-sm font-semibold transition-colors">
                             <span id="playgroundExecuteBtnLabel">Execute</span>
                         </button>
                     </div>
-                    <div class="playground-card rounded-2xl border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-800/70 p-4 space-y-3">
+                    <div class="pg-col playground-card rounded-2xl border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-800/70 p-4 space-y-3">
                         <h4 class="font-semibold text-gray-800 dark:text-gray-100">Quick Checks</h4>
                         <div class="grid grid-cols-2 gap-2">
                             <button id="playgroundHealthBtn"
-                                class="px-3 py-2 rounded-xl bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-100 text-sm font-medium transition-colors">
+                                class="btn-pg gray px-3 py-2 rounded-xl text-gray-800 dark:text-gray-100 text-sm font-medium transition-colors">
                                 Health
                             </button>
                             <button id="playgroundProvidersBtn"
-                                class="px-3 py-2 rounded-xl bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-100 text-sm font-medium transition-colors">
+                                class="btn-pg gray px-3 py-2 rounded-xl text-gray-800 dark:text-gray-100 text-sm font-medium transition-colors">
                                 Providers
                             </button>
                         </div>
                         <button id="playgroundListTracesBtn"
-                            class="w-full px-3 py-2 rounded-xl bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-100 text-sm font-medium transition-colors">
+                            class="btn-pg gray w-full px-3 py-2 rounded-xl text-gray-800 dark:text-gray-100 text-sm font-medium transition-colors">
                             List Traces
                         </button>
                         <div class="grid grid-cols-2 gap-2">
                             <select id="playgroundWorkflowModeSelect"
-                                class="px-2 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 text-xs">
+                                class="pg-input px-2 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 text-xs">
                                 <option value="quick">quick review</option>
                                 <option value="deep">deep forensic</option>
                                 <option value="academic">academic presentation</option>
                             </select>
                             <button id="playgroundIntegrityOverviewBtn"
-                                class="px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-medium transition-colors">
+                                class="btn-pg orange px-3 py-2 rounded-xl text-white text-xs font-medium transition-colors">
                                 Integrity Overview
                             </button>
                         </div>
                         <div class="grid grid-cols-2 gap-2">
                             <select id="playgroundForensicViewSelect"
-                                class="px-2 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 text-xs">
+                                class="pg-input px-2 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 text-xs">
                                 <option value="summary">summary</option>
                                 <option value="raw">raw</option>
                                 <option value="canonical">canonical</option>
@@ -762,22 +746,22 @@
                                 <option value="divergence">divergence</option>
                             </select>
                             <button id="playgroundLoadForensicViewBtn"
-                                class="px-3 py-2 rounded-xl bg-indigo-500 hover:bg-indigo-600 text-white text-xs font-medium transition-colors">
+                                class="btn-pg purple px-3 py-2 rounded-xl text-white text-xs font-medium transition-colors">
                                 Load View
                             </button>
                         </div>
                         <div class="grid grid-cols-2 gap-2">
                             <button id="playgroundVerifySnapshotBtn"
-                                class="px-3 py-2 rounded-xl bg-violet-500 hover:bg-violet-600 text-white text-xs font-medium transition-colors">
+                                class="btn-pg green px-3 py-2 rounded-xl text-white text-xs font-medium transition-colors">
                                 Verify Snapshot
                             </button>
                             <button id="playgroundExportBundleBtn"
-                                class="px-3 py-2 rounded-xl bg-sky-500 hover:bg-sky-600 text-white text-xs font-medium transition-colors">
+                                class="btn-pg blue px-3 py-2 rounded-xl text-white text-xs font-medium transition-colors">
                                 Export Bundle
                             </button>
                         </div>
                         <button id="playgroundLineageBtn"
-                            class="w-full px-3 py-2 rounded-xl bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-100 text-sm font-medium transition-colors">
+                            class="btn-pg gray w-full px-3 py-2 rounded-xl text-gray-800 dark:text-gray-100 text-sm font-medium transition-colors">
                             Lineage View
                         </button>
                         <div id="playgroundIntegrityOverview"
@@ -806,7 +790,7 @@
                         </div>
                     </div>
                 </div>
-                <div class="playground-card rounded-2xl border border-gray-200 dark:border-gray-700 bg-gray-950 text-emerald-200 p-4">
+                <div class="pg-output playground-card rounded-2xl border border-gray-200 dark:border-gray-700 bg-gray-950 text-emerald-200 p-4">
                     <div class="flex items-center justify-between gap-3 mb-2">
                         <p class="text-xs uppercase tracking-wider text-emerald-400">Playground Output</p>
                         <div class="flex items-center gap-2">
@@ -854,44 +838,119 @@
             </div>
 
             <!-- Welcome Screen -->
-            <div id="welcomeScreen" class="flex-1 flex flex-col items-center justify-center p-8 animate-fade-in hidden">
-                <div
-                    class="w-24 h-24 rounded-3xl bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center shadow-2xl shadow-emerald-500/20 mb-6">
-                    <i class="fa-solid fa-shield-cat text-white text-5xl"></i>
+            <div id="welcomeScreen" class="chat-area hidden">
+                <div class="welcome">
+                    <div class="welcome-avatar">
+                        <span>K</span>
+                    </div>
+                    <h2>Hello, {{ display_name }}</h2>
+                    <p>Kuro is at your service. How can I assist you today?</p>
+                    <div class="quick-chips">
+                        <button type="button" class="chip"
+                            onclick="document.getElementById('welcomeInput').value='Rancang QA test plan'; document.getElementById('welcomeSendBtn').click();">Rancang QA test plan</button>
+                        <button type="button" class="chip"
+                            onclick="document.getElementById('welcomeInput').value='Analisis Market Sentinel'; document.getElementById('welcomeSendBtn').click();">Analisis Market Sentinel</button>
+                        <button type="button" class="chip"
+                            onclick="if(window.applyRuntimeMode){window.applyRuntimeMode('playground')}">Buka PhD Research Playground</button>
+                        <button type="button" class="chip"
+                            onclick="document.getElementById('welcomeInput').value='Audit requirement ambigu'; document.getElementById('welcomeSendBtn').click();">Audit requirement ambigu</button>
+                    </div>
                 </div>
-                <h2 class="text-3xl font-bold text-gray-800 dark:text-white mb-2 text-center">Hello, {{ display_name }}
-                </h2>
-                <p class="text-gray-500 dark:text-gray-400 mb-8 text-center max-w-md">Kuro is at your service. How can I
-                    assist you today?</p>
 
                 <!-- Welcome Input (mirrors bottom input) -->
-                <div class="w-full max-w-2xl mt-4">
-                    <div class="flex items-end gap-3">
+                <div class="composer-wrap welcome-composer-wrap">
+                    <div class="composer composer-row-shell">
                         <!-- File Upload Button (mirrored) -->
+                        <div class="composer-row">
                         <div class="relative">
                             <button id="welcomeUploadBtn"
-                                class="p-3 rounded-xl bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-all duration-300 hover:scale-105">
-                                <i data-lucide="paperclip" class="w-5 h-5 text-gray-600 dark:text-gray-300"></i>
+                                class="composer-add">
+                                <i data-lucide="plus" class="w-5 h-5 text-gray-600 dark:text-gray-300"></i>
                             </button>
+                            <div id="welcomeComposerActionMenu"
+                                class="plus-menu kuro-composer-menu hidden absolute left-0 bottom-14 z-50 w-72 rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-2xl overflow-hidden">
+                                <button type="button" data-composer-action="attach"
+                                    class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                                    <i data-lucide="paperclip" class="w-4 h-4"></i>
+                                    <span>Add photos & files</span>
+                                </button>
+                                <button type="button" data-composer-action="files"
+                                    class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                                    <i data-lucide="folder-open" class="w-4 h-4"></i>
+                                    <span>Uploaded Files</span>
+                                </button>
+                                <div class="border-t border-gray-200 dark:border-gray-700 my-1"></div>
+                                <button type="button" data-composer-action="deep_research"
+                                    class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                                    <i data-lucide="search-check" class="w-4 h-4"></i>
+                                    <span>Deep Research</span>
+                                </button>
+                                <button type="button" data-composer-action="web_search"
+                                    class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                                    <i data-lucide="globe" class="w-4 h-4"></i>
+                                    <span>Web Search</span>
+                                </button>
+                                <button type="button" data-composer-action="agent_mode"
+                                    class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                                    <i data-lucide="bot" class="w-4 h-4"></i>
+                                    <span>Agent Mode</span>
+                                </button>
+                                <button type="button" data-composer-action="task_mode"
+                                    class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                                    <i data-lucide="check-square" class="w-4 h-4"></i>
+                                    <span>Task</span>
+                                </button>
+                                <button type="button" data-composer-action="reminder_mode"
+                                    class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                                    <i data-lucide="bell" class="w-4 h-4"></i>
+                                    <span>Reminder</span>
+                                </button>
+                                <button type="button" data-composer-action="market_page"
+                                    class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                                    <i data-lucide="line-chart" class="w-4 h-4"></i>
+                                    <span>Market Sentinel</span>
+                                </button>
+                                <button type="button" data-composer-action="intelligence_page"
+                                    class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                                    <i data-lucide="radar" class="w-4 h-4"></i>
+                                    <span>Intelligence Hub</span>
+                                </button>
+                                <button type="button" data-composer-action="tutorial_page"
+                                    class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                                    <i data-lucide="book-open" class="w-4 h-4"></i>
+                                    <span>Tutorial</span>
+                                </button>
+                                <button type="button" data-composer-action="playground_mode"
+                                    class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                                    <i data-lucide="flask-conical" class="w-4 h-4"></i>
+                                    <span>Playground</span>
+                                </button>
+                            </div>
                         </div>
 
                         <!-- Text Input -->
                         <div class="flex-1 relative">
                             <textarea id="welcomeInput" rows="1" placeholder="Type your message..."
-                                class="w-full px-4 py-3 pr-12 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl text-gray-800 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent resize-none transition-all"></textarea>
+                                class="composer-input w-full px-4 py-3 pr-12 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl text-gray-800 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent resize-none transition-all"></textarea>
                         </div>
+
+                        <select id="welcomeModelSelect"
+                            class="model-selector kuro-chatbar-model px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 text-sm">
+                            <option value="gemini_fast">Gemini Flash</option>
+                        </select>
 
                         <!-- Send Button -->
                         <button id="welcomeSendBtn"
-                            class="p-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100">
+                            class="send-btn p-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100">
                             <i data-lucide="send" class="w-5 h-5"></i>
                         </button>
+                        </div>
                     </div>
                 </div>
             </div>
 
             <!-- Chat Area -->
-            <div class="flex-1 overflow-y-auto hidden" id="chatContainer">
+            <div class="chat-area hidden" id="chatContainer">
 
                 <!-- Scroll Loader -->
                 <div class="scroll-loader" id="scrollLoader">
@@ -900,19 +959,79 @@
             </div>
 
             <!-- Input Area -->
-            <div id="mainInputArea" class="hidden p-4 lg:p-6 glass-panel border-t-0 rounded-none">
+            <div id="mainInputArea" class="composer-wrap hidden p-4 lg:p-6 glass-panel border-t-0 rounded-none">
                 <!-- File Preview -->
-                <div id="filePreview" class="hidden mb-3 flex flex-wrap gap-2"></div>
+                <div id="filePreview" class="composer-attachments hidden mb-3 flex flex-wrap gap-2"></div>
 
-                <div class="flex items-end gap-3">
+                <div class="composer composer-row-shell">
+                    <div class="composer-row">
                     <!-- File Upload Button -->
                     <div class="relative">
                         <input type="file" id="fileInput" class="hidden" multiple
                             accept="image/*,video/*,.pdf,.txt,.md,.py,.csv,.log,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.json,.yaml,.yml">
                         <button id="uploadBtn" aria-label="Upload file"
-                            class="p-3 rounded-xl bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-all duration-300 hover:scale-105">
-                            <i data-lucide="paperclip" class="w-5 h-5 text-gray-600 dark:text-gray-300"></i>
+                            class="composer-add p-3 rounded-xl bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-all duration-300 hover:scale-105">
+                            <i data-lucide="plus" class="w-5 h-5 text-gray-600 dark:text-gray-300"></i>
                         </button>
+                        <div id="composerActionMenu"
+                            class="plus-menu kuro-composer-menu hidden absolute left-0 bottom-14 z-50 w-72 rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-2xl overflow-hidden">
+                            <button type="button" data-composer-action="attach"
+                                class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                                <i data-lucide="paperclip" class="w-4 h-4"></i>
+                                <span>Add photos & files</span>
+                            </button>
+                            <button type="button" data-composer-action="files"
+                                class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                                <i data-lucide="folder-open" class="w-4 h-4"></i>
+                                <span>Uploaded Files</span>
+                            </button>
+                            <div class="border-t border-gray-200 dark:border-gray-700 my-1"></div>
+                            <button type="button" data-composer-action="deep_research"
+                                class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                                <i data-lucide="search-check" class="w-4 h-4"></i>
+                                <span>Deep Research</span>
+                            </button>
+                            <button type="button" data-composer-action="web_search"
+                                class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                                <i data-lucide="globe" class="w-4 h-4"></i>
+                                <span>Web Search</span>
+                            </button>
+                            <button type="button" data-composer-action="agent_mode"
+                                class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                                <i data-lucide="bot" class="w-4 h-4"></i>
+                                <span>Agent Mode</span>
+                            </button>
+                            <button type="button" data-composer-action="task_mode"
+                                class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                                <i data-lucide="check-square" class="w-4 h-4"></i>
+                                <span>Task</span>
+                            </button>
+                            <button type="button" data-composer-action="reminder_mode"
+                                class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                                <i data-lucide="bell" class="w-4 h-4"></i>
+                                <span>Reminder</span>
+                            </button>
+                            <button type="button" data-composer-action="market_page"
+                                class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                                <i data-lucide="line-chart" class="w-4 h-4"></i>
+                                <span>Market Sentinel</span>
+                            </button>
+                            <button type="button" data-composer-action="intelligence_page"
+                                class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                                <i data-lucide="radar" class="w-4 h-4"></i>
+                                <span>Intelligence Hub</span>
+                            </button>
+                            <button type="button" data-composer-action="tutorial_page"
+                                class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                                <i data-lucide="book-open" class="w-4 h-4"></i>
+                                <span>Tutorial</span>
+                            </button>
+                            <button type="button" data-composer-action="playground_mode"
+                                class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                                <i data-lucide="flask-conical" class="w-4 h-4"></i>
+                                <span>Playground</span>
+                            </button>
+                        </div>
                     </div>
 
                     <!-- Text Input -->
@@ -923,8 +1042,13 @@
                             <i data-lucide="arrow-down" class="w-5 h-5"></i>
                         </button>
                         <textarea id="messageInput" rows="1" placeholder="Type your message..."
-                            class="w-full px-4 py-3 pr-12 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl text-gray-800 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent resize-none transition-all"></textarea>
+                            class="composer-input w-full px-4 py-3 pr-12 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl text-gray-800 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent resize-none transition-all"></textarea>
                     </div>
+
+                    <select id="composerModelSelect"
+                        class="model-selector kuro-chatbar-model px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 text-sm">
+                        <option value="gemini_fast">Gemini Flash</option>
+                    </select>
 
                     <!-- Stop Generating Button -->
                     <button id="stopGeneratingBtn" aria-label="Stop generating"
@@ -934,10 +1058,11 @@
                     </button>
                     <!-- Send Button -->
                     <button id="sendBtn" aria-label="Send message"
-                        class="p-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+                        class="send-btn p-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
                         title="Send message">
                         <i data-lucide="send" class="w-5 h-5"></i>
                     </button>
+                    </div>
                 </div>
 
                 <p class="text-xs text-gray-400 dark:text-gray-500 mt-2 text-center">Kuro AI may make mistakes. Please
@@ -945,6 +1070,29 @@
                 <div id="export-status-container" class="mt-3 space-y-2"></div>
             </div>
         </main>
+    </div>
+
+    <!-- Chat Session Modals -->
+    <div id="chatRenameModal" class="modal-backdrop hidden fixed inset-0 z-[80] items-center justify-center">
+        <div class="modal">
+            <h3>Rename chat</h3>
+            <input id="chatRenameInput" class="modal-input" type="text" maxlength="120" value="">
+            <div class="modal-actions">
+                <button id="chatRenameCancelBtn" type="button" class="btn-cancel">Cancel</button>
+                <button id="chatRenameSaveBtn" type="button" class="btn-save">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="chatDeleteModal" class="modal-backdrop hidden fixed inset-0 z-[80] items-center justify-center">
+        <div class="modal">
+            <h3>Hapus chat ini?</h3>
+            <div id="chatDeleteMessage" class="modal-body">Chat akan dihapus permanen.</div>
+            <div class="modal-actions">
+                <button id="chatDeleteCancelBtn" type="button" class="btn-cancel">Cancel</button>
+                <button id="chatDeleteConfirmBtn" type="button" class="btn-delete">Hapus</button>
+            </div>
+        </div>
     </div>
 
     <!-- Drag & Drop Overlay -->

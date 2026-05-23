@@ -1,6 +1,6 @@
 # Enterprise Refactor Phase 0 Feature Flags
 
-Phase 0 introduces an enterprise control plane without replacing any existing runtime path. The default behavior remains unchanged: all new enterprise flags default to `false`, and existing chat, memory, market, Telegram, provider, API, and frontend paths continue to run as before.
+Phase 0 introduces an enterprise control plane without replacing any existing runtime path. The default behavior remains unchanged: all new enterprise flags default to `false`, and existing chat, memory, market, Telegram, provider, API, and dashboard paths continue to run as before.
 
 This closes the audit gaps for missing enterprise feature flags, missing public-safe capability discovery, and missing safe env examples:
 
@@ -23,7 +23,6 @@ This closes the audit gaps for missing enterprise feature flags, missing public-
 | `KURO_TASKS_V2_ENABLED` | `false` | Future durable task runtime path. |
 | `KURO_DEEP_RESEARCH_V2_ENABLED` | `false` | Future deep research path. |
 | `KURO_WEB_SEARCH_V2_ENABLED` | `false` | Future web search path. |
-| `KURO_FRONTEND_V2_ENABLED` | `false` | Future frontend path. |
 | `KURO_ADMIN_SETTINGS_V2_ENABLED` | `false` | Future admin settings path. |
 | `KURO_ENTERPRISE_OBSERVABILITY_ENABLED` | `false` | Future enterprise observability path. |
 | `KURO_API_V2_ENABLED` | `false` | Future API V2 path. |

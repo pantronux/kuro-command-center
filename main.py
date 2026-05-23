@@ -22,8 +22,6 @@ from pathlib import Path
 import uvicorn
 from typing import Any, Dict, Optional, List
 from datetime import date, datetime, timedelta
-import fcntl
-import atexit
 from fastapi import (
     FastAPI,
     UploadFile,
@@ -51,16 +49,6 @@ from fastapi.responses import (
 from pydantic import BaseModel, Field
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from telegram import Update
-from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    MessageHandler,
-    filters,
-    ContextTypes,
-)
-from telegram.error import NetworkError, TimedOut
-
 # --- Early warning suppression (must run before heavy imports initialize) ---
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 warnings.filterwarnings("ignore", message=".*Pydantic V1 style.*")
@@ -110,6 +98,7 @@ from kuro_backend.memory_v3.store import MemoryV3Store
 from kuro_backend.storage.data_catalog import get_storage_catalog_snapshot
 from kuro_backend.storage.health import get_storage_health_snapshot
 from kuro_backend.storage.migrations import get_all_migration_histories
+from kuro_backend.telegram_center import service as telegram_center
 from kuro_backend.runtime.runtime_context import resolve_runtime_context
 from kuro_backend.runtime.runtime_registry import RuntimeRegistry
 from kuro_backend.output.schema_registry import SchemaRegistry
@@ -170,32 +159,10 @@ CHAT_SESSION_HEADER = "X-Chat-Session"
 _CHAT_SESSION_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{8,128}$")
 _sse_buffers: dict[str, deque] = {}
 _sse_event_counters: dict[str, int] = {}
-_tg_rate_buckets: dict[str, dict] = defaultdict(
-    lambda: {
-        "tokens": float(getattr(settings, "KURO_TELEGRAM_RATE_LIMIT_PER_MIN", 10)),
-        "last_refill": time.time(),
-    }
-)
-_tg_inbound_queue: asyncio.Queue = asyncio.Queue(
-    maxsize=int(getattr(settings, "KURO_TELEGRAM_QUEUE_MAXSIZE", 50))
-)
-_telegram_polling_shutdown = threading.Event()
-
-
-def _check_telegram_rate_limit(chat_id: str, limit_per_min: int) -> bool:
-    """Token-bucket limiter for inbound Telegram messages per chat_id."""
-    bucket = _tg_rate_buckets[str(chat_id)]
-    now = time.time()
-    elapsed = now - float(bucket.get("last_refill", now))
-    refill = elapsed * (float(limit_per_min) / 60.0)
-    bucket["tokens"] = min(
-        float(limit_per_min), float(bucket.get("tokens", 0.0)) + refill
-    )
-    bucket["last_refill"] = now
-    if float(bucket["tokens"]) >= 1.0:
-        bucket["tokens"] -= 1.0
-        return True
-    return False
+_tg_rate_buckets = telegram_center.rate_buckets
+_tg_inbound_queue = telegram_center.inbound_queue
+_telegram_polling_shutdown = telegram_center.polling_shutdown
+_check_telegram_rate_limit = telegram_center.check_rate_limit
 
 
 class ChatSessionUpdate(BaseModel):
@@ -891,7 +858,7 @@ async def _register_dashboard_sync_loop():
 @app.on_event("shutdown")
 async def _shutdown_runtime_flags():
     """Set shutdown flags so background loops can exit gracefully."""
-    _telegram_polling_shutdown.set()
+    telegram_center.shutdown()
 
 
 def _ws_token_from_cookie(ws: WebSocket) -> Optional[str]:
@@ -1348,7 +1315,7 @@ PUBLIC_API_ROUTES = [
 
 
 def _dashboard_template_name() -> str:
-    return "index_v2.html" if bool(getattr(settings, "KURO_FRONTEND_V2_ENABLED", False)) else "index.html"
+    return "index.html"
 
 
 def _dashboard_template_context(username: str, user_info: Dict[str, Any]) -> Dict[str, Any]:
@@ -1360,7 +1327,6 @@ def _dashboard_template_context(username: str, user_info: Dict[str, Any]) -> Dic
         "restricted_persona": user_info.get("restricted_persona") or "",
         "master_name": user_info.get("master_name", f"Master {username}"),
         "custom_persona": user_info.get("custom_persona") or "",
-        "frontend_v2_enabled": bool(getattr(settings, "KURO_FRONTEND_V2_ENABLED", False)),
     }
 
 
@@ -1467,11 +1433,23 @@ async def get_public_capabilities():
     return api_success(data=get_enterprise_flag_snapshot(admin=False))
 
 
+@app.get("/api/proactive-events")
+async def get_proactive_events(limit: int = Query(5, ge=1, le=50)):
+    """Return missed proactive events for dashboard reconnect sync.
+
+    The proactive bus currently dispatches live alerts but does not persist a
+    dashboard event inbox. Keep this endpoint present so reconnect polling is
+    quiet and future persistence can fill the same contract.
+    """
+    return api_success(data={"events": [], "limit": limit})
+
+
 @app.get("/api/admin/enterprise-flags")
 async def get_admin_enterprise_flags(request: Request):
     """Return enterprise flag status for authenticated admins only."""
     require_admin_user(request)
     return api_success(data=get_enterprise_flag_snapshot(admin=True))
+
 
 @app.get("/api/admin/storage/health")
 async def get_admin_storage_health(request: Request):
@@ -4721,6 +4699,18 @@ def start_reminder_scheduler():
         replace_existing=True,
     )
 
+    if bool(getattr(settings, "KURO_TELEGRAM_DIGEST_ENABLED", True)):
+        _reminder_scheduler.add_job(
+            telegram_center.send_digest_job,
+            "cron",
+            hour=int(getattr(settings, "KURO_TELEGRAM_DIGEST_HOUR", 8)),
+            minute=5,
+            id="telegram_operational_digest",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+
     # Quantitative updates for all users
     def run_all_price_updates():
         from kuro_backend import price_ticker_worker
@@ -5119,450 +5109,24 @@ def reset_daily_habits():
         logger.error(f"Failed to run midnight cleanup: {e}")
 
 
-# --- Telegram Bot Logic ---
-def _telegram_allowed_chat_ids() -> set[str]:
-    raw = str(getattr(settings, "TELEGRAM_CHAT_ID", "") or "")
-    return {part.strip() for part in raw.split(",") if part.strip()}
-
-
-def _is_authorized_telegram_chat(chat_id: object) -> bool:
-    return str(chat_id) in _telegram_allowed_chat_ids()
-
-
-def _telegram_admin_profile() -> tuple[str, str]:
-    username = os.getenv("ADMIN_USERNAME", "Pantronux")
-    display_name = username
-    try:
-        user_info = auth_db.get_user(username)
-        if user_info and user_info.get("master_name"):
-            display_name = str(user_info["master_name"])
-    except Exception:
-        pass
-    return username, display_name
-
-
-def _telegram_command_name(text: str) -> str:
-    first = (text or "").strip().split(maxsplit=1)[0].lower()
-    if "@" in first:
-        first = first.split("@", 1)[0]
-    return first
-
-
-async def _send_telegram_long_message(bot, chat_id: str, text: str) -> None:
-    from kuro_backend.telegram_notifier import split_text_for_telegram
-
-    chunks = split_text_for_telegram(text or "")
-    for chunk in chunks or [""]:
-        await bot.send_message(chat_id=chat_id, text=chunk)
-
-
-def _build_telegram_queue_summary() -> Dict[str, int]:
-    dlq = intelligence_db.get_failed_notification_summary()
-    return {
-        "inbound_size": int(_tg_inbound_queue.qsize()),
-        "inbound_maxsize": int(_tg_inbound_queue.maxsize),
-        "dlq_pending": int(dlq.get("pending", 0)),
-        "dlq_sent": int(dlq.get("sent", 0)),
-        "dlq_dead": int(dlq.get("dead", 0)),
-        "dlq_total": int(dlq.get("total", 0)),
-    }
-
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = str(update.effective_chat.id)
-    if not _is_authorized_telegram_chat(chat_id):
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text="I apologize, but I am only authorized to serve Pantronux.",
-        )
-        logger.warning("Unauthorized /start attempt by chat_id: %s", chat_id)
-        return
-    await context.bot.send_message(
-        chat_id=chat_id,
-        text="Greetings, Master. Kuro is at your service. Kirim /help untuk command center.",
-    )
-
-
-async def handle_telegram_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = str(update.effective_chat.id)
-    if not _is_authorized_telegram_chat(chat_id):
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text="I apologize, but I am only authorized to serve Pantronux.",
-        )
-        logger.warning("Unauthorized command attempt by chat_id: %s", chat_id)
-        return
-
-    text = (getattr(update.message, "text", "") or "").strip()
-    command = _telegram_command_name(text)
-    if command in {"/help", "/start"}:
-        msg = (
-            "Kuro Telegram Command Center\n"
-            "/ping - cek bot hidup\n"
-            "/status - ringkasan sistem, backup, dan Telegram\n"
-            "/queue - status antrean Telegram dan DLQ\n"
-            "/sentinel - ringkasan Market Sentinel\n"
-            "/briefing - briefing intelijen terbaru\n\n"
-            "Kirim pesan biasa untuk chat langsung dengan Kuro."
-        )
-    elif command == "/ping":
-        q = _build_telegram_queue_summary()
-        msg = (
-            f"Pong. Kuro online.\n"
-            f"Inbound queue: {q['inbound_size']}/{q['inbound_maxsize']}\n"
-            f"DLQ pending: {q['dlq_pending']}"
-        )
-    elif command == "/queue":
-        q = _build_telegram_queue_summary()
-        msg = (
-            "Telegram Queue\n"
-            f"Inbound: {q['inbound_size']}/{q['inbound_maxsize']}\n"
-            f"DLQ pending: {q['dlq_pending']}\n"
-            f"DLQ sent: {q['dlq_sent']}\n"
-            f"DLQ dead: {q['dlq_dead']}\n"
-            f"DLQ total: {q['dlq_total']}"
-        )
-    elif command == "/status":
-        mem = psutil.virtual_memory()
-        disk = psutil.disk_usage("/")
-        backup = _build_system_status_backup_payload() or {}
-        q = _build_telegram_queue_summary()
-        msg = (
-            "Kuro System Status\n"
-            f"CPU: {psutil.cpu_percent(interval=0)}%\n"
-            f"RAM: {round(mem.used / (1024**3), 1)}GB/{round(mem.total / (1024**3), 1)}GB ({mem.percent}%)\n"
-            f"Disk: {round(disk.used / (1024**3), 1)}GB/{round(disk.total / (1024**3), 1)}GB ({disk.percent}%)\n"
-            f"Backup: {backup.get('last_backup_status', 'unknown')} at {backup.get('last_backup_at', '-')}\n"
-            f"Telegram inbound: {q['inbound_size']}/{q['inbound_maxsize']}; DLQ pending: {q['dlq_pending']}"
-        )
-    elif command == "/sentinel":
-        username, _ = _telegram_admin_profile()
-        cfg = settings
-        stale = finance_db.is_snapshot_stale(
-            int(getattr(cfg, "KURO_SENTINEL_STALE_THRESHOLD_MIN", 15)),
-            username=username,
-        )
-        stocks = finance_db.get_all_sentinel_stocks(sort_by="roi_1m", username=username)[:5]
-        lines = [
-            "Market Sentinel",
-            f"Price data: {'STALE' if stale else 'fresh'}",
-        ]
-        if stocks:
-            for stock in stocks:
-                code = stock.get("stock_code", "-")
-                price = stock.get("current_price_per_share", 0)
-                roi = stock.get("projected_roi_1m", 0)
-                conclusion = stock.get("conclusion", "HOLD")
-                lines.append(f"{code}: Rp {price} | ROI 1M {roi}% | {conclusion}")
-        else:
-            lines.append("Belum ada data Market Sentinel.")
-        msg = "\n".join(lines)
-    elif command == "/briefing":
-        username, display_name = _telegram_admin_profile()
-        briefings = intelligence_db.get_briefings(limit=1, username=username)
-        if not briefings:
-            msg = "Belum ada briefing tersimpan. Jalankan riset harian dari dashboard atau tunggu scheduler berikutnya."
-        else:
-            from kuro_backend.intelligence_engine import format_telegram_message
-
-            briefing = briefings[0].get("raw_json_data") or {}
-            msg = format_telegram_message(briefing, display_name=display_name)
-    else:
-        msg = "Command belum dikenal. Kirim /help untuk daftar command."
-
-    await _send_telegram_long_message(context.bot, chat_id, msg)
-
-
-async def _process_telegram_chat_payload(payload: Dict[str, Any], bot) -> None:
-    chat_id = str(payload.get("chat_id") or "")
-    message_text = str(payload.get("text") or "").strip()
-    if not chat_id or not message_text:
-        return
-
-    try:
-        await bot.send_chat_action(chat_id=chat_id, action="typing")
-    except Exception:
-        pass
-
-    try:
-        username, master_name = _telegram_admin_profile()
-        telegram_persona = str(payload.get("persona") or route_telegram_persona(message_text))
-        telegram_request_id = str(payload.get("request_id") or f"telegram_{uuid.uuid4().hex}")
-        telegram_trace_id = str(payload.get("trace_id") or f"telegram_chat_{uuid.uuid4().hex}")
-        chat_history.add_message(
-            "telegram",
-            "user",
-            message_text,
-            persona=telegram_persona,
-            request_id=telegram_request_id,
-            username=username,
-        )
-        response_text = await asyncio.wait_for(
-            asyncio.to_thread(
-                process_chat_with_graph,
-                message_text,
-                persona_override=telegram_persona,
-                approval_scope=f"telegram:{chat_id}:{telegram_persona}",
-                trace_id=telegram_trace_id,
-                master_name=master_name,
-                username=username,
-            ),
-            timeout=int(getattr(settings, "KURO_TELEGRAM_RESPONSE_TIMEOUT_S", 180)),
-        )
-        chat_history.add_message(
-            "telegram",
-            "assistant",
-            response_text,
-            persona=telegram_persona,
-            request_id=telegram_request_id,
-            username=username,
-        )
-        await _send_telegram_long_message(bot, chat_id, response_text)
-    except asyncio.TimeoutError:
-        logger.warning("[TELEGRAM] chat processing timed out for chat_id=%s", chat_id)
-        await bot.send_message(
-            chat_id=chat_id,
-            text="Kuro butuh waktu terlalu lama untuk menjawab. Coba ulangi dengan instruksi yang lebih pendek, atau cek dashboard.",
-        )
-    except Exception as e:
-        logger.exception("Error sending response to Telegram: %s", e)
-        await bot.send_message(
-            chat_id=chat_id,
-            text="My apologies, Master — I encountered an error while delivering the response. Please try once more.",
-        )
-
-
-async def _telegram_inbound_queue_worker(bot, max_items: Optional[int] = None) -> None:
-    processed = 0
-    while not _telegram_polling_shutdown.is_set():
-        if max_items is not None and processed >= max_items:
-            return
-        try:
-            if max_items is None:
-                payload = await _tg_inbound_queue.get()
-            else:
-                payload = await asyncio.wait_for(_tg_inbound_queue.get(), timeout=0.1)
-        except asyncio.TimeoutError:
-            return
-        except asyncio.CancelledError:
-            raise
-
-        try:
-            await _process_telegram_chat_payload(payload, bot)
-        except Exception as exc:
-            logger.exception("[TELEGRAM] inbound queue worker failed: %s", exc)
-        finally:
-            _tg_inbound_queue.task_done()
-            processed += 1
-
-
-async def _telegram_post_init(application):
-    application.create_task(_telegram_inbound_queue_worker(application.bot))
-
-
-def _schedule_telegram_chat_payload(payload: Dict[str, Any], context: ContextTypes.DEFAULT_TYPE) -> None:
-    coro = _process_telegram_chat_payload(payload, context.bot)
-    application = getattr(context, "application", None)
-    if application and hasattr(application, "create_task"):
-        application.create_task(coro)
-    else:
-        asyncio.create_task(coro)
-
-
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    inbound_chat_id = str(update.effective_chat.id)
-    if not _is_authorized_telegram_chat(inbound_chat_id):
-        await context.bot.send_message(
-            chat_id=inbound_chat_id,
-            text="I apologize, but I am only authorized to serve Pantronux.",
-        )
-        logger.warning("Unauthorized access attempt by chat_id: %s", inbound_chat_id)
-        return
-
-    message_text = (getattr(update.message, "text", "") or "").strip()
-    if not message_text:
-        return
-    logger.info("Received Telegram message from admin: %s", message_text)
-
-    payload = {
-        "chat_id": inbound_chat_id,
-        "text": message_text,
-        "received_at": datetime.utcnow().isoformat(),
-        "request_id": f"telegram_{uuid.uuid4().hex}",
-        "trace_id": f"telegram_chat_{uuid.uuid4().hex}",
-    }
-
-    if not _check_telegram_rate_limit(
-        inbound_chat_id,
-        int(getattr(settings, "KURO_TELEGRAM_RATE_LIMIT_PER_MIN", 10)),
-    ):
-        try:
-            _tg_inbound_queue.put_nowait(payload)
-            await context.bot.send_message(
-                chat_id=inbound_chat_id,
-                text="Kuro sedang memproses antrian. Pesan kamu akan segera dibalas.",
-            )
-        except asyncio.QueueFull:
-            await context.bot.send_message(
-                chat_id=inbound_chat_id,
-                text="Antrian penuh. Coba lagi dalam beberapa menit.",
-            )
-        return
-
-    await context.bot.send_message(
-        chat_id=inbound_chat_id,
-        text="Diterima. Kuro sedang memproses jawaban.",
-    )
-    _schedule_telegram_chat_payload(payload, context)
-
-
-def route_telegram_persona(message_text: str) -> str:
-    """
-    Telegram hybrid auto-router:
-    - tactical for infra/code/security/ops intent
-    - chill for daily/social intent
-    """
-    text = (message_text or "").lower()
-    technical_keywords = [
-        "proxmox",
-        "server",
-        "docker",
-        "kubernetes",
-        "code",
-        "python",
-        "error",
-        "bug",
-        "api",
-        "database",
-        "sql",
-        "log",
-        "linux",
-        "deploy",
-        "security",
-        "iso",
-        "audit",
-        "openclaw",
-        "memory",
-        "websocket",
-        "revision",
-        "ci",
-        "cd",
-    ]
-    casual_keywords = [
-        "gym",
-        "musik",
-        "lagu",
-        "hindia",
-        "hsr",
-        "honkai",
-        "capek",
-        "semangat",
-        "mood",
-        "curhat",
-        "istirahat",
-        "ngobrol",
-        "santai",
-        "hari ini",
-    ]
-    if any(keyword in text for keyword in technical_keywords):
-        logger.info("[TELEGRAM_PERSONA] Routed to tactical")
-        return "tactical"
-    if any(keyword in text for keyword in casual_keywords):
-        logger.info("[TELEGRAM_PERSONA] Routed to chill")
-        return "chill"
-    logger.info("[TELEGRAM_PERSONA] Ambiguous intent -> default tactical")
-    return "tactical"
-
-
-async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
-    error = context.error
-    if isinstance(error, (NetworkError, TimedOut)):
-        logger.warning(f"Network error: {error}")
-        return
-    logger.error(f"Update {update} caused error: {error}", exc_info=error)
-
-
-def run_bot_with_recovery():
-    """Runs Telegram in polling mode with retry/backoff and shutdown flag support.
-
-    Inbound mechanism note:
-    - Kuro currently uses long polling (`python-telegram-bot` `run_polling`),
-      not webhook mode.
-    - `_telegram_polling_shutdown` is set during app/process shutdown so polling
-      restart attempts stop cleanly instead of spinning during termination.
-    """
-    max_retries = 5
-    retry_delay = 5
-
-    for attempt in range(max_retries):
-        if _telegram_polling_shutdown.is_set():
-            logger.info("Telegram polling shutdown flag set; exiting polling loop.")
-            break
-        try:
-            logger.info(
-                f"Starting Telegram bot polling... (Attempt {attempt + 1}/{max_retries})"
-            )
-
-            # Create a new event loop for each attempt, as python-telegram-bot closes the loop on exit
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-
-            application = (
-                ApplicationBuilder()
-                .token(settings.TELEGRAM_TOKEN)
-                .post_init(_telegram_post_init)
-                .build()
-            )
-
-            start_handler = CommandHandler("start", start)
-            command_handler = CommandHandler(
-                ["help", "ping", "status", "queue", "sentinel", "briefing"],
-                handle_telegram_command,
-            )
-            message_handler = MessageHandler(
-                filters.TEXT & ~filters.COMMAND, handle_message
-            )
-
-            application.add_handler(start_handler)
-            application.add_handler(command_handler)
-            application.add_handler(message_handler)
-            application.add_error_handler(error_handler)
-
-            application.run_polling(
-                drop_pending_updates=bool(
-                    getattr(settings, "KURO_TELEGRAM_DROP_PENDING_UPDATES", False)
-                )
-            )
-
-        except (NetworkError, TimedOut) as e:
-            logger.warning(f"Network error during polling: {e}")
-            if attempt < max_retries - 1:
-                logger.info(f"Retrying in {retry_delay} seconds...")
-                time.sleep(retry_delay)
-                retry_delay *= 2
-            else:
-                logger.critical("Max retries reached. Shutting down.")
-                raise
-
-        except KeyboardInterrupt:
-            logger.info("Received shutdown signal. Stopping bot gracefully...")
-            break
-
-        except BaseException as e:
-            if isinstance(e, KeyboardInterrupt):
-                logger.info("Received KeyboardInterrupt. Stopping bot...")
-                break
-            logger.exception(
-                f"CRITICAL: Bot polling exited with {type(e).__name__}: {e}"
-            )
-            if attempt < max_retries - 1:
-                logger.info(f"Retrying in {retry_delay} seconds...")
-                time.sleep(retry_delay)
-                retry_delay *= 2
-            else:
-                logger.critical("Max retries reached. Shutting down.")
-                raise
-
+# --- Telegram Bot Bootstrap (delegated to kuro_backend.telegram_center) ---
+_telegram_allowed_chat_ids = telegram_center.auth.allowed_chat_ids
+_is_authorized_telegram_chat = telegram_center.auth.is_authorized_chat
+_telegram_admin_profile = telegram_center.auth.admin_profile
+_telegram_command_name = telegram_center.command_name
+_send_telegram_long_message = telegram_center.send_long_message
+_build_telegram_queue_summary = telegram_center.queue_summary
+start = telegram_center.start
+handle_telegram_command = telegram_center.handle_command
+handle_telegram_callback = telegram_center.handle_callback
+_process_telegram_chat_payload = telegram_center.process_chat_payload
+_telegram_inbound_queue_worker = telegram_center.inbound_queue_worker
+_telegram_post_init = telegram_center.post_init
+_schedule_telegram_chat_payload = telegram_center.schedule_chat_payload
+handle_message = telegram_center.handle_message
+route_telegram_persona = telegram_center.route_persona
+error_handler = telegram_center.error_handler
+run_bot_with_recovery = telegram_center.run_bot_with_recovery
 
 def run_uvicorn():
     """Runs FastAPI server with HTTPS support via mkcert."""
@@ -5599,20 +5163,7 @@ def run_uvicorn():
 
 def _acquire_bot_lock() -> bool:
     """Prevent duplicate Telegram polling instances."""
-    lock_path = os.path.join(settings.WORKING_DIR, ".kuro_telegram.lock")
-    try:
-        lock_file = open(lock_path, "w")
-        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        lock_file.write(str(os.getpid()))
-        lock_file.flush()
-        atexit.register(lambda: os.unlink(lock_path))
-        return True
-    except (BlockingIOError, PermissionError) as e:
-        logger.critical(
-            f"Another Kuro Telegram bot is already running or lock file is inaccessible: {e}. "
-            "Kill the old process first. Exiting."
-        )
-        return False
+    return telegram_center.acquire_bot_lock()
 
 
 if __name__ == "__main__":
@@ -5637,7 +5188,7 @@ if __name__ == "__main__":
 
     def signal_handler(sig, frame):
         logger.info("Received interrupt signal. Shutting down gracefully...")
-        _telegram_polling_shutdown.set()
+        telegram_center.shutdown()
         if _reminder_scheduler:
             _reminder_scheduler.shutdown()
         if _evaluation_scheduler:

@@ -1,0 +1,1159 @@
+/*
+  Kuro AI index revamp.
+  Scope: web_interface/templates/index.html only.
+  Purpose: make the V1 runtime DOM follow index_revamp.html without replacing
+  existing JS hooks, persona state, chat sessions, or playground endpoints.
+*/
+
+body.kuro-redesign-v1 {
+    --bg-primary: #1a1a1a;
+    --bg-secondary: #212121;
+    --bg-tertiary: #2a2a2a;
+    --bg-hover: #2f2f2f;
+    --bg-active: #333333;
+    --border-subtle: #383838;
+    --accent-primary: #0d9488;
+    --accent-hover: #0f766e;
+    --text-primary: #f5f5f5;
+    --text-secondary: #a3a3a3;
+    --status-error: #ef4444;
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 14px;
+    --radius-xl: 20px;
+    margin: 0;
+    min-height: 100vh;
+    overflow: hidden;
+    background: var(--bg-primary) !important;
+    color: var(--text-primary) !important;
+    color-scheme: dark;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+body.kuro-redesign-v1 *,
+body.kuro-redesign-v1 *::before,
+body.kuro-redesign-v1 *::after {
+    box-sizing: border-box;
+    letter-spacing: 0;
+}
+
+body.kuro-redesign-v1 .hidden {
+    display: none !important;
+}
+
+body.kuro-redesign-v1 .app {
+    display: flex;
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+    background: var(--bg-primary);
+}
+
+/* Sidebar */
+body.kuro-redesign-v1 #sidebar.sidebar {
+    position: relative !important;
+    inset: auto !important;
+    transform: none !important;
+    z-index: 30;
+    width: 228px !important;
+    min-width: 228px !important;
+    max-width: 228px !important;
+    height: 100vh !important;
+    padding: 12px !important;
+    overflow: hidden;
+    background: var(--bg-secondary) !important;
+    border-right: 1px solid var(--border-subtle) !important;
+    box-shadow: none !important;
+}
+
+body.kuro-redesign-v1 #sidebar.sidebar[data-collapsed="true"] {
+    width: 72px !important;
+    min-width: 72px !important;
+    max-width: 72px !important;
+}
+
+body.kuro-redesign-v1 #sidebar.sidebar[data-collapsed="true"] .sidebar-text,
+body.kuro-redesign-v1 #sidebar.sidebar[data-collapsed="true"] .logo-text,
+body.kuro-redesign-v1 #sidebar.sidebar[data-collapsed="true"] .btn-new-chat span,
+body.kuro-redesign-v1 #sidebar.sidebar[data-collapsed="true"] .search-box,
+body.kuro-redesign-v1 #sidebar.sidebar[data-collapsed="true"] .persona-row,
+body.kuro-redesign-v1 #sidebar.sidebar[data-collapsed="true"] #chatSessionsList,
+body.kuro-redesign-v1 #sidebar.sidebar[data-collapsed="true"] #sidebarSessionsMore,
+body.kuro-redesign-v1 #sidebar.sidebar[data-collapsed="true"] .user-info {
+    display: none !important;
+}
+
+body.kuro-redesign-v1 #sidebar.sidebar[data-collapsed="true"] .sidebar-logo,
+body.kuro-redesign-v1 #sidebar.sidebar[data-collapsed="true"] .btn-new-chat,
+body.kuro-redesign-v1 #sidebar.sidebar[data-collapsed="true"] .sidebar-user {
+    justify-content: center !important;
+}
+
+body.kuro-redesign-v1 #sidebar.sidebar[data-collapsed="true"] .btn-new-chat {
+    padding: 10px 0 !important;
+}
+
+body.kuro-redesign-v1 #sidebar > .flex {
+    gap: 8px;
+}
+
+body.kuro-redesign-v1 .sidebar-logo {
+    min-height: auto !important;
+    padding: 8px 4px !important;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    border: 0 !important;
+}
+
+body.kuro-redesign-v1 .sidebar-logo-area {
+    min-width: 0;
+    gap: 10px !important;
+}
+
+body.kuro-redesign-v1 .logo-avatar,
+body.kuro-redesign-v1 .kuro-flat-mark,
+body.kuro-redesign-v1 .kuro-avatar,
+body.kuro-redesign-v1 .msg-avatar,
+body.kuro-redesign-v1 .profile-btn {
+    width: 34px !important;
+    height: 34px !important;
+    min-width: 34px !important;
+    border-radius: 50% !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    background: var(--accent-primary) !important;
+    color: #fff !important;
+    font-size: 15px !important;
+    font-weight: 700 !important;
+    box-shadow: none !important;
+}
+
+body.kuro-redesign-v1 .logo-text {
+    min-width: 0;
+    line-height: 1.2;
+}
+
+body.kuro-redesign-v1 .logo-text .name {
+    margin: 0;
+    color: var(--text-primary) !important;
+    font-size: 14px !important;
+    font-weight: 700 !important;
+}
+
+body.kuro-redesign-v1 .logo-text .sub {
+    max-width: 146px;
+    margin: 0;
+    color: var(--text-secondary) !important;
+    font-size: 11px !important;
+    line-height: 1.2;
+}
+
+body.kuro-redesign-v1 #minimizeSidebar,
+body.kuro-redesign-v1 #closeSidebar,
+body.kuro-redesign-v1 #openSidebar {
+    border: 0 !important;
+    background: transparent !important;
+    color: var(--text-secondary) !important;
+}
+
+body.kuro-redesign-v1 .kuro-session-sidebar {
+    padding: 0 !important;
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    flex-direction: column;
+    gap: 8px;
+}
+
+body.kuro-redesign-v1 .btn-new-chat,
+body.kuro-redesign-v1 #newChatBtn {
+    width: 100%;
+    min-height: 42px;
+    padding: 10px 14px !important;
+    border: 0 !important;
+    border-radius: var(--radius-md) !important;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    background: var(--accent-primary) !important;
+    color: #fff !important;
+    font-size: 14px !important;
+    font-weight: 600 !important;
+    box-shadow: none !important;
+}
+
+body.kuro-redesign-v1 .btn-new-chat:hover,
+body.kuro-redesign-v1 #newChatBtn:hover {
+    background: var(--accent-hover) !important;
+    transform: none !important;
+}
+
+body.kuro-redesign-v1 .search-box {
+    min-height: 40px;
+    padding: 8px 10px !important;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border: 1px solid var(--border-subtle) !important;
+    border-radius: var(--radius-md) !important;
+    background: var(--bg-tertiary) !important;
+}
+
+body.kuro-redesign-v1 .search-box input {
+    min-width: 0;
+    background: transparent !important;
+    border: 0 !important;
+    outline: 0 !important;
+    color: var(--text-primary) !important;
+    font-size: 13px !important;
+}
+
+body.kuro-redesign-v1 input::placeholder,
+body.kuro-redesign-v1 textarea::placeholder {
+    color: var(--text-secondary) !important;
+}
+
+body.kuro-redesign-v1 .persona-row {
+    flex: 0 0 auto;
+}
+
+body.kuro-redesign-v1 #personaAccordionBtn {
+    min-height: 34px;
+    padding: 7px 8px !important;
+    border: 0 !important;
+    border-radius: var(--radius-sm) !important;
+    background: transparent !important;
+    color: var(--text-secondary) !important;
+    box-shadow: none !important;
+    font-size: 13px !important;
+}
+
+body.kuro-redesign-v1 #personaAccordionBtn:hover,
+body.kuro-redesign-v1 .persona-option-v2:hover,
+body.kuro-redesign-v1 .persona-option-v2.active {
+    background: var(--bg-hover) !important;
+    color: var(--text-primary) !important;
+    transform: none !important;
+    box-shadow: none !important;
+}
+
+body.kuro-redesign-v1 #activePersonaName {
+    color: var(--accent-primary) !important;
+}
+
+body.kuro-redesign-v1 #personaAccordionContent > div {
+    background: var(--bg-tertiary) !important;
+    border: 1px solid var(--border-subtle) !important;
+    border-radius: var(--radius-md) !important;
+}
+
+body.kuro-redesign-v1 .persona-option-v2 {
+    color: var(--text-secondary) !important;
+}
+
+body.kuro-redesign-v1 .persona-option-v2 span {
+    color: inherit !important;
+}
+
+body.kuro-redesign-v1 #chatSessionsList {
+    margin-top: 10px !important;
+    display: flex !important;
+    flex: 1 1 auto;
+    min-height: 0;
+    flex-direction: column;
+    gap: 8px !important;
+    overflow-y: auto;
+}
+
+body.kuro-redesign-v1 #chatSessionsList::-webkit-scrollbar {
+    width: 3px;
+}
+
+body.kuro-redesign-v1 #chatSessionsList::-webkit-scrollbar-thumb {
+    background: var(--border-subtle);
+    border-radius: 3px;
+}
+
+body.kuro-redesign-v1 .sidebar-section-label,
+body.kuro-redesign-v1 #chatSessionsList section > p:first-child {
+    padding: 6px 4px 2px !important;
+    color: var(--text-secondary) !important;
+    font-size: 10px !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.08em !important;
+    text-transform: uppercase;
+}
+
+body.kuro-redesign-v1 #chatSessionsList section > p:not(:first-child) {
+    padding: 0 4px !important;
+    color: var(--text-secondary) !important;
+    font-size: 13px !important;
+}
+
+body.kuro-redesign-v1 .chat-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+body.kuro-redesign-v1 .chat-item,
+body.kuro-redesign-v1 .session-item {
+    min-height: 34px;
+    padding: 7px 8px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 6px;
+    border: 0 !important;
+    border-radius: var(--radius-sm) !important;
+    background: transparent !important;
+    color: var(--text-primary) !important;
+    font-size: 13px !important;
+    box-shadow: none !important;
+}
+
+body.kuro-redesign-v1 .chat-item:hover,
+body.kuro-redesign-v1 .session-item:hover {
+    background: var(--bg-hover) !important;
+}
+
+body.kuro-redesign-v1 .chat-item.active,
+body.kuro-redesign-v1 .session-item.active {
+    padding-left: 6px !important;
+    background: var(--bg-active) !important;
+    border-left: 2px solid var(--accent-primary) !important;
+    box-shadow: none !important;
+}
+
+body.kuro-redesign-v1 .chat-item-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+body.kuro-redesign-v1 .chat-item-actions,
+body.kuro-redesign-v1 .session-actions {
+    display: flex;
+    flex: 0 0 auto;
+    gap: 4px;
+    opacity: 0;
+    background: transparent !important;
+    box-shadow: none !important;
+    transition: opacity 0.12s ease;
+}
+
+body.kuro-redesign-v1 .chat-item:hover .chat-item-actions,
+body.kuro-redesign-v1 .chat-item.active .chat-item-actions,
+body.kuro-redesign-v1 .session-item:hover .session-actions,
+body.kuro-redesign-v1 .session-item.active .session-actions {
+    opacity: 1;
+}
+
+body.kuro-redesign-v1 .chat-item-actions button,
+body.kuro-redesign-v1 .session-actions button,
+body.kuro-redesign-v1 .icon-btn {
+    width: 22px !important;
+    height: 22px !important;
+    min-width: 22px !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 4px !important;
+    background: transparent !important;
+    color: var(--text-secondary) !important;
+    box-shadow: none !important;
+}
+
+body.kuro-redesign-v1 .chat-item-actions button:hover,
+body.kuro-redesign-v1 .session-actions button:hover,
+body.kuro-redesign-v1 .icon-btn:hover {
+    background: var(--bg-active) !important;
+    color: var(--text-primary) !important;
+}
+
+body.kuro-redesign-v1 .btn-more,
+body.kuro-redesign-v1 #sidebarSessionsMore {
+    align-self: flex-start;
+    width: auto;
+    min-height: 30px;
+    margin-top: 6px !important;
+    padding: 5px 14px !important;
+    border: 1px solid var(--border-subtle) !important;
+    border-radius: var(--radius-sm) !important;
+    background: var(--bg-tertiary) !important;
+    color: var(--text-secondary) !important;
+    font-size: 12px !important;
+    box-shadow: none !important;
+}
+
+body.kuro-redesign-v1 .sidebar-user {
+    margin-top: auto;
+    padding: 10px 8px !important;
+    border-top: 1px solid var(--border-subtle) !important;
+}
+
+body.kuro-redesign-v1 .sidebar-user-area > div {
+    background: transparent !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+}
+
+body.kuro-redesign-v1 .user-avatar {
+    width: 32px !important;
+    height: 32px !important;
+    min-width: 32px !important;
+    border: 1px solid var(--border-subtle) !important;
+    border-radius: 50% !important;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-tertiary) !important;
+    color: var(--text-secondary) !important;
+    font-size: 13px !important;
+    font-weight: 600 !important;
+}
+
+body.kuro-redesign-v1 .user-name {
+    margin: 0;
+    color: var(--text-primary) !important;
+    font-size: 13px !important;
+    font-weight: 600 !important;
+}
+
+body.kuro-redesign-v1 .user-role {
+    margin: 0;
+    color: var(--text-secondary) !important;
+    font-size: 11px !important;
+}
+
+/* Main shell */
+body.kuro-redesign-v1 #mainContent.main {
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 100vh;
+    margin-left: 0 !important;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--bg-primary) !important;
+}
+
+body.kuro-redesign-v1 .header {
+    height: 60px !important;
+    min-height: 60px !important;
+    padding: 0 20px !important;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+    background: var(--bg-secondary) !important;
+    border-bottom: 1px solid var(--border-subtle) !important;
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+}
+
+body.kuro-redesign-v1 .header-left {
+    min-width: 0;
+}
+
+body.kuro-redesign-v1 .header-left .label {
+    margin: 0;
+    color: var(--text-secondary) !important;
+    font-size: 11px !important;
+}
+
+body.kuro-redesign-v1 .header-left .title {
+    margin: 0;
+    color: var(--text-primary) !important;
+    font-size: 16px !important;
+    font-weight: 700 !important;
+}
+
+body.kuro-redesign-v1 .header-right {
+    display: flex;
+    align-items: center;
+    gap: 8px !important;
+}
+
+body.kuro-redesign-v1 .mode-toggle {
+    padding: 3px !important;
+    display: flex;
+    border: 1px solid var(--border-subtle) !important;
+    border-radius: var(--radius-xl) !important;
+    background: var(--bg-tertiary) !important;
+}
+
+body.kuro-redesign-v1 .mode-btn {
+    min-height: 28px;
+    padding: 5px 14px !important;
+    border: 0 !important;
+    border-radius: 20px !important;
+    background: transparent !important;
+    color: var(--text-secondary) !important;
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    box-shadow: none !important;
+}
+
+body.kuro-redesign-v1 .mode-btn.active {
+    background: var(--accent-primary) !important;
+    color: #fff !important;
+}
+
+body.kuro-redesign-v1 .header-icon-btn {
+    width: 34px !important;
+    height: 34px !important;
+    min-width: 34px !important;
+    padding: 0 !important;
+    border: 1px solid var(--border-subtle) !important;
+    border-radius: 50% !important;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-tertiary) !important;
+    color: var(--text-secondary) !important;
+    box-shadow: none !important;
+}
+
+body.kuro-redesign-v1 .header-icon-btn:hover {
+    background: var(--bg-hover) !important;
+    color: var(--text-primary) !important;
+}
+
+body.kuro-redesign-v1 .profile-btn {
+    border: 0 !important;
+    cursor: pointer;
+}
+
+body.kuro-redesign-v1 .profile-btn + * {
+    color: var(--text-secondary);
+}
+
+/* Welcome, chat, messages */
+body.kuro-redesign-v1 #welcomeScreen.chat-area,
+body.kuro-redesign-v1 #chatContainer.chat-area {
+    flex: 1 1 auto;
+    width: 100% !important;
+    max-width: none !important;
+    min-width: 0;
+    min-height: 0;
+    margin: 0 !important;
+    padding: 32px 20px !important;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    background: var(--bg-primary) !important;
+    background-image: none !important;
+}
+
+body.kuro-redesign-v1 #welcomeScreen.chat-area {
+    padding-bottom: 0 !important;
+}
+
+body.kuro-redesign-v1 #welcomeScreen > div.welcome:first-child,
+body.kuro-redesign-v1 #welcomeScreen > .welcome {
+    flex: 1 1 auto !important;
+    width: 100% !important;
+    max-width: none !important;
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 40px 20px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 16px !important;
+    background: transparent !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+}
+
+body.kuro-redesign-v1 .welcome-avatar {
+    flex: 0 0 64px !important;
+    width: 64px !important;
+    height: 64px !important;
+    min-width: 64px !important;
+    border-radius: 50% !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    background: var(--accent-primary) !important;
+    color: #fff !important;
+    font-size: 28px !important;
+    font-weight: 700 !important;
+    box-shadow: none !important;
+}
+
+body.kuro-redesign-v1 .welcome h2 {
+    width: 100% !important;
+    max-width: 720px !important;
+    margin: 0 !important;
+    color: var(--text-primary) !important;
+    font-size: clamp(28px, 3vw, 36px) !important;
+    line-height: 1.15 !important;
+    font-weight: 700 !important;
+    text-align: center !important;
+}
+
+body.kuro-redesign-v1 .welcome p {
+    width: 100% !important;
+    max-width: 520px !important;
+    margin: 0 !important;
+    color: var(--text-secondary) !important;
+    font-size: 15px !important;
+    line-height: 1.5 !important;
+    text-align: center !important;
+}
+
+body.kuro-redesign-v1 .quick-chips {
+    width: 100% !important;
+    max-width: 760px !important;
+    margin-top: 18px !important;
+    display: flex !important;
+    flex-wrap: wrap !important;
+    justify-content: center !important;
+    gap: 12px !important;
+}
+
+body.kuro-redesign-v1 .quick-chips .chip {
+    width: auto !important;
+    min-width: 150px !important;
+    max-width: 190px !important;
+    min-height: 44px !important;
+    padding: 10px 16px !important;
+    border: 1px solid var(--border-subtle) !important;
+    border-radius: var(--radius-lg) !important;
+    background: var(--bg-tertiary) !important;
+    color: var(--text-primary) !important;
+    font-size: 13px !important;
+    line-height: 1.15 !important;
+    text-align: center !important;
+    box-shadow: none !important;
+}
+
+body.kuro-redesign-v1 .quick-chips .chip:hover {
+    background: var(--bg-hover) !important;
+    border-color: var(--accent-primary) !important;
+}
+
+body.kuro-redesign-v1 .msg-row,
+body.kuro-redesign-v1 #chatContainer > .flex.items-start {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+}
+
+body.kuro-redesign-v1 .msg-row.user,
+body.kuro-redesign-v1 #chatContainer > .flex-row-reverse {
+    justify-content: flex-end;
+}
+
+body.kuro-redesign-v1 .msg-avatar {
+    width: 32px !important;
+    height: 32px !important;
+    min-width: 32px !important;
+    margin-top: 2px;
+    font-size: 13px !important;
+}
+
+body.kuro-redesign-v1 .user-message-avatar {
+    display: none !important;
+}
+
+body.kuro-redesign-v1 .msg-bubble,
+body.kuro-redesign-v1 .chat-bubble-ai,
+body.kuro-redesign-v1 .chat-bubble-user {
+    max-width: min(760px, 65vw) !important;
+    padding: 12px 16px !important;
+    border: 1px solid var(--border-subtle) !important;
+    border-radius: var(--radius-lg) !important;
+    background: var(--bg-tertiary) !important;
+    color: var(--text-primary) !important;
+    box-shadow: none !important;
+    font-size: 14px !important;
+    line-height: 1.55 !important;
+}
+
+body.kuro-redesign-v1 .msg-row.user .msg-bubble,
+body.kuro-redesign-v1 .chat-bubble-user {
+    background: var(--accent-primary) !important;
+    border-color: var(--accent-primary) !important;
+    color: #fff !important;
+    border-radius: var(--radius-lg) var(--radius-lg) 4px var(--radius-lg) !important;
+}
+
+body.kuro-redesign-v1 .msg-row.ai .msg-bubble,
+body.kuro-redesign-v1 .chat-bubble-ai {
+    border-radius: var(--radius-lg) var(--radius-lg) var(--radius-lg) 4px !important;
+}
+
+body.kuro-redesign-v1 .markdown-content pre,
+body.kuro-redesign-v1 #playgroundOutput {
+    background: #0b0b0b !important;
+    border: 1px solid var(--border-subtle) !important;
+}
+
+/* Composer */
+body.kuro-redesign-v1 .composer-wrap#mainInputArea,
+body.kuro-redesign-v1 .welcome-composer-wrap {
+    flex: 0 0 auto !important;
+    width: 100% !important;
+    padding: 12px 20px 16px !important;
+    background: var(--bg-primary) !important;
+    border-top: 1px solid var(--border-subtle) !important;
+}
+
+body.kuro-redesign-v1 .welcome-composer-wrap {
+    border-top: 0 !important;
+}
+
+body.kuro-redesign-v1 .composer {
+    width: 100% !important;
+    max-width: 980px !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    background: var(--bg-secondary) !important;
+    border: 1px solid var(--border-subtle) !important;
+    border-radius: var(--radius-xl) !important;
+    box-shadow: none !important;
+}
+
+body.kuro-redesign-v1 .composer-row {
+    width: 100% !important;
+    padding: 10px 12px !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+}
+
+body.kuro-redesign-v1 .composer-row > .relative {
+    flex: 0 0 auto;
+}
+
+body.kuro-redesign-v1 .composer-row > .relative.flex-1,
+body.kuro-redesign-v1 .composer-row > div.flex-1 {
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+}
+
+body.kuro-redesign-v1 .composer-add {
+    flex: 0 0 32px !important;
+    width: 32px !important;
+    height: 32px !important;
+    min-width: 32px !important;
+    padding: 0 !important;
+    border: 1px solid var(--border-subtle) !important;
+    border-radius: 50% !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    background: var(--bg-tertiary) !important;
+    color: var(--text-secondary) !important;
+    box-shadow: none !important;
+}
+
+body.kuro-redesign-v1 .composer-add:hover {
+    background: var(--bg-hover) !important;
+    color: var(--text-primary) !important;
+    transform: none !important;
+}
+
+body.kuro-redesign-v1 #messageInput.composer-input,
+body.kuro-redesign-v1 #welcomeInput.composer-input {
+    flex: 1 1 auto !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    min-height: 28px !important;
+    max-height: 140px !important;
+    padding: 2px 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    color: var(--text-primary) !important;
+    font: inherit !important;
+    font-size: 14px !important;
+    line-height: 1.45 !important;
+    resize: none !important;
+    box-shadow: none !important;
+    outline: 0 !important;
+}
+
+body.kuro-redesign-v1 .model-selector,
+body.kuro-redesign-v1 .kuro-chatbar-model {
+    flex: 0 0 auto !important;
+    width: auto !important;
+    min-width: 132px !important;
+    max-width: 170px !important;
+    min-height: 34px !important;
+    padding: 6px 10px !important;
+    border: 1px solid var(--border-subtle) !important;
+    border-radius: var(--radius-md) !important;
+    background: var(--bg-tertiary) !important;
+    color: var(--text-primary) !important;
+    font-size: 12px !important;
+    font-weight: 500 !important;
+    box-shadow: none !important;
+}
+
+body.kuro-redesign-v1 .model-selector option,
+body.kuro-redesign-v1 .kuro-chatbar-model option {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
+body.kuro-redesign-v1 .send-btn,
+body.kuro-redesign-v1 #sendBtn,
+body.kuro-redesign-v1 #welcomeSendBtn,
+body.kuro-redesign-v1 #stopGeneratingBtn {
+    flex: 0 0 36px !important;
+    width: 36px !important;
+    height: 36px !important;
+    min-width: 36px !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 50% !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    background: var(--accent-primary) !important;
+    color: #fff !important;
+    box-shadow: none !important;
+}
+
+body.kuro-redesign-v1 .send-btn:hover,
+body.kuro-redesign-v1 #sendBtn:hover,
+body.kuro-redesign-v1 #welcomeSendBtn:hover {
+    background: var(--accent-hover) !important;
+    transform: none !important;
+}
+
+body.kuro-redesign-v1 #filePreview {
+    width: 100%;
+    max-width: 980px;
+    margin: 0 auto 8px !important;
+}
+
+body.kuro-redesign-v1 #mainInputArea > p {
+    margin: 8px 0 0 !important;
+    color: var(--text-secondary) !important;
+}
+
+body.kuro-redesign-v1 .plus-menu,
+body.kuro-redesign-v1 .kuro-composer-menu {
+    width: 256px !important;
+    min-width: 256px !important;
+    padding: 8px !important;
+    overflow: hidden;
+    border: 1px solid var(--border-subtle) !important;
+    border-radius: var(--radius-lg) !important;
+    background: var(--bg-tertiary) !important;
+    box-shadow: 0 24px 56px rgba(0, 0, 0, 0.45) !important;
+}
+
+body.kuro-redesign-v1 .plus-menu button,
+body.kuro-redesign-v1 .kuro-composer-menu button,
+body.kuro-redesign-v1 .kuro-composer-menu a {
+    min-height: 38px !important;
+    padding: 10px 12px !important;
+    border: 1px solid transparent !important;
+    border-radius: var(--radius-sm) !important;
+    background: transparent !important;
+    color: var(--text-primary) !important;
+    box-shadow: none !important;
+}
+
+body.kuro-redesign-v1 .plus-menu button:hover,
+body.kuro-redesign-v1 .kuro-composer-menu button:hover,
+body.kuro-redesign-v1 .kuro-composer-menu a:hover {
+    background: var(--bg-active) !important;
+    border-color: var(--border-subtle) !important;
+}
+
+body.kuro-redesign-v1 .kuro-composer-menu .border-t {
+    border-color: var(--border-subtle) !important;
+}
+
+/* Menus and modals */
+body.kuro-redesign-v1 .kuro-profile-menu,
+body.kuro-redesign-v1 #userDropdownMenu {
+    width: 320px !important;
+    border: 1px solid var(--border-subtle) !important;
+    border-radius: var(--radius-lg) !important;
+    background: var(--bg-secondary) !important;
+    color: var(--text-primary) !important;
+    box-shadow: 0 20px 44px rgba(0, 0, 0, 0.42) !important;
+}
+
+body.kuro-redesign-v1 .kuro-profile-menu-header,
+body.kuro-redesign-v1 .kuro-profile-menu .bg-gray-50 {
+    background: var(--bg-tertiary) !important;
+    border-color: var(--border-subtle) !important;
+}
+
+body.kuro-redesign-v1 .kuro-profile-menu-link,
+body.kuro-redesign-v1 .kuro-profile-submenu-link {
+    min-height: 38px;
+    border: 1px solid transparent;
+    background: transparent !important;
+    color: var(--text-primary) !important;
+}
+
+body.kuro-redesign-v1 .kuro-profile-menu-link:hover,
+body.kuro-redesign-v1 .kuro-profile-submenu-link:hover,
+body.kuro-redesign-v1 .kuro-profile-tools[open] > summary {
+    background: var(--bg-active) !important;
+    border-color: var(--border-subtle);
+}
+
+body.kuro-redesign-v1 .kuro-profile-tools summary {
+    list-style: none;
+}
+
+body.kuro-redesign-v1 .kuro-profile-tools summary::-webkit-details-marker {
+    display: none;
+}
+
+body.kuro-redesign-v1 .kuro-profile-tools[open] .kuro-profile-tools-chevron {
+    transform: rotate(90deg);
+}
+
+body.kuro-redesign-v1 .modal-backdrop {
+    background: rgba(0, 0, 0, 0.5);
+}
+
+body.kuro-redesign-v1 .modal {
+    width: min(420px, 90vw);
+    min-width: 0;
+    padding: 24px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+}
+
+body.kuro-redesign-v1 .modal h3 {
+    margin: 0 0 16px;
+    font-size: 17px;
+    font-weight: 700;
+}
+
+body.kuro-redesign-v1 .modal-input {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm) !important;
+    background: var(--bg-tertiary) !important;
+    color: var(--text-primary) !important;
+    font-size: 14px;
+    outline: none;
+}
+
+body.kuro-redesign-v1 .modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 16px;
+}
+
+body.kuro-redesign-v1 .btn-cancel,
+body.kuro-redesign-v1 .btn-save,
+body.kuro-redesign-v1 .btn-delete {
+    min-height: 36px;
+    padding: 8px 16px !important;
+    border-radius: var(--radius-sm) !important;
+    font-size: 13px;
+}
+
+body.kuro-redesign-v1 .btn-cancel {
+    border: 1px solid var(--border-subtle) !important;
+    background: var(--bg-tertiary) !important;
+    color: var(--text-primary) !important;
+}
+
+body.kuro-redesign-v1 .btn-save {
+    border: 0 !important;
+    background: var(--accent-primary) !important;
+    color: #fff !important;
+}
+
+body.kuro-redesign-v1 .btn-delete {
+    border: 0 !important;
+    background: var(--status-error) !important;
+    color: #fff !important;
+}
+
+body.kuro-redesign-v1 .fixed.inset-0 .bg-white,
+body.kuro-redesign-v1 .fixed.inset-0 .dark\:bg-gray-800,
+body.kuro-redesign-v1 .fixed.inset-0 .dark\:bg-gray-900 {
+    background: var(--bg-secondary) !important;
+    border-color: var(--border-subtle) !important;
+}
+
+/* Playground keeps the existing V1 backend/runtime hooks. */
+body.kuro-redesign-v1 #playgroundPanel.playground-wrap {
+    flex: 1 1 auto;
+    min-height: 0;
+    padding: 96px 32px 120px !important;
+    overflow-y: auto;
+    background: var(--bg-primary) !important;
+}
+
+body.kuro-redesign-v1 #playgroundPanel > div,
+body.kuro-redesign-v1 #playgroundPanel > section {
+    max-width: 1120px;
+    margin-right: auto;
+    margin-left: auto;
+}
+
+body.kuro-redesign-v1 .pg-header {
+    background: linear-gradient(90deg, rgba(13, 148, 136, 0.16), rgba(23, 23, 23, 0.98)) !important;
+    border-color: rgba(13, 148, 136, 0.42) !important;
+}
+
+body.kuro-redesign-v1 .pg-col,
+body.kuro-redesign-v1 #playgroundPanel .playground-card {
+    background: var(--bg-secondary) !important;
+    border: 1px solid var(--border-subtle) !important;
+    border-radius: var(--radius-md) !important;
+    box-shadow: none !important;
+}
+
+body.kuro-redesign-v1 .pg-input,
+body.kuro-redesign-v1 #playgroundPanel input,
+body.kuro-redesign-v1 #playgroundPanel textarea,
+body.kuro-redesign-v1 #playgroundPanel select,
+body.kuro-redesign-v1 #playgroundProviderChecklist,
+body.kuro-redesign-v1 #playgroundIntegrityOverview,
+body.kuro-redesign-v1 #playgroundHistoryList,
+body.kuro-redesign-v1 #playgroundHistoryDetail {
+    background: #111827 !important;
+    border-color: var(--border-subtle) !important;
+    color: var(--text-primary) !important;
+}
+
+body.kuro-redesign-v1 .btn-pg {
+    border: 0 !important;
+    border-radius: 8px !important;
+    font-weight: 700;
+    box-shadow: none !important;
+}
+
+body.kuro-redesign-v1 .btn-pg.teal {
+    background: var(--accent-primary) !important;
+    color: #fff !important;
+}
+
+body.kuro-redesign-v1 .btn-pg.gray {
+    background: #374151 !important;
+    color: #fff !important;
+}
+
+body.kuro-redesign-v1 .btn-pg.orange {
+    background: #f59e0b !important;
+    color: #fff !important;
+}
+
+body.kuro-redesign-v1 .btn-pg.purple {
+    background: #6366f1 !important;
+    color: #fff !important;
+}
+
+body.kuro-redesign-v1 .btn-pg.green {
+    background: #8b5cf6 !important;
+    color: #fff !important;
+}
+
+body.kuro-redesign-v1 .btn-pg.blue {
+    background: #0ea5e9 !important;
+    color: #fff !important;
+}
+
+body.kuro-redesign-v1 #kuroStatusTicker {
+    background: rgba(17, 24, 39, 0.96) !important;
+    border-color: var(--border-subtle) !important;
+    color: #99f6e4 !important;
+}
+
+body.kuro-redesign-v1 a:focus-visible,
+body.kuro-redesign-v1 button:focus-visible,
+body.kuro-redesign-v1 input:focus-visible,
+body.kuro-redesign-v1 textarea:focus-visible,
+body.kuro-redesign-v1 select:focus-visible {
+    outline: 2px solid var(--accent-primary);
+    outline-offset: 2px;
+}
+
+@media (max-width: 1023px) {
+    body.kuro-redesign-v1 #sidebar.sidebar {
+        position: fixed !important;
+        inset: 0 auto 0 0 !important;
+        transform: translateX(-100%) !important;
+        width: 260px !important;
+        min-width: 260px !important;
+        max-width: 260px !important;
+    }
+
+    body.kuro-redesign-v1 #sidebar.sidebar.translate-x-0 {
+        transform: translateX(0) !important;
+    }
+
+    body.kuro-redesign-v1 #sidebar.sidebar:not(.\-translate-x-full) {
+        transform: translateX(0) !important;
+    }
+
+    body.kuro-redesign-v1 .header {
+        padding: 0 14px !important;
+    }
+
+    body.kuro-redesign-v1 #playgroundPanel.playground-wrap {
+        padding: 28px 16px 120px !important;
+    }
+}
+
+@media (max-width: 760px) {
+    body.kuro-redesign-v1 .header-left .kuro-avatar,
+    body.kuro-redesign-v1 .mode-toggle {
+        display: none !important;
+    }
+
+    body.kuro-redesign-v1 #welcomeScreen.chat-area,
+    body.kuro-redesign-v1 #chatContainer.chat-area {
+        padding: 24px 14px !important;
+    }
+
+    body.kuro-redesign-v1 .composer-wrap#mainInputArea,
+    body.kuro-redesign-v1 .welcome-composer-wrap {
+        padding: 10px 12px 12px !important;
+    }
+
+    body.kuro-redesign-v1 .composer-row {
+        flex-wrap: wrap;
+    }
+
+    body.kuro-redesign-v1 .composer-row > .relative.flex-1,
+    body.kuro-redesign-v1 .composer-row > div.flex-1 {
+        flex-basis: calc(100% - 40px) !important;
+    }
+
+    body.kuro-redesign-v1 .model-selector,
+    body.kuro-redesign-v1 .kuro-chatbar-model {
+        min-width: 112px !important;
+        max-width: 130px !important;
+        font-size: 11px !important;
+    }
+
+    body.kuro-redesign-v1 .quick-chips .chip {
+        min-width: 132px !important;
+    }
+}

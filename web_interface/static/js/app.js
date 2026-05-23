@@ -41,11 +41,29 @@ const CONFIG = {
     ],
 };
 
+const MODEL_ALIAS_FALLBACK = [
+    { alias: 'gemini_fast', display_name: 'Gemini Flash' },
+    { alias: 'openai_nano', display_name: 'OpenAI Nano' },
+    { alias: 'claude_fast', display_name: 'Claude Fast' },
+    { alias: 'deepseek_fast', display_name: 'DeepSeek Fast' },
+    { alias: 'ollama_local', display_name: 'Ollama Local' },
+];
+
 // ============================================
 // Authentication Helper Functions (Cookie-Based)
 // ============================================
 function getUsername() {
     return window.KURO_USER_CONTEXT?.displayName || localStorage.getItem('kuro_username') || sessionStorage.getItem('kuro_username') || 'Pantronux';
+}
+
+function getUserInitial() {
+    const source = (
+        window.KURO_USER_CONTEXT?.displayName
+        || window.KURO_USER_CONTEXT?.username
+        || getUsername()
+        || 'U'
+    ).trim();
+    return (source[0] || 'U').toUpperCase();
 }
 
 function logout() {
@@ -97,6 +115,11 @@ let runtimeMode = localStorage.getItem('kuro-runtime-mode') || 'normal';
 let playgroundSessionId = null;
 let playgroundExecuting = false;
 let playgroundHistorySessionId = null;
+let sessionSearchQuery = '';
+let selectedModelAlias = localStorage.getItem('kuro_model_alias') || 'gemini_fast';
+let availableModelAliases = [...MODEL_ALIAS_FALLBACK];
+let pendingRenameChatId = null;
+let pendingDeleteChatId = null;
 
 // Infinite Scroll State
 let chatOffset = 0;
@@ -145,6 +168,139 @@ function loadDraft(chatId) {
     }
 }
 
+function resolveComposerInputElement() {
+    if (elements.welcomeScreen && !elements.welcomeScreen.classList.contains('hidden') && elements.welcomeInput) {
+        return elements.welcomeInput;
+    }
+    return elements.messageInput;
+}
+
+function queueComposerPrompt(prefixText) {
+    const targetInput = resolveComposerInputElement();
+    if (!targetInput) return;
+    const cleanPrefix = String(prefixText || '').trim();
+    if (!cleanPrefix) return;
+    const current = (targetInput.value || '').trim();
+    targetInput.value = current ? `${current}\n${cleanPrefix}` : cleanPrefix;
+    targetInput.dispatchEvent(new Event('input'));
+    targetInput.focus();
+}
+
+function openComposerActionDestination(url) {
+    if (!url) return;
+    window.location.href = url;
+}
+
+function closeComposerMenus() {
+    elements.composerActionMenu?.classList.add('hidden');
+    elements.welcomeComposerActionMenu?.classList.add('hidden');
+}
+
+function toggleComposerMenu(menuElement) {
+    if (!menuElement) return;
+    const shouldShow = menuElement.classList.contains('hidden');
+    closeComposerMenus();
+    if (shouldShow) {
+        menuElement.classList.remove('hidden');
+    }
+}
+
+function normalizeModelDisplayName(alias, displayName) {
+    if (displayName && displayName.trim()) {
+        return displayName
+            .replace(/\bfast\b/i, 'Flash')
+            .replace(/\bnano\b/i, 'Nano')
+            .trim();
+    }
+    const fallback = MODEL_ALIAS_FALLBACK.find((item) => item.alias === alias);
+    return fallback ? fallback.display_name : alias;
+}
+
+function applyModelAlias(alias) {
+    if (!alias) return;
+    selectedModelAlias = String(alias).trim();
+    localStorage.setItem('kuro_model_alias', selectedModelAlias);
+    [elements.composerModelSelect, elements.welcomeModelSelect].forEach((selectEl) => {
+        if (selectEl) selectEl.value = selectedModelAlias;
+    });
+}
+
+function renderModelSelectorOptions(models) {
+    const options = Array.isArray(models) && models.length ? models : MODEL_ALIAS_FALLBACK;
+    const normalized = options.map((item) => ({
+        alias: String(item.alias || '').trim(),
+        display_name: normalizeModelDisplayName(item.alias, item.display_name),
+    })).filter((item) => item.alias);
+    if (!normalized.some((item) => item.alias === selectedModelAlias)) {
+        normalized.unshift({ alias: selectedModelAlias, display_name: normalizeModelDisplayName(selectedModelAlias, '') });
+    }
+    availableModelAliases = normalized;
+
+    const optionHtml = normalized
+        .map((item) => `<option value="${escapeHtml(item.alias)}">${escapeHtml(item.display_name)}</option>`)
+        .join('');
+    [elements.composerModelSelect, elements.welcomeModelSelect].forEach((selectEl) => {
+        if (!selectEl) return;
+        selectEl.innerHTML = optionHtml;
+        selectEl.value = selectedModelAlias;
+    });
+}
+
+async function loadComposerModelAliases() {
+    try {
+        const response = await authFetch('/api/models');
+        if (!response.ok) {
+            renderModelSelectorOptions(MODEL_ALIAS_FALLBACK);
+            return;
+        }
+        const payload = await response.json();
+        const models = payload?.data?.models;
+        renderModelSelectorOptions(models);
+    } catch (_) {
+        renderModelSelectorOptions(MODEL_ALIAS_FALLBACK);
+    }
+}
+
+function handleComposerAction(action) {
+    switch (action) {
+        case 'attach':
+            elements.fileInput?.click();
+            return;
+        case 'files':
+            openFilesModal();
+            return;
+        case 'deep_research':
+            queueComposerPrompt('Deep research:');
+            return;
+        case 'web_search':
+            queueComposerPrompt('Web search:');
+            return;
+        case 'agent_mode':
+            queueComposerPrompt('Agent mode:');
+            return;
+        case 'task_mode':
+            queueComposerPrompt('Task:');
+            return;
+        case 'reminder_mode':
+            queueComposerPrompt('Reminder:');
+            return;
+        case 'market_page':
+            openComposerActionDestination('/market');
+            return;
+        case 'intelligence_page':
+            openComposerActionDestination('/intelligence');
+            return;
+        case 'tutorial_page':
+            openComposerActionDestination('/tutorial');
+            return;
+        case 'playground_mode':
+            applyRuntimeMode('playground');
+            return;
+        default:
+            return;
+    }
+}
+
 // ============================================
 // DOM Elements
 // ============================================
@@ -153,6 +309,8 @@ const elements = {
     messageInput: document.getElementById('messageInput'),
     sendBtn: document.getElementById('sendBtn'),
     uploadBtn: document.getElementById('uploadBtn'),
+    composerActionMenu: document.getElementById('composerActionMenu'),
+    welcomeComposerActionMenu: document.getElementById('welcomeComposerActionMenu'),
     fileInput: document.getElementById('fileInput'),
     filePreview: document.getElementById('filePreview'),
     dropOverlay: document.getElementById('dropOverlay'),
@@ -173,6 +331,8 @@ const elements = {
     settingsBackdrop: document.getElementById('settingsBackdrop'),
     closeSettings: document.getElementById('closeSettings'),
     modelSelect: document.getElementById('modelSelect'),
+    composerModelSelect: document.getElementById('composerModelSelect'),
+    welcomeModelSelect: document.getElementById('welcomeModelSelect'),
     temperatureSlider: document.getElementById('temperatureSlider'),
     temperatureValue: document.getElementById('temperatureValue'),
     clearHistoryBtn: document.getElementById('clearHistoryBtn'),
@@ -193,6 +353,7 @@ const elements = {
     applyPersonaBtn: document.getElementById('applyPersona'),
     // Navigation
     navChat: document.getElementById('navChat'),
+    navAdminSettings: document.getElementById('navAdminSettings'),
     navSystemStatus: document.getElementById('navSystemStatus'),
     navSettings: document.getElementById('navSettings'),
     navFiles: document.getElementById('navFiles'),
@@ -285,6 +446,16 @@ const elements = {
     chatSessionsList: document.getElementById('chatSessionsList'),
     toggleChatDrawer: document.getElementById('toggleChatDrawer'),
     newChatBtn: document.getElementById('newChatBtn'),
+    sidebarChatSearch: document.getElementById('sidebarChatSearch'),
+    sidebarSessionsMore: document.getElementById('sidebarSessionsMore'),
+    chatRenameModal: document.getElementById('chatRenameModal'),
+    chatRenameInput: document.getElementById('chatRenameInput'),
+    chatRenameCancelBtn: document.getElementById('chatRenameCancelBtn'),
+    chatRenameSaveBtn: document.getElementById('chatRenameSaveBtn'),
+    chatDeleteModal: document.getElementById('chatDeleteModal'),
+    chatDeleteMessage: document.getElementById('chatDeleteMessage'),
+    chatDeleteCancelBtn: document.getElementById('chatDeleteCancelBtn'),
+    chatDeleteConfirmBtn: document.getElementById('chatDeleteConfirmBtn'),
     personaAccordionBtn: document.getElementById('personaAccordionBtn'),
     personaAccordionContent: document.getElementById('personaAccordionContent'),
     personaChevron: document.getElementById('personaChevron'),
@@ -381,6 +552,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     setupEventListeners();
     setupAutoResize();
     setupInfiniteScroll();
+    renderModelSelectorOptions(MODEL_ALIAS_FALLBACK);
+    applyModelAlias(selectedModelAlias);
+    await loadComposerModelAliases();
     updateUserInfo();
     kuroRestoreUIMode();
     kuroConnectDashboardWS();
@@ -420,7 +594,11 @@ function setupEventListeners() {
                 sendMessage(true);
             }
         });
-        elements.welcomeUploadBtn.addEventListener('click', () => elements.fileInput.click());
+        elements.welcomeUploadBtn.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            toggleComposerMenu(elements.welcomeComposerActionMenu || elements.composerActionMenu);
+        });
         // Auto resize welcome input
         elements.welcomeInput.addEventListener('input', function () {
             this.style.height = 'auto';
@@ -432,8 +610,42 @@ function setupEventListeners() {
         elements.backToSidebarBtn.addEventListener('click', () => toggleChatDrawer(false));
     }
 
-    elements.uploadBtn.addEventListener('click', () => elements.fileInput.click());
+    elements.uploadBtn.addEventListener('click', (event) => {
+        event.stopPropagation();
+        if (elements.composerActionMenu) {
+            toggleComposerMenu(elements.composerActionMenu);
+        } else {
+            elements.fileInput.click();
+        }
+    });
+    [elements.composerActionMenu, elements.welcomeComposerActionMenu].forEach((menuEl) => {
+        if (!menuEl) return;
+        menuEl.addEventListener('click', (event) => {
+            const actionButton = event.target.closest('[data-composer-action]');
+            if (!actionButton) return;
+            const action = actionButton.dataset.composerAction;
+            closeComposerMenus();
+            handleComposerAction(action);
+        });
+    });
+    document.addEventListener('click', (event) => {
+        const clickedOnMainUpload = elements.uploadBtn?.contains(event.target);
+        const clickedOnWelcomeUpload = elements.welcomeUploadBtn?.contains(event.target);
+        const clickedOnMainMenu = elements.composerActionMenu?.contains(event.target);
+        const clickedOnWelcomeMenu = elements.welcomeComposerActionMenu?.contains(event.target);
+        if (clickedOnMainUpload || clickedOnWelcomeUpload || clickedOnMainMenu || clickedOnWelcomeMenu) {
+            return;
+        }
+        closeComposerMenus();
+    });
     elements.fileInput.addEventListener('change', handleFileSelect);
+
+    [elements.composerModelSelect, elements.welcomeModelSelect].forEach((modelSelectEl) => {
+        if (!modelSelectEl) return;
+        modelSelectEl.addEventListener('change', (event) => {
+            applyModelAlias(event.target.value);
+        });
+    });
 
     // Ctrl+V paste support for images and files
     elements.messageInput.addEventListener('paste', handlePaste);
@@ -466,14 +678,17 @@ function setupEventListeners() {
     });
 
     // System Status Modal
-    elements.navSystemStatus.addEventListener('click', (e) => {
-        e.preventDefault();
-        if (isCurrentUserAdmin()) {
-            openSystemStatus();
-        } else {
-            showToast('Akses ditolak: halaman ini hanya untuk Administrator.', 'error');
-        }
-    });
+    if (elements.navSystemStatus) {
+        elements.navSystemStatus.addEventListener('click', (e) => {
+            e.preventDefault();
+            if (isCurrentUserAdmin()) {
+                openSystemStatus();
+                elements.userDropdownMenu?.classList.add('hidden');
+            } else {
+                showToast('Akses ditolak: halaman ini hanya untuk Administrator.', 'error');
+            }
+        });
+    }
     elements.closeSystemStatus.addEventListener('click', closeSystemStatus);
     elements.systemStatusBackdrop.addEventListener('click', closeSystemStatus);
 
@@ -482,14 +697,26 @@ function setupEventListeners() {
         elements.navFiles.addEventListener('click', (e) => {
             e.preventDefault();
             openFilesModal();
+            elements.userDropdownMenu?.classList.add('hidden');
+        });
+    }
+
+    if (elements.navAdminSettings) {
+        elements.navAdminSettings.addEventListener('click', (e) => {
+            e.preventDefault();
+            openSettings();
+            elements.userDropdownMenu?.classList.add('hidden');
         });
     }
 
     // Settings Modal
-    elements.navSettings.addEventListener('click', (e) => {
-        e.preventDefault();
-        openSettings();
-    });
+    if (elements.navSettings) {
+        elements.navSettings.addEventListener('click', (e) => {
+            e.preventDefault();
+            openSettings();
+            elements.userDropdownMenu?.classList.add('hidden');
+        });
+    }
     elements.closeSettings.addEventListener('click', closeSettings);
     elements.settingsBackdrop.addEventListener('click', closeSettings);
 
@@ -525,8 +752,47 @@ function setupEventListeners() {
     if (elements.newChatBtn) {
         elements.newChatBtn.addEventListener('click', () => {
             startNewChat();
-            if (window.innerWidth < 1024) toggleChatDrawer(false);
+            if (window.innerWidth < 1024) closeSidebar();
         });
+    }
+    if (elements.sidebarChatSearch) {
+        elements.sidebarChatSearch.addEventListener('input', (event) => {
+            sessionSearchQuery = (event.target.value || '').trim().toLowerCase();
+            renderChatSessions();
+        });
+    }
+    if (elements.sidebarSessionsMore) {
+        elements.sidebarSessionsMore.addEventListener('click', () => {
+            loadChatSessions();
+        });
+    }
+    if (elements.chatRenameCancelBtn) {
+        elements.chatRenameCancelBtn.addEventListener('click', closeChatRenameModal);
+    }
+    if (elements.chatRenameModal) {
+        elements.chatRenameModal.addEventListener('click', (event) => {
+            if (event.target === elements.chatRenameModal) closeChatRenameModal();
+        });
+    }
+    if (elements.chatRenameSaveBtn) {
+        elements.chatRenameSaveBtn.addEventListener('click', submitChatRename);
+    }
+    if (elements.chatRenameInput) {
+        elements.chatRenameInput.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') submitChatRename();
+            if (event.key === 'Escape') closeChatRenameModal();
+        });
+    }
+    if (elements.chatDeleteCancelBtn) {
+        elements.chatDeleteCancelBtn.addEventListener('click', closeChatDeleteModal);
+    }
+    if (elements.chatDeleteModal) {
+        elements.chatDeleteModal.addEventListener('click', (event) => {
+            if (event.target === elements.chatDeleteModal) closeChatDeleteModal();
+        });
+    }
+    if (elements.chatDeleteConfirmBtn) {
+        elements.chatDeleteConfirmBtn.addEventListener('click', submitChatDelete);
     }
 
     // Load initial data
@@ -758,6 +1024,7 @@ function updatePersonaUI() {
 }
 
 function toggleChatDrawer(force) {
+    if (!elements.chatDrawer) return;
     const isOpen = typeof force === 'boolean' ? !force : elements.chatDrawer.classList.contains('active');
 
     if (isOpen) {
@@ -847,23 +1114,33 @@ async function loadChatSessions() {
 function renderChatSessions() {
     if (!elements.chatSessionsList) return;
 
-    if (chatSessions.length === 0) {
+    const filteredSessions = chatSessions.filter((session) => {
+        if (!sessionSearchQuery) return true;
+        const title = (session.title || 'New Chat').toLowerCase();
+        return title.includes(sessionSearchQuery);
+    });
+
+    if (filteredSessions.length === 0) {
         elements.chatSessionsList.innerHTML = `
-            <div class="flex flex-col items-center justify-center h-full text-gray-400 space-y-2 opacity-50">
-                <i data-lucide="message-square" class="w-8 h-8"></i>
-                <p class="text-xs">No sessions for ${selectedPersona}</p>
-            </div>
+            <section>
+                <p class="sidebar-section-label px-1 text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Pinned</p>
+                <p class="mt-3 px-1 text-sm text-gray-500 dark:text-gray-400">No pinned chats</p>
+            </section>
+            <section>
+                <p class="sidebar-section-label px-1 text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Recent</p>
+                <p class="mt-3 px-1 text-sm text-gray-500 dark:text-gray-400">${sessionSearchQuery ? 'No matching chats' : `No sessions for ${selectedPersona}`}</p>
+            </section>
         `;
         lucide.createIcons();
         return;
     }
 
-    elements.chatSessionsList.innerHTML = chatSessions.map(session => `
-        <div class="session-item group relative flex items-center gap-3 px-3 py-2.5 rounded-xl cursor-pointer ${currentChatId === session.chat_id ? 'active' : 'text-gray-600 dark:text-gray-400'}" 
+    const renderRows = (sessions) => sessions.map(session => `
+        <div class="chat-item session-item group relative flex items-center gap-3 px-3 py-2.5 rounded-xl cursor-pointer ${currentChatId === session.chat_id ? 'active' : 'text-gray-600 dark:text-gray-400'}" 
              onclick="selectChatSession('${session.chat_id}')" data-chat-id="${session.chat_id}">
             <i data-lucide="${session.is_pinned ? 'pin' : 'message-circle'}" class="w-4 h-4 flex-shrink-0 ${session.is_pinned ? 'text-emerald-500 fill-emerald-500/20' : ''}"></i>
-            <span class="text-sm font-medium truncate flex-1">${session.title || 'New Chat'}</span>
-            <div class="flex items-center opacity-0 group-hover:opacity-100 transition-opacity bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-lg px-1 shadow-sm">
+            <span class="chat-item-name text-sm font-medium truncate flex-1">${escapeHtml(session.title || 'New Chat')}</span>
+            <div class="chat-item-actions session-actions flex items-center opacity-0 group-hover:opacity-100 transition-opacity bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-lg px-1 shadow-sm">
                 <button onclick="event.stopPropagation(); togglePinChatSession('${session.chat_id}', ${!!session.is_pinned})" class="p-1.5 hover:text-emerald-500 transition-colors" title="${session.is_pinned ? 'Unpin' : 'Pin'}">
                     <i data-lucide="${session.is_pinned ? 'pin-off' : 'pin'}" class="w-3 h-3"></i>
                 </button>
@@ -879,6 +1156,23 @@ function renderChatSessions() {
             </div>
         </div>
     `).join('');
+
+    const pinned = filteredSessions.filter((session) => session.is_pinned);
+    const recent = filteredSessions.filter((session) => !session.is_pinned);
+    elements.chatSessionsList.innerHTML = `
+        <section>
+            <p class="sidebar-section-label px-1 text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Pinned</p>
+            <div class="chat-list mt-3 space-y-2">
+                ${pinned.length ? renderRows(pinned) : '<p class="px-1 text-sm text-gray-500 dark:text-gray-400">No pinned chats</p>'}
+            </div>
+        </section>
+        <section>
+            <p class="sidebar-section-label px-1 text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Recent</p>
+            <div class="chat-list mt-3 space-y-2">
+                ${recent.length ? renderRows(recent) : '<p class="px-1 text-sm text-gray-500 dark:text-gray-400">No recent chats</p>'}
+            </div>
+        </section>
+    `;
     lucide.createIcons();
 }
 
@@ -933,7 +1227,30 @@ async function selectChatSession(chatId) {
 }
 
 async function deleteChatSession(chatId) {
-    if (!confirm('Are you sure you want to delete this chat session?')) return;
+    pendingDeleteChatId = chatId;
+    const session = chatSessions.find(s => s.chat_id === chatId);
+    if (elements.chatDeleteMessage) {
+        const title = escapeHtml(session?.title || 'New Chat');
+        elements.chatDeleteMessage.innerHTML = `"${title}" akan dihapus permanen.${session?.is_pinned ? ' Unpin chat ini dulu sebelum menghapus.' : ''}`;
+    }
+    if (elements.chatDeleteModal) {
+        elements.chatDeleteModal.classList.remove('hidden');
+        elements.chatDeleteModal.classList.add('flex');
+        return;
+    }
+    await submitChatDelete();
+}
+
+function closeChatDeleteModal() {
+    pendingDeleteChatId = null;
+    if (!elements.chatDeleteModal) return;
+    elements.chatDeleteModal.classList.add('hidden');
+    elements.chatDeleteModal.classList.remove('flex');
+}
+
+async function submitChatDelete() {
+    const chatId = pendingDeleteChatId;
+    if (!chatId) return;
 
     try {
         const response = await authFetch(`${CONFIG.API_BASE}/chats/${chatId}`, { method: 'DELETE' });
@@ -948,13 +1265,45 @@ async function deleteChatSession(chatId) {
         }
     } catch (error) {
         console.error('Delete failed:', error);
+    } finally {
+        closeChatDeleteModal();
     }
 }
 
 async function renameChatSession(chatId) {
     const session = chatSessions.find(s => s.chat_id === chatId);
-    const newTitle = prompt('Enter new title:', session?.title || '');
-    if (!newTitle || newTitle === session?.title) return;
+    pendingRenameChatId = chatId;
+    if (elements.chatRenameInput) {
+        elements.chatRenameInput.value = session?.title || '';
+    }
+    if (elements.chatRenameModal) {
+        elements.chatRenameModal.classList.remove('hidden');
+        elements.chatRenameModal.classList.add('flex');
+        setTimeout(() => {
+            elements.chatRenameInput?.focus();
+            elements.chatRenameInput?.select();
+        }, 50);
+        return;
+    }
+    await submitChatRename();
+}
+
+function closeChatRenameModal() {
+    pendingRenameChatId = null;
+    if (!elements.chatRenameModal) return;
+    elements.chatRenameModal.classList.add('hidden');
+    elements.chatRenameModal.classList.remove('flex');
+}
+
+async function submitChatRename() {
+    const chatId = pendingRenameChatId;
+    if (!chatId) return;
+    const session = chatSessions.find(s => s.chat_id === chatId);
+    const newTitle = (elements.chatRenameInput?.value || '').trim();
+    if (!newTitle || newTitle === session?.title) {
+        closeChatRenameModal();
+        return;
+    }
 
     try {
         const response = await authFetch(`${CONFIG.API_BASE}/chats/${chatId}`, {
@@ -967,6 +1316,8 @@ async function renameChatSession(chatId) {
         }
     } catch (error) {
         console.error('Rename failed:', error);
+    } finally {
+        closeChatRenameModal();
     }
 }
 
@@ -1552,6 +1903,7 @@ function applyRuntimeMode(mode) {
 
     if (elements.normalModeBtn) {
         const active = runtimeMode === 'normal';
+        elements.normalModeBtn.classList.toggle('active', active);
         elements.normalModeBtn.classList.toggle('bg-emerald-500', active);
         elements.normalModeBtn.classList.toggle('text-white', active);
         elements.normalModeBtn.classList.toggle('text-gray-600', !active);
@@ -1561,6 +1913,7 @@ function applyRuntimeMode(mode) {
     }
     if (elements.playgroundModeBtn) {
         const active = runtimeMode === 'playground';
+        elements.playgroundModeBtn.classList.toggle('active', active);
         elements.playgroundModeBtn.classList.toggle('bg-emerald-500', active);
         elements.playgroundModeBtn.classList.toggle('text-white', active);
         elements.playgroundModeBtn.classList.toggle('text-gray-600', !active);
@@ -2241,11 +2594,11 @@ async function sendMessage(isFromWelcome = false) {
 
     // STEP 1: Create ONE empty chat bubble for Kuro and insert into DOM
     const aiMessageDiv = document.createElement('div');
-    aiMessageDiv.className = 'flex items-start gap-3 message-enter';
+    aiMessageDiv.className = 'msg-row ai flex items-start gap-3 message-enter';
     aiMessageDiv.innerHTML = `
-        <div class="w-8 h-8 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center flex-shrink-0 shadow-lg shadow-emerald-500/10"><i class="fa-solid fa-shield-cat text-white text-sm"></i></div>
+        <div class="msg-avatar w-8 h-8 rounded-full bg-emerald-500 flex items-center justify-center flex-shrink-0 text-white font-bold text-sm shadow-lg shadow-emerald-500/10">K</div>
         <div class="max-w-[85%] lg:max-w-[70%] relative group">
-            <div class="chat-bubble-ai px-4 py-3 shadow-sm relative border border-emerald-500/5">
+            <div class="msg-bubble chat-bubble-ai px-4 py-3 shadow-sm relative border border-emerald-500/5">
                 <div class="typing-indicator" id="thinkingIndicator">
                     <span></span><span></span><span></span>
                 </div>
@@ -2297,6 +2650,8 @@ async function sendMessage(isFromWelcome = false) {
         formData.append('message', message);
         formData.append('persona', selectedPersona);
         if (currentChatId) formData.append('chat_id', currentChatId);
+        if (selectedModelAlias) formData.append('model_alias', selectedModelAlias);
+        if (elements.temperatureSlider?.value) formData.append('temperature', String(elements.temperatureSlider.value));
         filesToSend.forEach(file => formData.append('files', file));
 
         // STEP 2: Fetch the streaming endpoint
@@ -2496,15 +2851,15 @@ function highlightInContainer(container) {
 
 function addMessageToChat(role, content, files = [], messageId = null, extra = {}) {
     const messageDiv = document.createElement('div');
-    messageDiv.className = `flex items-start gap-3 message-enter ${role === 'user' ? 'flex-row-reverse' : ''}`;
+    messageDiv.className = `msg-row ${role === 'user' ? 'user flex-row-reverse' : 'ai'} flex items-start gap-3 message-enter`;
     if (messageId) {
         messageDiv.setAttribute('data-message-id', messageId);
     }
 
     // Avatar
     const avatar = role === 'user'
-        ? `<div class="w-8 h-8 rounded-full bg-gradient-to-br from-purple-400 to-pink-500 flex items-center justify-center flex-shrink-0 text-white font-bold text-sm shadow-lg shadow-purple-500/10">P</div>`
-        : `<div class="w-8 h-8 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center flex-shrink-0 shadow-lg shadow-emerald-500/10"><i class="fa-solid fa-shield-cat text-white text-sm"></i></div>`;
+        ? `<div class="msg-avatar user-message-avatar w-8 h-8 rounded-full bg-emerald-500 flex items-center justify-center flex-shrink-0 text-white font-bold text-sm shadow-lg shadow-emerald-500/10">${escapeHtml(getUserInitial())}</div>`
+        : `<div class="msg-avatar w-8 h-8 rounded-full bg-emerald-500 flex items-center justify-center flex-shrink-0 text-white font-bold text-sm shadow-lg shadow-emerald-500/10">K</div>`;
 
     let contentHtml = '';
 
@@ -2567,7 +2922,7 @@ function addMessageToChat(role, content, files = [], messageId = null, extra = {
     messageDiv.innerHTML = `
         ${avatar}
         <div class="max-w-[85%] lg:max-w-[70%] relative group">
-            <div class="${bubbleClass} px-4 py-3 shadow-sm relative border ${role === 'ai' ? 'border-emerald-500/5' : 'border-purple-500/5'}">
+            <div class="msg-bubble ${bubbleClass} px-4 py-3 shadow-sm relative border ${role === 'ai' ? 'border-emerald-500/5' : 'border-purple-500/5'}">
                 ${contentHtml}
             </div>
             ${toolbar}
@@ -2599,12 +2954,12 @@ function addMessageToChat(role, content, files = [], messageId = null, extra = {
 
 function prependMessageToChat(role, content, attachments = [], messageId = null, extra = {}) {
     const messageDiv = document.createElement('div');
-    messageDiv.className = `flex items-start gap-3 mb-6 ${role === 'user' ? 'flex-row-reverse' : ''} group`;
+    messageDiv.className = `msg-row ${role === 'user' ? 'user flex-row-reverse' : 'ai'} flex items-start gap-3 mb-6 group`;
     if (messageId) messageDiv.setAttribute('data-message-id', messageId);
 
     const avatar = role === 'user'
-        ? `<div class="w-8 h-8 rounded-full bg-gradient-to-br from-purple-400 to-pink-500 flex items-center justify-center flex-shrink-0 text-white font-bold text-sm shadow-lg shadow-purple-500/10">P</div>`
-        : `<div class="w-8 h-8 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center flex-shrink-0 shadow-lg shadow-emerald-500/10"><i class="fa-solid fa-shield-cat text-white text-sm"></i></div>`;
+        ? `<div class="msg-avatar user-message-avatar w-8 h-8 rounded-full bg-emerald-500 flex items-center justify-center flex-shrink-0 text-white font-bold text-sm shadow-lg shadow-emerald-500/10">${escapeHtml(getUserInitial())}</div>`
+        : `<div class="msg-avatar w-8 h-8 rounded-full bg-emerald-500 flex items-center justify-center flex-shrink-0 text-white font-bold text-sm shadow-lg shadow-emerald-500/10">K</div>`;
 
     let contentHtml = '';
 
@@ -2655,7 +3010,7 @@ function prependMessageToChat(role, content, attachments = [], messageId = null,
     messageDiv.innerHTML = `
         ${avatar}
         <div class="max-w-[85%] lg:max-w-[70%] relative group">
-            <div class="${bubbleClass} px-4 py-3 shadow-sm relative border ${role === 'ai' ? 'border-emerald-500/5' : 'border-purple-500/5'}">
+            <div class="msg-bubble ${bubbleClass} px-4 py-3 shadow-sm relative border ${role === 'ai' ? 'border-emerald-500/5' : 'border-purple-500/5'}">
                 ${contentHtml}
             </div>
             ${toolbar}
@@ -2872,9 +3227,7 @@ function showTypingIndicator() {
     indicator.id = 'typingIndicator';
     indicator.className = 'flex items-start gap-3 message-enter';
     indicator.innerHTML = `
-        <div class="w-8 h-8 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center flex-shrink-0">
-            <i data-lucide="cat" class="w-4 h-4 text-white"></i>
-        </div>
+        <div class="w-8 h-8 rounded-full bg-emerald-500 flex items-center justify-center flex-shrink-0 text-white font-bold text-sm">K</div>
         <div class="chat-bubble-ai px-4 py-3 shadow-sm">
             <div class="typing-indicator">
                 <span></span><span></span><span></span>

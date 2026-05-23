@@ -48,7 +48,6 @@ class Settings:
     KURO_TASKS_V2_ENABLED: bool = _env_bool("KURO_TASKS_V2_ENABLED", "false")
     KURO_DEEP_RESEARCH_V2_ENABLED: bool = _env_bool("KURO_DEEP_RESEARCH_V2_ENABLED", "false")
     KURO_WEB_SEARCH_V2_ENABLED: bool = _env_bool("KURO_WEB_SEARCH_V2_ENABLED", "false")
-    KURO_FRONTEND_V2_ENABLED: bool = _env_bool("KURO_FRONTEND_V2_ENABLED", "false")
     KURO_ADMIN_SETTINGS_V2_ENABLED: bool = _env_bool("KURO_ADMIN_SETTINGS_V2_ENABLED", "false")
     KURO_ENTERPRISE_OBSERVABILITY_ENABLED: bool = _env_bool("KURO_ENTERPRISE_OBSERVABILITY_ENABLED", "false")
     KURO_API_V2_ENABLED: bool = _env_bool("KURO_API_V2_ENABLED", "false")
@@ -176,6 +175,17 @@ class Settings:
     KURO_TELEGRAM_RESPONSE_TIMEOUT_S: int = int(os.getenv("KURO_TELEGRAM_RESPONSE_TIMEOUT_S", "180"))
     KURO_TELEGRAM_DROP_PENDING_UPDATES: bool = os.getenv(
         "KURO_TELEGRAM_DROP_PENDING_UPDATES", "false"
+    ).strip().lower() in ("1", "true", "yes", "on")
+    KURO_TELEGRAM_COCKPIT_ENABLED: bool = os.getenv(
+        "KURO_TELEGRAM_COCKPIT_ENABLED", "true"
+    ).strip().lower() in ("1", "true", "yes", "on")
+    KURO_TELEGRAM_CONFIRM_TTL_S: int = int(os.getenv("KURO_TELEGRAM_CONFIRM_TTL_S", "300"))
+    KURO_TELEGRAM_DIGEST_ENABLED: bool = os.getenv(
+        "KURO_TELEGRAM_DIGEST_ENABLED", "true"
+    ).strip().lower() in ("1", "true", "yes", "on")
+    KURO_TELEGRAM_DIGEST_HOUR: int = int(os.getenv("KURO_TELEGRAM_DIGEST_HOUR", "8"))
+    KURO_TELEGRAM_CRITICAL_INSTANT: bool = os.getenv(
+        "KURO_TELEGRAM_CRITICAL_INSTANT", "true"
     ).strip().lower() in ("1", "true", "yes", "on")
     WORKING_DIR: str = os.getenv("WORKING_DIR")
     TIMEZONE: str = os.getenv("TIMEZONE", "Asia/Jakarta")

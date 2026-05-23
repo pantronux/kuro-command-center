@@ -1,0 +1,93 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+INDEX = ROOT / "web_interface" / "templates" / "index.html"
+STYLE = ROOT / "web_interface" / "static" / "css" / "style.css"
+REVAMP_STYLE = ROOT / "web_interface" / "static" / "css" / "index_revamp.css"
+APP_JS = ROOT / "web_interface" / "static" / "js" / "app.js"
+MAIN = ROOT / "main.py"
+
+
+def test_v1_dashboard_uses_dark_gray_redesign_shell():
+    html = INDEX.read_text(encoding="utf-8")
+    css = STYLE.read_text(encoding="utf-8")
+    revamp_css = REVAMP_STYLE.read_text(encoding="utf-8")
+
+    assert 'class="kuro-redesign-v1' in html
+    assert "/static/css/index_revamp.css" in html
+    assert "id=\"composerActionMenu\"" in html
+    assert "<span>K</span>" in html
+    assert '<img src="/profile/kuro_avatar.png"' not in html
+
+    assert "--kuro-bg-primary: #1a1a1a" in css
+    assert "--kuro-bg-secondary: #212121" in css
+    assert "--kuro-bg-tertiary: #2a2a2a" in css
+    assert "--kuro-accent-primary: #0d9488" in css
+    assert "--bg-primary: #1a1a1a" in revamp_css
+    assert "body.kuro-redesign-v1 .hidden" in revamp_css
+    assert "#welcomeScreen > div.welcome:first-child" in revamp_css
+    assert '#sidebar.sidebar[data-collapsed="true"]' in revamp_css
+
+
+def test_v1_dashboard_is_the_only_frontend_shell():
+    html = INDEX.read_text(encoding="utf-8")
+    main = MAIN.read_text(encoding="utf-8")
+
+    assert not (ROOT / "web_interface" / "templates" / "index_v2.html").exists()
+    assert not (ROOT / "web_interface" / "static" / "css" / "v2.css").exists()
+    assert not (ROOT / "web_interface" / "static" / "js" / "v2").exists()
+    assert 'return "index.html"' in main
+    assert "KURO_FRONTEND_V2_ENABLED" not in main
+    assert "index_v2" not in main
+    assert "/static/css/v2.css" not in html
+
+
+def test_v1_redesign_preserves_existing_playground_runtime_hooks():
+    html = INDEX.read_text(encoding="utf-8")
+    js = APP_JS.read_text(encoding="utf-8")
+
+    assert "id=\"playgroundPanel\"" in html
+    assert "id=\"playgroundSessionMode\"" in html
+    assert "id=\"playgroundProviderChecklist\"" in html
+    assert "id=\"playgroundIntegrityOverviewBtn\"" in html
+    assert "async function playgroundCreateSession" in js
+    assert "'/api/playground/sessions'" in js
+    assert "'/api/playground/executions'" in js
+    assert "/api/playground/qa" not in js
+
+
+def test_v1_redesign_keeps_persona_and_existing_tool_navigation():
+    html = INDEX.read_text(encoding="utf-8")
+    js = APP_JS.read_text(encoding="utf-8")
+
+    assert "id=\"personaAccordionBtn\"" in html
+    assert "id=\"composerModelSelect\"" in html
+    assert "id=\"welcomeModelSelect\"" in html
+    assert "id=\"sidebarChatSearch\"" in html
+    assert "id=\"sidebarSessionsMore\"" in html
+    assert "id=\"chatSessionsList\"" in html
+    assert "id=\"chatDrawer\"" not in html
+    assert "kuro-profile-menu" in html
+    assert "Administrator Settings" in html
+    assert "Model Settings" in html
+    assert "data-persona=\"consultant\"" in html
+    assert "data-persona=\"auditor\"" in html
+    assert "href=\"/intelligence\"" in html
+    assert "href=\"/market\"" in html
+    assert "href=\"/tutorial\"" in html
+    assert "composerActionMenu" in js
+    assert "loadComposerModelAliases" in js
+    assert "model_alias" in js
+    assert "openFilesModal()" in js
+    assert "navAdminSettings" in js
+
+
+def test_v1_redesign_quiets_optional_proactive_reconnect_poll():
+    js = APP_JS.read_text(encoding="utf-8")
+    main = MAIN.read_text(encoding="utf-8")
+
+    assert "'/api/proactive-events?limit=5'" in js
+    assert '@app.get("/api/proactive-events")' in main

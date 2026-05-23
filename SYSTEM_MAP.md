@@ -44,8 +44,9 @@ Kuro AI is your **Intelligent Personal Sovereign**—a sophisticated digital com
 - **Enterprise Major Refactor status**: Prompts `-2..14` have been executed as
   an additive, feature-flagged enterprise refactor. The legacy runtime remains
   the default path; Memory V3, Chat V2, provider registry, governed tools,
-  Market Sentinel V2, Telegram V2, API V2, Frontend V2, and enterprise
-  observability are present behind explicit flags.
+  Market Sentinel V2, Telegram V2, API V2, and enterprise observability are
+  present behind explicit flags. The separate Frontend V2 shell has been
+  retired; `index.html` is the single dashboard shell.
 - **Tech stack**:
   - Backend: FastAPI, LangGraph, `google-genai` (Gemini),
     APScheduler, SQLite, ChromaDB, Mem0 (via `perpetual_memory.py`),
@@ -112,10 +113,6 @@ Kuro AI is your **Intelligent Personal Sovereign**—a sophisticated digital com
     metrics, traces, eval summaries, and admin dashboards.
   - `kuro_backend/enterprise_ops/` for deployment profiles, startup validation,
     and public-safe liveness/readiness/health metadata.
-- **Frontend V2**: `web_interface/templates/index_v2.html`,
-  `web_interface/static/css/v2.css`, and `web_interface/static/js/v2/*`
-  implement the feature-flagged chat workspace, model settings, tasks,
-  market panels, sidebar, profile menu, API helpers, and admin settings.
 - **Acceptance status**: suitable for a small enterprise pilot when flags are
   enabled gradually with rollback plans. Large enterprise production still
   needs tenant isolation, SSO/OIDC, stronger RBAC, PostgreSQL/pgvector option,
@@ -530,9 +527,9 @@ Side-branches not drawn on trunk:
 - **API V2 middleware**: `/api/v2/*` routes normalize errors/responses, apply
   rate limits by path bucket, filter public OpenAPI output, and keep legacy
   `/api/*` behavior intact.
-- **Frontend V2**: when `KURO_FRONTEND_V2_ENABLED=true`, the dashboard serves
-  `index_v2.html`, loads `static/js/v2/*`, and consumes the additive Chat V2,
-  provider registry, tasks, market, and admin endpoints.
+- **Dashboard UI**: the dashboard serves `index.html` only. The former
+  feature-flagged Frontend V2 shell was removed so V1 can carry the dark-gray
+  agent UX while preserving existing backend/playground behavior.
 
 ## Clean Tree
 
@@ -573,6 +570,7 @@ artefacts are excluded — see **Exclusions** at the bottom of this section.
 │   ├── ui_mode_router.py        # English mode commands
 │   ├── dashboard_broadcast.py   # /ws/dashboard fan-out
 │   ├── telegram_notifier.py
+│   ├── telegram_center/         # interactive Telegram cockpit: commands, callbacks, actions
 │   ├── telegram_v2/             # webhook, outbound queue, mappings, DLQ, commands
 │   ├── proactive_events.py
 │   ├── proactive_greeting.py
@@ -627,8 +625,7 @@ artefacts are excluded — see **Exclusions** at the bottom of this section.
 │   │   └── service.py           # sync wrapper
 ├── web_interface/
 │   ├── templates/
-│   │   ├── index.html           # dashboard + avatar
-│   │   ├── index_v2.html        # feature-flagged Chat Workspace V2
+│   │   ├── index.html           # single dashboard shell
 │   │   ├── login.html
 │   │   ├── intelligence.html
 │   │   ├── ingestion_center.html
@@ -636,11 +633,10 @@ artefacts are excluded — see **Exclusions** at the bottom of this section.
 │   │   └── compliance.html
 │   └── static/
 │       ├── js/
-│       │   ├── app.js           # WS client, UI modes
+│       │   ├── app.js           # chat UI, WS client, UI modes
 │       │   ├── ingestion_center.js
-│       │   ├── semantic_graph.js
-│       │   └── v2/              # Chat V2 workspace JS modules
-│       ├── css/                 # dashboard styles, including v2.css
+│       │   └── semantic_graph.js
+│       ├── css/                 # dashboard styles
 │       └── vendor/
 ├── openclaw_skills/
 │   ├── harvest_gemini_share/
@@ -698,7 +694,7 @@ artefacts are excluded — see **Exclusions** at the bottom of this section.
 │   ├── test_market_v2.py
 │   ├── test_telegram_v2.py
 │   ├── test_api_v2.py
-│   ├── test_frontend_v2.py
+│   ├── test_frontend_v1_redesign.py
 │   ├── test_enterprise_observability.py
 │   ├── test_enterprise_ops.py
 │   ├── test_performance_bugfix_sweep.py
@@ -963,6 +959,10 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
   down".
 - [`kuro_backend/telegram_notifier.py`](kuro_backend/telegram_notifier.py)
   — *public*: `send_message`, `send_dream_inconsistency`.
+- [`kuro_backend/telegram_center/`](kuro_backend/telegram_center/)
+  — *public*: `service.run_bot_with_recovery`; owns the Telegram command
+  registry, inline callback panels, confirmation-gated actions, inbound queue
+  worker, and digest job.
 - [`kuro_backend/observability.py`](kuro_backend/observability.py) —
   *public*: `start_phoenix_server`, `stop_phoenix_server`,
   `setup_opentelemetry`, `get_tracer`, `create_session_context`,
@@ -1054,12 +1054,10 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
 
 ### Frontend
 - [`web_interface/templates/index.html`](web_interface/templates/index.html)
-  — dashboard shell: avatar (`/profile/kuro_avatar.png`), WebSocket status ticker, chat pane,
-  favicon links, `V.2.1.0 Beta 1` sidebar badge, Chancellor persona option, market chips bar,
-  and admin-only sidebar entries for `Ingestion Center` / `Ingestion Analytics`.
-- [`web_interface/templates/index_v2.html`](web_interface/templates/index_v2.html)
-  — feature-flagged Chat Workspace V2 shell served when
-  `KURO_FRONTEND_V2_ENABLED=true`.
+  — single dashboard shell: dark-gray agent UI, session-first sidebar,
+  profile-menu tools/admin navigation, flat Kuro monogram, WebSocket status
+  ticker, chat pane, favicon links, persona options, existing Playground
+  Runtime panel, market chips, and admin-only controls.
 - [`web_interface/templates/intelligence.html`](web_interface/templates/intelligence.html),
   [`ingestion_center.html`](web_interface/templates/ingestion_center.html),
   [`ingestion_analytics.html`](web_interface/templates/ingestion_analytics.html),
@@ -1072,12 +1070,9 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
   `kuroEnsureTicker`, `kuroRenderStatusTicker`, `kuroRenderSentinelTicker`,
   `kuroSetAvatarSpeaking`, `kuroConnectDashboardWS`, `kuroStartMarketHudPoll`, `kuroMarketHudChipLine`,
   `kuroHandleGreeting`, `kuroRestoreUIMode`, `sendMessage`, `handleFiles`.
-- [`web_interface/static/css/v2.css`](web_interface/static/css/v2.css) and
-  [`web_interface/static/js/v2/`](web_interface/static/js/v2/) — Chat
-  Workspace V2 UI modules: API client, streaming, chat layout, sidebar,
-  model settings, task/reminder panel, market panel, profile menu, and admin
-  settings. The prior UI boot issue was fixed by exposing
-  `window.onOpenModelSettings` before inline handlers can call it.
+- [`web_interface/static/css/style.css`](web_interface/static/css/style.css)
+  — shared dashboard styling plus the scoped `kuro-redesign-v1` dark-gray
+  redesign tokens and component overrides.
 - [`web_interface/static/js/ingestion_center.js`](web_interface/static/js/ingestion_center.js) —
   dataset registry UI, upload form, polling for jobs, detail drawer, and lifecycle actions.
 - [`web_interface/static/js/semantic_graph.js`](web_interface/static/js/semantic_graph.js) —
@@ -1109,7 +1104,7 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
   `test_provider_registry_v2.py`, `test_provider_ollama.py`,
   `test_provider_ollama_smoke_contract.py`, `test_tools_v2.py`,
   `test_market_v2.py`, `test_telegram_v2.py`, `test_api_v2.py`,
-  `test_frontend_v2.py`, `test_enterprise_observability.py`,
+  `test_frontend_v1_redesign.py`, `test_enterprise_observability.py`,
   `test_enterprise_ops.py`, and `test_performance_bugfix_sweep.py`.
 
 ## Data & Config
@@ -1137,7 +1132,7 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
     `KURO_TELEGRAM_V2_ENABLED`, `KURO_PROVIDER_REGISTRY_V2_ENABLED`,
     `KURO_AGENT_TOOLS_V2_ENABLED`, `KURO_TASKS_V2_ENABLED`,
     `KURO_DEEP_RESEARCH_V2_ENABLED`, `KURO_WEB_SEARCH_V2_ENABLED`,
-    `KURO_FRONTEND_V2_ENABLED`, `KURO_ADMIN_SETTINGS_V2_ENABLED`,
+    `KURO_ADMIN_SETTINGS_V2_ENABLED`,
     `KURO_ENTERPRISE_OBSERVABILITY_ENABLED`, `KURO_API_V2_ENABLED`.
   - Chat / memory / DB hardening: `KURO_CHAT_CONTEXT_REFRESH_THRESHOLD`,
     `KURO_CHAT_CONTEXT_MODEL`, `KURO_NODE_TIMEOUT_S`,
@@ -1155,7 +1150,9 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
   - Telegram: `TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID`,
     `TELEGRAM_WEBHOOK_SECRET`, `KURO_TELEGRAM_RATE_LIMIT_PER_MIN`,
     `KURO_TELEGRAM_QUEUE_MAXSIZE`, `KURO_TELEGRAM_RESPONSE_TIMEOUT_S`,
-    `KURO_TELEGRAM_DROP_PENDING_UPDATES`.
+    `KURO_TELEGRAM_DROP_PENDING_UPDATES`, `KURO_TELEGRAM_COCKPIT_ENABLED`,
+    `KURO_TELEGRAM_CONFIRM_TTL_S`, `KURO_TELEGRAM_DIGEST_ENABLED`,
+    `KURO_TELEGRAM_DIGEST_HOUR`, `KURO_TELEGRAM_CRITICAL_INSTANT`.
   - CVE sentinel: `KURO_CVE_SENTINEL_ENABLED`, `KURO_CVE_MIN_CVSS`,
     `KURO_CVE_MAX_ALERTS_PER_CYCLE`, `KURO_VULN_NMAP_ENABLED`.
   - Proactive: `KURO_PROACTIVE_ENABLED`,
@@ -1358,9 +1355,8 @@ semantics, and the presence of both indexes via `PRAGMA index_list`.
   drafts and cost-saving tasks, but it is disabled by default, must not be
   treated as current knowledge without RAG/web grounding, and cannot execute
   tool-like output outside governed Tool Runtime V2.
-- **Frontend V2 scope**: Chat Workspace V2 is feature-flagged and covered by
-  static/template tests; browser smoke testing is still recommended before
-  making it the default operator UI.
+- **Dashboard UI scope**: Frontend V2 was retired; browser smoke testing is
+  still recommended for the V1 dark-gray redesign before daily use.
 - **Operational docs are pilot-grade**: `docker-compose.yml` and
   `docs/deployment/*` are enough for a single-VM/small pilot, not a complete
   HA/Kubernetes/regulated-enterprise runbook.

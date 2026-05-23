@@ -18,7 +18,6 @@ ENTERPRISE_FLAG_NAMES: tuple[str, ...] = (
     "KURO_TASKS_V2_ENABLED",
     "KURO_DEEP_RESEARCH_V2_ENABLED",
     "KURO_WEB_SEARCH_V2_ENABLED",
-    "KURO_FRONTEND_V2_ENABLED",
     "KURO_ADMIN_SETTINGS_V2_ENABLED",
     "KURO_ENTERPRISE_OBSERVABILITY_ENABLED",
     "KURO_API_V2_ENABLED",
@@ -167,7 +166,7 @@ def get_enterprise_flag_snapshot(admin: bool = False) -> Dict[str, Any]:
             },
             "frontend": {
                 "available": True,
-                "v2_enabled": flags["KURO_FRONTEND_V2_ENABLED"],
+                "v2_enabled": False,
             },
             "admin_settings": {
                 "available": False,

@@ -15,10 +15,10 @@ ordered by rollout risk and enterprise value.
 
 ### Chat V2 Rollout
 
-- Run browser smoke tests for `index_v2.html` on desktop and mobile widths.
+- Run browser smoke tests for `index.html` on desktop and mobile widths after
+  each dashboard redesign.
 - Add Chat V2 SSE replay/timeout tests around provider fallback and disconnect.
-- Add operator toggle guidance for `KURO_CHAT_V2_ENABLED` and
-  `KURO_FRONTEND_V2_ENABLED`.
+- Add operator toggle guidance for `KURO_CHAT_V2_ENABLED`.
 - Acceptance: one pilot user can use Chat V2 for daily work while legacy chat
   remains available.
 
@@ -38,7 +38,7 @@ ordered by rollout risk and enterprise value.
 - Add freshness and alert-quality review notes to operator docs.
 - Acceptance: V2 produces useful alerts without duplicate or stale spam.
 
-### UI V2 Admin Settings
+### Dashboard Admin Settings
 
 - Complete feature toggles/status views for enterprise flags, provider health,
   observability, Telegram V2, and Market V2.
