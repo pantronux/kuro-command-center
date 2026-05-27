@@ -320,7 +320,7 @@
     </style>
 
     <!-- Index-only revamp source of truth. Loaded after legacy styles to prevent cascade regressions. -->
-    <link rel="stylesheet" href="/static/css/index_revamp.css?v=20260523-10">
+    <link rel="stylesheet" href="/static/css/index_revamp.css?v=20260525-01">
 </head>
 
 <body class="kuro-redesign-v1 min-h-screen transition-colors duration-300">
@@ -557,7 +557,7 @@
                                     data-admin-only="true"
                                     class="kuro-profile-menu-link w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-gray-600 dark:text-gray-300 transition-all group text-left">
                                     <i data-lucide="command" class="w-4 h-4"></i>
-                                    <span>Administrator Settings</span>
+                                    <span>Administration Settings</span>
                                 </button>
                                 {% endif %}
                                 <details class="kuro-profile-tools">
@@ -588,20 +588,6 @@
                                             <i data-lucide="line-chart" class="w-4 h-4"></i>
                                             Market Sentinel
                                         </a>
-                                        {% if is_admin %}
-                                        <button id="navSystemStatus"
-                                            data-admin-only="true"
-                                            class="kuro-profile-submenu-link w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-gray-600 dark:text-gray-300 transition-all text-left">
-                                            <i data-lucide="server" class="w-4 h-4"></i>
-                                            System Status
-                                        </button>
-                                        <a href="/ingestion"
-                                            data-admin-only="true"
-                                            class="kuro-profile-submenu-link flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-gray-600 dark:text-gray-300 transition-all">
-                                            <i data-lucide="database-zap" class="w-4 h-4"></i>
-                                            Ingestion Center
-                                        </a>
-                                        {% endif %}
                                     </div>
                                 </details>
                                 <button id="navSettings"
@@ -1098,6 +1084,83 @@
         </div>
     </div>
 
+    {% if is_admin %}
+    <!-- Administration Settings Modal -->
+    <div id="adminSettingsModal" class="fixed inset-0 z-[80] hidden items-center justify-center admin-settings-modal">
+        <div class="absolute inset-0 admin-settings-backdrop" id="adminSettingsBackdrop"></div>
+        <div class="admin-settings-shell relative w-full mx-4 overflow-hidden">
+            <div class="admin-settings-header">
+                <div>
+                    <p class="admin-settings-eyebrow">Enterprise Runtime</p>
+                    <h3>Administration Settings</h3>
+                </div>
+                <button id="closeAdminSettings" class="admin-settings-close" type="button" aria-label="Close Administration Settings">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+            <div class="admin-settings-body">
+                <nav class="admin-settings-tabs" aria-label="Administration sections">
+                    <button type="button" data-admin-settings-tab="system-status" class="admin-settings-tab active">
+                        <i data-lucide="activity" class="w-4 h-4"></i>
+                        <span>System Status</span>
+                    </button>
+                    <button type="button" data-admin-settings-tab="storage-health" class="admin-settings-tab">
+                        <i data-lucide="hard-drive" class="w-4 h-4"></i>
+                        <span>Storage Health</span>
+                    </button>
+                    <button type="button" data-admin-settings-tab="memory-v3" class="admin-settings-tab">
+                        <i data-lucide="brain-circuit" class="w-4 h-4"></i>
+                        <span>Memory V3</span>
+                    </button>
+                    <button type="button" data-admin-settings-tab="provider-model" class="admin-settings-tab">
+                        <i data-lucide="route" class="w-4 h-4"></i>
+                        <span>Provider/Model Settings</span>
+                    </button>
+                    <button type="button" data-admin-settings-tab="ai-temperature" class="admin-settings-tab">
+                        <i data-lucide="thermometer" class="w-4 h-4"></i>
+                        <span>AI Temperature</span>
+                    </button>
+                    <button type="button" data-admin-settings-tab="runtime-settings" class="admin-settings-tab">
+                        <i data-lucide="shield-check" class="w-4 h-4"></i>
+                        <span>Runtime Settings</span>
+                    </button>
+                    <button type="button" data-admin-settings-tab="market-sentinel" class="admin-settings-tab">
+                        <i data-lucide="line-chart" class="w-4 h-4"></i>
+                        <span>Market Sentinel</span>
+                    </button>
+                    <button type="button" data-admin-settings-tab="ingestion-center" class="admin-settings-tab">
+                        <i data-lucide="database-zap" class="w-4 h-4"></i>
+                        <span>Ingestion Center</span>
+                    </button>
+                    <button type="button" data-admin-settings-tab="evaluation" class="admin-settings-tab">
+                        <i data-lucide="clipboard-check" class="w-4 h-4"></i>
+                        <span>Evaluation</span>
+                    </button>
+                    <button type="button" data-admin-settings-tab="backup" class="admin-settings-tab">
+                        <i data-lucide="database-backup" class="w-4 h-4"></i>
+                        <span>Backup</span>
+                    </button>
+                    <button type="button" data-admin-settings-tab="telegram" class="admin-settings-tab">
+                        <i data-lucide="send" class="w-4 h-4"></i>
+                        <span>Telegram</span>
+                    </button>
+                    <button type="button" data-admin-settings-tab="feature-flags" class="admin-settings-tab">
+                        <i data-lucide="flag" class="w-4 h-4"></i>
+                        <span>Feature Flags</span>
+                    </button>
+                </nav>
+                <section class="admin-settings-content" aria-live="polite">
+                    <div id="adminSettingsContent">
+                        <div class="admin-settings-loading">
+                            <div class="spinner"></div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
     <!-- Access Denied Modal -->
     <div id="accessDeniedModal" class="fixed inset-0 z-[70] hidden items-center justify-center">
         <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" onclick="closeAccessDeniedModal()"></div>
@@ -1417,7 +1480,7 @@
     </script>
 
     <!-- Custom JS -->
-    <script src="/static/js/app.js?v=20260523-11"></script>
+    <script src="/static/js/app.js?v=20260525-01"></script>
 
 </body>
 

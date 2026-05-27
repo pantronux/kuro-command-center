@@ -1093,6 +1093,336 @@ body.kuro-redesign-v1 .btn-delete {
     color: #fff !important;
 }
 
+body.kuro-redesign-v1 .admin-settings-backdrop {
+    background: rgba(0, 0, 0, 0.68);
+    backdrop-filter: blur(10px);
+}
+
+body.kuro-redesign-v1 .admin-settings-shell {
+    width: min(1120px, calc(100vw - 48px));
+    max-height: min(760px, calc(100vh - 48px));
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    box-shadow: 0 28px 70px rgba(0, 0, 0, 0.56);
+}
+
+body.kuro-redesign-v1 .admin-settings-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 22px 24px;
+    border-bottom: 1px solid var(--border-subtle);
+    background: var(--bg-tertiary);
+}
+
+body.kuro-redesign-v1 .admin-settings-eyebrow {
+    margin: 0 0 4px;
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+body.kuro-redesign-v1 .admin-settings-header h3 {
+    margin: 0;
+    color: var(--text-primary);
+    font-size: 20px;
+    font-weight: 700;
+}
+
+body.kuro-redesign-v1 .admin-settings-close {
+    display: inline-flex;
+    width: 36px;
+    height: 36px;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    background: var(--bg-active);
+    color: var(--text-primary);
+    transition: background 160ms ease, border-color 160ms ease;
+}
+
+body.kuro-redesign-v1 .admin-settings-close:hover {
+    background: var(--bg-hover);
+    border-color: rgba(13, 148, 136, 0.42);
+}
+
+body.kuro-redesign-v1 .admin-settings-body {
+    display: grid;
+    grid-template-columns: 260px minmax(0, 1fr);
+    min-height: 520px;
+    max-height: calc(min(760px, 100vh - 48px) - 82px);
+}
+
+body.kuro-redesign-v1 .admin-settings-tabs {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    padding: 16px;
+    border-right: 1px solid var(--border-subtle);
+    background: var(--bg-secondary);
+    overflow-y: auto;
+}
+
+body.kuro-redesign-v1 .admin-settings-tab {
+    display: flex;
+    min-height: 38px;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 9px 11px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 600;
+    text-align: left;
+    transition: background 160ms ease, color 160ms ease, border-color 160ms ease;
+}
+
+body.kuro-redesign-v1 .admin-settings-tab:hover {
+    background: var(--bg-active);
+    color: var(--text-primary);
+}
+
+body.kuro-redesign-v1 .admin-settings-tab.active {
+    border-color: rgba(13, 148, 136, 0.5);
+    background: rgba(13, 148, 136, 0.16);
+    color: var(--text-primary);
+}
+
+body.kuro-redesign-v1 .admin-settings-content {
+    min-width: 0;
+    padding: 18px;
+    background: var(--bg-primary);
+    overflow-y: auto;
+}
+
+body.kuro-redesign-v1 .admin-settings-loading {
+    display: flex;
+    min-height: 420px;
+    align-items: center;
+    justify-content: center;
+}
+
+body.kuro-redesign-v1 .admin-settings-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+body.kuro-redesign-v1 .admin-settings-panel-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 16px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: linear-gradient(90deg, rgba(13, 148, 136, 0.14), rgba(33, 33, 33, 0.96));
+}
+
+body.kuro-redesign-v1 .admin-settings-panel-header h4 {
+    margin: 0 0 6px;
+    color: var(--text-primary);
+    font-size: 17px;
+    font-weight: 700;
+}
+
+body.kuro-redesign-v1 .admin-settings-panel-header p {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: 13px;
+}
+
+body.kuro-redesign-v1 .admin-settings-summary,
+body.kuro-redesign-v1 .admin-endpoint-status {
+    flex: 0 0 auto;
+    border-radius: 999px;
+    padding: 5px 9px;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+body.kuro-redesign-v1 .admin-settings-summary,
+body.kuro-redesign-v1 .admin-endpoint-status.ok {
+    background: rgba(13, 148, 136, 0.18);
+    color: #5eead4;
+}
+
+body.kuro-redesign-v1 .admin-endpoint-status.error {
+    background: rgba(239, 68, 68, 0.14);
+    color: #fca5a5;
+}
+
+body.kuro-redesign-v1 .admin-settings-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+body.kuro-redesign-v1 .admin-settings-link {
+    display: inline-flex;
+    min-height: 36px;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 11px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 600;
+}
+
+body.kuro-redesign-v1 .admin-settings-link:hover {
+    border-color: rgba(13, 148, 136, 0.45);
+    background: var(--bg-active);
+}
+
+body.kuro-redesign-v1 .admin-settings-endpoints {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+body.kuro-redesign-v1 .admin-endpoint-card {
+    min-width: 0;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: var(--bg-secondary);
+    overflow: hidden;
+}
+
+body.kuro-redesign-v1 .admin-endpoint-card.is-error {
+    border-color: rgba(239, 68, 68, 0.36);
+}
+
+body.kuro-redesign-v1 .admin-endpoint-card-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 13px;
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+body.kuro-redesign-v1 .admin-endpoint-card h5 {
+    margin: 0 0 4px;
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 700;
+}
+
+body.kuro-redesign-v1 .admin-endpoint-card code {
+    display: block;
+    color: var(--text-secondary);
+    font-size: 11px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+body.kuro-redesign-v1 .admin-endpoint-card pre {
+    max-height: 260px;
+    margin: 0;
+    padding: 13px;
+    background: #111827;
+    color: #d1fae5;
+    font-size: 11px;
+    line-height: 1.45;
+    overflow: auto;
+}
+
+body.kuro-redesign-v1 .admin-endpoint-latency {
+    margin: 0;
+    padding: 8px 13px;
+    border-top: 1px solid rgba(56, 56, 56, 0.7);
+    color: var(--text-secondary);
+    font-size: 11px;
+}
+
+body.kuro-redesign-v1 .admin-settings-form-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+body.kuro-redesign-v1 .admin-settings-field {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 14px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: var(--bg-secondary);
+}
+
+body.kuro-redesign-v1 .admin-settings-field > span {
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+body.kuro-redesign-v1 .admin-settings-field select,
+body.kuro-redesign-v1 .admin-settings-field input[type="range"] {
+    width: 100%;
+}
+
+body.kuro-redesign-v1 .admin-settings-field select {
+    min-height: 38px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    padding: 0 10px;
+}
+
+body.kuro-redesign-v1 .admin-settings-range-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    color: var(--text-secondary);
+    font-size: 11px;
+}
+
+body.kuro-redesign-v1 .admin-settings-range-meta strong {
+    color: var(--text-primary);
+}
+
+@media (max-width: 900px) {
+    body.kuro-redesign-v1 .admin-settings-shell {
+        width: calc(100vw - 24px);
+        max-height: calc(100vh - 24px);
+    }
+
+    body.kuro-redesign-v1 .admin-settings-body {
+        grid-template-columns: 1fr;
+        max-height: calc(100vh - 104px);
+    }
+
+    body.kuro-redesign-v1 .admin-settings-tabs {
+        flex-direction: row;
+        overflow-x: auto;
+        border-right: 0;
+        border-bottom: 1px solid var(--border-subtle);
+    }
+
+    body.kuro-redesign-v1 .admin-settings-tab {
+        width: auto;
+        white-space: nowrap;
+    }
+
+    body.kuro-redesign-v1 .admin-settings-endpoints,
+    body.kuro-redesign-v1 .admin-settings-form-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
 body.kuro-redesign-v1 .fixed.inset-0 .bg-white,
 body.kuro-redesign-v1 .fixed.inset-0 .dark\:bg-gray-800,
 body.kuro-redesign-v1 .fixed.inset-0 .dark\:bg-gray-900 {

@@ -10,6 +10,7 @@ import logging
 import json
 import hashlib
 import asyncio
+import os
 from datetime import datetime
 from typing import List, Dict, Any
 
@@ -140,11 +141,14 @@ def run_triangulation_scan(username: str = "Pantronux") -> bool:
     cfg = Settings()
     if is_snapshot_stale(cfg.KURO_SENTINEL_STALE_THRESHOLD_MIN, username=username):
         logger.warning("Market Sentinel: price data is stale, aborting alert publish")
-        asyncio.run(
-            telegram_notifier.send_message_with_retry(
-                f"⚠️ Market Sentinel: Alert aborted — price data is stale (>{cfg.KURO_SENTINEL_STALE_THRESHOLD_MIN}min). Check price_ticker_worker."
+        if username == os.getenv("ADMIN_USERNAME", "Pantronux"):
+            asyncio.run(
+                telegram_notifier.send_message_with_retry(
+                    f"⚠️ Market Sentinel: Alert aborted — price data is stale (>{cfg.KURO_SENTINEL_STALE_THRESHOLD_MIN}min). Check price_ticker_worker."
+                )
             )
-        )
+        else:
+            logger.info("[SENTINEL] Non-admin stale alert suppressed for %s", username)
         return False
         
     # 2. Fetch qualitative contexts
@@ -178,7 +182,6 @@ def run_triangulation_scan(username: str = "Pantronux") -> bool:
         )
         
     # Send Telegram (Filter: Only for Admin)
-    import os
     if username == os.getenv("ADMIN_USERNAME", "Pantronux"):
         msg = format_sentinel_telegram(analysis)
         if msg:

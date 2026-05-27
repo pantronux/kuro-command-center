@@ -140,6 +140,52 @@ def test_legacy_market_hud_snapshot_gets_username_conflict_target(tmp_path, monk
     assert row_count == 1
 
 
+def test_legacy_single_row_market_hud_snapshot_is_rebuilt(tmp_path, monkeypatch):
+    from kuro_backend import finance_db
+
+    db = tmp_path / "legacy_single_row_finance.db"
+    monkeypatch.setenv("KURO_FINANCE_DB_PATH", str(db))
+    finance_db._reset_schema_ready_for_tests()
+
+    conn = sqlite3.connect(db)
+    try:
+        conn.execute(
+            """
+            CREATE TABLE market_hud_snapshot (
+                id INTEGER PRIMARY KEY NOT NULL DEFAULT 1 CHECK (id = 1),
+                brief_text TEXT NOT NULL DEFAULT '',
+                last_sentinel_note TEXT NOT NULL DEFAULT '',
+                updated_at TEXT DEFAULT (datetime('now')),
+                username TEXT NOT NULL DEFAULT 'Pantronux'
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO market_hud_snapshot (username, brief_text) VALUES ('Pantronux', 'old')"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    finance_db.init_db()
+    finance_db.touch_market_snapshot_fetched_at("Faikhira")
+
+    conn = sqlite3.connect(db)
+    try:
+        ddl = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'market_hud_snapshot'"
+        ).fetchone()[0]
+        rows = conn.execute(
+            "SELECT username FROM market_hud_snapshot ORDER BY username"
+        ).fetchall()
+    finally:
+        conn.close()
+        finance_db._reset_schema_ready_for_tests()
+
+    assert "CHECK (id = 1)" not in ddl
+    assert [row[0] for row in rows] == ["Faikhira", "Pantronux"]
+
+
 def test_market_sentinel_stocks_are_user_scoped_and_chart_history_records_prices(isolated_finance_db):
     f = isolated_finance_db
     f.init_db()

@@ -87,6 +87,88 @@ def _conn() -> sqlite3.Connection:
     return get_connection(_db_path())
 
 
+def _create_market_hud_snapshot_table(cursor: sqlite3.Cursor) -> None:
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS market_hud_snapshot (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL DEFAULT 'Pantronux',
+            brief_text TEXT NOT NULL DEFAULT '',
+            last_sentinel_note TEXT NOT NULL DEFAULT '',
+            updated_at TEXT DEFAULT (datetime('now')),
+            fetched_at TEXT DEFAULT (datetime('now')),
+            snapshot_version INTEGER DEFAULT 0,
+            is_current INTEGER DEFAULT 1,
+            UNIQUE(username)
+        )
+        """
+    )
+
+
+def _rebuild_market_hud_snapshot_if_needed(conn: sqlite3.Connection) -> None:
+    """Rebuild legacy single-row HUD snapshot tables into per-user schema."""
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'market_hud_snapshot'"
+    ).fetchone()
+    ddl = str(row["sql"] or "") if row else ""
+    if "CHECK (id = 1)" not in ddl and "CHECK(id = 1)" not in ddl:
+        return
+
+    rows = conn.execute("SELECT * FROM market_hud_snapshot ORDER BY id").fetchall()
+    by_username: Dict[str, Dict[str, Any]] = {}
+    for item in rows:
+        data = dict(item)
+        username = str(data.get("username") or "Pantronux")
+        by_username[username] = {
+            "username": username,
+            "brief_text": str(data.get("brief_text") or ""),
+            "last_sentinel_note": str(data.get("last_sentinel_note") or ""),
+            "updated_at": str(data.get("updated_at") or ""),
+            "fetched_at": str(data.get("fetched_at") or ""),
+            "snapshot_version": int(data.get("snapshot_version") or 0),
+            "is_current": int(
+                data.get("is_current") if data.get("is_current") is not None else 1
+            ),
+        }
+
+    conn.execute("ALTER TABLE market_hud_snapshot RENAME TO market_hud_snapshot_legacy")
+    _create_market_hud_snapshot_table(conn.cursor())
+    for data in by_username.values():
+        conn.execute(
+            """
+            INSERT INTO market_hud_snapshot
+                (
+                    username, brief_text, last_sentinel_note, updated_at,
+                    fetched_at, snapshot_version, is_current
+                )
+            VALUES (
+                ?, ?, ?,
+                COALESCE(NULLIF(?, ''), datetime('now')),
+                COALESCE(NULLIF(?, ''), datetime('now')),
+                ?, ?
+            )
+            ON CONFLICT(username) DO UPDATE SET
+                brief_text = excluded.brief_text,
+                last_sentinel_note = excluded.last_sentinel_note,
+                updated_at = excluded.updated_at,
+                fetched_at = excluded.fetched_at,
+                snapshot_version = excluded.snapshot_version,
+                is_current = excluded.is_current
+            """,
+            (
+                data["username"],
+                data["brief_text"],
+                data["last_sentinel_note"],
+                data["updated_at"],
+                data["fetched_at"],
+                data["snapshot_version"],
+                data["is_current"],
+            ),
+        )
+    conn.execute("DROP TABLE market_hud_snapshot_legacy")
+    logger.info("[FINANCE] rebuilt legacy market_hud_snapshot single-row schema")
+
+
 def init_db() -> None:
     """Create tables if missing (idempotent + once-per-process per DB path).
 
@@ -214,21 +296,7 @@ def _init_db_locked() -> None:
             )
             """
         )
-        c.execute(
-            """
-            CREATE TABLE IF NOT EXISTS market_hud_snapshot (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT NOT NULL DEFAULT 'Pantronux',
-                brief_text TEXT NOT NULL DEFAULT '',
-                last_sentinel_note TEXT NOT NULL DEFAULT '',
-                updated_at TEXT DEFAULT (datetime('now')),
-                fetched_at TEXT DEFAULT (datetime('now')),
-                snapshot_version INTEGER DEFAULT 0,
-                is_current INTEGER DEFAULT 1,
-                UNIQUE(username)
-            )
-            """
-        )
+        _create_market_hud_snapshot_table(c)
         c.execute(
             """
             CREATE TABLE IF NOT EXISTS market_sentinel_history (
@@ -421,6 +489,7 @@ def _init_db_locked() -> None:
             c.execute("ALTER TABLE market_hud_snapshot ADD COLUMN snapshot_version INTEGER DEFAULT 0")
         if "is_current" not in hud_cols:
             c.execute("ALTER TABLE market_hud_snapshot ADD COLUMN is_current INTEGER DEFAULT 1")
+        _rebuild_market_hud_snapshot_if_needed(conn)
         c.execute(
             """
             DELETE FROM market_hud_snapshot

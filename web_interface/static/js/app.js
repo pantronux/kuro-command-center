@@ -146,6 +146,7 @@ let pendingDeleteChatId = null;
 let pendingPlaygroundLinkChatId = null;
 let composerFeatureState = loadComposerFeatureState();
 let composerToolAvailability = null;
+let activeAdminSettingsTab = 'system-status';
 
 // Infinite Scroll State
 let chatOffset = 0;
@@ -584,6 +585,12 @@ const elements = {
     systemStatusBackdrop: document.getElementById('systemStatusBackdrop'),
     closeSystemStatus: document.getElementById('closeSystemStatus'),
     systemStatusContent: document.getElementById('systemStatusContent'),
+    // Administration Settings Modal
+    adminSettingsModal: document.getElementById('adminSettingsModal'),
+    adminSettingsBackdrop: document.getElementById('adminSettingsBackdrop'),
+    closeAdminSettings: document.getElementById('closeAdminSettings'),
+    adminSettingsContent: document.getElementById('adminSettingsContent'),
+    adminSettingsTabs: document.querySelectorAll('[data-admin-settings-tab]'),
     // Settings Modal
     settingsModal: document.getElementById('settingsModal'),
     settingsBackdrop: document.getElementById('settingsBackdrop'),
@@ -955,15 +962,22 @@ function setupEventListeners() {
         elements.navSystemStatus.addEventListener('click', (e) => {
             e.preventDefault();
             if (isCurrentUserAdmin()) {
-                openSystemStatus();
+                openAdminSettings('system-status');
                 elements.userDropdownMenu?.classList.add('hidden');
             } else {
                 showToast('Akses ditolak: halaman ini hanya untuk Administrator.', 'error');
             }
         });
     }
-    elements.closeSystemStatus.addEventListener('click', closeSystemStatus);
-    elements.systemStatusBackdrop.addEventListener('click', closeSystemStatus);
+    elements.closeSystemStatus?.addEventListener('click', closeSystemStatus);
+    elements.systemStatusBackdrop?.addEventListener('click', closeSystemStatus);
+    elements.closeAdminSettings?.addEventListener('click', closeAdminSettings);
+    elements.adminSettingsBackdrop?.addEventListener('click', closeAdminSettings);
+    elements.adminSettingsTabs?.forEach((tabButton) => {
+        tabButton.addEventListener('click', () => {
+            selectAdminSettingsTab(tabButton.dataset.adminSettingsTab);
+        });
+    });
 
     // Files Modal
     if (elements.navFiles) {
@@ -977,7 +991,7 @@ function setupEventListeners() {
     if (elements.navAdminSettings) {
         elements.navAdminSettings.addEventListener('click', (e) => {
             e.preventDefault();
-            openSettings();
+            openAdminSettings('system-status');
             elements.userDropdownMenu?.classList.add('hidden');
         });
     }
@@ -986,12 +1000,16 @@ function setupEventListeners() {
     if (elements.navSettings) {
         elements.navSettings.addEventListener('click', (e) => {
             e.preventDefault();
-            openSettings();
+            if (isCurrentUserAdmin()) {
+                openAdminSettings('provider-model');
+            } else {
+                openSettings();
+            }
             elements.userDropdownMenu?.classList.add('hidden');
         });
     }
-    elements.closeSettings.addEventListener('click', closeSettings);
-    elements.settingsBackdrop.addEventListener('click', closeSettings);
+    elements.closeSettings?.addEventListener('click', closeSettings);
+    elements.settingsBackdrop?.addEventListener('click', closeSettings);
 
     elements.temperatureSlider.addEventListener('input', (e) => {
         elements.temperatureValue.textContent = e.target.value;
@@ -4040,6 +4058,319 @@ async function openSystemStatus() {
 function closeSystemStatus() {
     elements.systemStatusModal.classList.add('hidden');
     elements.systemStatusModal.classList.remove('flex');
+}
+
+// ============================================
+// Administration Settings
+// ============================================
+const ADMIN_SETTINGS_DEFINITIONS = {
+    'system-status': {
+        title: 'System Status',
+        description: 'Runtime health, log storage, and observability status.',
+        endpoints: [
+            ['System Health', '/api/system-status'],
+            ['Log Storage', '/api/log-storage'],
+            ['Observability', '/api/observability/status'],
+        ],
+    },
+    'storage-health': {
+        title: 'Storage Health',
+        description: 'Storage V2 health, catalog inventory, and migration history.',
+        endpoints: [
+            ['Storage Health', '/api/admin/storage/health'],
+            ['Storage Catalog', '/api/admin/storage/catalog'],
+            ['Storage Migrations', '/api/admin/storage/migrations'],
+        ],
+    },
+    'memory-v3': {
+        title: 'Memory V3',
+        description: 'Memory V3 operational health, conflict queue, and access audit trail.',
+        endpoints: [
+            ['Memory Health', '/api/admin/memory-v3/health'],
+            ['Conflicts', '/api/admin/memory-v3/conflicts?limit=25'],
+            ['Access Log', '/api/admin/memory-v3/access-log?limit=25'],
+        ],
+    },
+    'provider-model': {
+        title: 'Provider/Model Settings',
+        description: 'Provider registry, health, Ollama adapter status, and safe model aliases.',
+        endpoints: [
+            ['Provider Registry', '/api/admin/providers'],
+            ['Provider Health', '/api/admin/providers/health'],
+            ['Ollama Health', '/api/admin/providers/ollama/health'],
+            ['Safe Model Aliases', '/api/models'],
+        ],
+    },
+    'runtime-settings': {
+        title: 'Runtime Settings',
+        description: 'Runtime strict-mode health, boundary events, and governed tool execution.',
+        endpoints: [
+            ['Runtime Health', '/api/admin/runtime-health'],
+            ['Boundary Violations', '/api/admin/boundary-violations?limit=25'],
+            ['Tools Audit', '/api/admin/tools/audit'],
+            ['Tool Approvals', '/api/admin/tools/approvals'],
+        ],
+    },
+    'market-sentinel': {
+        title: 'Market Sentinel',
+        description: 'Market V2 health, HUD cache, and briefing output.',
+        endpoints: [
+            ['Market V2 Health', '/api/admin/market-v2/health'],
+            ['Market HUD', '/api/market/hud'],
+            ['Market Brief', '/api/market/brief'],
+        ],
+        links: [
+            ['Open Market Sentinel', '/market'],
+        ],
+    },
+    'ingestion-center': {
+        title: 'Ingestion Center',
+        description: 'Dataset intake, analytics, retrieval quality, and ingestion logs.',
+        endpoints: [
+            ['Datasets', '/api/ingestion/datasets?active_only=false'],
+            ['Analytics Overview', '/api/ingestion/analytics/overview'],
+            ['Recent Jobs', '/api/ingestion/jobs?limit=10'],
+            ['Logs Overview', '/api/ingestion/logs?job_limit=10&failed_limit=10'],
+            ['Chroma Health', '/api/ingestion/chroma/health'],
+        ],
+        links: [
+            ['Ingestion Center', '/ingestion'],
+            ['Ingestion Analytics', '/ingestion/analytics'],
+            ['Ingestion Logs', '/ingestion/logs'],
+        ],
+    },
+    evaluation: {
+        title: 'Evaluation',
+        description: 'Autonomous evaluation, observability eval feed, and security events.',
+        endpoints: [
+            ['Evaluation Summary', () => `/api/evaluation/summary?username=${encodeURIComponent(currentUserProfile.username || getUsername())}`],
+            ['Observability Evals', '/api/admin/observability/evals'],
+            ['Security Events', '/api/admin/observability/security-events'],
+        ],
+    },
+    backup: {
+        title: 'Backup',
+        description: 'Manual backup posture and recent backup history.',
+        endpoints: [
+            ['Backup Status', '/api/backup/status'],
+            ['Backup History', '/api/backup/history'],
+        ],
+    },
+    telegram: {
+        title: 'Telegram',
+        description: 'Telegram V2 health, dead-letter queue, and user mappings.',
+        endpoints: [
+            ['Telegram Health', '/api/admin/telegram-v2/health'],
+            ['Dead Letter Queue', '/api/admin/telegram-v2/dlq'],
+            ['Mappings', '/api/admin/telegram-v2/mappings'],
+        ],
+    },
+    'feature-flags': {
+        title: 'Feature Flags',
+        description: 'Stable runtime flags and rollback switches currently visible to admins.',
+        endpoints: [
+            ['Enterprise Flags', '/api/admin/enterprise-flags'],
+        ],
+    },
+};
+
+function openAdminSettings(initialTab = 'system-status') {
+    if (!isCurrentUserAdmin() || !elements.adminSettingsModal) {
+        showToast('Akses ditolak: halaman ini hanya untuk Administrator.', 'error');
+        return;
+    }
+    elements.adminSettingsModal.classList.remove('hidden');
+    elements.adminSettingsModal.classList.add('flex');
+    selectAdminSettingsTab(initialTab);
+}
+
+function closeAdminSettings() {
+    if (!elements.adminSettingsModal) return;
+    elements.adminSettingsModal.classList.add('hidden');
+    elements.adminSettingsModal.classList.remove('flex');
+}
+
+function selectAdminSettingsTab(tabId) {
+    if (!elements.adminSettingsContent) return;
+    const safeTabId = (ADMIN_SETTINGS_DEFINITIONS[tabId] || tabId === 'ai-temperature')
+        ? tabId
+        : 'system-status';
+    activeAdminSettingsTab = safeTabId;
+    elements.adminSettingsTabs?.forEach((button) => {
+        button.classList.toggle('active', button.dataset.adminSettingsTab === safeTabId);
+    });
+    elements.adminSettingsContent.innerHTML = `
+        <div class="admin-settings-loading">
+            <div class="spinner"></div>
+        </div>
+    `;
+    if (safeTabId === 'ai-temperature') {
+        renderAdminChatSettingsPanel();
+        return;
+    }
+    loadAdminSettingsTab(safeTabId);
+}
+
+async function fetchAdminEndpoint(label, endpointOrFactory) {
+    const endpoint = typeof endpointOrFactory === 'function' ? endpointOrFactory() : endpointOrFactory;
+    const startedAt = performance.now();
+    try {
+        const response = await authFetch(endpoint);
+        const rawText = await response.text();
+        let payload = rawText;
+        try {
+            payload = rawText ? JSON.parse(rawText) : {};
+        } catch (_) {
+            payload = rawText || {};
+        }
+        const payloadStatus = typeof payload === 'object' && payload ? payload.status : null;
+        const ok = response.ok && payloadStatus !== 'error';
+        return {
+            label,
+            endpoint,
+            ok,
+            http_status: response.status,
+            latency_ms: Math.round(performance.now() - startedAt),
+            payload,
+        };
+    } catch (error) {
+        return {
+            label,
+            endpoint,
+            ok: false,
+            http_status: 'network',
+            latency_ms: Math.round(performance.now() - startedAt),
+            payload: { error: error.message || 'Request failed' },
+        };
+    }
+}
+
+async function loadAdminSettingsTab(tabId) {
+    const definition = ADMIN_SETTINGS_DEFINITIONS[tabId] || ADMIN_SETTINGS_DEFINITIONS['system-status'];
+    const requestTab = tabId;
+    const results = await Promise.all(definition.endpoints.map(([label, endpoint]) => fetchAdminEndpoint(label, endpoint)));
+    if (activeAdminSettingsTab !== requestTab || !elements.adminSettingsContent) return;
+    elements.adminSettingsContent.innerHTML = renderAdminSettingsPanel(definition, results);
+    lucide.createIcons();
+}
+
+function renderAdminSettingsPanel(definition, results) {
+    const okCount = results.filter((item) => item.ok).length;
+    const linksHtml = renderAdminSettingsLinks(definition.links || []);
+    return `
+        <div class="admin-settings-panel">
+            <div class="admin-settings-panel-header">
+                <div>
+                    <h4>${escapeHtml(definition.title)}</h4>
+                    <p>${escapeHtml(definition.description || '')}</p>
+                </div>
+                <span class="admin-settings-summary">${okCount}/${results.length} healthy</span>
+            </div>
+            ${linksHtml}
+            <div class="admin-settings-endpoints">
+                ${results.map(renderAdminEndpointCard).join('')}
+            </div>
+        </div>
+    `;
+}
+
+function renderAdminSettingsLinks(links) {
+    if (!Array.isArray(links) || !links.length) return '';
+    return `
+        <div class="admin-settings-links">
+            ${links.map(([label, href]) => `
+                <a href="${escapeHtml(href)}" class="admin-settings-link">
+                    <span>${escapeHtml(label)}</span>
+                    <i data-lucide="external-link" class="w-4 h-4"></i>
+                </a>
+            `).join('')}
+        </div>
+    `;
+}
+
+function renderAdminEndpointCard(result) {
+    const statusLabel = result.ok ? 'OK' : `HTTP ${result.http_status}`;
+    const statusClass = result.ok ? 'ok' : 'error';
+    return `
+        <article class="admin-endpoint-card ${result.ok ? '' : 'is-error'}">
+            <div class="admin-endpoint-card-head">
+                <div class="min-w-0">
+                    <h5>${escapeHtml(result.label)}</h5>
+                    <code>${escapeHtml(result.endpoint)}</code>
+                </div>
+                <span class="admin-endpoint-status ${statusClass}">${escapeHtml(statusLabel)}</span>
+            </div>
+            <pre>${escapeHtml(JSON.stringify(result.payload, null, 2))}</pre>
+            <p class="admin-endpoint-latency">${escapeHtml(String(result.latency_ms))} ms</p>
+        </article>
+    `;
+}
+
+function renderAdminChatSettingsPanel() {
+    const currentTemperature = elements.temperatureSlider?.value || '0.2';
+    const optionHtml = availableModelAliases.map((item) => `
+        <option value="${escapeHtml(item.alias)}"${item.alias === selectedModelAlias ? ' selected' : ''}>
+            ${escapeHtml(item.display_name || normalizeModelDisplayName(item.alias, ''))}
+        </option>
+    `).join('');
+
+    elements.adminSettingsContent.innerHTML = `
+        <div class="admin-settings-panel">
+            <div class="admin-settings-panel-header">
+                <div>
+                    <h4>AI Temperature</h4>
+                    <p>Per-session model alias and creativity controls used by the chat composer.</p>
+                </div>
+                <span class="admin-settings-summary">${escapeHtml(normalizeModelDisplayName(selectedModelAlias, ''))}</span>
+            </div>
+            <div class="admin-settings-form-grid">
+                <label class="admin-settings-field">
+                    <span>Model Alias</span>
+                    <select id="adminModelAliasSelect">${optionHtml}</select>
+                </label>
+                <label class="admin-settings-field">
+                    <span>Temperature</span>
+                    <input id="adminTemperatureSlider" type="range" min="0" max="1" step="0.1" value="${escapeHtml(currentTemperature)}">
+                    <div class="admin-settings-range-meta">
+                        <span>Precise</span>
+                        <strong id="adminTemperatureValue">${escapeHtml(currentTemperature)}</strong>
+                        <span>Creative</span>
+                    </div>
+                </label>
+            </div>
+            <div class="admin-endpoint-card">
+                <div class="admin-endpoint-card-head">
+                    <div class="min-w-0">
+                        <h5>Safe Alias Payload</h5>
+                        <code>composer model_alias</code>
+                    </div>
+                    <span class="admin-endpoint-status ok">LOCAL</span>
+                </div>
+                <pre>${escapeHtml(JSON.stringify({
+                    model_alias: selectedModelAlias,
+                    display_name: normalizeModelDisplayName(selectedModelAlias, ''),
+                    temperature: Number(currentTemperature),
+                }, null, 2))}</pre>
+            </div>
+        </div>
+    `;
+    bindAdminChatSettingsControls();
+    lucide.createIcons();
+}
+
+function bindAdminChatSettingsControls() {
+    const aliasSelect = document.getElementById('adminModelAliasSelect');
+    const tempSlider = document.getElementById('adminTemperatureSlider');
+    const tempValue = document.getElementById('adminTemperatureValue');
+    aliasSelect?.addEventListener('change', (event) => {
+        applyModelAlias(event.target.value);
+        renderAdminChatSettingsPanel();
+    });
+    tempSlider?.addEventListener('input', (event) => {
+        if (elements.temperatureSlider) elements.temperatureSlider.value = event.target.value;
+        if (elements.temperatureValue) elements.temperatureValue.textContent = event.target.value;
+        if (tempValue) tempValue.textContent = event.target.value;
+    });
 }
 
 function renderBackupStatusCard(backup) {

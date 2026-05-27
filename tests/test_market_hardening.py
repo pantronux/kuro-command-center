@@ -109,11 +109,47 @@ def test_market_alert_dedup_suppresses_second_publish(tmp_path, monkeypatch):
         sent["count"] += 1
         return True
 
-    monkeypatch.setattr(market_sentinel.telegram_notifier, "send_message_with_retry", _fake_send)
+    monkeypatch.setattr(
+        market_sentinel.telegram_notifier,
+        "send_message_with_retry",
+        _fake_send,
+    )
 
     assert market_sentinel.run_triangulation_scan(username="Pantronux") is True
     assert market_sentinel.run_triangulation_scan(username="Pantronux") is True
     assert sent["count"] == 1
+
+
+def test_market_stale_alert_is_admin_only(monkeypatch):
+    monkeypatch.setenv("ADMIN_USERNAME", "Pantronux")
+    monkeypatch.setattr(
+        market_sentinel,
+        "get_all_sentinel_stocks",
+        lambda username="Pantronux": [
+            {
+                "stock_code": "BBCA",
+                "current_price_per_lot": 1000,
+                "volume_24h": 1,
+                "ytd_performance": 0.0,
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        market_sentinel,
+        "is_snapshot_stale",
+        lambda threshold, username="Pantronux": True,
+    )
+
+    sent = {"count": 0}
+
+    async def _fake_send(msg, chat_id=None, max_attempts=3):
+        sent["count"] += 1
+        return True
+
+    monkeypatch.setattr(market_sentinel.telegram_notifier, "send_message_with_retry", _fake_send)
+
+    assert market_sentinel.run_triangulation_scan(username="Faikhira") is False
+    assert sent["count"] == 0
 
 
 def test_openclaw_circuit_transitions_to_open_and_half_open(monkeypatch):
@@ -136,4 +172,3 @@ def test_openclaw_circuit_transitions_to_open_and_half_open(monkeypatch):
     monkeypatch.setattr(openclaw_bridge.time, "monotonic", lambda: opened_at + openclaw_bridge.OPENCLAW_CIRCUIT_BREAKER_COOLDOWN_SECONDS + 1)
     assert openclaw_bridge._try_begin_half_open_probe() is True
     assert openclaw_bridge.get_circuit_state() == "half-open"
-

@@ -18,7 +18,7 @@ def test_v1_dashboard_uses_dark_gray_redesign_shell():
 
     assert 'class="kuro-redesign-v1' in html
     assert "/static/css/index_revamp.css" in html
-    assert "index_revamp.css?v=20260523-10" in html
+    assert "index_revamp.css?v=20260525-01" in html
     assert "id=\"composerActionMenu\"" in html
     assert "id=\"minimizeSidebar\"" in html
     assert "sidebar-collapse-toggle" in html
@@ -87,7 +87,11 @@ def test_v1_redesign_keeps_persona_and_existing_tool_navigation():
     assert "id=\"chatSessionsList\"" in html
     assert "id=\"chatDrawer\"" not in html
     assert "kuro-profile-menu" in html
-    assert "Administrator Settings" in html
+    assert "Administration Settings" in html
+    assert "id=\"adminSettingsModal\"" in html
+    assert "data-admin-settings-tab=\"memory-v3\"" in html
+    assert "data-admin-settings-tab=\"provider-model\"" in html
+    assert "data-admin-settings-tab=\"feature-flags\"" in html
     assert "Model Settings" in html
     assert "data-persona=\"consultant\"" in html
     assert "data-persona=\"auditor\"" in html
@@ -100,6 +104,11 @@ def test_v1_redesign_keeps_persona_and_existing_tool_navigation():
     assert "model_alias" in js
     assert "openFilesModal()" in js
     assert "navAdminSettings" in js
+    assert "function openAdminSettings(" in js
+    assert "'/api/admin/enterprise-flags'" in js
+    assert "'/api/admin/providers/health'" in js
+    assert "'/api/admin/memory-v3/health'" in js
+    assert "'/api/ingestion/analytics/overview'" in js
     assert "function generateClientChatId()" in js
     assert "const isFirstTurnInNewChat = !currentChatId" in js
     assert "formData.append('chat_id', currentChatId)" in js
