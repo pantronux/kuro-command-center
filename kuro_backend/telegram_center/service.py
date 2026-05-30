@@ -33,6 +33,7 @@ from telegram.ext import (
 
 from kuro_backend import chat_history, finance_db, intelligence_db
 from kuro_backend.config import settings
+from kuro_backend.krc_profile import get_app_profile, is_krc_feature_enabled
 from kuro_backend.langgraph_core import process_chat_with_graph
 from kuro_backend.telegram_notifier import split_text_for_telegram
 from . import actions, auth, notifications, renderers
@@ -59,6 +60,8 @@ def shutdown() -> None:
 
 
 def reset_runtime_for_tests() -> None:
+    global _COMMANDS
+    _COMMANDS = None
     rate_buckets.clear()
     selected_persona_by_chat.clear()
     polling_shutdown.clear()
@@ -136,14 +139,39 @@ def backup_summary() -> Dict[str, Any]:
     }
 
 
+def market_controls_enabled() -> bool:
+    """Return True when Telegram may expose Market Sentinel controls."""
+    if get_app_profile() == "krc":
+        return is_krc_feature_enabled("market")
+    return True
+
+
+def _market_disabled_panel() -> Panel:
+    return Panel(
+        text=(
+            "Market Sentinel disabled\n"
+            f"Time: {renderers.now_wib_label()}\n\n"
+            "KRC Telegram is running as an ops command center. Enable "
+            "KURO_KRC_MARKET_ENABLED=true to expose market commands."
+        ),
+        reply_markup=renderers.back_home_markup(),
+    )
+
+
 async def _home_panel(chat_id: str, context: Any) -> Panel:
     _, display_name = auth.admin_profile()
-    return renderers.home_panel(display_name)
+    return renderers.home_panel(display_name, include_market=market_controls_enabled())
 
 
 async def _help_panel(chat_id: str, context: Any) -> Panel:
-    commands = [(spec.name, spec.description) for spec in command_registry().values()]
-    return renderers.help_panel(commands)
+    seen = set()
+    commands = []
+    for spec in command_registry().values():
+        if spec.name in seen:
+            continue
+        seen.add(spec.name)
+        commands.append((spec.name, spec.description))
+    return renderers.help_panel(commands, include_market=market_controls_enabled())
 
 
 async def _ping_panel(chat_id: str, context: Any) -> Panel:
@@ -159,6 +187,8 @@ async def _status_panel(chat_id: str, context: Any) -> Panel:
 
 
 async def _sentinel_panel(chat_id: str, context: Any) -> Panel:
+    if not market_controls_enabled():
+        return _market_disabled_panel()
     username, _ = auth.admin_profile()
     stale = finance_db.is_snapshot_stale(
         int(getattr(settings, "KURO_SENTINEL_STALE_THRESHOLD_MIN", 15)),
@@ -190,10 +220,12 @@ async def _persona_panel(chat_id: str, context: Any) -> Panel:
 
 
 async def _actions_panel(chat_id: str, context: Any) -> Panel:
-    return renderers.actions_panel()
+    return renderers.actions_panel(include_market=market_controls_enabled())
 
 
 async def _run_sentinel_confirm_panel(chat_id: str, context: Any) -> Panel:
+    if not market_controls_enabled():
+        return _market_disabled_panel()
     username, _ = auth.admin_profile()
     summary, label, execute = actions.make_run_sentinel_action(username)
     pending = actions.create_pending_action(
@@ -233,14 +265,24 @@ def command_registry() -> dict[str, CommandSpec]:
             CommandSpec("/ping", "check bot and queue health", _ping_panel),
             CommandSpec("/status", "show system, backup, and Telegram status", _status_panel),
             CommandSpec("/queue", "show inbound queue and DLQ health", _queue_panel),
-            CommandSpec("/sentinel", "show Market Sentinel panel", _sentinel_panel),
             CommandSpec("/briefing", "show latest intelligence briefing", _briefing_panel),
             CommandSpec("/chat", "show chat/persona panel", _chat_panel),
             CommandSpec("/persona", "choose active Telegram persona", _persona_panel),
             CommandSpec("/actions", "show confirmation-gated actions", _actions_panel),
-            CommandSpec("/run_sentinel", "confirm and run Market Sentinel", _run_sentinel_confirm_panel, mutating=True),
             CommandSpec("/run_backup", "confirm and run manual backup", _run_backup_confirm_panel, mutating=True),
         ]
+        if market_controls_enabled():
+            specs.extend(
+                [
+                    CommandSpec("/sentinel", "show Market Sentinel panel", _sentinel_panel),
+                    CommandSpec(
+                        "/run_sentinel",
+                        "confirm and run Market Sentinel",
+                        _run_sentinel_confirm_panel,
+                        mutating=True,
+                    ),
+                ]
+            )
         _COMMANDS = {}
         for spec in specs:
             _COMMANDS[spec.name] = spec
@@ -252,11 +294,6 @@ def command_registry() -> dict[str, CommandSpec]:
 def build_operational_digest_text() -> str:
     status = system_status_payload()
     username, _ = auth.admin_profile()
-    stale = finance_db.is_snapshot_stale(
-        int(getattr(settings, "KURO_SENTINEL_STALE_THRESHOLD_MIN", 15)),
-        username=username,
-    )
-    stocks = finance_db.get_all_sentinel_stocks(sort_by="roi_1m", username=username)[:3]
     briefings = intelligence_db.get_briefings(limit=1, username=username)
     briefing_date = briefings[0].get("date") if briefings else "none"
     buffered = notifications.flush_digest()
@@ -265,15 +302,23 @@ def build_operational_digest_text() -> str:
         f"System: CPU {status['cpu_percent']}%, RAM {status['ram_percent']}%, Disk {status['disk_percent']}%",
         f"Backup: {status.get('backup_status', 'unknown')} at {status.get('backup_at', '-')}",
         f"Telegram: inbound {status['inbound_size']}/{status['inbound_maxsize']}, DLQ pending {status['dlq_pending']}",
-        f"Market Sentinel: {'STALE' if stale else 'fresh'}",
         f"Latest briefing: {briefing_date}",
     ]
-    if stocks:
-        lines.append("Top market watch:")
-        for stock in stocks:
-            lines.append(
-                f"- {stock.get('stock_code', '-')}: ROI 1M {stock.get('projected_roi_1m', 0)}%, {stock.get('conclusion', 'HOLD')}"
-            )
+    if market_controls_enabled():
+        stale = finance_db.is_snapshot_stale(
+            int(getattr(settings, "KURO_SENTINEL_STALE_THRESHOLD_MIN", 15)),
+            username=username,
+        )
+        stocks = finance_db.get_all_sentinel_stocks(sort_by="roi_1m", username=username)[:3]
+        lines.insert(4, f"Market Sentinel: {'STALE' if stale else 'fresh'}")
+        if stocks:
+            lines.append("Top market watch:")
+            for stock in stocks:
+                lines.append(
+                    f"- {stock.get('stock_code', '-')}: ROI 1M {stock.get('projected_roi_1m', 0)}%, {stock.get('conclusion', 'HOLD')}"
+                )
+    else:
+        lines.append("Mode: KRC ops command center")
     if buffered and "No buffered events." not in buffered:
         lines.extend(["", buffered])
     return "\n".join(lines)
@@ -288,7 +333,10 @@ def send_digest_job() -> None:
 
 
 def resolve_command(text: str) -> CommandSpec:
-    return command_registry().get(command_name(text), command_registry()["/help"])
+    name = command_name(text)
+    if name in {"/sentinel", "/run_sentinel"} and not market_controls_enabled():
+        return CommandSpec(name, "Market Sentinel disabled in KRC ops mode", _sentinel_panel)
+    return command_registry().get(name, command_registry()["/help"])
 
 
 async def send_panel(bot, chat_id: str, panel: Panel) -> None:
@@ -386,13 +434,16 @@ async def _panel_from_callback(target: str, chat_id: str, context: Any) -> Panel
         "ping": "/ping",
         "status": "/status",
         "queue": "/queue",
-        "sentinel": "/sentinel",
         "briefing": "/briefing",
         "chat": "/chat",
         "actions": "/actions",
-        "run_sentinel": "/run_sentinel",
         "run_backup": "/run_backup",
     }
+    if market_controls_enabled():
+        command_map["sentinel"] = "/sentinel"
+        command_map["run_sentinel"] = "/run_sentinel"
+    elif target in {"sentinel", "run_sentinel"}:
+        return _market_disabled_panel()
     if target == "actions":
         return await _actions_panel(chat_id, context)
     spec = command_registry().get(command_map.get(target, "/home"), command_registry()["/home"])

@@ -9,6 +9,12 @@
 > Prompt `7` (Prompt `-1..7` complete), tanpa menambahkan goal/decision engine
 > baru di batch ini.
 
+> **KRC REFOCUS TAG (2026-05-27):** Kuro Research Center profile mode is
+> additive and playground-first. `KURO_APP_PROFILE=legacy` preserves legacy
+> behavior; `KURO_APP_PROFILE=krc` refocuses UI V1, schedulers, and knowledge
+> sharing around Kuro Playground, approved knowledge, ingestion, and research
+> export/report support.
+
 ## Executive Summary (User-Friendly Overview)
 
 **Note on Telegram**: Kuro AI uses Telegram for both *outbound* proactive notifications (e.g. Sentinel alerts, Dreaming cycle updates) and *inbound* two-way chat commands. Messages are processed via the same LangGraph reasoning core as the Web Dashboard.
@@ -47,6 +53,11 @@ Kuro AI is your **Intelligent Personal Sovereign**—a sophisticated digital com
   Market Sentinel V2, Telegram V2, API V2, and enterprise observability are
   present behind explicit flags. The separate Frontend V2 shell has been
   retired; `index.html` is the single dashboard shell.
+- **Kuro Research Center Refocus status**: Phases `0..10` have been executed
+  as an additive profile-mode refocus. Kuro Stack (KS) owns daily chat
+  separately; KRC owns canonical research knowledge and exposes only the
+  approved Knowledge API to KS/KKG callers. No KS database or daily history is
+  shared with KRC.
 - **Tech stack**:
   - Backend: FastAPI, LangGraph, `google-genai` (Gemini),
     APScheduler, SQLite, ChromaDB, Mem0 (via `perpetual_memory.py`),
@@ -117,6 +128,40 @@ Kuro AI is your **Intelligent Personal Sovereign**—a sophisticated digital com
   enabled gradually with rollback plans. Large enterprise production still
   needs tenant isolation, SSO/OIDC, stronger RBAC, PostgreSQL/pgvector option,
   external telemetry collector, and formal secrets management.
+
+### Kuro Research Center Refocus (Phases 0..10 Complete)
+
+- **Execution status**: Complete for the playground-first KRC refocus plan.
+- **Profile control**: `KURO_APP_PROFILE=legacy` remains the default.
+  `KURO_APP_PROFILE=krc` enables Kuro Research Center presentation and
+  scheduler narrowing. `KURO_APP_PROFILE=dev` exposes KRC features for local
+  debugging.
+- **Product split**: Kuro Stack (KS) is the daily chat surface. KRC is the
+  Kuro Playground research, ingestion, export/report, and canonical knowledge
+  authority. KS/KKG integration reads through approved-only Knowledge API
+  routes; KS chat history and databases are not shared with KRC.
+- **UI contract**: UI V1 (`web_interface/templates/index.html` +
+  `web_interface/static/js/app.js`) remains the production shell. Frontend V2
+  is not reintroduced. KRC mode adds the Kuro Playground landing surface as the
+  primary research action.
+- **Research Console persona contract**: `KURO_APP_PROFILE=krc` locks the
+  Research Console to the `advisor` persona. Persona switching remains
+  available in legacy/dev profiles, but KRC defaults every chat/session request
+  to Advisor without migrating old non-Advisor history.
+- **Knowledge contract**: `kuro_backend/knowledge_center/` owns approved
+  knowledge search/context, candidate review, redaction, policy, audit, and
+  its KRC-owned SQLite store. Candidate writes default off.
+- **Bloatware control**: daily chat affordances, market/ticker flows, agent
+  tools, tasks/reminders, proactive jobs, fitness, and daily briefings are
+  hidden or disabled by KRC flags instead of deleting working modules.
+  Telegram remains available as an ops command center for server status,
+  backup, queue/DLQ, and controlled actions.
+- **Legacy QA deactivation**: `/api/playground/qa/*` remains in the codebase
+  for compatibility, but KRC hides and disables it by default through
+  `KURO_KRC_QA_PLAYGROUND_ENABLED=false` and
+  `KURO_KRC_QA_PRODUCTIZATION_ENABLED=false`.
+- **Compatibility preserved**: legacy mode, `/api/chat/stream`, admin auth,
+  port 8443 deployment assumptions, and existing modules remain intact.
 
 ### V7.0 Reset Notes ("Lean Leviathan")
 
@@ -492,8 +537,17 @@ flowchart TD
 ```
 Side-branches not drawn on trunk:
 - **Admin ingestion center**: `/api/ingestion/*` and `/ingestion*` route ke `ingestion_manager -> ingestion_pipeline -> ingestion_registry`.
-- **Scheduler jobs**: daily intelligence briefing, dreaming cycle, memory decay job, backup routines.
-- **QA playground**: `interpret`, `generate-testcases`, `generate-gherkin` dengan kill-switch `KURO_QA_PLAYGROUND_ENABLED`.
+- **Scheduler jobs**: daily intelligence briefing, dreaming cycle, memory decay
+  job, backup routines. KRC profile gates daily/market/Telegram/proactive
+  jobs through `KURO_KRC_SCHEDULER_*` flags.
+- **Legacy QA playground**: `interpret`, `generate-testcases`, `generate-gherkin`
+  remain behind `KURO_QA_PLAYGROUND_ENABLED`; KRC additionally disables QA by
+  default with `KURO_KRC_QA_PLAYGROUND_ENABLED=false` so Kuro Playground stays a
+  single research surface.
+- **Approved Knowledge API**: `/api/knowledge/health`,
+  `/api/knowledge/search-approved`, `/api/knowledge/context-approved`,
+  `/api/knowledge/sources/{source_id}`, and admin candidate review routes
+  use KRC-owned storage and never expose chat history.
 
 ### Enterprise V2 Additive Data Flows
 
@@ -549,6 +603,7 @@ artefacts are excluded — see **Exclusions** at the bottom of this section.
 │   ├── config.py                # env keys -> typed Settings
 │   ├── db_utils.py              # shared SQLite connection/retry/migration helpers
 │   ├── enterprise_flags.py      # enterprise refactor feature flag snapshot
+│   ├── krc_profile.py           # KRC/legacy/dev profile flags and scheduler gates
 │   ├── storage/                 # Storage V2 connections, migrations, catalog, idempotency
 │   ├── api_v2/                  # response/error/rate-limit/OpenAPI V2 controls
 │   ├── personas.py              # persona prompts + Anti-Halusinasi epistemic layer
@@ -578,6 +633,8 @@ artefacts are excluded — see **Exclusions** at the bottom of this section.
 │   ├── price_ticker_worker.py   # Quantitative market anchor (V1.0)
 │   ├── market_v2/               # source registry, collectors, triangulator, alerts
 │   ├── tools_v2/                # governed tools, approvals, tasks, reminders, research
+│   ├── knowledge_center/        # approved knowledge API, candidates, policy, audit
+│   ├── playground/qa/           # Optional legacy QA runtime helpers
 │   ├── enterprise_observability/ # audit, security events, metrics, traces, evals
 │   ├── enterprise_ops/          # deployment profiles, startup validation, health
 │   ├── epistemic_filter.py      # Anti-Halusinasi claim labeling & hard-rule enforcement (V1.0)
@@ -746,6 +803,8 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
   `/api/intelligence*`, `/api/finances/*`, `/api/persona*`, `/api/observability/*`,
   `/ingestion`, `/ingestion/analytics`, `/api/ingestion/*`,
   `/api/capabilities`, `/api/admin/enterprise-flags`,
+  `/api/admin/krc/profile`, `/api/knowledge/*`, `/api/admin/knowledge/*`,
+  optional legacy `/api/playground/qa/*`,
   `/api/admin/storage/*`, `/api/admin/memory-v3/*`,
   `/api/chat/v2/stream`, `/api/models`, `/api/admin/providers*`,
   `/api/admin/providers/ollama/*`,
@@ -756,6 +815,20 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
   `/api/backup/status`, `/api/backup/run`, `/api/backup/history`,
   `/api/system-status`, `/api/live`, `/api/ready`, `/api/health`. Also wires three APScheduler
   `BackgroundScheduler` instances (`_hardware_sentinel_scheduler`) and the Uvicorn boot thread.
+
+### KRC Refocus Packages
+- [`kuro_backend/krc_profile.py`](kuro_backend/krc_profile.py) — *public*:
+  `get_app_profile`, `is_krc_feature_enabled`, `is_krc_scheduler_enabled`,
+  and `get_krc_profile_snapshot`. This is the profile-mode control plane for
+  legacy/KRC/dev behavior.
+- [`kuro_backend/knowledge_center/`](kuro_backend/knowledge_center/) —
+  *public*: approved-only search/context routes, source metadata routes,
+  candidate submission/review, policy/auth helpers, redaction, audit logging,
+  and the KRC-owned knowledge SQLite store. Candidate writes default off.
+- [`kuro_backend/playground/qa/`](kuro_backend/playground/qa/) — *public*:
+  optional legacy requirement parsing, testcase generation, Gherkin generation,
+  ambiguity analysis, coverage matrix, export-bundle preparation, and
+  `QARuntime`. KRC mode disables this by default.
 
 ### Enterprise V2 Packages
 - [`kuro_backend/enterprise_flags.py`](kuro_backend/enterprise_flags.py) —
@@ -1106,6 +1179,9 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
   `test_market_v2.py`, `test_telegram_v2.py`, `test_api_v2.py`,
   `test_frontend_v1_redesign.py`, `test_enterprise_observability.py`,
   `test_enterprise_ops.py`, and `test_performance_bugfix_sweep.py`.
+  KRC refocus coverage includes `test_krc_profile_flags.py`,
+  `test_krc_navigation_profile.py`, `test_krc_knowledge_api.py`,
+  `test_krc_scheduler_flags.py`, and `test_krc_qa_productization.py`.
 
 ## Data & Config
 
@@ -1134,6 +1210,27 @@ backups like `kuro_chat_history.db.backup_*`), all `*.log` /
     `KURO_DEEP_RESEARCH_V2_ENABLED`, `KURO_WEB_SEARCH_V2_ENABLED`,
     `KURO_ADMIN_SETTINGS_V2_ENABLED`,
     `KURO_ENTERPRISE_OBSERVABILITY_ENABLED`, `KURO_API_V2_ENABLED`.
+  - KRC profile and knowledge flags: `KURO_APP_PROFILE`,
+    `KURO_KRC_RESEARCH_CONSOLE_ENABLED`, `KURO_KRC_PLAYGROUND_ENABLED`,
+    `KURO_KRC_QA_PLAYGROUND_ENABLED`,
+    `KURO_KRC_QA_PRODUCTIZATION_ENABLED`,
+    `KURO_KRC_KNOWLEDGE_PUBLISH_ENABLED`, `KURO_KRC_INGESTION_ENABLED`,
+    `KURO_KRC_EVALUATION_ENABLED`, `KURO_KRC_EXPORT_ENABLED`,
+    `KURO_KRC_DAILY_CHAT_PROMINENT`,
+    `KURO_KRC_TELEGRAM_CENTER_ENABLED`, `KURO_KRC_MARKET_ENABLED`,
+    `KURO_KRC_AGENT_TOOLS_ENABLED`, `KURO_KRC_DAILY_TASKS_ENABLED`,
+    `KURO_KRC_PROACTIVE_EVENTS_ENABLED`,
+    `KURO_KRC_KNOWLEDGE_CANDIDATES_ENABLED`, `KURO_KNOWLEDGE_DB_PATH`,
+    `KURO_KNOWLEDGE_API_KEY`.
+  - KRC scheduler flags: `KURO_KRC_SCHEDULER_BACKUP_ENABLED`,
+    `KURO_KRC_SCHEDULER_MEMORY_DECAY_ENABLED`,
+    `KURO_KRC_SCHEDULER_EVALUATION_ENABLED`,
+    `KURO_KRC_SCHEDULER_MARKET_ENABLED`,
+    `KURO_KRC_SCHEDULER_TELEGRAM_ENABLED`,
+    `KURO_KRC_SCHEDULER_PROACTIVE_ENABLED`,
+    `KURO_KRC_SCHEDULER_FITNESS_ENABLED`,
+    `KURO_KRC_SCHEDULER_DAILY_BRIEFING_ENABLED`,
+    `KURO_KRC_SCHEDULER_FILE_RETENTION_ENABLED`.
   - Chat / memory / DB hardening: `KURO_CHAT_CONTEXT_REFRESH_THRESHOLD`,
     `KURO_CHAT_CONTEXT_MODEL`, `KURO_NODE_TIMEOUT_S`,
     `KURO_ADVISOR_NODE_TIMEOUT_S`, `KURO_DB_BUSY_TIMEOUT_MS`.

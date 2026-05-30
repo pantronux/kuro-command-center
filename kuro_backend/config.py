@@ -33,6 +33,39 @@ def _env_bool(name: str, default: str = "false") -> bool:
 
 class Settings:
     # -----------------------------------------------------------------
+    # Kuro Research Center Profile Control Plane
+    # -----------------------------------------------------------------
+    # Defaults preserve legacy behavior. KURO_APP_PROFILE=krc activates the
+    # playground-first Research Center presentation without replacing UI V1.
+    KURO_APP_PROFILE: str = os.getenv("KURO_APP_PROFILE", "legacy").strip().lower()
+    KURO_KRC_RESEARCH_CONSOLE_ENABLED: bool = _env_bool("KURO_KRC_RESEARCH_CONSOLE_ENABLED", "true")
+    KURO_KRC_PLAYGROUND_ENABLED: bool = _env_bool("KURO_KRC_PLAYGROUND_ENABLED", "true")
+    KURO_KRC_QA_PLAYGROUND_ENABLED: bool = _env_bool("KURO_KRC_QA_PLAYGROUND_ENABLED", "false")
+    KURO_KRC_QA_PRODUCTIZATION_ENABLED: bool = _env_bool("KURO_KRC_QA_PRODUCTIZATION_ENABLED", "false")
+    KURO_KRC_KNOWLEDGE_PUBLISH_ENABLED: bool = _env_bool("KURO_KRC_KNOWLEDGE_PUBLISH_ENABLED", "true")
+    KURO_KRC_INGESTION_ENABLED: bool = _env_bool("KURO_KRC_INGESTION_ENABLED", "true")
+    KURO_KRC_EVALUATION_ENABLED: bool = _env_bool("KURO_KRC_EVALUATION_ENABLED", "false")
+    KURO_KRC_EXPORT_ENABLED: bool = _env_bool("KURO_KRC_EXPORT_ENABLED", "true")
+    KURO_KRC_DAILY_CHAT_PROMINENT: bool = _env_bool("KURO_KRC_DAILY_CHAT_PROMINENT", "false")
+    KURO_KRC_TELEGRAM_CENTER_ENABLED: bool = _env_bool("KURO_KRC_TELEGRAM_CENTER_ENABLED", "true")
+    KURO_KRC_MARKET_ENABLED: bool = _env_bool("KURO_KRC_MARKET_ENABLED", "false")
+    KURO_KRC_AGENT_TOOLS_ENABLED: bool = _env_bool("KURO_KRC_AGENT_TOOLS_ENABLED", "false")
+    KURO_KRC_DAILY_TASKS_ENABLED: bool = _env_bool("KURO_KRC_DAILY_TASKS_ENABLED", "false")
+    KURO_KRC_PROACTIVE_EVENTS_ENABLED: bool = _env_bool("KURO_KRC_PROACTIVE_EVENTS_ENABLED", "false")
+    KURO_KRC_KNOWLEDGE_CANDIDATES_ENABLED: bool = _env_bool("KURO_KRC_KNOWLEDGE_CANDIDATES_ENABLED", "false")
+    KURO_KNOWLEDGE_DB_PATH: str = os.getenv("KURO_KNOWLEDGE_DB_PATH", "")
+    KURO_KNOWLEDGE_API_KEY: str = os.getenv("KURO_KNOWLEDGE_API_KEY", "")
+    KURO_KRC_SCHEDULER_BACKUP_ENABLED: bool = _env_bool("KURO_KRC_SCHEDULER_BACKUP_ENABLED", "true")
+    KURO_KRC_SCHEDULER_MEMORY_DECAY_ENABLED: bool = _env_bool("KURO_KRC_SCHEDULER_MEMORY_DECAY_ENABLED", "true")
+    KURO_KRC_SCHEDULER_EVALUATION_ENABLED: bool = _env_bool("KURO_KRC_SCHEDULER_EVALUATION_ENABLED", "false")
+    KURO_KRC_SCHEDULER_MARKET_ENABLED: bool = _env_bool("KURO_KRC_SCHEDULER_MARKET_ENABLED", "false")
+    KURO_KRC_SCHEDULER_TELEGRAM_ENABLED: bool = _env_bool("KURO_KRC_SCHEDULER_TELEGRAM_ENABLED", "true")
+    KURO_KRC_SCHEDULER_PROACTIVE_ENABLED: bool = _env_bool("KURO_KRC_SCHEDULER_PROACTIVE_ENABLED", "false")
+    KURO_KRC_SCHEDULER_FITNESS_ENABLED: bool = _env_bool("KURO_KRC_SCHEDULER_FITNESS_ENABLED", "false")
+    KURO_KRC_SCHEDULER_DAILY_BRIEFING_ENABLED: bool = _env_bool("KURO_KRC_SCHEDULER_DAILY_BRIEFING_ENABLED", "false")
+    KURO_KRC_SCHEDULER_FILE_RETENTION_ENABLED: bool = _env_bool("KURO_KRC_SCHEDULER_FILE_RETENTION_ENABLED", "true")
+
+    # -----------------------------------------------------------------
     # Enterprise Refactor Control Plane (Phase 0)
     # -----------------------------------------------------------------
     # All enterprise refactor paths default off to preserve current runtime

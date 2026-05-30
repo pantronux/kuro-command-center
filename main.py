@@ -92,6 +92,12 @@ from kuro_backend.enterprise_ops import (
     validate_startup_environment,
 )
 from kuro_backend.enterprise_flags import get_enterprise_flag_snapshot
+from kuro_backend.krc_profile import (
+    get_app_profile,
+    get_krc_profile_snapshot,
+    is_krc_feature_enabled,
+    is_krc_scheduler_enabled,
+)
 from kuro_backend.memory_v3.health import get_memory_v3_health, get_memory_v3_public_status
 from kuro_backend.memory_v3.retention import MemoryRetentionEngine
 from kuro_backend.memory_v3.store import MemoryV3Store
@@ -181,6 +187,10 @@ class NewChatSession(BaseModel):
 
 class QARequirementRequest(BaseModel):
     requirement: str = Field(..., min_length=1, max_length=32000)
+
+
+class QAExportRequest(QARequirementRequest):
+    format: str = Field(default="json", max_length=32)
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -567,8 +577,56 @@ def _as_env_bool(value: Optional[str], default: bool = False) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+KRC_LOCKED_PERSONA = "advisor"
+
+
+def _is_krc_advisor_persona_locked() -> bool:
+    """Return True when KRC should force Research Console to Advisor."""
+    return get_app_profile() == "krc"
+
+
+def _resolve_effective_persona(
+    persona: Optional[str],
+    *,
+    username: str = "Pantronux",
+    restricted_persona: Optional[str] = None,
+) -> str:
+    """Resolve the persona for request handling.
+
+    KRC intentionally has a single Research Console persona. Legacy and dev
+    profiles keep the old selectable persona behavior.
+    """
+    if _is_krc_advisor_persona_locked():
+        return KRC_LOCKED_PERSONA
+    if restricted_persona:
+        return memory_manager.normalize_persona(restricted_persona)
+    return memory_manager.normalize_persona(
+        persona or memory_manager.get_active_persona(username=username)
+    )
+
+
+def _persona_api_payload(persona: str) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {"status": "success", "persona": persona}
+    if _is_krc_advisor_persona_locked():
+        payload.update({"locked": True, "app_profile": "krc"})
+    return payload
+
+
 def _is_qa_playground_enabled() -> bool:
-    return _as_env_bool(os.getenv("KURO_QA_PLAYGROUND_ENABLED"), True)
+    if not _as_env_bool(os.getenv("KURO_QA_PLAYGROUND_ENABLED"), True):
+        return False
+    if get_app_profile() == "krc":
+        return is_krc_feature_enabled("qa_playground")
+    return True
+
+
+def _is_qa_productization_enabled() -> bool:
+    profile = get_app_profile()
+    if profile not in {"krc", "dev"}:
+        return False
+    return _is_qa_playground_enabled() and is_krc_feature_enabled(
+        "qa_productization"
+    )
 
 
 _PLAYGROUND_ADVISOR_CONTEXT_INSTRUCTION = (
@@ -658,12 +716,16 @@ def _mount_chat_v2_router(target_app: FastAPI) -> bool:
 
         async def _chat_v2_token_stream(**kwargs):
             message = str(kwargs.get("message") or "")
-            persona = str(kwargs.get("persona") or "consultant")
             username = str(kwargs.get("username") or "Pantronux")
             chat_id = str(kwargs.get("chat_id") or "")
             trace_id = str(kwargs.get("trace_id") or f"chatv2_{uuid.uuid4().hex}")
             user_info = auth_db.get_user(username) or {}
             master_name = user_info.get("master_name", "Master Pantronux")
+            persona = _resolve_effective_persona(
+                str(kwargs.get("persona") or ""),
+                username=username,
+                restricted_persona=user_info.get("restricted_persona"),
+            )
             advisor_context_block = _build_playground_advisor_context_block(
                 app_obj=target_app,
                 persona=persona,
@@ -839,6 +901,39 @@ def _mount_enterprise_observability_router(target_app: FastAPI) -> bool:
         return False
 
 
+def _mount_knowledge_center_router(target_app: FastAPI) -> bool:
+    """Mount approved-only KRC Knowledge Gateway routes."""
+    try:
+        from kuro_backend.knowledge_center import create_knowledge_router
+
+        target_app.include_router(
+            create_knowledge_router(
+                cookie_auth_dependency=validate_token_dependency,
+                admin_dependency=require_admin_user,
+            )
+        )
+        logger.info("[KRC_KNOWLEDGE] Router mounted")
+        return True
+    except Exception as exc:
+        logger.exception("[KRC_KNOWLEDGE] Failed to mount router: %s", exc)
+        return False
+
+
+def _mount_kuro_stack_handoff_router(target_app: FastAPI) -> bool:
+    """Mount KRC to Kuro Stack analysis handoff routes."""
+    try:
+        from kuro_backend.kuro_stack_handoff import create_kuro_stack_handoff_router
+
+        target_app.include_router(
+            create_kuro_stack_handoff_router(auth_dependency=validate_token_dependency)
+        )
+        logger.info("[KURO_STACK_HANDOFF] Router mounted")
+        return True
+    except Exception as exc:
+        logger.exception("[KURO_STACK_HANDOFF] Failed to mount router: %s", exc)
+        return False
+
+
 # --- FastAPI App ---
 app = FastAPI(title="Kuro AI Web Dashboard")
 app.add_middleware(TraceMiddleware)
@@ -850,6 +945,8 @@ _mount_market_v2_router(app)
 _mount_telegram_v2_router(app)
 _mount_api_v2_controls(app)
 _mount_enterprise_observability_router(app)
+_mount_knowledge_center_router(app)
+_mount_kuro_stack_handoff_router(app)
 
 
 @app.on_event("startup")
@@ -1376,6 +1473,7 @@ def _dashboard_template_name() -> str:
 
 
 def _dashboard_template_context(username: str, user_info: Dict[str, Any]) -> Dict[str, Any]:
+    krc_profile = get_krc_profile_snapshot(public=True)
     return {
         "username": username,
         "display_name": user_info.get("display_name", username),
@@ -1384,6 +1482,7 @@ def _dashboard_template_context(username: str, user_info: Dict[str, Any]) -> Dic
         "restricted_persona": user_info.get("restricted_persona") or "",
         "master_name": user_info.get("master_name", f"Master {username}"),
         "custom_persona": user_info.get("custom_persona") or "",
+        "krc_profile": krc_profile,
     }
 
 
@@ -1421,6 +1520,9 @@ async def auth_middleware(request: Request, call_next):
 
     # For API routes
     if path.startswith("/api/"):
+        if path == "/api/knowledge/health" or path.startswith("/api/knowledge/"):
+            return await call_next(request)
+
         if path in PUBLIC_API_ROUTES:
             return await call_next(request)
 
@@ -1506,6 +1608,13 @@ async def get_admin_enterprise_flags(request: Request):
     """Return enterprise flag status for authenticated admins only."""
     require_admin_user(request)
     return api_success(data=get_enterprise_flag_snapshot(admin=True))
+
+
+@app.get("/api/admin/krc/profile")
+async def get_admin_krc_profile(request: Request):
+    """Return admin-safe KRC profile and refocus flag state."""
+    require_admin_user(request)
+    return api_success(data=get_krc_profile_snapshot(public=False))
 
 
 @app.get("/api/admin/storage/health")
@@ -1599,14 +1708,12 @@ async def get_chat_history(
     username = user.get("username")
     user_info = auth_db.get_user(username) or {}
 
-    # Persona restriction enforcement
     restricted_persona = user_info.get("restricted_persona")
-    if restricted_persona:
-        resolved_persona = restricted_persona
-    else:
-        resolved_persona = memory_manager.normalize_persona(
-            persona or memory_manager.get_active_persona()
-        )
+    resolved_persona = _resolve_effective_persona(
+        persona,
+        username=username,
+        restricted_persona=restricted_persona,
+    )
 
     history = chat_history.get_history(
         limit=limit,
@@ -1658,8 +1765,14 @@ async def search_chat_history(request: Request, q: str, persona: Optional[str] =
     if not user:
         raise HTTPException(status_code=401, detail="Unauthorized")
     username = user.get("username")
+    user_info = auth_db.get_user(username) or {}
+    resolved_persona = _resolve_effective_persona(
+        persona,
+        username=username,
+        restricted_persona=user_info.get("restricted_persona"),
+    )
 
-    results = await run_db(chat_history.search_history, q, username, persona)
+    results = await run_db(chat_history.search_history, q, username, resolved_persona)
     return api_success(data={"results": results})
 
 
@@ -1746,16 +1859,12 @@ async def chat_endpoint(
             getattr(request.state, "trace_id", "") or f"chat_{uuid.uuid4().hex}"
         )
 
-        # Persona restriction
         restricted_persona = user_info.get("restricted_persona")
-        if restricted_persona:
-            resolved_persona = restricted_persona
-        else:
-            resolved_persona = memory_manager.normalize_persona(
-                persona
-                or request.query_params.get("persona")
-                or memory_manager.get_active_persona()
-            )
+        resolved_persona = _resolve_effective_persona(
+            persona or request.query_params.get("persona"),
+            username=username,
+            restricted_persona=restricted_persona,
+        )
 
         request_id = f"web_{uuid.uuid4().hex}"
 
@@ -2031,14 +2140,11 @@ async def chat_stream_endpoint(
     user_info = auth_db.get_user(username) or {}
     master_name = user_info.get("master_name", "Master Pantronux")
     restricted_persona = user_info.get("restricted_persona")
-    if restricted_persona:
-        resolved_persona = restricted_persona
-    else:
-        resolved_persona = memory_manager.normalize_persona(
-            persona
-            or request.query_params.get("persona")
-            or memory_manager.get_active_persona()
-        )
+    resolved_persona = _resolve_effective_persona(
+        persona or request.query_params.get("persona"),
+        username=username,
+        restricted_persona=restricted_persona,
+    )
     trace_id = str(
         getattr(request.state, "trace_id", "") or f"chatstream_{uuid.uuid4().hex}"
     )
@@ -2533,6 +2639,49 @@ async def get_output_schema(contract_id: str):
         raise HTTPException(status_code=404, detail=f"Unknown schema: {contract_id}")
 
 
+async def _run_qa_productization_action(
+    *,
+    request: Request,
+    requirement: str,
+    token_data: Dict[str, str],
+    action: str,
+    failure_label: str,
+    **options: Any,
+):
+    trace_id = getattr(request.state, "trace_id", "")
+    if not _is_qa_productization_enabled():
+        return JSONResponse(
+            status_code=503,
+            content=api_error("QA productization track disabled", trace_id=trace_id),
+        )
+    from kuro_backend.playground.qa.qa_runtime import QARuntime
+
+    username = token_data.get("username", "Pantronux")
+    chat_id = _resolve_chat_session_id(request)
+    try:
+        runtime = QARuntime(username=username, chat_id=chat_id, runtime_id="qa")
+        result = await runtime.process_request(action, requirement, **options)
+        if not result.get("ok"):
+            return JSONResponse(
+                status_code=500,
+                content=api_error(
+                    f"{failure_label} failed: {result.get('error', 'unknown error')}",
+                    trace_id=trace_id,
+                ),
+            )
+        output = result.get("data") or {}
+        if not isinstance(output, dict):
+            output = {"structured_output": output}
+        output["trace_id"] = trace_id
+        return output
+    except Exception as exc:
+        logger.exception("%s route failed: %s", failure_label, exc)
+        return JSONResponse(
+            status_code=500,
+            content=api_error(f"{failure_label} failed: {exc}", trace_id=trace_id),
+        )
+
+
 @app.post("/api/playground/qa/interpret")
 async def qa_playground_interpret(
     request: Request,
@@ -2657,6 +2806,52 @@ async def qa_playground_generate_gherkin(
                 f"QA gherkin generation failed: {exc}", trace_id=trace_id
             ),
         )
+
+
+@app.post("/api/playground/qa/analyze-ambiguity")
+async def qa_playground_analyze_ambiguity(
+    request: Request,
+    payload: QARequirementRequest,
+    token_data: Dict[str, str] = Depends(validate_token_dependency),
+):
+    return await _run_qa_productization_action(
+        request=request,
+        requirement=payload.requirement,
+        token_data=token_data,
+        action="analyze_ambiguity",
+        failure_label="QA ambiguity analysis",
+    )
+
+
+@app.post("/api/playground/qa/coverage-matrix")
+async def qa_playground_coverage_matrix(
+    request: Request,
+    payload: QARequirementRequest,
+    token_data: Dict[str, str] = Depends(validate_token_dependency),
+):
+    return await _run_qa_productization_action(
+        request=request,
+        requirement=payload.requirement,
+        token_data=token_data,
+        action="coverage_matrix",
+        failure_label="QA coverage matrix",
+    )
+
+
+@app.post("/api/playground/qa/export")
+async def qa_playground_export(
+    request: Request,
+    payload: QAExportRequest,
+    token_data: Dict[str, str] = Depends(validate_token_dependency),
+):
+    return await _run_qa_productization_action(
+        request=request,
+        requirement=payload.requirement,
+        token_data=token_data,
+        action="export_bundle",
+        failure_label="QA export",
+        format=payload.format,
+    )
 
 
 @app.get("/api/admin/runtimes/{runtime_id}")
@@ -2805,11 +3000,12 @@ async def latency_metrics(request: Request):
 
 
 @app.get("/api/evaluation/summary")
-async def evaluation_summary(username: str = "Pantronux"):
+async def evaluation_summary(request: Request, username: str = "Pantronux"):
     """
     Beta 3: Admin-only evaluation summary endpoint.
     Returns aggregated reasoning quality metrics.
     """
+    require_admin_user(request)
     if username != os.getenv("ADMIN_USERNAME", "Pantronux"):
         raise HTTPException(status_code=403, detail="Forbidden: Admin access required.")
 
@@ -3100,9 +3296,13 @@ async def get_chats(
     if not user:
         raise HTTPException(status_code=401, detail="Unauthorized")
     username = user.get("username")
+    user_info = auth_db.get_user(username) or {}
 
-    if not persona:
-        persona = memory_manager.get_active_persona()
+    persona = _resolve_effective_persona(
+        persona,
+        username=username,
+        restricted_persona=user_info.get("restricted_persona"),
+    )
 
     sessions = chat_history.get_sessions(username, persona, limit=limit, offset=offset)
     # Inject context_summary into each session
@@ -3121,17 +3321,29 @@ async def create_chat(request: Request, session_data: NewChatSession):
     if not user:
         raise HTTPException(status_code=401, detail="Unauthorized")
     username = user.get("username")
+    user_info = auth_db.get_user(username) or {}
+    resolved_persona = _resolve_effective_persona(
+        session_data.persona,
+        username=username,
+        restricted_persona=user_info.get("restricted_persona"),
+    )
 
     chat_id = f"chat_{uuid.uuid4().hex[:12]}"
     success = chat_history.create_session(
         chat_id=chat_id,
         username=username,
-        persona=session_data.persona,
+        persona=resolved_persona,
         title=session_data.title,
     )
 
     if success:
-        return api_success(data={"chat_id": chat_id, "title": session_data.title})
+        return api_success(
+            data={
+                "chat_id": chat_id,
+                "title": session_data.title,
+                "persona": resolved_persona,
+            }
+        )
     else:
         return api_error("Gagal membuat sesi chat baru.")
 
@@ -4446,15 +4658,22 @@ async def set_persona(request: Request):
     try:
         body = await request.json()
         persona = body.get("persona", "consultant")
+        resolved_persona = _resolve_effective_persona(
+            persona,
+            username=username,
+            restricted_persona=restricted_persona,
+        )
+        if _is_krc_advisor_persona_locked():
+            return _persona_api_payload(resolved_persona)
 
         # Enforce restriction
-        if restricted_persona and persona != restricted_persona:
+        if restricted_persona and resolved_persona != memory_manager.normalize_persona(restricted_persona):
             return {
                 "status": "error",
                 "message": f"Unauthorized. Your account is restricted to the {restricted_persona} persona.",
             }
 
-        result = memory_manager.set_active_persona(persona, username=username)
+        result = memory_manager.set_active_persona(resolved_persona, username=username)
         return result
     except Exception as e:
         return {"status": "error", "message": str(e)}
@@ -4473,11 +4692,12 @@ async def get_persona(request: Request):
     restricted_persona = user_info.get("restricted_persona")
 
     try:
-        if restricted_persona:
-            return {"status": "success", "persona": restricted_persona}
-
-        persona = memory_manager.get_active_persona(username=username)
-        return {"status": "success", "persona": persona}
+        persona = _resolve_effective_persona(
+            None,
+            username=username,
+            restricted_persona=restricted_persona,
+        )
+        return _persona_api_payload(persona)
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
@@ -4563,6 +4783,9 @@ _hardware_sentinel_scheduler = None
 def start_hardware_sentinel():
     """Start the hardware monitoring scheduler with dynamic intervals."""
     global _hardware_sentinel_scheduler
+    if not is_krc_scheduler_enabled("proactive"):
+        logger.info("Hardware Sentinel scheduler skipped by KRC scheduler profile.")
+        return
     from apscheduler.schedulers.background import BackgroundScheduler
 
     _hardware_sentinel_scheduler = BackgroundScheduler(daemon=True)
@@ -4715,6 +4938,9 @@ _openclaw_last_open_alert_at = 0.0
 def start_evaluation_scheduler():
     """Dedicated scheduler for autonomous evaluation metrics (Beta 3)."""
     global _evaluation_scheduler
+    if not is_krc_scheduler_enabled("evaluation"):
+        logger.info("Evaluation Scheduler skipped by KRC scheduler profile.")
+        return
     from apscheduler.schedulers.background import BackgroundScheduler
     from kuro_backend.evaluation.evaluation_scheduler import run_evaluation_batch_job
 
@@ -4843,16 +5069,17 @@ def start_reminder_scheduler():
             logger.warning("[MEMORY_V2] Decay job failed: %s", exc)
 
     # Daily intelligence briefing at 08:00 AM
-    _reminder_scheduler.add_job(
-        send_daily_intelligence_briefing,
-        "cron",
-        hour=8,
-        minute=0,
-        id="daily_intelligence_briefing",
-        replace_existing=True,
-    )
+    if is_krc_scheduler_enabled("daily_briefing"):
+        _reminder_scheduler.add_job(
+            send_daily_intelligence_briefing,
+            "cron",
+            hour=8,
+            minute=0,
+            id="daily_intelligence_briefing",
+            replace_existing=True,
+        )
 
-    if bool(getattr(settings, "KURO_TELEGRAM_DIGEST_ENABLED", True)):
+    if bool(getattr(settings, "KURO_TELEGRAM_DIGEST_ENABLED", True)) and is_krc_scheduler_enabled("telegram"):
         _reminder_scheduler.add_job(
             telegram_center.send_digest_job,
             "cron",
@@ -4875,18 +5102,19 @@ def start_reminder_scheduler():
             except Exception as e:
                 logger.error(f"[TICKER] Failed for {u}: {e}")
 
-    _reminder_scheduler.add_job(
-        run_all_price_updates,
-        "cron",
-        day_of_week="mon-fri",
-        hour="9-16",
-        minute="0,30",
-        id="price_ticker_update",
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-    )
-    logger.info("Price Ticker updates scheduled for all users.")
+    if is_krc_scheduler_enabled("market"):
+        _reminder_scheduler.add_job(
+            run_all_price_updates,
+            "cron",
+            day_of_week="mon-fri",
+            hour="9-16",
+            minute="0,30",
+            id="price_ticker_update",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        logger.info("Price Ticker updates scheduled for all users.")
 
     # Market Sentinel autonomous scans for all users
     def run_all_sentinel_scans():
@@ -4901,20 +5129,21 @@ def start_reminder_scheduler():
             except Exception as e:
                 logger.error(f"[SENTINEL] Failed for {u}: {e}")
 
-    _reminder_scheduler.add_job(
-        run_all_sentinel_scans,
-        "cron",
-        day_of_week="mon-fri",
-        hour="9,13,17,21",
-        minute=0,
-        id="market_sentinel_scan",
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-    )
-    logger.info("Market Sentinel Triangulation scans scheduled for all users.")
+    if is_krc_scheduler_enabled("market"):
+        _reminder_scheduler.add_job(
+            run_all_sentinel_scans,
+            "cron",
+            day_of_week="mon-fri",
+            hour="9,13,17,21",
+            minute=0,
+            id="market_sentinel_scan",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        logger.info("Market Sentinel Triangulation scans scheduled for all users.")
 
-    if bool(getattr(settings, "KURO_MARKET_SENTINEL_V2_ENABLED", False)):
+    if bool(getattr(settings, "KURO_MARKET_SENTINEL_V2_ENABLED", False)) and is_krc_scheduler_enabled("market"):
         try:
             from kuro_backend.market_v2.routes import run_market_v2_scheduled_scan
 
@@ -4934,7 +5163,7 @@ def start_reminder_scheduler():
             logger.warning("[MARKET_V2] Scheduler hook skipped: %s", exc)
 
     # Autonomous memory dreaming cycle (Kuro AI V6.0 Sovereign).
-    if os.getenv("KURO_DREAMING_ENABLED", "true").strip().lower() in (
+    if is_krc_scheduler_enabled("proactive") and os.getenv("KURO_DREAMING_ENABLED", "true").strip().lower() in (
         "1",
         "true",
         "yes",
@@ -4962,7 +5191,7 @@ def start_reminder_scheduler():
             )
 
     # Fitness anomaly sentinel (Kuro AI V6.0 Sovereign).
-    if os.getenv("KURO_FITNESS_ENABLED", "false").strip().lower() in (
+    if is_krc_scheduler_enabled("fitness") and os.getenv("KURO_FITNESS_ENABLED", "false").strip().lower() in (
         "1",
         "true",
         "yes",
@@ -4990,25 +5219,27 @@ def start_reminder_scheduler():
 
     from kuro_backend import file_retention_worker
 
-    _reminder_scheduler.add_job(
-        file_retention_worker.run_retention_cycle,
-        "cron",
-        hour=2,
-        minute=0,
-        id="file_retention_cycle",
-        replace_existing=True,
-    )
+    if is_krc_scheduler_enabled("file_retention"):
+        _reminder_scheduler.add_job(
+            file_retention_worker.run_retention_cycle,
+            "cron",
+            hour=2,
+            minute=0,
+            id="file_retention_cycle",
+            replace_existing=True,
+        )
 
-    _reminder_scheduler.add_job(
-        run_nightly_backup_job,
-        "cron",
-        hour=1,
-        minute=0,
-        id="nightly_backup",
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-    )
+    if is_krc_scheduler_enabled("backup"):
+        _reminder_scheduler.add_job(
+            run_nightly_backup_job,
+            "cron",
+            hour=1,
+            minute=0,
+            id="nightly_backup",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
     _reminder_scheduler.add_job(
         run_research_ledger_prune_job,
         "cron",
@@ -5020,34 +5251,36 @@ def start_reminder_scheduler():
         max_instances=1,
         coalesce=True,
     )
-    _reminder_scheduler.add_job(
-        run_openclaw_circuit_open_alert_job,
-        "interval",
-        minutes=5,
-        id="openclaw_circuit_open_alert",
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-    )
-    _reminder_scheduler.add_job(
-        run_retry_failed_telegram_notifications_job,
-        "interval",
-        minutes=30,
-        id="retry_failed_telegram_notifications",
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-    )
-    _reminder_scheduler.add_job(
-        run_memory_decay_job,
-        "cron",
-        hour=4,
-        minute=0,
-        id="memory_decay_job",
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-    )
+    if is_krc_scheduler_enabled("telegram"):
+        _reminder_scheduler.add_job(
+            run_openclaw_circuit_open_alert_job,
+            "interval",
+            minutes=5,
+            id="openclaw_circuit_open_alert",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        _reminder_scheduler.add_job(
+            run_retry_failed_telegram_notifications_job,
+            "interval",
+            minutes=30,
+            id="retry_failed_telegram_notifications",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+    if is_krc_scheduler_enabled("memory_decay"):
+        _reminder_scheduler.add_job(
+            run_memory_decay_job,
+            "cron",
+            hour=4,
+            minute=0,
+            id="memory_decay_job",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
 
     _reminder_scheduler.start()
     logger.info("Intelligence scheduler started.")

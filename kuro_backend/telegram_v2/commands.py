@@ -5,6 +5,7 @@ from typing import Any, Callable, Dict, Optional
 
 from kuro_backend.config import settings
 from kuro_backend.enterprise_flags import is_enabled
+from kuro_backend.krc_profile import get_app_profile, is_krc_feature_enabled
 from kuro_backend.telegram_v2.schemas import TelegramCommandResult
 
 
@@ -49,13 +50,15 @@ class TelegramV2CommandRouter:
                 response_text="Telegram API V2 is ready. Send /help for commands.",
             )
         if cmd == "/help":
+            commands = ["/status", "/chat <message>", "/research <topic>"]
+            if self._market_enabled():
+                commands.append("/market <symbol>")
+            if self._daily_tasks_enabled():
+                commands.extend(["/task <title>", "/remind <time> <text>"])
             return TelegramCommandResult(
                 command="/help",
                 action="help",
-                response_text=(
-                    "Commands: /status, /chat <message>, /research <topic>, "
-                    "/market <symbol>, /task <title>, /remind <time> <text>."
-                ),
+                response_text="Commands: " + ", ".join(commands) + ".",
             )
         if cmd == "/status":
             return self._status()
@@ -64,12 +67,45 @@ class TelegramV2CommandRouter:
         if cmd == "/research":
             return self._wrap_result("/research", "research", self.research_handler(username=username, chat_id=chat_id, topic=arg))
         if cmd == "/market":
+            if not self._market_enabled():
+                return TelegramCommandResult(
+                    command="/market",
+                    action="disabled",
+                    response_text=(
+                        "Market commands are disabled in KRC ops mode. "
+                        "Enable KURO_KRC_MARKET_ENABLED=true to expose them."
+                    ),
+                )
             return self._wrap_result("/market", "market", self.market_handler(username=username, chat_id=chat_id, symbol=arg))
         if cmd == "/task":
+            if not self._daily_tasks_enabled():
+                return TelegramCommandResult(
+                    command="/task",
+                    action="disabled",
+                    response_text="Daily task commands are disabled in KRC ops mode.",
+                )
             return self._wrap_result("/task", "task", self.task_handler(username=username, chat_id=chat_id, title=arg))
         if cmd == "/remind":
+            if not self._daily_tasks_enabled():
+                return TelegramCommandResult(
+                    command="/remind",
+                    action="disabled",
+                    response_text="Daily reminder commands are disabled in KRC ops mode.",
+                )
             return self._wrap_result("/remind", "reminder", self.reminder_handler(username=username, chat_id=chat_id, text=arg))
         return self._wrap_result("/chat", "chat", self.chat_handler(username=username, chat_id=chat_id, message=text))
+
+    @staticmethod
+    def _market_enabled() -> bool:
+        if get_app_profile() == "krc":
+            return is_krc_feature_enabled("market")
+        return True
+
+    @staticmethod
+    def _daily_tasks_enabled() -> bool:
+        if get_app_profile() == "krc":
+            return is_krc_feature_enabled("daily_tasks")
+        return True
 
     def _status(self) -> TelegramCommandResult:
         from kuro_backend import intelligence_db

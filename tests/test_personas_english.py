@@ -49,6 +49,17 @@ def test_consultant_persona_is_sovereign_english():
     pass
 
 
+def test_advisor_persona_is_research_console_co_investigator():
+    text = personas.PERSONA_INSTRUCTIONS["advisor"]
+    assert "Senior Research Partner and co-investigator" in text
+    assert "Kuro Research Center" in text
+    assert "novelty gap" in text
+    assert "PLAYGROUND_ADVISOR_CONTEXT" in text
+    assert "Do not claim access to hidden chain-of-thought" in text
+    for phrase in BAHASA_FORBIDDEN:
+        assert phrase not in text
+
+
 def test_build_system_instruction_is_english_for_consultant():
     prompt = personas.build_system_instruction(
         "consultant",

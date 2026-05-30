@@ -9,6 +9,7 @@ import types
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from fastapi.testclient import TestClient
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -40,6 +41,12 @@ if "phoenix" not in sys.modules:
     sys.modules["phoenix"] = fake_phoenix
 
 import main
+
+
+@pytest.fixture(autouse=True)
+def _default_legacy_qa_profile(monkeypatch):
+    monkeypatch.setenv("KURO_APP_PROFILE", "legacy")
+    monkeypatch.setenv("KURO_QA_PLAYGROUND_ENABLED", "true")
 
 
 def _auth_client(monkeypatch, username: str = "Pantronux") -> TestClient:

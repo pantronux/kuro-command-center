@@ -69,10 +69,19 @@ def test_v1_redesign_preserves_existing_playground_runtime_hooks():
     assert "id=\"playgroundSessionMode\"" in html
     assert "id=\"playgroundProviderChecklist\"" in html
     assert "id=\"playgroundIntegrityOverviewBtn\"" in html
+    assert "id=\"playgroundKsAnalysisMode\"" in html
+    assert "id=\"playgroundAnalyzeInKsBtn\"" in html
+    assert "id=\"playgroundAnalyzeSessionInKsBtn\"" in html
     assert "async function playgroundCreateSession" in js
+    assert "async function analyzePlaygroundInKuroStack" in js
+    assert "buildKuroStackPlaygroundAnalysisPrompt" in js
+    assert "fetchPlaygroundArtifactText" in js
+    assert "'/api/integrations/kuro-stack/analyze-playground'" in js
+    assert "resolvePlaygroundHandoffRequest" in js
     assert "'/api/playground/sessions'" in js
     assert "'/api/playground/executions'" in js
-    assert "/api/playground/qa" not in js
+    assert "/api/playground/qa/interpret" in js
+    assert "id=\"qaRequirementInput\"" in html
 
 
 def test_v1_redesign_keeps_persona_and_existing_tool_navigation():

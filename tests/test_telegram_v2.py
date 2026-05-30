@@ -48,6 +48,7 @@ def _telegram_update(
 
 @pytest.fixture
 def telegram_stack(tmp_path, monkeypatch):
+    monkeypatch.setenv("KURO_APP_PROFILE", "legacy")
     monkeypatch.setattr(settings, "KURO_TELEGRAM_V2_ENABLED", False, raising=False)
     monkeypatch.setattr(settings, "TELEGRAM_WEBHOOK_SECRET", SECRET, raising=False)
     monkeypatch.setenv("KURO_TELEGRAM_V2_DB_PATH", str(tmp_path / "telegram_v2.db"))
@@ -231,6 +232,7 @@ def test_admin_routes_require_admin(telegram_stack):
 
 
 def test_market_command_uses_mocked_market_v2(telegram_stack, monkeypatch):
+    monkeypatch.setenv("KURO_APP_PROFILE", "legacy")
     monkeypatch.setattr(settings, "KURO_TELEGRAM_V2_ENABLED", True, raising=False)
     _seed_mapping(telegram_stack["queue"])
     client = _client(telegram_stack["service"])
@@ -246,6 +248,26 @@ def test_market_command_uses_mocked_market_v2(telegram_stack, monkeypatch):
         {"username": "Pantronux", "chat_id": "-10042", "symbol": "BBCA"}
     ]
     assert response.json()["data"]["command"]["response_text"] == "market:BBCA"
+
+
+def test_krc_telegram_v2_market_command_disabled_by_default(telegram_stack, monkeypatch):
+    monkeypatch.setenv("KURO_APP_PROFILE", "krc")
+    monkeypatch.delenv("KURO_KRC_MARKET_ENABLED", raising=False)
+    monkeypatch.setattr(settings, "KURO_TELEGRAM_V2_ENABLED", True, raising=False)
+    _seed_mapping(telegram_stack["queue"])
+    client = _client(telegram_stack["service"])
+
+    response = client.post(
+        "/api/telegram/webhook",
+        json=_telegram_update("/market BBCA"),
+        headers=_webhook_headers(),
+    )
+
+    assert response.status_code == 200
+    assert telegram_stack["calls"]["market"] == []
+    body = response.json()["data"]["command"]
+    assert body["action"] == "disabled"
+    assert "Market commands are disabled" in body["response_text"]
 
 
 def test_research_command_uses_mocked_deep_research_v2(telegram_stack, monkeypatch):

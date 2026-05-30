@@ -10,12 +10,21 @@ Dependencies: intelligence_db, dataset_builder.
 Main Functions: run_evaluation_batch(), get_evaluation_summary().
 Side Effects: Updates epistemic_log with eval scores.
 """
-from dataclasses import dataclass
 import logging
+import sqlite3
+from dataclasses import dataclass
 from typing import List, Dict, Any
 from .dataset_builder import EvalRecord, build_dataset
 
 logger = logging.getLogger(__name__)
+
+_EVAL_COLUMNS: dict[str, str] = {
+    "eval_groundedness": "REAL",
+    "eval_goal_alignment": "REAL",
+    "eval_epistemic": "REAL",
+    "eval_composite": "REAL",
+    "eval_rationale": "TEXT",
+}
 
 @dataclass
 class EvalScore:
@@ -30,18 +39,71 @@ def evaluate_record(record: EvalRecord) -> EvalScore:
     # Dummy mock scoring for now, production would call Gemini
     return EvalScore(1.0, 1.0, 1.0, 0.0, 1.0, "Mock evaluation")
 
+
+def _empty_summary(reason: str = "No evaluation records have been written yet.") -> Dict[str, Any]:
+    return {
+        "status": "no_data",
+        "message": reason,
+        "metrics": {
+            "groundedness": 0.0,
+            "goal_alignment": 0.0,
+            "epistemic_compliance": 0.0,
+            "composite": 0.0,
+        },
+        "total_records": 0,
+    }
+
+
+def _intelligence_connection():
+    """Return the intelligence DB connection used by the current runtime."""
+    from kuro_backend import intelligence_db
+
+    init_db = getattr(intelligence_db, "init_db", None)
+    if callable(init_db):
+        init_db()
+
+    connection_factory = getattr(intelligence_db, "_get_connection", None)
+    if not callable(connection_factory):
+        connection_factory = getattr(intelligence_db, "_conn", None)
+    if callable(connection_factory):
+        return connection_factory()
+
+    db_path = getattr(intelligence_db, "DB_PATH", None)
+    if not db_path:
+        raise RuntimeError("Intelligence DB path is not configured")
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def _ensure_eval_columns(cursor) -> bool:
+    cursor.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+        ("epistemic_log",),
+    )
+    if cursor.fetchone() is None:
+        return False
+
+    cursor.execute("PRAGMA table_info(epistemic_log)")
+    existing = {row["name"] if hasattr(row, "keys") else row[1] for row in cursor.fetchall()}
+    for column, column_type in _EVAL_COLUMNS.items():
+        if column not in existing:
+            cursor.execute(f"ALTER TABLE epistemic_log ADD COLUMN {column} {column_type}")
+    return True
+
+
+def _round_metric(value: Any) -> float:
+    if value is None:
+        return 0.0
+    return round(float(value), 3)
+
 def run_evaluation_batch(since_hours: int = 24) -> List[EvalScore]:
     records = build_dataset(since_hours)
     scores = []
-    from kuro_backend import intelligence_db
-    conn = intelligence_db._conn()
+    conn = _intelligence_connection()
     try:
         c = conn.cursor()
-        c.execute('ALTER TABLE epistemic_log ADD COLUMN eval_groundedness REAL;')
-        c.execute('ALTER TABLE epistemic_log ADD COLUMN eval_goal_alignment REAL;')
-        c.execute('ALTER TABLE epistemic_log ADD COLUMN eval_epistemic REAL;')
-        c.execute('ALTER TABLE epistemic_log ADD COLUMN eval_composite REAL;')
-        c.execute('ALTER TABLE epistemic_log ADD COLUMN eval_rationale TEXT;')
+        _ensure_eval_columns(c)
         conn.commit()
     except Exception:
         pass # Already exists
@@ -64,10 +126,12 @@ def run_evaluation_batch(since_hours: int = 24) -> List[EvalScore]:
 
 def get_evaluation_summary() -> Dict[str, Any]:
     """Retrieves aggregated evaluation metrics from the epistemic log."""
-    from kuro_backend import intelligence_db
-    conn = intelligence_db._conn()
+    conn = _intelligence_connection()
     try:
         c = conn.cursor()
+        if not _ensure_eval_columns(c):
+            return _empty_summary("Evaluation log table is not initialized yet.")
+        conn.commit()
         c.execute('''
             SELECT 
                 AVG(eval_groundedness) as avg_groundedness,
@@ -80,29 +144,20 @@ def get_evaluation_summary() -> Dict[str, Any]:
         ''')
         row = c.fetchone()
         if not row or row[4] == 0:
-            return {
-                "status": "no_data",
-                "metrics": {
-                    "groundedness": 0.0,
-                    "goal_alignment": 0.0,
-                    "epistemic_compliance": 0.0,
-                    "composite": 0.0,
-                },
-                "total_records": 0
-            }
+            return _empty_summary()
         
         return {
             "status": "success",
             "metrics": {
-                "groundedness": round(row[0], 3),
-                "goal_alignment": round(row[1], 3),
-                "epistemic_compliance": round(row[2], 3),
-                "composite": round(row[3], 3),
+                "groundedness": _round_metric(row[0]),
+                "goal_alignment": _round_metric(row[1]),
+                "epistemic_compliance": _round_metric(row[2]),
+                "composite": _round_metric(row[3]),
             },
             "total_records": row[4]
         }
     except Exception as e:
-        logger.error(f"Failed to get evaluation summary: {e}")
+        logger.error(f"Failed to get evaluation summary: {e}", exc_info=True)
         return {"status": "error", "message": str(e)}
     finally:
         conn.close()

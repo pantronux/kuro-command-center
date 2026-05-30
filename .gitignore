@@ -1,5 +1,9 @@
-# File Sensitif
+# Secrets / runtime secrets
 .env
+*.pem
+*.key
+
+# Logs / generated JSON
 *.log
 logs/
 *.json
@@ -8,73 +12,56 @@ logs/
 !kuro_epistemic_persona_refactor_implementation_plan_canvas_1.md
 !kuro_sovereign_cognitive_runtime_continuation_plan_canvas_2.md
 
-
-# Virtual Environment
+# Virtual environments
 venv/
+.venv/
 __pycache__/
 *.pyc
 
-# Security Keys
-*.pem
-*.key
+# Local assistant/context notes and scratch state
+.antigravityrules
+.jules/
+.mnemo/
+.roo/
+scratch/
+.kuro_telegram.lock
 
-# Uploaded files
+# Uploaded files and runtime state
 uploaded_files/
 kuro_auth.db
+kuro_memory.json
+master_profile.json
+.archive/
+backups/
 
-# Runtime databases - never commit
+# Runtime database artifacts
 *.db
-*.sqlite
-*.sqlite3
-*.sqlite-wal
-*.sqlite-shm
-*.sqlite3-wal
-*.sqlite3-shm
 *.db-wal
 *.db-shm
 *.db-backup*
-*.db-recovery*
-*.db-corrupted*
+*.db.backup*
+*.db.recovery*
+*.db.corrupted*
 *.db.from_github
 *.db.pre_migration*
 *.db.gz
-
-# Backup directory
-backups/
-
-# Runtime state
-master_profile.json
-kuro_memory.json
-phoenix_data/
-uploaded_files/
-.archive/
-
-# Vector stores
-kuro_chromadb/
-
-# Compliance Knowledge Base (External - DO NOT COPY TO PROJECT)
-# These are references to /home/kuro/ComplianceDoc
-compliance_cache/
-kuro_compliance_chroma/
-*.compliance.db
-test_venv/
-test_venv3/
-
-# DB Files
-*.db
 *.sqlite
 *.sqlite3
 *.sqlite-wal
 *.sqlite-shm
 *.sqlite3-wal
 *.sqlite3-shm
-*.db-wal
-*.db-shm
-*.db-backup*
-*.db-recovery*
-*.db.corrupted*
 
-# Local runtime artifacts
-.kuro_telegram.lock
+# Long-term stores
+kuro_chromadb/
+phoenix_data/
+
+# Exports and compliance artifacts
 exports/
-.venv/
+compliance_cache/
+kuro_compliance_chroma/
+*.compliance.db
+
+# Runtime/testing virtual env
+test_venv/
+test_venv3/
