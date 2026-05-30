@@ -6,14 +6,15 @@
 */
 
 body.kuro-redesign-v1 {
-    --bg-primary: #1a1a1a;
-    --bg-secondary: #212121;
-    --bg-tertiary: #2a2a2a;
-    --bg-hover: #2f2f2f;
-    --bg-active: #333333;
-    --border-subtle: #383838;
-    --accent-primary: #0d9488;
-    --accent-hover: #0f766e;
+    --bg-primary: #1a1a1f;
+    --bg-secondary: #18181d;
+    --bg-tertiary: #222228;
+    --bg-card: #2a2a32;
+    --bg-hover: #2f2f36;
+    --bg-active: #33333b;
+    --border-subtle: #2e2e38;
+    --accent-primary: #14b8a6;
+    --accent-hover: #0d9488;
     --text-primary: #f5f5f5;
     --text-secondary: #a3a3a3;
     --status-error: #ef4444;
@@ -55,9 +56,9 @@ body.kuro-redesign-v1 #sidebar.sidebar {
     inset: auto !important;
     transform: none !important;
     z-index: 30;
-    width: 228px !important;
-    min-width: 228px !important;
-    max-width: 228px !important;
+    width: 260px !important;
+    min-width: 260px !important;
+    max-width: 260px !important;
     height: 100vh !important;
     padding: 12px !important;
     overflow: hidden;
@@ -377,6 +378,7 @@ body.kuro-redesign-v1 .session-menu-wrap {
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    z-index: 210;
 }
 
 body.kuro-redesign-v1 .chat-item-actions,
@@ -396,13 +398,18 @@ body.kuro-redesign-v1 .session-actions {
     border-radius: 8px !important;
     padding: 4px !important;
     box-shadow: 0 10px 22px rgba(0, 0, 0, 0.35) !important;
+    pointer-events: none;
 }
 
-body.kuro-redesign-v1 .session-menu-wrap:focus-within .chat-item-actions,
-body.kuro-redesign-v1 .session-menu-wrap:focus-within .session-actions,
-body.kuro-redesign-v1 .session-menu-wrap:hover .chat-item-actions,
-body.kuro-redesign-v1 .session-menu-wrap:hover .session-actions {
+body.kuro-redesign-v1 .session-menu-wrap.menu-open .chat-item-actions,
+body.kuro-redesign-v1 .session-menu-wrap.menu-open .session-actions {
     display: flex !important;
+    pointer-events: auto;
+}
+
+body.kuro-redesign-v1 .session-actions.open-up {
+    top: auto !important;
+    bottom: calc(100% + 4px) !important;
 }
 
 body.kuro-redesign-v1 .chat-item-actions button,
@@ -426,6 +433,17 @@ body.kuro-redesign-v1 .chat-item-actions button:hover,
 body.kuro-redesign-v1 .session-actions button:hover {
     background: rgba(255, 255, 255, 0.08) !important;
     color: var(--text-primary) !important;
+}
+
+body.kuro-redesign-v1 .chat-item-menu-trigger {
+    position: relative;
+    z-index: 220;
+    pointer-events: auto;
+}
+
+body.kuro-redesign-v1 .chat-item,
+body.kuro-redesign-v1 .session-item {
+    overflow: visible;
 }
 
 body.kuro-redesign-v1 .icon-btn {
@@ -1093,6 +1111,16 @@ body.kuro-redesign-v1 #sendBtn:hover,
 body.kuro-redesign-v1 #welcomeSendBtn:hover {
     background: var(--accent-hover) !important;
     transform: none !important;
+}
+
+body.kuro-redesign-v1.kuro-chat-streaming #sendBtn.send-btn,
+body.kuro-redesign-v1.kuro-chat-streaming #welcomeSendBtn.send-btn,
+body.kuro-redesign-v1.kuro-chat-streaming .send-btn.send-btn {
+    display: none !important;
+}
+
+body.kuro-redesign-v1.kuro-chat-streaming #stopGeneratingBtn {
+    display: inline-flex !important;
 }
 
 body.kuro-redesign-v1 #filePreview {
@@ -1825,6 +1853,7 @@ body.kuro-redesign-v1 #sidebar.sidebar {
     position: relative !important;
     inset: auto !important;
     transform: none !important;
+    z-index: 70 !important;
     width: 260px !important;
     min-width: 260px !important;
     max-width: 260px !important;
@@ -2237,6 +2266,33 @@ body.kuro-redesign-v1 .pg-output {
     background: #060b15 !important;
 }
 
+body.kuro-redesign-v1 #playgroundOutput {
+    box-sizing: border-box !important;
+    max-height: 428px !important;
+    padding: 12px 14px 18px !important;
+    border-radius: var(--radius-sm) !important;
+    line-height: 18px !important;
+    overflow: auto !important;
+    scrollbar-gutter: stable both-edges;
+    scrollbar-color: rgba(20, 184, 166, 0.42) rgba(255, 255, 255, 0.04);
+}
+
+body.kuro-redesign-v1 #playgroundOutput::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+body.kuro-redesign-v1 #playgroundOutput::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.04);
+    border-radius: 999px;
+}
+
+body.kuro-redesign-v1 #playgroundOutput::-webkit-scrollbar-thumb {
+    background: rgba(20, 184, 166, 0.42);
+    border: 2px solid #060b15;
+    border-radius: 999px;
+}
+
 body.kuro-redesign-v1 .kuro-session-sidebar,
 body.kuro-redesign-v1 #chatSessionsList,
 body.kuro-redesign-v1 #chatSessionsList section,
@@ -2261,6 +2317,7 @@ body.kuro-redesign-v1 .session-item:hover {
 
     body.kuro-redesign-v1 #sidebar.sidebar {
         position: fixed !important;
+        z-index: 80 !important;
         width: 260px !important;
         min-width: 260px !important;
         max-width: 260px !important;
@@ -2358,5 +2415,223 @@ body.kuro-redesign-v1 #sidebar.sidebar[data-collapsed="true"] #minimizeSidebar.s
 @media (max-width: 1023px) {
     body.kuro-redesign-v1 #minimizeSidebar.sidebar-collapse-toggle {
         display: none !important;
+    }
+
+    body.kuro-redesign-v1 #sidebar.sidebar {
+        transform: translateX(0) !important;
+    }
+
+    body.kuro-redesign-v1 #sidebar.sidebar.-translate-x-full {
+        transform: translateX(-100%) !important;
+    }
+}
+
+/* KRC prototype port final contract: these rules intentionally win over the
+   older V1 compatibility cascade while keeping the same DOM/runtime hooks. */
+body.kuro-redesign-v1 .krc-workspace-nav {
+    margin: 2px 0 4px !important;
+    padding: 0 !important;
+    display: grid !important;
+    gap: 6px !important;
+    border: 0 !important;
+    background: transparent !important;
+}
+
+body.kuro-redesign-v1 .krc-nav-item {
+    min-height: 40px !important;
+    padding: 9px 10px !important;
+    border: 1px solid transparent !important;
+    border-radius: var(--radius-sm) !important;
+    background: transparent !important;
+    color: var(--text-secondary) !important;
+    justify-content: flex-start !important;
+    font-size: 14px !important;
+    font-weight: 600 !important;
+}
+
+body.kuro-redesign-v1 .krc-nav-item:hover,
+body.kuro-redesign-v1 .krc-nav-item.active {
+    background: rgba(20, 184, 166, 0.12) !important;
+    border-color: rgba(20, 184, 166, 0.36) !important;
+    color: var(--text-primary) !important;
+}
+
+body.kuro-redesign-v1 .krc-nav-item:first-child {
+    color: #5eead4 !important;
+}
+
+body.kuro-redesign-v1.sidebar-collapsed-shell #openSidebar {
+    display: inline-flex !important;
+}
+
+body.kuro-redesign-v1 .header.glass-header {
+    height: 64px !important;
+    min-height: 64px !important;
+    padding: 0 20px !important;
+}
+
+body.kuro-redesign-v1 #chatContainer {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    overflow-x: hidden !important;
+}
+
+body.kuro-redesign-v1 #chatContainer > .msg-row,
+body.kuro-redesign-v1 #chatContainer > .flex.items-start,
+body.kuro-redesign-v1 #chatContainer > .flex-row-reverse {
+    width: min(100%, var(--conversation-width)) !important;
+    max-width: var(--conversation-width) !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+}
+
+body.kuro-redesign-v1 #chatContainer > .msg-row.ai,
+body.kuro-redesign-v1 #chatContainer > .flex.items-start:not(.flex-row-reverse) {
+    justify-content: flex-start !important;
+}
+
+body.kuro-redesign-v1 #chatContainer > .msg-row.user,
+body.kuro-redesign-v1 #chatContainer > .flex-row-reverse {
+    justify-content: flex-end !important;
+}
+
+body.kuro-redesign-v1 #chatContainer > .msg-row > .relative,
+body.kuro-redesign-v1 #chatContainer > .flex.items-start > .relative,
+body.kuro-redesign-v1 #chatContainer > .flex-row-reverse > .relative {
+    max-width: min(760px, calc(100% - 54px)) !important;
+}
+
+body.kuro-redesign-v1 .composer-active-features {
+    width: min(100%, var(--conversation-width)) !important;
+    margin: 0 auto 8px !important;
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 6px !important;
+}
+
+body.kuro-redesign-v1 .composer-active-features.hidden {
+    display: none !important;
+}
+
+body.kuro-redesign-v1 .composer-feature-pill {
+    min-height: 28px !important;
+    padding: 5px 9px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 6px !important;
+    border: 1px solid rgba(20, 184, 166, 0.4) !important;
+    border-radius: 999px !important;
+    background: rgba(20, 184, 166, 0.12) !important;
+    color: #99f6e4 !important;
+    font-size: 12px !important;
+    font-weight: 600 !important;
+}
+
+body.kuro-redesign-v1 .composer-row-shell {
+    width: min(100%, var(--conversation-width)) !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+}
+
+body.kuro-redesign-v1 .session-menu-wrap.menu-open {
+    z-index: 220 !important;
+}
+
+body.kuro-redesign-v1 .session-menu-wrap.menu-open .session-actions {
+    display: flex !important;
+    min-width: 156px !important;
+    background: rgba(42, 42, 50, 0.98) !important;
+    border-color: var(--border-subtle) !important;
+}
+
+body.kuro-redesign-v1 .session-actions [data-chat-session-action="delete"] {
+    color: var(--status-error) !important;
+}
+
+body.kuro-redesign-v1 #sidebar.sidebar {
+    z-index: 180 !important;
+}
+
+body.kuro-redesign-v1 #closeSidebar {
+    position: relative !important;
+    z-index: 2 !important;
+    pointer-events: auto !important;
+}
+
+@media (max-width: 1023px) {
+    body.kuro-redesign-v1 #sidebar.sidebar {
+        z-index: 220 !important;
+    }
+}
+
+body.kuro-redesign-v1 #playgroundPanel .pg-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(280px, 0.75fr) !important;
+}
+
+@media (max-width: 1180px) {
+    body.kuro-redesign-v1 #playgroundPanel .pg-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    }
+}
+
+@media (max-width: 760px) {
+    body.kuro-redesign-v1 #toastContainer {
+        top: 72px !important;
+        right: 12px !important;
+        left: 12px !important;
+        align-items: stretch !important;
+        z-index: 260 !important;
+    }
+
+    body.kuro-redesign-v1 #toastContainer > div {
+        justify-content: center !important;
+        padding: 10px 14px !important;
+        border-radius: var(--radius-md) !important;
+    }
+
+    body.kuro-redesign-v1 .header.glass-header {
+        height: auto !important;
+        min-height: 58px !important;
+        padding: 8px 12px !important;
+        gap: 8px !important;
+    }
+
+    body.kuro-redesign-v1 .mode-toggle {
+        display: inline-flex !important;
+    }
+
+    body.kuro-redesign-v1 .mode-btn {
+        min-height: 28px !important;
+        padding: 0 9px !important;
+        font-size: 11px !important;
+    }
+
+    body.kuro-redesign-v1 .composer-row {
+        flex-wrap: wrap !important;
+    }
+
+    body.kuro-redesign-v1 .composer-row > div.flex-1 {
+        flex: 1 1 calc(100% - 46px) !important;
+    }
+
+    body.kuro-redesign-v1 .model-selector.kuro-chatbar-model {
+        order: 4 !important;
+        flex: 1 1 auto !important;
+        max-width: none !important;
+    }
+
+    body.kuro-redesign-v1 #sendBtn,
+    body.kuro-redesign-v1 #stopGeneratingBtn,
+    body.kuro-redesign-v1 #welcomeSendBtn {
+        order: 5 !important;
+    }
+
+    body.kuro-redesign-v1 #playgroundPanel .pg-grid {
+        grid-template-columns: minmax(0, 1fr) !important;
+    }
+
+    body.kuro-redesign-v1 #playgroundOutput {
+        max-height: 338px !important;
     }
 }

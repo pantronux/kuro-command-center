@@ -86,6 +86,14 @@ def test_krc_navigation_render_is_playground_first(monkeypatch):
     assert "Kuro Research Center" in html
     assert "New Research Console" in html
     assert "id=\"krcWorkspaceNav\"" in html
+    assert "id=\"krcNavResearchConsole\"" in html
+    assert "id=\"krcNavKnowledge\"" in html
+    assert "id=\"krcNavIngestion\"" in html
+    assert "id=\"krcNavResearchPlayground\"" not in html
+    assert "id=\"krcNavQAPlayground\"" not in html
+    assert "id=\"krcNavEvaluation\"" not in html
+    assert "id=\"krcNavExport\"" not in html
+    assert html.count("id=\"krcWorkspaceNav\"") == 1
     assert "Research Playground" in html
     assert "Kuro Playground" in html
     assert "Kuro Playground Runtime" not in html
@@ -98,7 +106,6 @@ def test_krc_navigation_render_is_playground_first(monkeypatch):
     assert 'data-persona="advisor"' not in html
     assert "QA Playground" not in html
     assert "id=\"qaRequirementInput\"" not in html
-    assert "id=\"krcNavEvaluation\"" not in html
     assert "Evaluation Summary" not in html
     assert "id=\"krcPlaygroundLanding\"" in html
     assert html.index("id=\"krcPlaygroundLanding\"") < html.index("class=\"pg-grid")
@@ -121,7 +128,8 @@ def test_krc_optional_qa_and_evaluation_can_be_revealed_by_flags(monkeypatch):
     html = response.text
     assert "QA Playground" in html
     assert "id=\"qaRequirementInput\"" in html
-    assert "id=\"krcNavEvaluation\"" in html
+    assert "id=\"krcNavEvaluation\"" not in html
+    assert "id=\"krcNavQAPlayground\"" not in html
     assert "data-admin-settings-tab=\"evaluation\"" in html
 
 

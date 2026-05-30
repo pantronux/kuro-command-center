@@ -259,6 +259,25 @@ function isComposerFeatureAvailable(action) {
 
 function updateComposerFeatureIndicators() {
     const activeActions = getActiveComposerFeatures();
+    const renderActivePills = (container) => {
+        if (!container) return;
+        const visibleActions = activeActions.filter((action) => isComposerFeatureAvailable(action));
+        container.classList.toggle('hidden', visibleActions.length === 0);
+        if (!visibleActions.length) {
+            container.innerHTML = '';
+            return;
+        }
+        container.innerHTML = visibleActions.map((action) => `
+            <button type="button"
+                class="composer-feature-pill"
+                data-composer-feature-pill="${action}"
+                title="Matikan ${escapeHtml(COMPOSER_FEATURE_LABELS[action])}">
+                <i data-lucide="check" class="w-3.5 h-3.5"></i>
+                <span>${escapeHtml(COMPOSER_FEATURE_LABELS[action])}</span>
+            </button>
+        `).join('');
+    };
+
     document.querySelectorAll('[data-composer-action]').forEach((button) => {
         const action = button.dataset.composerAction;
         if (!Object.prototype.hasOwnProperty.call(COMPOSER_FEATURE_DEFAULTS, action)) return;
@@ -280,6 +299,9 @@ function updateComposerFeatureIndicators() {
             ? `Active tools: ${activeActions.map((action) => COMPOSER_FEATURE_LABELS[action]).join(', ')}`
             : 'Open tools';
     });
+    renderActivePills(elements?.composerActiveFeatures);
+    renderActivePills(elements?.welcomeComposerActiveFeatures);
+    lucide.createIcons();
 }
 
 function toggleComposerFeature(action) {
@@ -588,6 +610,8 @@ const elements = {
     uploadBtn: document.getElementById('uploadBtn'),
     composerActionMenu: document.getElementById('composerActionMenu'),
     welcomeComposerActionMenu: document.getElementById('welcomeComposerActionMenu'),
+    composerActiveFeatures: document.getElementById('composerActiveFeatures'),
+    welcomeComposerActiveFeatures: document.getElementById('welcomeComposerActiveFeatures'),
     fileInput: document.getElementById('fileInput'),
     filePreview: document.getElementById('filePreview'),
     dropOverlay: document.getElementById('dropOverlay'),
@@ -641,12 +665,8 @@ const elements = {
     navFiles: document.getElementById('navFiles'),
     krcWorkspaceNav: document.getElementById('krcWorkspaceNav'),
     krcNavResearchConsole: document.getElementById('krcNavResearchConsole'),
-    krcNavResearchPlayground: document.getElementById('krcNavResearchPlayground'),
-    krcNavQAPlayground: document.getElementById('krcNavQAPlayground'),
     krcNavKnowledge: document.getElementById('krcNavKnowledge'),
     krcNavIngestion: document.getElementById('krcNavIngestion'),
-    krcNavEvaluation: document.getElementById('krcNavEvaluation'),
-    krcNavExport: document.getElementById('krcNavExport'),
     // Files Modal
     filesModal: null,
     filesContent: null,
@@ -875,6 +895,7 @@ function applyKrcProfileUI() {
 }
 
 function openKrcResearchConsole() {
+    setKrcNavActive('krcNavResearchConsole');
     applyRuntimeMode('normal');
     if (!currentChatId) showWelcomeScreen();
     const input = resolveComposerInputElement();
@@ -894,6 +915,7 @@ function openKrcQaPlayground() {
 }
 
 function openKrcKnowledge() {
+    setKrcNavActive('krcNavKnowledge');
     if (isCurrentUserAdmin()) {
         openAdminSettings('memory-v3');
         return;
@@ -902,6 +924,7 @@ function openKrcKnowledge() {
 }
 
 function openKrcIngestion() {
+    setKrcNavActive('krcNavIngestion');
     if (isCurrentUserAdmin()) {
         window.location.href = '/ingestion';
         return;
@@ -1038,6 +1061,15 @@ function setupEventListeners() {
             handleComposerAction(action);
         });
     });
+    [elements.composerActiveFeatures, elements.welcomeComposerActiveFeatures].forEach((container) => {
+        if (!container) return;
+        container.addEventListener('click', (event) => {
+            const pill = event.target.closest('[data-composer-feature-pill]');
+            if (!pill) return;
+            event.preventDefault();
+            toggleComposerFeature(pill.dataset.composerFeaturePill);
+        });
+    });
     document.addEventListener('click', (event) => {
         const clickedOnMainUpload = elements.uploadBtn?.contains(event.target);
         const clickedOnWelcomeUpload = elements.welcomeUploadBtn?.contains(event.target);
@@ -1067,8 +1099,12 @@ function setupEventListeners() {
     setupDragAndDrop();
 
     elements.openSidebar.addEventListener('click', () => {
+        if (window.innerWidth >= 1024 && elements.sidebar.getAttribute('data-collapsed') === 'true') {
+            applySidebarCollapse(false);
+            return;
+        }
         elements.sidebar.classList.remove('-translate-x-full');
-        document.body.style.overflow = 'hidden';
+        document.body.style.overflow = window.innerWidth < 1024 ? 'hidden' : '';
     });
     elements.closeSidebar.addEventListener('click', closeSidebar);
 
@@ -1130,11 +1166,7 @@ function setupEventListeners() {
     }
 
     elements.krcNavResearchConsole?.addEventListener('click', openKrcResearchConsole);
-    elements.krcNavResearchPlayground?.addEventListener('click', () => applyRuntimeMode('playground'));
-    elements.krcNavQAPlayground?.addEventListener('click', openKrcQaPlayground);
     elements.krcNavKnowledge?.addEventListener('click', openKrcKnowledge);
-    elements.krcNavEvaluation?.addEventListener('click', openKrcEvaluation);
-    elements.krcNavExport?.addEventListener('click', openKrcExport);
     elements.krcLandingConsoleBtn?.addEventListener('click', openKrcResearchConsole);
     elements.krcLandingKnowledgeBtn?.addEventListener('click', openKrcKnowledge);
     elements.krcLandingIngestionBtn?.addEventListener('click', openKrcIngestion);
@@ -1212,7 +1244,7 @@ function setupEventListeners() {
         });
     }
     if (elements.chatSessionsList) {
-        elements.chatSessionsList.addEventListener('click', handleChatSessionMenuClick, true);
+        elements.chatSessionsList.addEventListener('click', handleChatSessionMenuClick);
     }
     if (elements.chatRenameCancelBtn) {
         elements.chatRenameCancelBtn.addEventListener('click', closeChatRenameModal);
@@ -1538,6 +1570,13 @@ function updateConversationHeader() {
     setPlaygroundLink(activeSession?.linked_playground_session_id || '');
 }
 
+function setKrcNavActive(activeElementId) {
+    if (!elements.krcWorkspaceNav) return;
+    elements.krcWorkspaceNav.querySelectorAll('.krc-nav-item').forEach((item) => {
+        item.classList.toggle('active', Boolean(activeElementId) && item.id === activeElementId);
+    });
+}
+
 function toggleChatDrawer(force) {
     if (!elements.chatDrawer) return;
     const isOpen = typeof force === 'boolean' ? !force : elements.chatDrawer.classList.contains('active');
@@ -1652,18 +1691,18 @@ function renderChatSessions() {
     }
 
     const renderRows = (sessions) => sessions.map(session => `
-        <div class="chat-item session-item group relative flex items-center gap-3 px-3 py-2.5 rounded-xl cursor-pointer ${currentChatId === session.chat_id ? 'active' : 'text-gray-600 dark:text-gray-400'}" 
-             onclick="selectChatSession('${session.chat_id}')" data-chat-id="${session.chat_id}">
+        <div class="chat-item session-item group relative flex items-center gap-3 px-3 py-2.5 rounded-xl cursor-pointer ${currentChatId === session.chat_id ? 'active' : 'text-gray-600 dark:text-gray-400'}" data-chat-id="${session.chat_id}" role="button" tabindex="0">
             <i data-lucide="${session.is_pinned ? 'pin' : 'message-circle'}" class="w-4 h-4 flex-shrink-0 ${session.is_pinned ? 'text-emerald-500 fill-emerald-500/20' : ''}"></i>
             <span class="chat-item-name text-sm font-medium truncate flex-1">${escapeHtml(session.title || 'New Chat')}</span>
-            <div class="session-menu-wrap" onclick="event.stopPropagation()">
+            <div class="session-menu-wrap">
                 <button type="button" data-chat-session-menu-trigger
                     class="chat-item-menu-trigger p-1.5 text-gray-500 hover:text-gray-200 transition-colors rounded-md" 
                     aria-haspopup="menu"
+                    aria-expanded="false"
                     title="More actions">
                     <i data-lucide="more-vertical" class="w-3.5 h-3.5"></i>
                 </button>
-                <div data-chat-session-menu class="chat-item-actions session-actions absolute z-20" data-chat-id="${session.chat_id}">
+                <div data-chat-session-menu class="chat-item-actions session-actions absolute z-20" data-chat-id="${session.chat_id}" role="menu">
                     <button type="button" data-chat-session-action="pin" data-chat-id="${session.chat_id}" data-chat-pinned="${!!session.is_pinned}" class="session-action-btn justify-start" title="${session.is_pinned ? 'Unpin' : 'Pin'}">
                         <i data-lucide="${session.is_pinned ? 'pin-off' : 'pin'}" class="w-3.5 h-3.5"></i>
                         <span>${session.is_pinned ? 'Unpin' : 'Pin'}</span>
@@ -1672,12 +1711,6 @@ function renderChatSessions() {
                         <i data-lucide="pencil" class="w-3.5 h-3.5"></i>
                         <span>Rename</span>
                     </button>
-                    ${selectedPersona === 'advisor' ? `
-                    <button type="button" data-chat-session-action="link-playground" data-chat-id="${session.chat_id}" class="session-action-btn justify-start" title="Link Playground">
-                        <i data-lucide="link" class="w-3.5 h-3.5"></i>
-                        <span>${session.linked_playground_session_id ? 'Edit Playground Link' : 'Link Playground'}</span>
-                    </button>
-                    ` : ''}
                     <button type="button" data-chat-session-action="export" data-chat-id="${session.chat_id}" class="session-action-btn justify-start" title="Export">
                         <i data-lucide="download" class="w-3.5 h-3.5"></i>
                         <span>Export</span>
@@ -1711,10 +1744,13 @@ function renderChatSessions() {
     bindChatSessionMenuControls();
 }
 
-function closeChatSessionMenus() {
-    if (elements.chatSessionsList?.contains(document.activeElement)) {
-        document.activeElement.blur();
-    }
+function closeChatSessionMenus(exceptWrap = null) {
+    document.querySelectorAll('.session-menu-wrap.menu-open').forEach((wrap) => {
+        if (exceptWrap && wrap === exceptWrap) return;
+        wrap.classList.remove('menu-open');
+        const trigger = wrap.querySelector('[data-chat-session-menu-trigger]');
+        if (trigger) trigger.setAttribute('aria-expanded', 'false');
+    });
 }
 
 function toggleChatSessionMenu(event) {
@@ -1724,10 +1760,50 @@ function toggleChatSessionMenu(event) {
 }
 
 function toggleChatSessionMenuFromTrigger(trigger) {
-    trigger?.focus();
+    if (!trigger) return;
+    const wrap = trigger.closest('.session-menu-wrap');
+    if (!wrap) return;
+    const shouldOpen = !wrap.classList.contains('menu-open');
+    closeChatSessionMenus(wrap);
+    wrap.classList.toggle('menu-open', shouldOpen);
+    trigger.setAttribute('aria-expanded', shouldOpen ? 'true' : 'false');
+    if (shouldOpen) {
+        const menu = wrap.querySelector('[data-chat-session-menu]');
+        const row = wrap.closest('.session-item');
+        const sidebar = elements.sidebar;
+        if (menu && row && sidebar) {
+            const rowRect = row.getBoundingClientRect();
+            const sidebarRect = sidebar.getBoundingClientRect();
+            const overflow = rowRect.top + menu.offsetHeight + 8 > sidebarRect.bottom;
+            menu.classList.toggle('open-up', overflow);
+        }
+    }
 }
 
 function handleChatSessionMenuClick(event) {
+    const actionButton = event.target.closest('[data-chat-session-action]');
+    if (actionButton && elements.chatSessionsList.contains(actionButton)) {
+        event.preventDefault();
+        event.stopPropagation();
+        const chatId = actionButton.dataset.chatId;
+        const action = actionButton.dataset.chatSessionAction;
+        const wasPinned = actionButton.dataset.chatPinned === 'true';
+        closeChatSessionMenus();
+
+        if (action === 'pin') {
+            togglePinChatSession(chatId, wasPinned);
+        } else if (action === 'rename') {
+            renameChatSession(chatId);
+        } else if (action === 'link-playground') {
+            linkPlaygroundSession(chatId);
+        } else if (action === 'export') {
+            openExportModal(chatId);
+        } else if (action === 'delete') {
+            deleteChatSession(chatId);
+        }
+        return;
+    }
+
     const trigger = event.target.closest('[data-chat-session-menu-trigger]');
     if (trigger && elements.chatSessionsList.contains(trigger)) {
         event.preventDefault();
@@ -1736,68 +1812,45 @@ function handleChatSessionMenuClick(event) {
         return;
     }
 
-    const actionButton = event.target.closest('[data-chat-session-action]');
-    if (!actionButton || !elements.chatSessionsList.contains(actionButton)) return;
+    const row = event.target.closest('.session-item');
+    if (!row || !elements.chatSessionsList.contains(row)) return;
 
-    event.preventDefault();
-    event.stopPropagation();
-    const chatId = actionButton.dataset.chatId;
-    const action = actionButton.dataset.chatSessionAction;
-    const wasPinned = actionButton.dataset.chatPinned === 'true';
-    closeChatSessionMenus();
+    if (row.classList.contains('session-actions') || event.target.closest('[data-chat-session-menu]')) {
+        return;
+    }
 
-    if (action === 'pin') {
-        togglePinChatSession(chatId, wasPinned);
-    } else if (action === 'rename') {
-        renameChatSession(chatId);
-    } else if (action === 'link-playground') {
-        linkPlaygroundSession(chatId);
-    } else if (action === 'export') {
-        openExportModal(chatId);
-    } else if (action === 'delete') {
-        deleteChatSession(chatId);
+    const chatId = row.dataset.chatId;
+    if (chatId) {
+        selectChatSession(chatId);
     }
 }
 
 function bindChatSessionMenuControls() {
     if (!elements.chatSessionsList) return;
 
-    elements.chatSessionsList.querySelectorAll('[data-chat-session-menu-trigger]').forEach((trigger) => {
-        trigger.onpointerdown = (event) => {
+    elements.chatSessionsList.querySelectorAll('.session-item').forEach((row) => {
+        row.addEventListener('keydown', (event) => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
             event.preventDefault();
-            event.stopPropagation();
-        };
-        trigger.onclick = (event) => {
+            const chatId = row.dataset.chatId;
+            if (chatId) selectChatSession(chatId);
+        });
+    });
+
+    elements.chatSessionsList.querySelectorAll('[data-chat-session-menu-trigger]').forEach((trigger) => {
+        if (trigger._kuroMenuTriggerBound) return;
+        trigger._kuroMenuTriggerBound = true;
+        trigger.addEventListener('click', (event) => {
             event.preventDefault();
             event.stopPropagation();
             toggleChatSessionMenuFromTrigger(trigger);
-        };
-    });
-
-    elements.chatSessionsList.querySelectorAll('[data-chat-session-action]').forEach((actionButton) => {
-        actionButton.onpointerdown = (event) => {
-            event.stopPropagation();
-        };
-        actionButton.onclick = (event) => {
+        });
+        trigger.addEventListener('keydown', (event) => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
             event.preventDefault();
             event.stopPropagation();
-            const chatId = actionButton.dataset.chatId;
-            const action = actionButton.dataset.chatSessionAction;
-            const wasPinned = actionButton.dataset.chatPinned === 'true';
-            closeChatSessionMenus();
-
-            if (action === 'pin') {
-                togglePinChatSession(chatId, wasPinned);
-            } else if (action === 'rename') {
-                renameChatSession(chatId);
-            } else if (action === 'link-playground') {
-                linkPlaygroundSession(chatId);
-            } else if (action === 'export') {
-                openExportModal(chatId);
-            } else if (action === 'delete') {
-                deleteChatSession(chatId);
-            }
-        };
+            toggleChatSessionMenuFromTrigger(trigger);
+        });
     });
 }
 
@@ -3645,6 +3698,7 @@ async function sendMessage(isFromWelcome = false) {
     if (isProcessing) return;
 
     isProcessing = true;
+    document.body.classList.add('kuro-chat-streaming');
     const isFirstTurnInNewChat = !currentChatId;
     if (isFirstTurnInNewChat) {
         currentChatId = generateClientChatId();
@@ -3658,6 +3712,9 @@ async function sendMessage(isFromWelcome = false) {
     }
     if (elements.sendBtn) elements.sendBtn.disabled = true;
     if (elements.welcomeSendBtn) elements.welcomeSendBtn.disabled = true;
+    const requestChatId = currentChatId;
+    let activeStreamChatId = requestChatId;
+    const isActiveStream = () => activeStreamChatId === currentChatId;
 
     if (isFromWelcome || isFirstTurnInNewChat) {
         elements.chatContainer.innerHTML = '';
@@ -3725,11 +3782,14 @@ async function sendMessage(isFromWelcome = false) {
     const abortController = new AbortController();
     if (stopBtn) {
         elements.sendBtn?.classList.add('hidden');
+        elements.welcomeSendBtn?.classList.add('hidden');
         stopBtn.classList.remove('hidden');
         stopBtn.onclick = () => {
             abortController.abort();
             stopBtn.classList.add('hidden');
             elements.sendBtn?.classList.remove('hidden');
+            elements.welcomeSendBtn?.classList.add('hidden');
+            document.body.classList.remove('kuro-chat-streaming');
         };
     }
 
@@ -3825,6 +3885,7 @@ async function sendMessage(isFromWelcome = false) {
                     const piece = data.text != null && data.text !== '' ? data.text : data.chunk;
 
                     if (eventType === 'chunk' && piece != null && piece !== '') {
+                        if (!isActiveStream()) continue;
                         if (!streamStarted) {
                             streamStarted = true;
                             // Hide thinking indicator
@@ -3840,6 +3901,7 @@ async function sendMessage(isFromWelcome = false) {
                             }, 50);
                         }
                     } else if (eventType === 'complete' && (data.response || data?.data?.response)) {
+                        if (!isActiveStream()) continue;
                         if (renderTimer) {
                             clearTimeout(renderTimer);
                             renderTimer = null;
@@ -3878,13 +3940,16 @@ async function sendMessage(isFromWelcome = false) {
                         // Refresh session list to catch title updates
                         loadChatSessions();
                     } else if (eventType === 'error' && data.error) {
+                        if (!isActiveStream()) continue;
                         streamHadError = true;
                         streamingContent.innerHTML = `<span style="color:red">Error: ${escapeHtml(data.error)}</span>`;
                     } else if (eventType === 'meta') {
+                        if (!isActiveStream()) continue;
                         streamMeta = data;
                         if (data && data.chat_id) {
                             const previousChatId = currentChatId;
                             currentChatId = data.chat_id;
+                            activeStreamChatId = data.chat_id;
                             if (previousChatId && previousChatId !== currentChatId) {
                                 chatOldestMessageIdBySession[currentChatId] = chatOldestMessageIdBySession[previousChatId] || null;
                                 chatHasMoreBySession[currentChatId] = chatHasMoreBySession[previousChatId] !== false;
@@ -3910,11 +3975,11 @@ async function sendMessage(isFromWelcome = false) {
         flushStreamingRender();
 
         // Final render (fallback if complete event wasn't received)
-        if (botMessage && !streamHadError) {
+        if (botMessage && !streamHadError && isActiveStream()) {
             streamingContent.innerHTML = marked.parse(botMessage);
             highlightInContainer(streamingContent);
         }
-        if (wasPinnedToBottom) {
+        if (wasPinnedToBottom && isActiveStream()) {
             scrollToBottom();
         }
 
@@ -3924,7 +3989,9 @@ async function sendMessage(isFromWelcome = false) {
         }
 
         // Save AI message to internal history
-        chatHistory.push({ role: 'assistant', content: botMessage });
+        if (isActiveStream()) {
+            chatHistory.push({ role: 'assistant', content: botMessage });
+        }
         sendCompleted = !streamHadError;
 
     } catch (error) {
@@ -3940,11 +4007,18 @@ async function sendMessage(isFromWelcome = false) {
             addMessageToChat('ai', '<span style="color:red">Connection lost. Please try again.</span>');
         }
     } finally {
-        if (sendCompleted && currentChatId) {
+        document.body.classList.remove('kuro-chat-streaming');
+        if (sendCompleted && currentChatId && isActiveStream()) {
             saveDraft(currentChatId, '');
         }
         if (stopBtn) stopBtn.classList.add('hidden');
         elements.sendBtn?.classList.remove('hidden');
+        if (!isFromWelcome) {
+            elements.welcomeSendBtn?.classList.add('hidden');
+        }
+        if (isFromWelcome) {
+            elements.welcomeSendBtn?.classList.remove('hidden');
+        }
         isProcessing = false;
         if (elements.sendBtn) elements.sendBtn.disabled = false;
         if (elements.welcomeSendBtn) elements.welcomeSendBtn.disabled = false;

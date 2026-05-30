@@ -20,6 +20,8 @@ def test_v1_dashboard_uses_dark_gray_redesign_shell():
     assert "/static/css/index_revamp.css" in html
     assert "index_revamp.css?v=20260525-01" in html
     assert "id=\"composerActionMenu\"" in html
+    assert 'data-composer-action="market_page"' in html
+    assert 'data-composer-action="playground_mode"' in html
     assert "id=\"minimizeSidebar\"" in html
     assert "sidebar-collapse-toggle" in html
     assert "title=\"Hide sidebar\"" in html
@@ -27,23 +29,54 @@ def test_v1_dashboard_uses_dark_gray_redesign_shell():
     assert "<span>K</span>" in html
     assert '<img src="/profile/kuro_avatar.png"' not in html
 
-    assert "--kuro-bg-primary: #1a1a1a" in css
-    assert "--kuro-bg-secondary: #212121" in css
-    assert "--kuro-bg-tertiary: #2a2a2a" in css
-    assert "--kuro-accent-primary: #0d9488" in css
-    assert "--bg-primary: #1a1a1a" in revamp_css
+    assert "--kuro-bg-primary: #1a1a1f" in css
+    assert "--kuro-bg-secondary: #18181d" in css
+    assert "--kuro-bg-tertiary: #222228" in css
+    assert "--kuro-bg-card: #2a2a32" in css
+    assert "--kuro-accent-primary: #14b8a6" in css
+    assert "--bg-primary: #1a1a1f" in revamp_css
+    assert "--bg-secondary: #18181d" in revamp_css
+    assert "--bg-card: #2a2a32" in revamp_css
     assert "body.kuro-redesign-v1 .hidden" in revamp_css
     assert "#welcomeScreen > div.welcome:first-child" in revamp_css
     assert '#sidebar.sidebar[data-collapsed="true"]' in revamp_css
     assert "Prototype skin pass" in revamp_css
-    assert "--bg-primary: #1a1a1f" in revamp_css
     assert "sidebar-collapsed-shell" in revamp_css
     assert "--conversation-width: 900px" in revamp_css
     assert "#stopGeneratingBtn.hidden" in revamp_css
     assert "#chatContainer > .flex-row-reverse" in revamp_css
     assert "#minimizeSidebar.sidebar-collapse-toggle" in revamp_css
     assert '#sidebar.sidebar[data-collapsed="true"] #minimizeSidebar' in revamp_css
+    assert "z-index: 80 !important" in revamp_css
+    assert ".session-menu-wrap.menu-open .session-actions" in revamp_css
+    assert "body.kuro-redesign-v1 #playgroundOutput" in revamp_css
+    assert "max-height: 428px !important" in revamp_css
+    assert "line-height: 18px !important" in revamp_css
+    assert "max-height: 338px !important" in revamp_css
+    assert "id=\"composerActiveFeatures\"" in html
+    assert "id=\"welcomeComposerActiveFeatures\"" in html
     assert "Show sidebar" in APP_JS.read_text(encoding="utf-8")
+
+
+def test_v1_plus_menu_parity_with_composer_actions():
+    html = INDEX.read_text(encoding="utf-8")
+    expected_actions = [
+        "attach",
+        "files",
+        "deep_research",
+        "web_search",
+        "agent_mode",
+        "task_mode",
+        "reminder_mode",
+        "market_page",
+        "playground_mode",
+    ]
+    for action in expected_actions:
+        assert f'data-composer-action="{action}"' in html
+
+    # Main composer and welcome composer menu should both expose action set (prototype-like behavior).
+    assert (html.count('data-composer-action="attach"') >= 2)
+    assert (html.count('data-composer-action="playground_mode"') >= 2)
 
 
 def test_v1_dashboard_is_the_only_frontend_shell():
@@ -95,6 +128,12 @@ def test_v1_redesign_keeps_persona_and_existing_tool_navigation():
     assert "id=\"sidebarSessionsMore\"" in html
     assert "id=\"chatSessionsList\"" in html
     assert "id=\"chatDrawer\"" not in html
+    assert "id=\"krcNavResearchConsole\"" in html
+    assert "id=\"krcNavKnowledge\"" in html
+    assert "id=\"krcNavResearchPlayground\"" not in html
+    assert "id=\"krcNavQAPlayground\"" not in html
+    assert "id=\"krcNavEvaluation\"" not in html
+    assert "id=\"krcNavExport\"" not in html
     assert "kuro-profile-menu" in html
     assert "Administration Settings" in html
     assert "id=\"adminSettingsModal\"" in html
@@ -108,6 +147,10 @@ def test_v1_redesign_keeps_persona_and_existing_tool_navigation():
     assert "href=\"/market\"" in html
     assert "href=\"/tutorial\"" in html
     assert "composerActionMenu" in js
+    assert "data-composer-feature-pill" in js
+    assert "composerActiveFeatures" in js
+    assert "toggleChatSessionMenuFromTrigger" in js
+    assert "menu-open" in js
     assert "elements.sendBtn?.classList.add('hidden')" in js
     assert "loadComposerModelAliases" in js
     assert "model_alias" in js

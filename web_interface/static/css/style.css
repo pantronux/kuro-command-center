@@ -973,14 +973,15 @@ pre button.copied svg,
    ============================================ */
 
 .kuro-redesign-v1 {
-    --bg-primary: #1a1a1a;
-    --bg-secondary: #212121;
-    --bg-tertiary: #2a2a2a;
-    --bg-hover: #2f2f2f;
-    --bg-active: #333333;
-    --border-subtle: #383838;
-    --accent-primary: #0d9488;
-    --accent-hover: #0f766e;
+    --bg-primary: #1a1a1f;
+    --bg-secondary: #18181d;
+    --bg-tertiary: #222228;
+    --bg-card: #2a2a32;
+    --bg-hover: #2f2f36;
+    --bg-active: #33333b;
+    --border-subtle: #2e2e38;
+    --accent-primary: #14b8a6;
+    --accent-hover: #0d9488;
     --text-primary: #f5f5f5;
     --text-secondary: #a3a3a3;
     --status-error: #ef4444;
@@ -1932,15 +1933,16 @@ body.kuro-redesign-v1 {
    ============================================ */
 
 .kuro-redesign-v1 {
-    --kuro-bg-primary: #1a1a1a;
-    --kuro-bg-secondary: #212121;
-    --kuro-bg-tertiary: #2a2a2a;
-    --kuro-bg-hover: #2f2f2f;
-    --kuro-bg-active: #333333;
-    --kuro-border-subtle: #383838;
-    --kuro-border-strong: #404040;
-    --kuro-accent-primary: #0d9488;
-    --kuro-accent-hover: #14a99b;
+    --kuro-bg-primary: #1a1a1f;
+    --kuro-bg-secondary: #18181d;
+    --kuro-bg-tertiary: #222228;
+    --kuro-bg-card: #2a2a32;
+    --kuro-bg-hover: #2f2f36;
+    --kuro-bg-active: #33333b;
+    --kuro-border-subtle: #2e2e38;
+    --kuro-border-strong: #383844;
+    --kuro-accent-primary: #14b8a6;
+    --kuro-accent-hover: #0d9488;
     --kuro-text-primary: #f5f5f5;
     --kuro-text-secondary: #a3a3a3;
     --kuro-status-error: #ef4444;
@@ -2647,14 +2649,15 @@ body.kuro-redesign-v1 {
    Keep this at the very end so older V1/Tailwind migration rules cannot
    collapse the revamp layout again. */
 body.kuro-redesign-v1 {
-    --bg-primary: #1a1a1a;
-    --bg-secondary: #212121;
-    --bg-tertiary: #2a2a2a;
-    --bg-hover: #2f2f2f;
-    --bg-active: #333333;
-    --border-subtle: #383838;
-    --accent-primary: #0d9488;
-    --accent-hover: #0f766e;
+    --bg-primary: #1a1a1f;
+    --bg-secondary: #18181d;
+    --bg-tertiary: #222228;
+    --bg-card: #2a2a32;
+    --bg-hover: #2f2f36;
+    --bg-active: #33333b;
+    --border-subtle: #2e2e38;
+    --accent-primary: #14b8a6;
+    --accent-hover: #0d9488;
     --text-primary: #f5f5f5;
     --text-secondary: #a3a3a3;
     --status-error: #ef4444;

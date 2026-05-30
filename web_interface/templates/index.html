@@ -408,16 +408,6 @@
                             <i data-lucide="square-terminal" class="w-4 h-4"></i>
                             <span>Research Console</span>
                         </button>
-                        <button type="button" id="krcNavResearchPlayground" class="krc-nav-item">
-                            <i data-lucide="flask-conical" class="w-4 h-4"></i>
-                            <span>Research Playground</span>
-                        </button>
-                        {% if krc_profile.features.qa_playground %}
-                        <button type="button" id="krcNavQAPlayground" class="krc-nav-item" data-krc-feature="qa_playground">
-                            <i data-lucide="clipboard-check" class="w-4 h-4"></i>
-                            <span>QA Playground</span>
-                        </button>
-                        {% endif %}
                         <button type="button" id="krcNavKnowledge" class="krc-nav-item">
                             <i data-lucide="library" class="w-4 h-4"></i>
                             <span>Knowledge</span>
@@ -427,18 +417,6 @@
                             <i data-lucide="database-zap" class="w-4 h-4"></i>
                             <span>Ingestion</span>
                         </a>
-                        {% if krc_profile.features.evaluation %}
-                        <button type="button" id="krcNavEvaluation" class="krc-nav-item" data-admin-only="true" data-krc-feature="evaluation">
-                            <i data-lucide="activity" class="w-4 h-4"></i>
-                            <span>Evaluation</span>
-                        </button>
-                        {% endif %}
-                        {% endif %}
-                        {% if krc_profile.features.export %}
-                        <button type="button" id="krcNavExport" class="krc-nav-item" data-krc-feature="export">
-                            <i data-lucide="download" class="w-4 h-4"></i>
-                            <span>Export</span>
-                        </button>
                         {% endif %}
                     </div>
                     {% endif %}
@@ -1057,6 +1035,7 @@
 
                 <!-- Welcome Input (mirrors bottom input) -->
                 <div class="composer-wrap welcome-composer-wrap">
+                    <div id="welcomeComposerActiveFeatures" class="composer-active-features hidden" aria-live="polite"></div>
                     <div class="composer composer-row-shell">
                         <!-- File Upload Button (mirrored) -->
                         <div class="composer-row">
@@ -1070,12 +1049,12 @@
                                 <button type="button" data-composer-action="attach"
                                     class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
                                     <i data-lucide="paperclip" class="w-4 h-4"></i>
-                                    <span>Add photos & files</span>
+                                    <span>Add Photos & Files</span>
                                 </button>
                                 <button type="button" data-composer-action="files"
                                     class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
                                     <i data-lucide="folder-open" class="w-4 h-4"></i>
-                                    <span>Uploaded Files</span>
+                                    <span>Recent Files</span>
                                 </button>
                                 <div class="border-t border-gray-200 dark:border-gray-700 my-1"></div>
                                 <button type="button" data-composer-action="deep_research"
@@ -1102,6 +1081,17 @@
                                     class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
                                     <i data-lucide="bell" class="w-4 h-4"></i>
                                     <span>Reminder</span>
+                                </button>
+                                <div class="border-t border-gray-200 dark:border-gray-700 my-1"></div>
+                                <button type="button" data-composer-action="market_page"
+                                    class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                                    <i data-lucide="trending-up" class="w-4 h-4"></i>
+                                    <span>Market Analysis</span>
+                                </button>
+                                <button type="button" data-composer-action="playground_mode"
+                                    class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                                    <i data-lucide="terminal" class="w-4 h-4"></i>
+                                    <span>Playground</span>
                                 </button>
                             </div>
                         </div>
@@ -1140,6 +1130,7 @@
             <div id="mainInputArea" class="composer-wrap hidden p-4 lg:p-6 glass-panel border-t-0 rounded-none">
                 <!-- File Preview -->
                 <div id="filePreview" class="composer-attachments hidden mb-3 flex flex-wrap gap-2"></div>
+                <div id="composerActiveFeatures" class="composer-active-features hidden" aria-live="polite"></div>
 
                 <div class="composer composer-row-shell">
                     <div class="composer-row">
@@ -1156,13 +1147,13 @@
                             <button type="button" data-composer-action="attach"
                                 class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
                                 <i data-lucide="paperclip" class="w-4 h-4"></i>
-                                <span>Add photos & files</span>
+                                    <span>Add Photos & Files</span>
                             </button>
-                            <button type="button" data-composer-action="files"
-                                class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
-                                <i data-lucide="folder-open" class="w-4 h-4"></i>
-                                <span>Uploaded Files</span>
-                            </button>
+                                <button type="button" data-composer-action="files"
+                                    class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                                    <i data-lucide="folder-open" class="w-4 h-4"></i>
+                                    <span>Recent Files</span>
+                                </button>
                             <div class="border-t border-gray-200 dark:border-gray-700 my-1"></div>
                             <button type="button" data-composer-action="deep_research"
                                 class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
@@ -1184,13 +1175,24 @@
                                 <i data-lucide="check-square" class="w-4 h-4"></i>
                                 <span>Task</span>
                             </button>
-                            <button type="button" data-composer-action="reminder_mode" data-krc-daily-action="true"
-                                class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
-                                <i data-lucide="bell" class="w-4 h-4"></i>
-                                <span>Reminder</span>
-                            </button>
+                                <button type="button" data-composer-action="reminder_mode" data-krc-daily-action="true"
+                                    class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                                    <i data-lucide="bell" class="w-4 h-4"></i>
+                                    <span>Reminder</span>
+                                </button>
+                                <div class="border-t border-gray-200 dark:border-gray-700 my-1"></div>
+                                <button type="button" data-composer-action="market_page"
+                                    class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                                    <i data-lucide="trending-up" class="w-4 h-4"></i>
+                                    <span>Market Analysis</span>
+                                </button>
+                                <button type="button" data-composer-action="playground_mode"
+                                    class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                                    <i data-lucide="terminal" class="w-4 h-4"></i>
+                                    <span>Playground</span>
+                                </button>
+                            </div>
                         </div>
-                    </div>
 
                     <!-- Text Input -->
                     <div class="flex-1 relative">
