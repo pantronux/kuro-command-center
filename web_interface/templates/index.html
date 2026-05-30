@@ -8,11 +8,29 @@
   Side Effects: Opens /ws/dashboard WebSocket, polls /api/market/hud on a timer.
 -->
 <html lang="en" class="scroll-smooth dark">
+{% set krc_profile = krc_profile | default({
+    "app_profile": "legacy",
+    "is_krc": false,
+    "is_dev": false,
+    "workspace_label": "Kuro AI",
+    "features": {
+        "research_console": false,
+        "playground": false,
+        "qa_playground": false,
+        "qa_productization": false,
+        "knowledge_publish": false,
+        "ingestion": false,
+        "evaluation": false,
+        "export": false,
+        "market": false,
+        "telegram_center": false
+    }
+}) %}
 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Kuro AI - Web Dashboard</title>
+    <title>{% if krc_profile.is_krc or krc_profile.is_dev %}Kuro Research Center{% else %}Kuro AI - Web Dashboard{% endif %}</title>
 
     <!-- V6.1 branding: favicon + Apple touch icon served from /profile mount -->
     <link rel="icon" type="image/x-icon" href="/profile/favicon.ico">
@@ -323,7 +341,9 @@
     <link rel="stylesheet" href="/static/css/index_revamp.css?v=20260525-01">
 </head>
 
-<body class="kuro-redesign-v1 min-h-screen transition-colors duration-300">
+<body class="kuro-redesign-v1 min-h-screen transition-colors duration-300"
+    data-app-profile="{{ krc_profile.app_profile }}"
+    data-krc-profile="{{ 'true' if krc_profile.is_krc or krc_profile.is_dev else 'false' }}">
     <div id="kuroModeBanner" class="hidden"></div>
 
     <!-- Animated Background Mesh -->
@@ -352,9 +372,9 @@
                             <span>K</span>
                         </div>
                         <div class="logo-text sidebar-text">
-                            <h1 class="name text-gray-800 dark:text-white">Kuro AI</h1>
+                            <h1 class="name text-gray-800 dark:text-white">{% if krc_profile.is_krc or krc_profile.is_dev %}Kuro Research Center{% else %}Kuro AI{% endif %}</h1>
                             <p class="sub text-gray-500 dark:text-gray-400">
-                                <span id="kuroVersionBadge">Pre V.2.0.0 Beta 1 Runtime Sovereign</span>
+                                <span id="kuroVersionBadge">{% if krc_profile.is_krc or krc_profile.is_dev %}Kuro Playground{% else %}Pre V.2.0.0 Beta 1 Runtime Sovereign{% endif %}</span>
                             </p>
                         </div>
                     </div>
@@ -379,8 +399,49 @@
                     <button id="newChatBtn"
                         class="btn-new-chat">
                         <i data-lucide="plus" class="w-5 h-5"></i>
-                        <span>New Chat</span>
+                        <span>{% if krc_profile.is_krc or krc_profile.is_dev %}New Research Console{% else %}New Chat{% endif %}</span>
                     </button>
+
+                    {% if krc_profile.is_krc or krc_profile.is_dev %}
+                    <div id="krcWorkspaceNav" class="krc-workspace-nav" aria-label="KRC workspace navigation">
+                        <button type="button" id="krcNavResearchConsole" class="krc-nav-item">
+                            <i data-lucide="square-terminal" class="w-4 h-4"></i>
+                            <span>Research Console</span>
+                        </button>
+                        <button type="button" id="krcNavResearchPlayground" class="krc-nav-item">
+                            <i data-lucide="flask-conical" class="w-4 h-4"></i>
+                            <span>Research Playground</span>
+                        </button>
+                        {% if krc_profile.features.qa_playground %}
+                        <button type="button" id="krcNavQAPlayground" class="krc-nav-item" data-krc-feature="qa_playground">
+                            <i data-lucide="clipboard-check" class="w-4 h-4"></i>
+                            <span>QA Playground</span>
+                        </button>
+                        {% endif %}
+                        <button type="button" id="krcNavKnowledge" class="krc-nav-item">
+                            <i data-lucide="library" class="w-4 h-4"></i>
+                            <span>Knowledge</span>
+                        </button>
+                        {% if is_admin %}
+                        <a href="/ingestion" id="krcNavIngestion" class="krc-nav-item" data-admin-only="true">
+                            <i data-lucide="database-zap" class="w-4 h-4"></i>
+                            <span>Ingestion</span>
+                        </a>
+                        {% if krc_profile.features.evaluation %}
+                        <button type="button" id="krcNavEvaluation" class="krc-nav-item" data-admin-only="true" data-krc-feature="evaluation">
+                            <i data-lucide="activity" class="w-4 h-4"></i>
+                            <span>Evaluation</span>
+                        </button>
+                        {% endif %}
+                        {% endif %}
+                        {% if krc_profile.features.export %}
+                        <button type="button" id="krcNavExport" class="krc-nav-item" data-krc-feature="export">
+                            <i data-lucide="download" class="w-4 h-4"></i>
+                            <span>Export</span>
+                        </button>
+                        {% endif %}
+                    </div>
+                    {% endif %}
 
                     <label class="search-box kuro-sidebar-search">
                         <i data-lucide="search" class="w-4 h-4 text-gray-500 dark:text-gray-400"></i>
@@ -388,6 +449,19 @@
                             class="w-full bg-transparent border-none outline-none text-sm text-gray-800 dark:text-white placeholder-gray-400">
                     </label>
 
+                    {% if krc_profile.is_krc %}
+                    <div class="persona-row" data-krc-persona-locked="true">
+                        <div
+                            class="w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm text-gray-500 dark:text-gray-400 bg-gray-50/40 dark:bg-gray-900/20 border border-gray-100 dark:border-gray-800">
+                            <div class="flex items-center gap-2 min-w-0">
+                                <i data-lucide="user-cog" class="w-4 h-4 flex-shrink-0"></i>
+                                <span class="truncate">Persona: <span id="activePersonaName"
+                                        class="font-semibold text-emerald-500">Advisor</span></span>
+                            </div>
+                            <span class="text-[10px] uppercase tracking-wider text-gray-400 dark:text-gray-500">Locked</span>
+                        </div>
+                    </div>
+                    {% else %}
                     <div class="persona-row">
                         <button id="personaAccordionBtn"
                             class="w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-all group">
@@ -443,12 +517,13 @@
                                 <button
                                     class="persona-option-v2 w-full text-left px-3 py-2 rounded-lg text-xs hover:bg-white dark:hover:bg-gray-800 transition-all flex items-center gap-2"
                                     data-persona="auditor">
-                                    <span class="font-medium text-gray-700 dark:text-gray-300">QA Architect</span>
+                                    <span class="font-medium text-gray-700 dark:text-gray-300">{% if krc_profile.is_krc or krc_profile.is_dev %}Research Auditor{% else %}QA Architect{% endif %}</span>
                                 </button>
                                 {% endif %}
                             </div>
                         </div>
                     </div>
+                    {% endif %}
 
                     <div id="chatSessionsList" class="chat-list-wrap">
                         <section>
@@ -495,7 +570,7 @@
                         <span class="kuro-avatar-fallback">K</span>
                     </div>
                     <div>
-                        <p id="headerPersonaLabel" class="label text-xs text-gray-500 dark:text-gray-400 leading-tight">Consultant</p>
+                        <p id="headerPersonaLabel" class="label text-xs text-gray-500 dark:text-gray-400 leading-tight">{% if krc_profile.is_krc %}Advisor{% else %}Consultant{% endif %}</p>
                         <h2 id="headerChatTitle" class="title text-xl font-semibold text-gray-800 dark:text-white leading-tight">Default Chat</h2>
                         <p id="headerPlaygroundLink" class="hidden text-[11px] text-emerald-600 dark:text-emerald-300 leading-tight font-mono truncate"></p>
                     </div>
@@ -583,11 +658,14 @@
                                             <i data-lucide="radar" class="w-4 h-4"></i>
                                             Intelligence Hub
                                         </a>
+                                        {% if not krc_profile.is_krc or krc_profile.features.market %}
                                         <a href="/market"
+                                            data-krc-feature="market"
                                             class="kuro-profile-submenu-link flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-gray-600 dark:text-gray-300 transition-all">
                                             <i data-lucide="line-chart" class="w-4 h-4"></i>
                                             Market Sentinel
                                         </a>
+                                        {% endif %}
                                     </div>
                                 </details>
                                 <button id="navSettings"
@@ -627,6 +705,7 @@
 
             <!-- Playground Runtime Panel -->
             <section id="playgroundPanel" class="playground-wrap hidden p-6 lg:p-8 space-y-4 overflow-y-auto">
+                {% if not krc_profile.is_krc and not krc_profile.is_dev %}
                 <div class="pg-header rounded-2xl border border-emerald-200 dark:border-emerald-900 bg-emerald-50/70 dark:bg-emerald-900/20 p-4">
                     <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                         <div class="min-w-0">
@@ -641,6 +720,108 @@
                         </a>
                     </div>
                 </div>
+                {% endif %}
+                {% if krc_profile.is_krc or krc_profile.is_dev %}
+                <section id="krcPlaygroundLanding" class="krc-playground-landing">
+                    <div class="krc-landing-header">
+                        <div>
+                            <p class="krc-eyebrow">KRC Workspace</p>
+                            <h3>Kuro Playground</h3>
+                        </div>
+                        <button type="button" id="krcLandingConsoleBtn" class="krc-action-btn secondary">
+                            <i data-lucide="square-terminal" class="w-4 h-4"></i>
+                            <span>Research Console</span>
+                        </button>
+                    </div>
+                    <div class="krc-landing-grid">
+                        <article class="krc-landing-card">
+                            <div class="krc-card-icon"><i data-lucide="flask-conical" class="w-5 h-5"></i></div>
+                            <h4>Research Playground</h4>
+                            <p>Run comparative research prompts, inspect traces, and export forensic bundles.</p>
+                            <a href="/playground/tutorial" class="krc-action-btn secondary">
+                                <i data-lucide="book-open" class="w-4 h-4"></i>
+                                <span>Tutorial</span>
+                            </a>
+                        </article>
+                        {% if krc_profile.features.qa_playground %}
+                        <article class="krc-landing-card krc-qa-card" data-krc-feature="qa_playground">
+                            <div class="krc-card-icon"><i data-lucide="clipboard-check" class="w-5 h-5"></i></div>
+                            <h4>QA Playground</h4>
+                            <textarea id="qaRequirementInput" rows="5" maxlength="32000"
+                                placeholder="Paste a requirement..."
+                                class="krc-qa-input"></textarea>
+                            <div class="krc-qa-actions">
+                                <button type="button" id="qaInterpretBtn" class="krc-action-btn secondary">
+                                    <i data-lucide="scan-text" class="w-4 h-4"></i>
+                                    <span>Interpret</span>
+                                </button>
+                                <button type="button" id="qaTestcasesBtn" class="krc-action-btn">
+                                    <i data-lucide="list-checks" class="w-4 h-4"></i>
+                                    <span>Test Cases</span>
+                                </button>
+                                <button type="button" id="qaGherkinBtn" class="krc-action-btn secondary">
+                                    <i data-lucide="file-code-2" class="w-4 h-4"></i>
+                                    <span>Gherkin</span>
+                                </button>
+                                <button type="button" id="qaAmbiguityBtn" class="krc-action-btn secondary">
+                                    <i data-lucide="search-check" class="w-4 h-4"></i>
+                                    <span>Ambiguity</span>
+                                </button>
+                                <button type="button" id="qaCoverageBtn" class="krc-action-btn secondary">
+                                    <i data-lucide="table-2" class="w-4 h-4"></i>
+                                    <span>Coverage</span>
+                                </button>
+                                <button type="button" id="qaExportBtn" class="krc-action-btn secondary">
+                                    <i data-lucide="download" class="w-4 h-4"></i>
+                                    <span>Export</span>
+                                </button>
+                            </div>
+                            <pre id="qaPlaygroundOutput" class="krc-qa-output">(no QA output)</pre>
+                        </article>
+                        {% endif %}
+                        <article class="krc-landing-card">
+                            <div class="krc-card-icon"><i data-lucide="library" class="w-5 h-5"></i></div>
+                            <h4>Knowledge</h4>
+                            <p>Inspect canonical memory health and approved knowledge surfaces.</p>
+                            <button type="button" id="krcLandingKnowledgeBtn" class="krc-action-btn secondary">
+                                <i data-lucide="brain-circuit" class="w-4 h-4"></i>
+                                <span>Open</span>
+                            </button>
+                        </article>
+                        <article class="krc-landing-card">
+                            <div class="krc-card-icon"><i data-lucide="database-zap" class="w-5 h-5"></i></div>
+                            <h4>Documents</h4>
+                            <p>Manage ingestion, dataset analytics, retrieval health, and logs.</p>
+                            <button type="button" id="krcLandingIngestionBtn" class="krc-action-btn secondary">
+                                <i data-lucide="folder-open" class="w-4 h-4"></i>
+                                <span>Open</span>
+                            </button>
+                        </article>
+                        {% if krc_profile.features.evaluation %}
+                        <article class="krc-landing-card" data-krc-feature="evaluation">
+                            <div class="krc-card-icon"><i data-lucide="activity" class="w-5 h-5"></i></div>
+                            <h4>Evaluation</h4>
+                            <p>Review autonomous evaluation summaries, security events, and observability evals.</p>
+                            <button type="button" id="krcLandingEvaluationBtn" class="krc-action-btn secondary">
+                                <i data-lucide="clipboard-check" class="w-4 h-4"></i>
+                                <span>Open</span>
+                            </button>
+                        </article>
+                        {% endif %}
+                        {% if krc_profile.features.export %}
+                        <article class="krc-landing-card">
+                            <div class="krc-card-icon"><i data-lucide="download" class="w-5 h-5"></i></div>
+                            <h4>Export</h4>
+                            <p>Create reports from active research sessions or Playground artifacts.</p>
+                            <button type="button" id="krcLandingExportBtn" class="krc-action-btn secondary">
+                                <i data-lucide="download" class="w-4 h-4"></i>
+                                <span>Open</span>
+                            </button>
+                        </article>
+                        {% endif %}
+                    </div>
+                </section>
+                {% endif %}
                 <div class="pg-grid grid grid-cols-1 lg:grid-cols-3 gap-4">
                     <div class="pg-col playground-card rounded-2xl border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-800/70 p-4 space-y-3">
                         <h4 class="font-semibold text-gray-800 dark:text-gray-100">Session</h4>
@@ -768,20 +949,41 @@
                                         class="px-2 py-1 rounded-lg bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-700 dark:text-cyan-300 text-[11px] font-medium transition-colors">
                                         Download Session JSON
                                     </button>
+                                    <button id="playgroundAnalyzeSessionInKsBtn"
+                                        class="px-2 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-700 dark:text-emerald-300 text-[11px] font-medium transition-colors">
+                                        Analyze in KS
+                                    </button>
                                 </div>
                                 <div id="playgroundHistoryMeta" class="text-gray-600 dark:text-gray-300"></div>
                                 <div id="playgroundHistoryExecutions" class="space-y-2"></div>
                             </div>
-                        </div>
-                    </div>
-                </div>
-                <div class="pg-output playground-card rounded-2xl border border-gray-200 dark:border-gray-700 bg-gray-950 text-emerald-200 p-4">
+	                        </div>
+	                    </div>
+	                </div>
+	                <div class="pg-output playground-card rounded-2xl border border-gray-200 dark:border-gray-700 bg-gray-950 text-emerald-200 p-4">
                     <div class="flex items-center justify-between gap-3 mb-2">
                         <p class="text-xs uppercase tracking-wider text-emerald-400">Playground Output</p>
                         <div class="flex items-center gap-2">
+                            <select id="playgroundKsAnalysisMode"
+                                class="px-2 py-1 rounded-lg bg-gray-900 border border-emerald-500/20 text-emerald-100 text-[11px]">
+                                <option value="auto">auto</option>
+                                <option value="summary">summary</option>
+                                <option value="integrity">integrity</option>
+                                <option value="forensic">forensic</option>
+                                <option value="divergence">divergence</option>
+                                <option value="ontology">ontology</option>
+                                <option value="lineage">lineage</option>
+                                {% if not krc_profile.is_krc or krc_profile.features.qa_playground %}
+                                <option value="qa">qa</option>
+                                {% endif %}
+                            </select>
                             <button id="playgroundCopyOutputBtn"
                                 class="px-2.5 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-200 text-[11px] font-medium transition-colors">
                                 Copy
+                            </button>
+                            <button id="playgroundAnalyzeInKsBtn"
+                                class="px-2.5 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-200 text-[11px] font-medium transition-colors">
+                                Analyze in KS
                             </button>
                             <button id="playgroundDownloadOutputBtn"
                                 class="px-2.5 py-1 rounded-lg bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-200 text-[11px] font-medium transition-colors">
@@ -828,17 +1030,28 @@
                     <div class="welcome-avatar">
                         <span>K</span>
                     </div>
-                    <h2>Hello, {{ display_name }}</h2>
-                    <p>Kuro is at your service. How can I assist you today?</p>
+                    <h2>{% if krc_profile.is_krc or krc_profile.is_dev %}Kuro Research Center{% else %}Hello, {{ display_name }}{% endif %}</h2>
+                    <p>{% if krc_profile.is_krc or krc_profile.is_dev %}Research Console is ready for grounded analysis, knowledge review, and Playground handoff.{% else %}Kuro is at your service. How can I assist you today?{% endif %}</p>
                     <div class="quick-chips">
+                        {% if krc_profile.is_krc or krc_profile.is_dev %}
+                        <button type="button" class="chip"
+                            onclick="if(window.applyRuntimeMode){window.applyRuntimeMode('playground')}">Open Research Playground</button>
+                        <button type="button" class="chip"
+                            onclick="document.getElementById('welcomeInput').value='Search approved knowledge for: '; document.getElementById('welcomeInput').focus();">Search Knowledge</button>
+                        <button type="button" class="chip"
+                            onclick="if(window.linkLatestPlaygroundToResearchConsole){window.linkLatestPlaygroundToResearchConsole()}">Link Latest Playground</button>
+                        <button type="button" class="chip"
+                            onclick="if(window.openKrcIngestion){window.openKrcIngestion()}">Ingest Document</button>
+                        {% else %}
                         <button type="button" class="chip"
                             onclick="document.getElementById('welcomeInput').value='Rancang QA test plan'; document.getElementById('welcomeSendBtn').click();">Rancang QA test plan</button>
                         <button type="button" class="chip"
                             onclick="document.getElementById('welcomeInput').value='Analisis Market Sentinel'; document.getElementById('welcomeSendBtn').click();">Analisis Market Sentinel</button>
                         <button type="button" class="chip"
-                            onclick="if(window.applyRuntimeMode){window.applyRuntimeMode('playground')}">Buka PhD Research Playground</button>
+                            onclick="if(window.applyRuntimeMode){window.applyRuntimeMode('playground')}">Buka Kuro Playground</button>
                         <button type="button" class="chip"
                             onclick="document.getElementById('welcomeInput').value='Audit requirement ambigu'; document.getElementById('welcomeSendBtn').click();">Audit requirement ambigu</button>
+                        {% endif %}
                     </div>
                 </div>
 
@@ -875,17 +1088,17 @@
                                     <i data-lucide="globe" class="w-4 h-4"></i>
                                     <span>Web Search</span>
                                 </button>
-                                <button type="button" data-composer-action="agent_mode"
+                                <button type="button" data-composer-action="agent_mode" data-krc-agent-action="true"
                                     class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
                                     <i data-lucide="bot" class="w-4 h-4"></i>
                                     <span>Agent Mode</span>
                                 </button>
-                                <button type="button" data-composer-action="task_mode"
+                                <button type="button" data-composer-action="task_mode" data-krc-daily-action="true"
                                     class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
                                     <i data-lucide="check-square" class="w-4 h-4"></i>
                                     <span>Task</span>
                                 </button>
-                                <button type="button" data-composer-action="reminder_mode"
+                                <button type="button" data-composer-action="reminder_mode" data-krc-daily-action="true"
                                     class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
                                     <i data-lucide="bell" class="w-4 h-4"></i>
                                     <span>Reminder</span>
@@ -895,7 +1108,7 @@
 
                         <!-- Text Input -->
                         <div class="flex-1 relative">
-                            <textarea id="welcomeInput" rows="1" placeholder="Type your message..."
+                            <textarea id="welcomeInput" rows="1" placeholder="{% if krc_profile.is_krc or krc_profile.is_dev %}Ask a research question or draft a QA task...{% else %}Type your message...{% endif %}"
                                 class="composer-input w-full px-4 py-3 pr-12 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl text-gray-800 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent resize-none transition-all"></textarea>
                         </div>
 
@@ -961,17 +1174,17 @@
                                 <i data-lucide="globe" class="w-4 h-4"></i>
                                 <span>Web Search</span>
                             </button>
-                            <button type="button" data-composer-action="agent_mode"
+                            <button type="button" data-composer-action="agent_mode" data-krc-agent-action="true"
                                 class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
                                 <i data-lucide="bot" class="w-4 h-4"></i>
                                 <span>Agent Mode</span>
                             </button>
-                            <button type="button" data-composer-action="task_mode"
+                            <button type="button" data-composer-action="task_mode" data-krc-daily-action="true"
                                 class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
                                 <i data-lucide="check-square" class="w-4 h-4"></i>
                                 <span>Task</span>
                             </button>
-                            <button type="button" data-composer-action="reminder_mode"
+                            <button type="button" data-composer-action="reminder_mode" data-krc-daily-action="true"
                                 class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
                                 <i data-lucide="bell" class="w-4 h-4"></i>
                                 <span>Reminder</span>
@@ -986,7 +1199,7 @@
                             class="absolute -top-12 right-0 p-2.5 rounded-full bg-white/80 dark:bg-gray-800/80 backdrop-blur-md shadow-lg border border-gray-200 dark:border-gray-700 text-emerald-500 hover:text-emerald-600 transition-all duration-300 opacity-0 pointer-events-none translate-y-2">
                             <i data-lucide="arrow-down" class="w-5 h-5"></i>
                         </button>
-                        <textarea id="messageInput" rows="1" placeholder="Type your message..."
+                        <textarea id="messageInput" rows="1" placeholder="{% if krc_profile.is_krc or krc_profile.is_dev %}Research Console prompt...{% else %}Type your message...{% endif %}"
                             class="composer-input w-full px-4 py-3 pr-12 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl text-gray-800 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent resize-none transition-all"></textarea>
                     </div>
 
@@ -1124,26 +1337,32 @@
                         <i data-lucide="shield-check" class="w-4 h-4"></i>
                         <span>Runtime Settings</span>
                     </button>
-                    <button type="button" data-admin-settings-tab="market-sentinel" class="admin-settings-tab">
+                    {% if not krc_profile.is_krc or krc_profile.features.market %}
+                    <button type="button" data-admin-settings-tab="market-sentinel" data-krc-feature="market" class="admin-settings-tab">
                         <i data-lucide="line-chart" class="w-4 h-4"></i>
                         <span>Market Sentinel</span>
                     </button>
+                    {% endif %}
                     <button type="button" data-admin-settings-tab="ingestion-center" class="admin-settings-tab">
                         <i data-lucide="database-zap" class="w-4 h-4"></i>
                         <span>Ingestion Center</span>
                     </button>
-                    <button type="button" data-admin-settings-tab="evaluation" class="admin-settings-tab">
+                    {% if not krc_profile.is_krc or krc_profile.features.evaluation %}
+                    <button type="button" data-admin-settings-tab="evaluation" data-krc-feature="evaluation" class="admin-settings-tab">
                         <i data-lucide="clipboard-check" class="w-4 h-4"></i>
                         <span>Evaluation</span>
                     </button>
+                    {% endif %}
                     <button type="button" data-admin-settings-tab="backup" class="admin-settings-tab">
                         <i data-lucide="database-backup" class="w-4 h-4"></i>
                         <span>Backup</span>
                     </button>
-                    <button type="button" data-admin-settings-tab="telegram" class="admin-settings-tab">
+                    {% if not krc_profile.is_krc or krc_profile.features.telegram_center %}
+                    <button type="button" data-admin-settings-tab="telegram" data-krc-feature="telegram_center" class="admin-settings-tab">
                         <i data-lucide="send" class="w-4 h-4"></i>
                         <span>Telegram</span>
                     </button>
+                    {% endif %}
                     <button type="button" data-admin-settings-tab="feature-flags" class="admin-settings-tab">
                         <i data-lucide="flag" class="w-4 h-4"></i>
                         <span>Feature Flags</span>
@@ -1477,10 +1696,11 @@
             masterName: "{{ master_name }}",
                 customPersona: `{{ custom_persona }}`
         };
+        window.KURO_KRC_PROFILE = {{ krc_profile | tojson }};
     </script>
 
     <!-- Custom JS -->
-    <script src="/static/js/app.js?v=20260525-01"></script>
+    <script src="/static/js/app.js?v=20260527-ks-analysis"></script>
 
 </body>
 

@@ -16,6 +16,8 @@ import sys
 import types
 from pathlib import Path
 
+import pytest
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -51,6 +53,11 @@ from kuro_backend.intelligence_engine import build_status_pagi, format_telegram_
 from kuro_backend.telegram_center import actions as telegram_actions
 from kuro_backend.telegram_center import notifications as telegram_notifications
 from kuro_backend.telegram_center import service as telegram_service
+
+
+@pytest.fixture(autouse=True)
+def _default_legacy_profile(monkeypatch):
+    monkeypatch.setenv("KURO_APP_PROFILE", "legacy")
 
 
 class _Resp500:
@@ -550,3 +557,50 @@ def test_operational_digest_includes_core_sections(monkeypatch):
     assert "Market Sentinel" in digest
     assert "Latest briefing: 2026-05-22" in digest
     assert "Buffered" in digest
+
+
+def test_krc_telegram_command_center_hides_market_by_default(monkeypatch):
+    telegram_service.reset_runtime_for_tests()
+    monkeypatch.setenv("KURO_APP_PROFILE", "krc")
+    monkeypatch.delenv("KURO_KRC_MARKET_ENABLED", raising=False)
+    monkeypatch.setattr(main.settings, "TELEGRAM_CHAT_ID", "12345", raising=False)
+    monkeypatch.setattr(telegram_service.auth, "admin_profile", lambda: ("Pantronux", "Master"))
+    bot = _FakeBot()
+    ctx = _FakeContext(bot=bot)
+
+    async def _run():
+        for command in ["/home", "/help", "/sentinel"]:
+            await main.handle_telegram_command(_FakeUpdate(chat_id="12345", text=command), ctx)
+
+    asyncio.run(_run())
+
+    texts = "\n".join(msg["text"] for msg in bot.messages)
+    assert "Kuro Telegram Cockpit" in texts
+    assert "/status" in texts
+    assert "/sentinel" not in texts
+    assert "Market Sentinel disabled" in texts
+
+
+def test_krc_operational_digest_omits_market_by_default(monkeypatch):
+    telegram_notifications.reset_digest_for_tests()
+    telegram_service.reset_runtime_for_tests()
+    monkeypatch.setenv("KURO_APP_PROFILE", "krc")
+    monkeypatch.delenv("KURO_KRC_MARKET_ENABLED", raising=False)
+    monkeypatch.setattr(telegram_service, "system_status_payload", lambda: {
+        "cpu_percent": 1,
+        "ram_percent": 2,
+        "disk_percent": 3,
+        "backup_status": "completed",
+        "backup_at": "now",
+        "inbound_size": 0,
+        "inbound_maxsize": 50,
+        "dlq_pending": 0,
+    })
+    monkeypatch.setattr(telegram_service.auth, "admin_profile", lambda: ("Pantronux", "Master"))
+    monkeypatch.setattr(telegram_service.intelligence_db, "get_briefings", lambda limit=1, username="Pantronux": [{"date": "2026-05-22"}])
+
+    digest = telegram_service.build_operational_digest_text()
+
+    assert "Kuro Operational Digest" in digest
+    assert "Mode: KRC ops command center" in digest
+    assert "Market Sentinel" not in digest

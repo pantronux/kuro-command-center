@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 
 from kuro_backend.config import settings
+from kuro_backend.krc_profile import get_krc_profile_snapshot
 
 
 ENTERPRISE_FLAG_NAMES: tuple[str, ...] = (
@@ -117,8 +118,11 @@ def get_enterprise_flag_snapshot(admin: bool = False) -> Dict[str, Any]:
             "model_aliases": _model_alias_snapshot(),
         }
 
+    krc_snapshot = get_krc_profile_snapshot(public=True)
     return {
         "enterprise_refactor_enabled": flags["KURO_ENTERPRISE_REFACTOR_ENABLED"],
+        "app_profile": krc_snapshot["app_profile"],
+        "krc": krc_snapshot,
         "features": {
             "chat": {
                 "available": True,

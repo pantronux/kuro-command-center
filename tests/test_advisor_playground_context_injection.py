@@ -183,4 +183,7 @@ def test_advisor_context_block_formats_compact_json(monkeypatch):
 
     assert block.startswith("[PLAYGROUND_ADVISOR_CONTEXT]")
     assert "observable forensic artifacts only" in block
+    assert "Do not claim" in block
+    assert "hidden chain-of-thought" in block
+    assert "private provider internals" in block
     assert '"context_type":"playground_advisor_context"' in block

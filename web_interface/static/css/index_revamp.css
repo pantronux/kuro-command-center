@@ -212,6 +212,40 @@ body.kuro-redesign-v1 .search-box input {
     font-size: 13px !important;
 }
 
+body.kuro-redesign-v1 .krc-workspace-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 6px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    background: #1c1c22;
+}
+
+body.kuro-redesign-v1 .krc-nav-item {
+    width: 100%;
+    min-height: 34px;
+    padding: 8px 9px;
+    border: 0;
+    border-radius: 6px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 600;
+    text-align: left;
+    text-decoration: none;
+}
+
+body.kuro-redesign-v1 .krc-nav-item:hover,
+body.kuro-redesign-v1 .krc-nav-item:focus-visible {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+    outline: none;
+}
+
 body.kuro-redesign-v1 input::placeholder,
 body.kuro-redesign-v1 textarea::placeholder {
     color: var(--text-secondary) !important;
@@ -769,6 +803,161 @@ body.kuro-redesign-v1 .markdown-content pre,
 body.kuro-redesign-v1 #playgroundOutput {
     background: #0b0b0b !important;
     border: 1px solid var(--border-subtle) !important;
+}
+
+body.kuro-redesign-v1 .krc-playground-landing {
+    width: 100%;
+    padding: 18px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    background: #1d1d24;
+}
+
+body.kuro-redesign-v1 .krc-landing-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 14px;
+}
+
+body.kuro-redesign-v1 .krc-eyebrow {
+    margin: 0 0 2px;
+    color: #5eead4;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+body.kuro-redesign-v1 .krc-landing-header h3,
+body.kuro-redesign-v1 .krc-landing-card h4 {
+    margin: 0;
+    color: var(--text-primary);
+}
+
+body.kuro-redesign-v1 .krc-landing-header h3 {
+    font-size: 20px;
+    line-height: 1.25;
+}
+
+body.kuro-redesign-v1 .krc-landing-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 10px;
+}
+
+body.kuro-redesign-v1 .krc-landing-card {
+    min-width: 0;
+    padding: 14px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    background: var(--bg-secondary);
+}
+
+body.kuro-redesign-v1 .krc-qa-card {
+    grid-column: span 2;
+}
+
+body.kuro-redesign-v1 .krc-card-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(20, 184, 166, 0.14);
+    color: #5eead4;
+}
+
+body.kuro-redesign-v1 .krc-landing-card h4 {
+    font-size: 15px;
+    line-height: 1.2;
+}
+
+body.kuro-redesign-v1 .krc-landing-card p {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: 13px;
+    line-height: 1.45;
+}
+
+body.kuro-redesign-v1 .krc-action-btn {
+    min-height: 34px;
+    padding: 8px 10px;
+    border: 0;
+    border-radius: 6px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    background: var(--accent-primary);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+body.kuro-redesign-v1 .krc-action-btn.secondary {
+    border: 1px solid var(--border-subtle);
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
+body.kuro-redesign-v1 .krc-action-btn:hover {
+    filter: brightness(1.08);
+}
+
+body.kuro-redesign-v1 .krc-action-btn:disabled {
+    opacity: 0.55;
+    cursor: wait;
+}
+
+body.kuro-redesign-v1 .krc-qa-input {
+    width: 100%;
+    min-height: 112px;
+    padding: 10px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 6px;
+    resize: vertical;
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    font-size: 13px;
+    line-height: 1.45;
+}
+
+body.kuro-redesign-v1 .krc-qa-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+body.kuro-redesign-v1 .krc-qa-output {
+    max-height: 220px;
+    min-height: 88px;
+    margin: 0;
+    padding: 10px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    border: 1px solid var(--border-subtle);
+    border-radius: 6px;
+    background: #0b0b0b;
+    color: #d1fae5;
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+@media (max-width: 900px) {
+    body.kuro-redesign-v1 .krc-landing-header {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    body.kuro-redesign-v1 .krc-qa-card {
+        grid-column: span 1;
+    }
 }
 
 /* Composer */

@@ -17,13 +17,12 @@ def now_wib_label() -> str:
     return datetime.now(tz).strftime("%Y-%m-%d %H:%M WIB")
 
 
-def cockpit_markup() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
+def cockpit_markup(*, include_market: bool = True) -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton("System", callback_data="panel:status")]]
+    if include_market:
+        rows[0].append(InlineKeyboardButton("Market", callback_data="panel:sentinel"))
+    rows.extend(
         [
-            [
-                InlineKeyboardButton("System", callback_data="panel:status"),
-                InlineKeyboardButton("Market", callback_data="panel:sentinel"),
-            ],
             [
                 InlineKeyboardButton("Intelligence", callback_data="panel:briefing"),
                 InlineKeyboardButton("Queue", callback_data="panel:queue"),
@@ -34,6 +33,7 @@ def cockpit_markup() -> InlineKeyboardMarkup:
             ],
         ]
     )
+    return InlineKeyboardMarkup(rows)
 
 
 def back_home_markup(*, refresh_target: str | None = None) -> InlineKeyboardMarkup:
@@ -44,17 +44,21 @@ def back_home_markup(*, refresh_target: str | None = None) -> InlineKeyboardMark
     return InlineKeyboardMarkup([row])
 
 
-def home_panel(display_name: str) -> Panel:
+def home_panel(display_name: str, *, include_market: bool = True) -> Panel:
     text = (
         "Kuro Telegram Cockpit\n"
         f"Operator: {display_name}\n"
         f"Time: {now_wib_label()}\n\n"
         "Pilih panel di bawah, atau kirim pesan biasa untuk chat langsung."
     )
-    return Panel(text=text, reply_markup=cockpit_markup())
+    return Panel(text=text, reply_markup=cockpit_markup(include_market=include_market))
 
 
-def help_panel(command_descriptions: Iterable[tuple[str, str]]) -> Panel:
+def help_panel(
+    command_descriptions: Iterable[tuple[str, str]],
+    *,
+    include_market: bool = True,
+) -> Panel:
     lines = [
         "Kuro Command Registry",
         f"Time: {now_wib_label()}",
@@ -62,7 +66,10 @@ def help_panel(command_descriptions: Iterable[tuple[str, str]]) -> Panel:
     ]
     for name, description in command_descriptions:
         lines.append(f"{name} - {description}")
-    return Panel(text="\n".join(lines), reply_markup=cockpit_markup())
+    return Panel(
+        text="\n".join(lines),
+        reply_markup=cockpit_markup(include_market=include_market),
+    )
 
 
 def ping_panel(queue_summary: Mapping[str, int]) -> Panel:
@@ -157,19 +164,22 @@ def persona_markup(selected_persona: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 
-def actions_panel() -> Panel:
+def actions_panel(*, include_market: bool = True) -> Panel:
     text = (
         "Kuro Actions\n"
         f"Time: {now_wib_label()}\n\n"
         "Aksi mutating membutuhkan konfirmasi sebelum dijalankan."
     )
-    markup = InlineKeyboardMarkup(
+    rows = []
+    if include_market:
+        rows.append([InlineKeyboardButton("Run Sentinel", callback_data="action:run_sentinel")])
+    rows.extend(
         [
-            [InlineKeyboardButton("Run Sentinel", callback_data="action:run_sentinel")],
             [InlineKeyboardButton("Run Backup", callback_data="action:run_backup")],
             [InlineKeyboardButton("Home", callback_data="home")],
         ]
     )
+    markup = InlineKeyboardMarkup(rows)
     return Panel(text=text, reply_markup=markup)
 
 

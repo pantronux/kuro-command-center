@@ -72,6 +72,23 @@ const COMPOSER_ACTION_TO_TOOL_ID = {
     reminder_mode: 'create_reminder',
 };
 
+const KRC_PROFILE = window.KURO_KRC_PROFILE || { app_profile: 'legacy', features: {} };
+
+function isKrcProfileActive() {
+    const profile = String(KRC_PROFILE.app_profile || '').toLowerCase();
+    return profile === 'krc' || profile === 'dev';
+}
+
+function isKrcAdvisorLockedProfile() {
+    return String(KRC_PROFILE.app_profile || '').toLowerCase() === 'krc';
+}
+
+function getKrcFeature(name) {
+    if (!isKrcProfileActive()) return true;
+    if (String(KRC_PROFILE.app_profile || '').toLowerCase() === 'dev') return true;
+    return Boolean((KRC_PROFILE.features || {})[name]);
+}
+
 // ============================================
 // Authentication Helper Functions (Cookie-Based)
 // ============================================
@@ -131,10 +148,10 @@ async function authFetch(url, options = {}) {
 let selectedFiles = [];
 let isProcessing = false;
 let chatHistory = [];
-let selectedPersona = 'consultant';
+let selectedPersona = isKrcAdvisorLockedProfile() ? 'advisor' : 'consultant';
 let currentChatId = null;
 let chatSessions = [];
-let runtimeMode = localStorage.getItem('kuro-runtime-mode') || 'normal';
+let runtimeMode = localStorage.getItem('kuro-runtime-mode') || (isKrcProfileActive() ? 'playground' : 'normal');
 let playgroundSessionId = null;
 let playgroundExecuting = false;
 let playgroundHistorySessionId = null;
@@ -622,6 +639,14 @@ const elements = {
     navSystemStatus: document.getElementById('navSystemStatus'),
     navSettings: document.getElementById('navSettings'),
     navFiles: document.getElementById('navFiles'),
+    krcWorkspaceNav: document.getElementById('krcWorkspaceNav'),
+    krcNavResearchConsole: document.getElementById('krcNavResearchConsole'),
+    krcNavResearchPlayground: document.getElementById('krcNavResearchPlayground'),
+    krcNavQAPlayground: document.getElementById('krcNavQAPlayground'),
+    krcNavKnowledge: document.getElementById('krcNavKnowledge'),
+    krcNavIngestion: document.getElementById('krcNavIngestion'),
+    krcNavEvaluation: document.getElementById('krcNavEvaluation'),
+    krcNavExport: document.getElementById('krcNavExport'),
     // Files Modal
     filesModal: null,
     filesContent: null,
@@ -684,12 +709,15 @@ const elements = {
     playgroundSessionId: document.getElementById('playgroundSessionId'),
     playgroundOutput: document.getElementById('playgroundOutput'),
     playgroundCopyOutputBtn: document.getElementById('playgroundCopyOutputBtn'),
+    playgroundKsAnalysisMode: document.getElementById('playgroundKsAnalysisMode'),
+    playgroundAnalyzeInKsBtn: document.getElementById('playgroundAnalyzeInKsBtn'),
     playgroundDownloadOutputBtn: document.getElementById('playgroundDownloadOutputBtn'),
     playgroundHistoryList: document.getElementById('playgroundHistoryList'),
     playgroundHistoryDetail: document.getElementById('playgroundHistoryDetail'),
     playgroundHistoryMeta: document.getElementById('playgroundHistoryMeta'),
     playgroundHistoryExecutions: document.getElementById('playgroundHistoryExecutions'),
     playgroundDownloadSessionArtifactBtn: document.getElementById('playgroundDownloadSessionArtifactBtn'),
+    playgroundAnalyzeSessionInKsBtn: document.getElementById('playgroundAnalyzeSessionInKsBtn'),
     playgroundArtifactDrawer: document.getElementById('playgroundArtifactDrawer'),
     playgroundArtifactDrawerBackdrop: document.getElementById('playgroundArtifactDrawerBackdrop'),
     playgroundArtifactDrawerClose: document.getElementById('playgroundArtifactDrawerClose'),
@@ -697,6 +725,20 @@ const elements = {
     playgroundArtifactIntegrity: document.getElementById('playgroundArtifactIntegrity'),
     playgroundArtifactTransformation: document.getElementById('playgroundArtifactTransformation'),
     playgroundArtifactProvenance: document.getElementById('playgroundArtifactProvenance'),
+    krcPlaygroundLanding: document.getElementById('krcPlaygroundLanding'),
+    krcLandingConsoleBtn: document.getElementById('krcLandingConsoleBtn'),
+    krcLandingKnowledgeBtn: document.getElementById('krcLandingKnowledgeBtn'),
+    krcLandingIngestionBtn: document.getElementById('krcLandingIngestionBtn'),
+    krcLandingEvaluationBtn: document.getElementById('krcLandingEvaluationBtn'),
+    krcLandingExportBtn: document.getElementById('krcLandingExportBtn'),
+    qaRequirementInput: document.getElementById('qaRequirementInput'),
+    qaInterpretBtn: document.getElementById('qaInterpretBtn'),
+    qaTestcasesBtn: document.getElementById('qaTestcasesBtn'),
+    qaGherkinBtn: document.getElementById('qaGherkinBtn'),
+    qaAmbiguityBtn: document.getElementById('qaAmbiguityBtn'),
+    qaCoverageBtn: document.getElementById('qaCoverageBtn'),
+    qaExportBtn: document.getElementById('qaExportBtn'),
+    qaPlaygroundOutput: document.getElementById('qaPlaygroundOutput'),
     exportModal: document.getElementById('exportModal'),
     exportBackdrop: document.getElementById('exportBackdrop'),
     closeExportModal: document.getElementById('closeExportModal'),
@@ -804,10 +846,101 @@ function setupAdminNavigationGuards() {
     }
 }
 
+function applyKrcProfileUI() {
+    if (!isKrcProfileActive()) return;
+    document.body.classList.add('krc-profile-mode');
+
+    if (!getKrcFeature('daily_tasks')) {
+        document.querySelectorAll('[data-krc-daily-action="true"]').forEach((node) => {
+            node.style.display = 'none';
+        });
+    }
+    if (!getKrcFeature('agent_tools')) {
+        document.querySelectorAll('[data-krc-agent-action="true"]').forEach((node) => {
+            node.style.display = 'none';
+        });
+    }
+    document.querySelectorAll('[data-krc-feature]').forEach((node) => {
+        const feature = node.dataset.krcFeature;
+        if (feature && !getKrcFeature(feature)) {
+            node.style.display = 'none';
+        }
+    });
+    if (elements.headerPersonaLabel && !currentChatId) {
+        elements.headerPersonaLabel.textContent = isKrcAdvisorLockedProfile() ? 'Advisor' : 'Research Console';
+    }
+    if (elements.headerChatTitle && !currentChatId) {
+        elements.headerChatTitle.textContent = 'Kuro Research Center';
+    }
+}
+
+function openKrcResearchConsole() {
+    applyRuntimeMode('normal');
+    if (!currentChatId) showWelcomeScreen();
+    const input = resolveComposerInputElement();
+    input?.focus();
+}
+
+function openKrcQaPlayground() {
+    if (!getKrcFeature('qa_playground')) {
+        showToast('QA Playground is disabled in KRC research mode.', 'info');
+        return;
+    }
+    applyRuntimeMode('playground');
+    requestAnimationFrame(() => {
+        elements.qaRequirementInput?.focus();
+        elements.qaRequirementInput?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    });
+}
+
+function openKrcKnowledge() {
+    if (isCurrentUserAdmin()) {
+        openAdminSettings('memory-v3');
+        return;
+    }
+    queueComposerPrompt('Search approved knowledge for:');
+}
+
+function openKrcIngestion() {
+    if (isCurrentUserAdmin()) {
+        window.location.href = '/ingestion';
+        return;
+    }
+    showToast('Akses ditolak: halaman ini hanya untuk Administrator.', 'error');
+}
+
+function openKrcEvaluation() {
+    if (!getKrcFeature('evaluation')) {
+        showToast('Evaluation is disabled in KRC research mode.', 'info');
+        return;
+    }
+    if (isCurrentUserAdmin()) {
+        openAdminSettings('evaluation');
+        return;
+    }
+    showToast('Akses ditolak: halaman ini hanya untuk Administrator.', 'error');
+}
+
+function openKrcExport() {
+    if (!getKrcFeature('export')) {
+        showToast('Export is disabled in KRC research mode.', 'info');
+        return;
+    }
+    if (currentChatId) {
+        exportChatSession(currentChatId);
+        return;
+    }
+    showToast('Start or open a Research Console session before exporting chat reports.', 'info');
+}
+
+window.openKrcQaPlayground = openKrcQaPlayground;
+window.openKrcIngestion = openKrcIngestion;
+
 document.addEventListener('DOMContentLoaded', async () => {
     await fetchCurrentUserProfile();
     applyAdminVisibilityGuards();
     setupAdminNavigationGuards();
+    applyKrcProfileUI();
     lucide.createIcons();
 
     marked.setOptions({
@@ -995,6 +1128,24 @@ function setupEventListeners() {
             elements.userDropdownMenu?.classList.add('hidden');
         });
     }
+
+    elements.krcNavResearchConsole?.addEventListener('click', openKrcResearchConsole);
+    elements.krcNavResearchPlayground?.addEventListener('click', () => applyRuntimeMode('playground'));
+    elements.krcNavQAPlayground?.addEventListener('click', openKrcQaPlayground);
+    elements.krcNavKnowledge?.addEventListener('click', openKrcKnowledge);
+    elements.krcNavEvaluation?.addEventListener('click', openKrcEvaluation);
+    elements.krcNavExport?.addEventListener('click', openKrcExport);
+    elements.krcLandingConsoleBtn?.addEventListener('click', openKrcResearchConsole);
+    elements.krcLandingKnowledgeBtn?.addEventListener('click', openKrcKnowledge);
+    elements.krcLandingIngestionBtn?.addEventListener('click', openKrcIngestion);
+    elements.krcLandingEvaluationBtn?.addEventListener('click', openKrcEvaluation);
+    elements.krcLandingExportBtn?.addEventListener('click', openKrcExport);
+    elements.qaInterpretBtn?.addEventListener('click', () => runQaPlaygroundAction('interpret'));
+    elements.qaTestcasesBtn?.addEventListener('click', () => runQaPlaygroundAction('generate-testcases'));
+    elements.qaGherkinBtn?.addEventListener('click', () => runQaPlaygroundAction('generate-gherkin'));
+    elements.qaAmbiguityBtn?.addEventListener('click', () => runQaPlaygroundAction('analyze-ambiguity'));
+    elements.qaCoverageBtn?.addEventListener('click', () => runQaPlaygroundAction('coverage-matrix'));
+    elements.qaExportBtn?.addEventListener('click', () => runQaPlaygroundAction('export'));
 
     // Settings Modal
     if (elements.navSettings) {
@@ -1291,11 +1442,17 @@ function setupEventListeners() {
     if (elements.playgroundCopyOutputBtn) {
         elements.playgroundCopyOutputBtn.addEventListener('click', copyPlaygroundOutput);
     }
+    if (elements.playgroundAnalyzeInKsBtn) {
+        elements.playgroundAnalyzeInKsBtn.addEventListener('click', () => analyzePlaygroundInKuroStack({ preferSelectedSession: false }));
+    }
     if (elements.playgroundDownloadOutputBtn) {
         elements.playgroundDownloadOutputBtn.addEventListener('click', downloadPlaygroundOutput);
     }
     if (elements.playgroundDownloadSessionArtifactBtn) {
         elements.playgroundDownloadSessionArtifactBtn.addEventListener('click', downloadSelectedSessionArtifact);
+    }
+    if (elements.playgroundAnalyzeSessionInKsBtn) {
+        elements.playgroundAnalyzeSessionInKsBtn.addEventListener('click', () => analyzePlaygroundInKuroStack({ preferSelectedSession: true }));
     }
 }
 
@@ -1842,6 +1999,67 @@ async function submitPlaygroundLink(clear = false) {
         closePlaygroundLinkModal();
     }
 }
+
+async function resolveLatestPlaygroundSessionIdForAdvisor() {
+    const localSid = (playgroundHistorySessionId || playgroundSessionId || '').trim();
+    if (localSid) return localSid;
+    const response = await authFetch('/api/playground/sessions/latest');
+    if (!response.ok) {
+        throw new Error('No Playground session is available yet.');
+    }
+    const payload = await response.json();
+    return String(payload.session_id || payload.id || '').trim();
+}
+
+async function ensureResearchConsoleSessionForPlaygroundLink() {
+    if (currentChatId) return currentChatId;
+    const response = await authFetch(`${CONFIG.API_BASE}/chats`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            persona: 'advisor',
+            title: 'Playground Advisor Session',
+        }),
+    });
+    const payload = await response.json();
+    if (!response.ok || payload.status !== 'success' || !payload.data?.chat_id) {
+        throw new Error(payload.error || payload.message || 'Unable to create Research Console session.');
+    }
+    currentChatId = payload.data.chat_id;
+    await loadChatSessions();
+    updateConversationHeader();
+    return currentChatId;
+}
+
+async function linkLatestPlaygroundToResearchConsole() {
+    try {
+        selectedPersona = 'advisor';
+        localStorage.setItem('kuro-persona', selectedPersona);
+        localStorage.setItem('kuro_persona', selectedPersona);
+        const sessionId = await resolveLatestPlaygroundSessionIdForAdvisor();
+        if (!sessionId) throw new Error('No Playground session is available yet.');
+        const chatId = await ensureResearchConsoleSessionForPlaygroundLink();
+        const response = await authFetch(`${CONFIG.API_BASE}/chats/${chatId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ linked_playground_session_id: sessionId }),
+        });
+        if (!response.ok) {
+            throw new Error('Failed to link Playground session.');
+        }
+        const session = chatSessions.find(s => s.chat_id === chatId);
+        if (session) session.linked_playground_session_id = sessionId;
+        ensureNormalModeForChatNavigation();
+        updatePersonaUI();
+        updateConversationHeader();
+        renderChatSessions();
+        showNotification(`Linked Playground session ${sessionId} to Advisor.`, 'success');
+    } catch (error) {
+        showNotification(error.message || 'Failed to link latest Playground session.', 'error');
+    }
+}
+
+window.linkLatestPlaygroundToResearchConsole = linkLatestPlaygroundToResearchConsole;
 
 // ============================================
 // Sidebar Collapse Toggle (Desktop)
@@ -2492,6 +2710,57 @@ async function parsePlaygroundJson(response) {
     }
 }
 
+async function runQaPlaygroundAction(action) {
+    if (!elements.qaRequirementInput || !elements.qaPlaygroundOutput) return;
+    const requirement = (elements.qaRequirementInput.value || '').trim();
+    if (!requirement) {
+        elements.qaPlaygroundOutput.textContent = 'Paste a requirement first.';
+        elements.qaRequirementInput.focus();
+        return;
+    }
+    const endpoint = {
+        interpret: '/api/playground/qa/interpret',
+        'generate-testcases': '/api/playground/qa/generate-testcases',
+        'generate-gherkin': '/api/playground/qa/generate-gherkin',
+        'analyze-ambiguity': '/api/playground/qa/analyze-ambiguity',
+        'coverage-matrix': '/api/playground/qa/coverage-matrix',
+        export: '/api/playground/qa/export',
+    }[action];
+    if (!endpoint) return;
+
+    const buttons = [
+        elements.qaInterpretBtn,
+        elements.qaTestcasesBtn,
+        elements.qaGherkinBtn,
+        elements.qaAmbiguityBtn,
+        elements.qaCoverageBtn,
+        elements.qaExportBtn,
+    ].filter(Boolean);
+    buttons.forEach((button) => { button.disabled = true; });
+    elements.qaPlaygroundOutput.textContent = 'Running QA Playground...';
+    try {
+        const headers = { 'Content-Type': 'application/json' };
+        if (currentChatId) headers['X-Chat-Session'] = currentChatId;
+        const requestBody = { requirement };
+        if (action === 'export') requestBody.format = 'json';
+        const response = await authFetch(endpoint, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(requestBody),
+        });
+        const payload = await parsePlaygroundJson(response);
+        if (!response.ok) {
+            elements.qaPlaygroundOutput.textContent = formatPlaygroundError('QA Playground', response, payload);
+            return;
+        }
+        elements.qaPlaygroundOutput.textContent = JSON.stringify(payload || {}, null, 2);
+    } catch (error) {
+        elements.qaPlaygroundOutput.textContent = `QA Playground failed: ${error.message}`;
+    } finally {
+        buttons.forEach((button) => { button.disabled = false; });
+    }
+}
+
 function resolvePlaygroundSessionId(payload) {
     if (!payload || typeof payload !== 'object') return null;
     if (typeof payload.session_id === 'string' && payload.session_id) return payload.session_id;
@@ -2729,6 +2998,18 @@ async function downloadPlaygroundArtifactJson(sessionId, type, executionId = nul
     }
 }
 
+async function fetchPlaygroundArtifactText(sessionId, type = 'session', executionId = null) {
+    const q = new URLSearchParams({ type });
+    if (executionId) q.set('execution_id', executionId);
+    const url = `/api/playground/sessions/${encodeURIComponent(sessionId)}/artifacts/json?${q.toString()}`;
+    const response = await authFetch(url);
+    if (!response.ok) {
+        const payload = await parsePlaygroundJson(response);
+        throw new Error(formatPlaygroundError('Artifact fetch', response, payload));
+    }
+    return response.text();
+}
+
 async function downloadSelectedSessionArtifact() {
     const sid = playgroundHistorySessionId || playgroundSessionId;
     if (!sid) {
@@ -2736,6 +3017,234 @@ async function downloadSelectedSessionArtifact() {
         return;
     }
     await downloadPlaygroundArtifactJson(sid, 'session', null, elements.playgroundDownloadSessionArtifactBtn);
+}
+
+function resolveKuroStackAnalysisUrl() {
+    if (typeof window.KURO_STACK_ANALYSIS_URL === 'string' && window.KURO_STACK_ANALYSIS_URL.trim()) {
+        return window.KURO_STACK_ANALYSIS_URL.trim();
+    }
+    const protocol = window.location.protocol === 'http:' ? 'http:' : 'https:';
+    const host = window.location.hostname || '127.0.0.1';
+    return `${protocol}//${host}:9443/`;
+}
+
+function resolveKuroStackChatUrl(chatId) {
+    const base = resolveKuroStackAnalysisUrl().replace(/\/+$/, '');
+    return `${base}/c/${encodeURIComponent(chatId)}`;
+}
+
+function normalizeJsonForAnalysis(rawText) {
+    const text = String(rawText || '').trim();
+    if (!text) return '';
+    try {
+        return JSON.stringify(JSON.parse(text), null, 2);
+    } catch (_) {
+        return text;
+    }
+}
+
+function getPlaygroundKsAnalysisMode() {
+    const value = String(elements.playgroundKsAnalysisMode?.value || 'auto').trim();
+    const allowed = new Set(['auto', 'summary', 'integrity', 'forensic', 'divergence', 'ontology', 'lineage', 'qa']);
+    return allowed.has(value) ? value : 'auto';
+}
+
+function getPlaygroundKsWorkflowMode() {
+    const value = String(elements.playgroundWorkflowModeSelect?.value || 'quick').trim();
+    const allowed = new Set(['quick', 'deep', 'academic']);
+    return allowed.has(value) ? value : 'quick';
+}
+
+function buildKuroStackPlaygroundAnalysisPrompt({
+    sessionId,
+    sourceLabel,
+    jsonText,
+    analysisMode = 'auto',
+    workflowMode = 'quick',
+}) {
+    const normalizedJson = normalizeJsonForAnalysis(jsonText);
+    const headers = {
+        auto: 'Tolong analisis artifact Playground ini sebagai handoff KRC ke Kuro Stack. Pilih perspektif analisis paling sesuai dengan isi session.',
+        summary: 'Tolong buat ringkasan eksekusi Playground: tujuan prompt, provider/model, hasil utama, keterbatasan data, dan keputusan operasional.',
+        integrity: 'Tolong audit integrity artifact ini. Fokus pada session_integrity, integrity_overview, snapshot trust, hash/provenance, dan risiko bukti.',
+        forensic: 'Tolong lakukan forensic review. Bedakan raw evidence, canonical trace, visible reasoning artifact, provider output, dan asumsi.',
+        divergence: 'Tolong analisis semantic divergence dan provider variance. Bandingkan jawaban antar provider dan rekomendasikan adjudication.',
+        ontology: 'Tolong analisis dari perspektif ontology: entity, relation, klaim, dependency, graph gap, dan knowledge structure berikutnya.',
+        lineage: 'Tolong analisis lineage dan provenance: raw-to-canonical-to-report, custody events, drift point, dan verifikasi ulang.',
+        qa: 'Tolong analisis artifact ini sebagai QA/evaluator: test idea, ambiguity, coverage gap, acceptance criteria, dan regression check.',
+    };
+    return `${headers[analysisMode] || headers.auto}
+
+Sebelum analisis, panggil Kuro Knowledge Gateway untuk mengambil konteks:
+- query="KRC Playground Runtime"
+- domain="research"
+- max_results=3
+
+Konteks data:
+- Sumber: ${sourceLabel || 'KRC Playground Runtime'}
+- Session ID: ${sessionId || '-'}
+- Analysis mode: ${analysisMode}
+- Workflow mode: ${workflowMode}
+
+Output yang diminta:
+1. Executive summary singkat.
+2. Temuan utama berdasarkan JSON.
+3. Integrity/trust state dan dampaknya.
+4. Risiko, anomali, atau data yang perlu diverifikasi.
+5. Rekomendasi tindakan berikutnya untuk consultant/evaluator.
+6. Follow-up prompt yang layak dijalankan di KRC Playground.
+
+Data JSON session/output:
+\`\`\`json
+${normalizedJson}
+\`\`\``;
+}
+
+async function writeTextToClipboard(text) {
+    try {
+        await navigator.clipboard.writeText(text);
+        return true;
+    } catch (_) {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.setAttribute('readonly', 'readonly');
+        textarea.style.position = 'fixed';
+        textarea.style.left = '-9999px';
+        document.body.appendChild(textarea);
+        textarea.select();
+        let copied = false;
+        try {
+            copied = document.execCommand('copy');
+        } catch (error) {
+            copied = false;
+        }
+        textarea.remove();
+        return copied;
+    }
+}
+
+async function resolvePlaygroundAnalysisPayload(preferSelectedSession) {
+    const sid = (preferSelectedSession ? playgroundHistorySessionId : null) || playgroundHistorySessionId || playgroundSessionId;
+    if (sid) {
+        const artifactText = await fetchPlaygroundArtifactText(sid, 'session');
+        return {
+            sessionId: sid,
+            sourceLabel: 'KRC session artifact',
+            jsonText: artifactText,
+            analysisMode: getPlaygroundKsAnalysisMode(),
+            workflowMode: getPlaygroundKsWorkflowMode(),
+        };
+    }
+
+    const outputText = getPlaygroundOutputText();
+    if (!outputText || outputText === '(no output)') {
+        throw new Error('No Playground session or output available to analyze.');
+    }
+    return {
+        sessionId: '-',
+        sourceLabel: 'current Playground Output panel',
+        jsonText: outputText,
+        analysisMode: getPlaygroundKsAnalysisMode(),
+        workflowMode: getPlaygroundKsWorkflowMode(),
+    };
+}
+
+function resolvePlaygroundHandoffRequest(preferSelectedSession) {
+    const sid = (preferSelectedSession ? playgroundHistorySessionId : null) || playgroundHistorySessionId || playgroundSessionId;
+    const requestBody = {
+        analysis_mode: getPlaygroundKsAnalysisMode(),
+        workflow_mode: getPlaygroundKsWorkflowMode(),
+    };
+    if (sid) {
+        return {
+            ...requestBody,
+            session_id: sid,
+            source_label: 'KRC Playground session artifact',
+        };
+    }
+    const outputText = getPlaygroundOutputText();
+    if (!outputText || outputText === '(no output)') {
+        throw new Error('No Playground session or output available to analyze.');
+    }
+    return {
+        ...requestBody,
+        source_label: 'current Playground Output panel',
+        output_text: outputText,
+    };
+}
+
+async function copyFallbackAnalysisPrompt(preferSelectedSession, openedWindow = null) {
+    const payload = await resolvePlaygroundAnalysisPayload(preferSelectedSession);
+    const prompt = buildKuroStackPlaygroundAnalysisPrompt(payload);
+    const copied = await writeTextToClipboard(prompt);
+    if (openedWindow) {
+        openedWindow.location.href = resolveKuroStackAnalysisUrl();
+    }
+    if (copied) {
+        showToast('Bridge gagal, tapi prompt analisis + JSON sudah dicopy. Paste di Kuro Stack lalu kirim.', 'info');
+    } else {
+        playgroundPrint(prompt);
+        showToast('Bridge dan clipboard gagal. Prompt analisis ditampilkan di Playground Output.', 'error');
+    }
+}
+
+async function analyzePlaygroundInKuroStack({ preferSelectedSession = false } = {}) {
+    const button = preferSelectedSession ? elements.playgroundAnalyzeSessionInKsBtn : elements.playgroundAnalyzeInKsBtn;
+    const fallbackText = 'Analyze in KS';
+    const originalText = button ? button.textContent : fallbackText;
+    let openedWindow = null;
+    if (button) {
+        button.disabled = true;
+        button.textContent = 'Creating...';
+    }
+    try {
+        openedWindow = window.open('about:blank', '_blank');
+        if (openedWindow) {
+            openedWindow.opener = null;
+            openedWindow.document.write('<title>Kuro Stack Handoff</title><body style="background:#111;color:#eee;font-family:sans-serif;padding:24px">Creating Kuro Stack analysis chat...</body>');
+            openedWindow.document.close();
+        }
+    } catch (_) {
+        openedWindow = null;
+    }
+
+    try {
+        const response = await authFetch('/api/integrations/kuro-stack/analyze-playground', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(resolvePlaygroundHandoffRequest(preferSelectedSession)),
+        });
+        const payload = await parsePlaygroundJson(response);
+        if (!response.ok) {
+            throw new Error(payload?.detail || payload?.error || `HTTP ${response.status}`);
+        }
+        const targetUrl = resolveKuroStackChatUrl(payload.chat_id);
+        if (openedWindow) {
+            openedWindow.location.href = targetUrl;
+        } else {
+            playgroundPrint(`Kuro Stack analysis chat created: ${targetUrl}`);
+            showToast('Chat analisis dibuat. Popup diblokir browser, URL ditampilkan di Playground Output.', 'info');
+        }
+        if (button) button.textContent = 'Created';
+        showToast('Kuro Stack analysis chat dibuat dan analisis mulai berjalan.', 'success');
+    } catch (error) {
+        playgroundPrint(`Analyze in KS bridge failed: ${error.message}`);
+        try {
+            await copyFallbackAnalysisPrompt(preferSelectedSession, openedWindow);
+            if (button) button.textContent = 'Copied';
+        } catch (fallbackError) {
+            playgroundPrint(`Analyze in KS fallback failed: ${fallbackError.message}`);
+            showToast(`Analyze in KS failed: ${fallbackError.message}`, 'error');
+            if (button) button.textContent = 'Failed';
+        }
+    } finally {
+        setTimeout(() => {
+            if (button) {
+                button.disabled = false;
+                button.textContent = originalText || fallbackText;
+            }
+        }, 1400);
+    }
 }
 
 function setPlaygroundExecuteLoading(isLoading) {
@@ -4190,11 +4699,22 @@ function closeAdminSettings() {
     elements.adminSettingsModal.classList.remove('flex');
 }
 
+function isAdminSettingsTabVisibleInKrc(tabId) {
+    if (!isKrcProfileActive()) return true;
+    if (tabId === 'market-sentinel') return getKrcFeature('market');
+    if (tabId === 'telegram') return getKrcFeature('telegram_center');
+    if (tabId === 'evaluation') return getKrcFeature('evaluation');
+    return true;
+}
+
 function selectAdminSettingsTab(tabId) {
     if (!elements.adminSettingsContent) return;
-    const safeTabId = (ADMIN_SETTINGS_DEFINITIONS[tabId] || tabId === 'ai-temperature')
+    let safeTabId = (ADMIN_SETTINGS_DEFINITIONS[tabId] || tabId === 'ai-temperature')
         ? tabId
         : 'system-status';
+    if (!isAdminSettingsTabVisibleInKrc(safeTabId)) {
+        safeTabId = 'system-status';
+    }
     activeAdminSettingsTab = safeTabId;
     elements.adminSettingsTabs?.forEach((button) => {
         button.classList.toggle('active', button.dataset.adminSettingsTab === safeTabId);
@@ -4875,6 +5395,7 @@ const personaAliases = {
 };
 
 function normalizePersona(persona) {
+    if (isKrcAdvisorLockedProfile()) return 'advisor';
     const raw = String(persona || '').trim().toLowerCase();
     if (VALID_PERSONAS.includes(raw)) return raw;
     if (personaAliases[raw]) return personaAliases[raw];
@@ -4923,6 +5444,17 @@ function updatePersonaLabel() {
 }
 
 async function applyPersona() {
+    if (isKrcAdvisorLockedProfile()) {
+        selectedPersona = 'advisor';
+        localStorage.setItem('kuro-persona', selectedPersona);
+        localStorage.setItem('kuro_persona', selectedPersona);
+        setPersonaInUrl(selectedPersona, true);
+        updatePersonaUI();
+        await loadChatSessions();
+        showNotification('KRC Research Console is locked to Advisor.', 'info');
+        return;
+    }
+
     // Show loading state
     elements.messageInput.disabled = true;
     if(elements.sendBtn) elements.sendBtn.disabled = true;
@@ -4960,10 +5492,12 @@ async function loadPersona() {
     const urlPersona = getPersonaFromUrl();
     const savedPersona = localStorage.getItem('kuro-persona');
 
-    if (restricted) {
+    if (isKrcAdvisorLockedProfile()) {
+        selectedPersona = 'advisor';
+    } else if (restricted) {
         selectedPersona = restricted;
         // Disable other options in UI
-        document.querySelectorAll('.persona-option').forEach(option => {
+        document.querySelectorAll('.persona-option, .persona-option-v2').forEach(option => {
             if (option.dataset.persona !== restricted) {
                 option.disabled = true;
                 option.classList.add('opacity-50', 'cursor-not-allowed');
