@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<!--
+  Header Doc ---
+  Purpose: Additive KRC UI shell based on Kuro-UI-Prototype structure.
+  Caller: main.py GET "/krc-shell" behind KURO_KRC_SHELL_ENABLED.
+  Dependencies: static/css/krc_shell.css, static/js/krc_shell.js, Lucide, marked.js.
+  Main Sections: prototype sidebar, header, Research Console, Playground Runtime,
+                 profile menu, runtime drawer, admin settings modal.
+  Side Effects: Uses existing chat/session/read-only admin APIs only.
+-->
+<html lang="en" class="dark krc-prototype-root" data-krc-shell="prototype-structured" data-prototype-source="Kuro-UI-Prototype">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kuro Research Center Shell</title>
+    <link rel="icon" type="image/x-icon" href="/profile/favicon.ico">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link rel="stylesheet" href="/static/css/krc_shell.css?v=20260530-05">
+    <script id="krcShellContext" type="application/json">{{ krc_shell | tojson }}</script>
+</head>
+<body
+    class="krc-shell-body"
+    data-krc-shell-route="/krc-shell"
+    data-krc-shell-admin="{{ 'true' if is_admin else 'false' }}"
+    data-krc-shell-role="{{ role }}"
+>
+    <div id="krcShell" class="krc-shell" data-testid="krc-shell">
+        <aside id="krcSidebar" class="krc-sidebar" data-prototype-marker="sidebar-session-playground">
+            <div class="krc-sidebar-brand">
+                <a class="krc-brand-lockup" href="/krc-shell" aria-label="Kuro Research Center">
+                    <span class="krc-monogram">K</span>
+                    <span class="krc-brand-copy">
+                        <span class="krc-brand-title">Kuro Research Center</span>
+                        <span class="krc-brand-subtitle">Kuro Playground</span>
+                    </span>
+                </a>
+                <button id="krcNewConsoleBtn" class="krc-primary-btn krc-full-btn" type="button" data-testid="button-new-research-console">
+                    <i data-lucide="plus" aria-hidden="true"></i>
+                    <span>New Research Console</span>
+                </button>
+            </div>
+
+            <nav class="krc-module-nav" aria-label="KRC workspace">
+                <button class="krc-nav-item is-active" type="button" data-krc-view-target="console" id="krcShellNavResearchConsole">
+                    <i data-lucide="layout-grid" aria-hidden="true"></i>
+                    <span>Research Console</span>
+                </button>
+                <button class="krc-nav-item" type="button" data-krc-view-target="playground" id="krcShellNavPlaygroundRuntime">
+                    <i data-lucide="terminal" aria-hidden="true"></i>
+                    <span>Playground Runtime</span>
+                </button>
+                <a class="krc-nav-item krc-link-item" href="/chat" id="krcShellNavLegacyChat">
+                    <i data-lucide="message-square" aria-hidden="true"></i>
+                    <span>Legacy Chat</span>
+                </a>
+                {% if krc_shell.can_admin %}
+                <a class="krc-nav-item krc-link-item" href="/ingestion" id="krcShellNavIngestion" data-admin-only="true">
+                    <i data-lucide="database-zap" aria-hidden="true"></i>
+                    <span>Ingestion</span>
+                </a>
+                {% endif %}
+            </nav>
+
+            <div class="krc-sidebar-divider"></div>
+
+            <div class="krc-sidebar-search">
+                <i data-lucide="search" aria-hidden="true"></i>
+                <input id="krcSessionSearch" type="search" placeholder="Search sessions" autocomplete="off">
+            </div>
+
+            <div class="krc-persona-lock" data-krc-persona-locked="true">
+                <i data-lucide="user-cog" aria-hidden="true"></i>
+                <span>Persona: <strong>Advisor</strong></span>
+                <span class="krc-lock-pill"><i data-lucide="lock" aria-hidden="true"></i> Locked</span>
+            </div>
+
+            <div class="krc-session-scroll" data-prototype-marker="session-focused-sidebar">
+                <section class="krc-session-group">
+                    <div class="krc-section-label">
+                        <i data-lucide="pin" aria-hidden="true"></i>
+                        <span>Pinned</span>
+                    </div>
+                    <div id="krcPinnedSessions" class="krc-session-list" aria-live="polite"></div>
+                </section>
+                <section class="krc-session-group">
+                    <div class="krc-section-label">
+                        <i data-lucide="clock" aria-hidden="true"></i>
+                        <span>Recent</span>
+                    </div>
+                    <div id="krcRecentSessions" class="krc-session-list" aria-live="polite"></div>
+                </section>
+            </div>
+
+            <div class="krc-user-card-wrap">
+                <button id="krcProfileButton" class="krc-user-card" type="button" aria-haspopup="true" aria-expanded="false" data-testid="button-profile-menu">
+                    <span class="krc-user-avatar">{{ krc_shell.initial }}</span>
+                    <span class="krc-user-copy">
+                        <span class="krc-user-name">{{ display_name }}</span>
+                        <span class="krc-user-role">{{ role }}</span>
+                    </span>
+                    <i data-lucide="settings" aria-hidden="true"></i>
+                </button>
+                <div id="krcProfileMenu" class="krc-profile-menu" hidden data-prototype-marker="profile-menu">
+                    <div class="krc-profile-menu-header">
+                        <span class="krc-user-avatar large">{{ krc_shell.initial }}</span>
+                        <span>
+                            <strong>{{ display_name }}</strong>
+                            <small>{{ username }}</small>
+                        </span>
+                    </div>
+                    <a href="/profile" class="krc-menu-row">
+                        <i data-lucide="user" aria-hidden="true"></i>
+                        <span>Profile Settings</span>
+                    </a>
+                    {% if krc_shell.can_admin %}
+                    <button id="krcOpenAdminSettings" class="krc-menu-row" type="button" data-admin-only="true">
+                        <i data-lucide="sliders-horizontal" aria-hidden="true"></i>
+                        <span>Administration Settings</span>
+                    </button>
+                    {% endif %}
+                    <button id="krcThemeToggle" class="krc-menu-row" type="button">
+                        <i data-lucide="monitor" aria-hidden="true"></i>
+                        <span>Theme</span>
+                    </button>
+                    <button id="krcLogoutBtn" class="krc-menu-row danger" type="button">
+                        <i data-lucide="log-out" aria-hidden="true"></i>
+                        <span>Sign Out</span>
+                    </button>
+                </div>
+            </div>
+        </aside>
+
+        <div class="krc-main-shell">
+            <header class="krc-header" data-prototype-marker="prototype-header">
+                <div class="krc-header-left">
+                    <button id="krcSidebarToggle" class="krc-icon-btn" type="button" title="Toggle sidebar">
+                        <i data-lucide="menu" aria-hidden="true"></i>
+                    </button>
+                    <nav class="krc-breadcrumb" aria-label="Breadcrumb">
+                        <span>Kuro AI</span>
+                        <i data-lucide="chevron-right" aria-hidden="true"></i>
+                        <strong id="krcBreadcrumbLeaf">Research Console</strong>
+                    </nav>
+                </div>
+                <div class="krc-mode-toggle" role="tablist" aria-label="KRC mode">
+                    <button id="krcNormalModeBtn" class="is-active" type="button" data-krc-view-target="console">Normal</button>
+                    <button id="krcPlaygroundModeBtn" type="button" data-krc-view-target="playground">
+                        Playground
+                        <span id="krcPlaygroundPulse" class="krc-live-dot" hidden></span>
+                    </button>
+                </div>
+                <div class="krc-header-actions">
+                    <button id="krcHeaderSearchBtn" class="krc-icon-btn" type="button" title="Focus session search">
+                        <i data-lucide="search" aria-hidden="true"></i>
+                    </button>
+                    <button id="krcHeaderRunBtn" class="krc-primary-btn compact" type="button" hidden>
+                        <i data-lucide="play" aria-hidden="true"></i>
+                        <span>Run</span>
+                    </button>
+                </div>
+            </header>
+
+            <main class="krc-main" data-prototype-marker="research-console-playground-first">
+                <section id="krcConsoleView" class="krc-view is-active" data-krc-view="console">
+                    <div id="krcMessages" class="krc-message-scroll" aria-live="polite">
+                        <div id="krcWelcomePanel" class="krc-welcome-panel">
+                            <div class="krc-welcome-copy">
+                                <span class="krc-eyebrow">Research Console</span>
+                                <h1>Research Console</h1>
+                                <p>Playground-first workspace for Advisor conversations and runtime probes.</p>
+                            </div>
+                            <div class="krc-console-grid">
+                                <button class="krc-action-card" type="button" data-krc-view-target="playground" id="krcKuroPlaygroundCard" data-prototype-marker="kuro-playground-card">
+                                    <i data-lucide="square-terminal" aria-hidden="true"></i>
+                                    <span>
+                                        <strong>Kuro Playground</strong>
+                                        <small>Open the prototype playground-first runtime workspace.</small>
+                                    </span>
+                                </button>
+                                <button class="krc-action-card" type="button" data-krc-view-target="playground" id="krcRuntimeCard">
+                                    <i data-lucide="terminal" aria-hidden="true"></i>
+                                    <span>
+                                        <strong>Playground Runtime</strong>
+                                        <small>Run prompts through isolated Playground execution sessions.</small>
+                                    </span>
+                                </button>
+                                <button class="krc-action-card" type="button" id="krcOpenRuntimeDrawerCard">
+                                    <i data-lucide="sliders-horizontal" aria-hidden="true"></i>
+                                    <span>
+                                        <strong>Runtime Drawer</strong>
+                                        <small>Adjust model, temperature, and runtime context.</small>
+                                    </span>
+                                </button>
+                                <a class="krc-action-card" href="/api/runtimes" target="_blank" rel="noreferrer">
+                                    <i data-lucide="route" aria-hidden="true"></i>
+                                    <span>
+                                        <strong>Runtime Registry</strong>
+                                        <small>Inspect public runtime descriptors.</small>
+                                    </span>
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="krc-composer-wrap" data-prototype-marker="prototype-composer">
+                        <div id="krcComposerPills" class="krc-context-pills" hidden></div>
+                        <form id="krcComposerForm" class="krc-composer" autocomplete="off">
+                            <input id="krcFileInput" type="file" multiple hidden>
+                            <button id="krcComposerMenuBtn" class="krc-icon-btn composer-plus" type="button" aria-haspopup="true" aria-expanded="false" title="Open composer actions">
+                                <i data-lucide="plus" aria-hidden="true"></i>
+                            </button>
+                            <div id="krcComposerMenu" class="krc-composer-menu" hidden>
+                                <button type="button" data-krc-composer-action="attach">
+                                    <i data-lucide="paperclip" aria-hidden="true"></i>
+                                    <span>Add Photos & Files</span>
+                                </button>
+                                <button type="button" data-krc-composer-action="files">
+                                    <i data-lucide="folder-open" aria-hidden="true"></i>
+                                    <span>Recent Files</span>
+                                </button>
+                                <button type="button" data-krc-composer-action="web_search">
+                                    <i data-lucide="globe" aria-hidden="true"></i>
+                                    <span>Web Search</span>
+                                </button>
+                                <button type="button" data-krc-composer-action="playground">
+                                    <i data-lucide="terminal" aria-hidden="true"></i>
+                                    <span>Playground Runtime</span>
+                                </button>
+                            </div>
+                            <div class="krc-textarea-shell">
+                                <textarea id="krcMessageInput" rows="1" placeholder="Message Kuro..."></textarea>
+                                <div id="krcSelectedFiles" class="krc-selected-files" hidden></div>
+                            </div>
+                            <select id="krcModelSelect" class="krc-model-select" aria-label="Model alias">
+                                <option value="gemini_fast">Gemini</option>
+                                <option value="openai_nano">GPT</option>
+                                <option value="claude_fast">Claude</option>
+                                <option value="deepseek_fast">Deepseek</option>
+                                <option value="ollama_local">Ollama</option>
+                            </select>
+                            <button id="krcSendBtn" class="krc-send-btn" type="submit" title="Send">
+                                <i data-lucide="arrow-up" aria-hidden="true"></i>
+                            </button>
+                        </form>
+                        <p class="krc-composer-note">Kuro can make mistakes. Check important info.</p>
+                    </div>
+                </section>
+
+                <section id="krcPlaygroundView" class="krc-view" data-krc-view="playground" data-prototype-marker="playground-runtime-view">
+                    <div class="krc-view-header">
+                        <div>
+                            <span class="krc-eyebrow">Playground</span>
+                            <h1>Playground Runtime</h1>
+                        </div>
+                        <button id="krcOpenRuntimeDrawer" class="krc-secondary-btn" type="button">
+                            <i data-lucide="sliders-horizontal" aria-hidden="true"></i>
+                            <span>Runtime Drawer</span>
+                        </button>
+                    </div>
+
+                    <div class="krc-playground-grid">
+                        <section class="krc-panel">
+                            <header>Session</header>
+                            <label>
+                                <span>Mode</span>
+                                <select id="krcPlaygroundSessionMode">
+                                    <option value="research">research</option>
+                                    <option value="forensic">forensic</option>
+                                    <option value="comparative">comparative</option>
+                                    <option value="ontology">ontology</option>
+                                </select>
+                            </label>
+                            <button id="krcPlaygroundCreateSession" class="krc-primary-btn" type="button">Create Session</button>
+                            <label>
+                                <span>Custom Session-ID</span>
+                                <input id="krcPlaygroundCustomSessionId" type="text" maxlength="80" placeholder="Custom Session-ID [A-Za-z0-9._:-]">
+                            </label>
+                            <div class="krc-inline-actions">
+                                <button id="krcPlaygroundReconnectLatest" class="krc-secondary-btn" type="button">Reconnect Latest</button>
+                                <button id="krcPlaygroundUseCustomSession" class="krc-secondary-btn" type="button">Use Custom ID</button>
+                            </div>
+                            <p class="krc-runtime-status">Active Session: <strong id="krcPlaygroundSessionId">-</strong></p>
+                        </section>
+
+                        <section class="krc-panel">
+                            <header>Execution</header>
+                            <div class="krc-provider-checklist" aria-label="Providers">
+                                <label><input type="checkbox" value="openai" checked> openai</label>
+                                <label><input type="checkbox" value="gemini"> gemini</label>
+                                <label><input type="checkbox" value="anthropic"> anthropic</label>
+                                <label><input type="checkbox" value="deepseek"> deepseek</label>
+                                <label><input type="checkbox" value="ollama"> ollama</label>
+                                <label><input type="checkbox" value="openai_compat"> openai_compat</label>
+                            </div>
+                            <p class="krc-help-text">Pick 1 provider for single execution. Pick 2+ providers for comparative execution.</p>
+                            <textarea id="krcPlaygroundPrompt" rows="8" placeholder="Prompt for playground execution..."></textarea>
+                            <button id="krcPlaygroundExecute" class="krc-primary-btn" type="button">
+                                <span id="krcPlaygroundExecuteLabel">Execute</span>
+                            </button>
+                        </section>
+
+                        <section class="krc-panel">
+                            <header>Quick Checks</header>
+                            <div class="krc-inline-actions">
+                                <button id="krcPlaygroundHealth" type="button" class="krc-secondary-btn">Health</button>
+                                <button id="krcPlaygroundProviders" type="button" class="krc-secondary-btn">Providers</button>
+                            </div>
+                            <button id="krcPlaygroundListTraces" type="button" class="krc-secondary-btn full">List Traces</button>
+                            <div class="krc-inline-actions">
+                                <select id="krcPlaygroundWorkflowMode">
+                                    <option value="quick">quick review</option>
+                                    <option value="deep">deep forensic</option>
+                                    <option value="academic">academic presentation</option>
+                                </select>
+                                <button id="krcPlaygroundIntegrityOverviewBtn" class="krc-secondary-btn amber" type="button">Integrity Overview</button>
+                            </div>
+                            <div class="krc-inline-actions">
+                                <select id="krcPlaygroundForensicView">
+                                    <option value="summary">summary</option>
+                                    <option value="raw">raw</option>
+                                    <option value="canonical">canonical</option>
+                                    <option value="ontology">ontology</option>
+                                    <option value="divergence">divergence</option>
+                                </select>
+                                <button id="krcPlaygroundLoadView" class="krc-secondary-btn purple" type="button">Load View</button>
+                            </div>
+                            <div class="krc-inline-actions">
+                                <button id="krcPlaygroundVerifySnapshot" class="krc-secondary-btn blue" type="button">Verify Snapshot</button>
+                                <button id="krcPlaygroundExportBundle" class="krc-secondary-btn cyan" type="button">Export Bundle</button>
+                            </div>
+                            <button id="krcPlaygroundLineage" type="button" class="krc-secondary-btn full">Lineage View</button>
+                            <div id="krcPlaygroundIntegrityOverview" class="krc-output-panel compact">
+                                <strong>Forensic Integrity Overview</strong>
+                                <pre>No integrity overview loaded.</pre>
+                            </div>
+                        </section>
+                    </div>
+
+                    <section class="krc-playground-history-shell">
+                        <section class="krc-panel krc-history-panel">
+                            <header>Session History</header>
+                            <div id="krcPlaygroundHistoryList" class="krc-history-list">
+                                <p class="krc-empty-row">(no sessions)</p>
+                            </div>
+                        </section>
+                        <section id="krcPlaygroundHistoryDetail" class="krc-panel krc-history-panel detail" hidden>
+                            <header>
+                                <span>History Detail</span>
+                                <span class="krc-history-actions">
+                                    <button id="krcPlaygroundDownloadSessionArtifact" class="krc-secondary-btn compact" type="button">Download Session JSON</button>
+                                    <button id="krcPlaygroundAnalyzeSessionInKs" class="krc-secondary-btn compact" type="button">Analyze in KS</button>
+                                </span>
+                            </header>
+                            <div id="krcPlaygroundHistoryMeta" class="krc-history-meta"></div>
+                            <div id="krcPlaygroundHistoryExecutions" class="krc-history-executions"></div>
+                        </section>
+                    </section>
+
+                    <section class="krc-terminal-output">
+                        <div class="krc-terminal-toolbar">
+                            <span>Playground Output</span>
+                            <select id="krcPlaygroundAnalysisMode">
+                                <option value="auto">auto</option>
+                                <option value="summary">summary</option>
+                                <option value="integrity">integrity</option>
+                                <option value="forensic">forensic</option>
+                                <option value="divergence">divergence</option>
+                                <option value="ontology">ontology</option>
+                                <option value="lineage">lineage</option>
+                            </select>
+                            <button id="krcCopyOutput" class="krc-secondary-btn compact" type="button">Copy</button>
+                            <button id="krcAnalyzeOutputInKs" class="krc-secondary-btn compact" type="button">Analyze in KS</button>
+                            <button id="krcDownloadOutput" class="krc-secondary-btn compact" type="button">Download</button>
+                        </div>
+                        <div class="krc-terminal-body">
+                            <pre id="krcRuntimeOutput">No Playground output loaded. Create or reconnect a Playground session.</pre>
+                            <span class="krc-realtime-chip"><i data-lucide="wifi" aria-hidden="true"></i> Realtime connected</span>
+                        </div>
+                    </section>
+                </section>
+
+            </main>
+        </div>
+    </div>
+
+    <aside id="krcRuntimeDrawer" class="krc-drawer" aria-hidden="true" data-prototype-marker="playground-runtime-drawer">
+        <div class="krc-drawer-header">
+            <div>
+                <h2><i data-lucide="terminal" aria-hidden="true"></i> Playground</h2>
+                <span class="krc-soft-pill">Runtime</span>
+            </div>
+            <button id="krcCloseRuntimeDrawer" class="krc-icon-btn" type="button" title="Close runtime drawer">
+                <i data-lucide="x" aria-hidden="true"></i>
+            </button>
+        </div>
+        <div class="krc-drawer-content">
+            <label>
+                <span>System Prompt</span>
+                <textarea id="krcRuntimeSystemPrompt" rows="6">You are a senior research assistant. Be concise, explicit, and careful about uncertainty.</textarea>
+            </label>
+            <label>
+                <span>Model</span>
+                <select id="krcDrawerModelSelect">
+                    <option value="gemini_fast">Gemini</option>
+                    <option value="openai_nano">GPT</option>
+                    <option value="claude_fast">Claude</option>
+                    <option value="deepseek_fast">Deepseek</option>
+                    <option value="ollama_local">Ollama</option>
+                </select>
+            </label>
+            <label>
+                <span>Temperature <strong id="krcTemperatureValue">0.7</strong></span>
+                <input id="krcTemperature" type="range" min="0" max="2" step="0.1" value="0.7">
+            </label>
+            <label>
+                <span>Top P <strong id="krcTopPValue">1.0</strong></span>
+                <input id="krcTopP" type="range" min="0" max="1" step="0.1" value="1.0">
+            </label>
+            <label>
+                <span>Max Tokens <strong id="krcMaxTokensValue">2048</strong></span>
+                <input id="krcMaxTokens" type="range" min="256" max="8192" step="256" value="2048">
+            </label>
+            <div class="krc-drawer-vars">
+                <div class="krc-drawer-vars-header">
+                    <strong>Variables</strong>
+                    <button id="krcAddRuntimeVariable" class="krc-secondary-btn compact" type="button">
+                        <i data-lucide="plus" aria-hidden="true"></i>
+                        <span>Add Variable</span>
+                    </button>
+                </div>
+                <div id="krcRuntimeVariables" class="krc-runtime-vars"></div>
+            </div>
+            <button id="krcApplyRuntimeSettings" class="krc-primary-btn full" type="button">Apply Runtime Settings</button>
+            <button id="krcDrawerRun" class="krc-primary-btn full" type="button">Run</button>
+            <div class="krc-output-panel">
+                <strong>Output</strong>
+                <pre id="krcDrawerOutput">Runtime settings are local until a Playground prompt is executed.</pre>
+                            </div>
+        </div>
+    </aside>
+
+    <aside id="krcFilesDrawer" class="krc-drawer slim" aria-hidden="true">
+        <div class="krc-drawer-header">
+            <div>
+                <h2><i data-lucide="folder-open" aria-hidden="true"></i> Recent Files</h2>
+            </div>
+            <button id="krcCloseFilesDrawer" class="krc-icon-btn" type="button" title="Close files drawer">
+                <i data-lucide="x" aria-hidden="true"></i>
+            </button>
+        </div>
+        <div id="krcFilesList" class="krc-files-list">No files loaded.</div>
+    </aside>
+
+    <aside id="krcPlaygroundArtifactDrawer" class="krc-drawer" aria-hidden="true" data-prototype-marker="playground-artifact-trust-drawer">
+        <div class="krc-drawer-header">
+            <div>
+                <h2><i data-lucide="shield-check" aria-hidden="true"></i> Artifact Trust Detail</h2>
+            </div>
+            <button id="krcClosePlaygroundArtifactDrawer" class="krc-icon-btn" type="button" title="Close artifact trust detail">
+                <i data-lucide="x" aria-hidden="true"></i>
+            </button>
+        </div>
+        <div class="krc-drawer-content">
+            <div class="krc-output-panel">
+                <strong>Acquisition Metadata</strong>
+                <pre id="krcPlaygroundArtifactAcquisition"></pre>
+            </div>
+            <div class="krc-output-panel">
+                <strong>Integrity Metadata</strong>
+                <pre id="krcPlaygroundArtifactIntegrity"></pre>
+            </div>
+            <div class="krc-output-panel">
+                <strong>Transformation Metadata</strong>
+                <pre id="krcPlaygroundArtifactTransformation"></pre>
+            </div>
+            <div class="krc-output-panel">
+                <strong>Provenance Metadata</strong>
+                <pre id="krcPlaygroundArtifactProvenance"></pre>
+            </div>
+        </div>
+    </aside>
+
+    {% if krc_shell.can_admin %}
+    <div id="krcAdminSettingsModal" class="krc-modal" hidden data-admin-only="true" data-prototype-marker="admin-settings-modal">
+        <div class="krc-modal-backdrop" data-krc-close-admin></div>
+        <section class="krc-admin-dialog" role="dialog" aria-modal="true" aria-labelledby="krcAdminSettingsTitle">
+            <aside class="krc-admin-tabs">
+                <h2 id="krcAdminSettingsTitle"><i data-lucide="settings" aria-hidden="true"></i> Admin Settings</h2>
+                <button class="is-active" type="button" data-krc-admin-tab="general">General</button>
+                <button type="button" data-krc-admin-tab="models">Models</button>
+                <button type="button" data-krc-admin-tab="runtime">Runtime</button>
+                <button type="button" data-krc-admin-tab="security">Security</button>
+                <button type="button" data-krc-admin-tab="audit">Audit Log</button>
+            </aside>
+            <div class="krc-admin-content">
+                <button id="krcCloseAdminSettings" class="krc-icon-btn admin-close" type="button" title="Close admin settings">
+                    <i data-lucide="x" aria-hidden="true"></i>
+                </button>
+                <div id="krcAdminPanel">
+                    <h3>General Settings</h3>
+                    <p>Read-only operator snapshot. Mutations stay in the existing admin APIs.</p>
+                    <pre id="krcAdminOutput">Open a tab to load admin status.</pre>
+                </div>
+            </div>
+        </section>
+    </div>
+    {% endif %}
+
+    <div id="krcToast" class="krc-toast" hidden></div>
+    <script src="/static/js/krc_shell.js?v=20260530-05"></script>
+</body>
+</html>

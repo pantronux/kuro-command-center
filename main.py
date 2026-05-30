@@ -1486,6 +1486,51 @@ def _dashboard_template_context(username: str, user_info: Dict[str, Any]) -> Dic
     }
 
 
+def _is_krc_shell_enabled() -> bool:
+    return _as_env_bool(os.getenv("KURO_KRC_SHELL_ENABLED"), False)
+
+
+def _is_krc_shell_dev_access_enabled() -> bool:
+    return get_app_profile() == "dev" or _as_env_bool(os.getenv("KURO_DEV_MODE"), False)
+
+
+def _krc_shell_template_context(
+    username: str,
+    user_info: Dict[str, Any],
+    *,
+    is_admin: bool,
+    is_dev_access: bool,
+) -> Dict[str, Any]:
+    display_name = user_info.get("display_name", username)
+    krc_profile = get_krc_profile_snapshot(public=True)
+    role = user_info.get("role") or ("Administrator" if is_admin else "User")
+    return {
+        "username": username,
+        "display_name": display_name,
+        "role": role,
+        "is_admin": is_admin,
+        "krc_shell": {
+            "username": username,
+            "display_name": display_name,
+            "role": role,
+            "initial": (display_name or username or "K")[:1].upper(),
+            "is_admin": is_admin,
+            "is_dev_access": is_dev_access,
+            "can_admin": is_admin,
+            "app_profile": get_app_profile(),
+            "krc_profile": krc_profile,
+            "flags": {
+                "krc_shell_enabled": True,
+                "playground_api_enabled": _as_env_bool(os.getenv("KURO_PLAYGROUND_API_ENABLED"), False),
+                "provider_registry_v2_enabled": _as_env_bool(os.getenv("KURO_PROVIDER_REGISTRY_V2_ENABLED"), False),
+                "web_search_v2_enabled": _as_env_bool(os.getenv("KURO_WEB_SEARCH_V2_ENABLED"), False),
+                "deep_research_v2_enabled": _as_env_bool(os.getenv("KURO_DEEP_RESEARCH_V2_ENABLED"), False),
+                "agent_tools_v2_enabled": _as_env_bool(os.getenv("KURO_AGENT_TOOLS_V2_ENABLED"), False),
+            },
+        },
+    }
+
+
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     """
@@ -1569,6 +1614,36 @@ async def chat_page(request: Request):
         request=request,
         name=_dashboard_template_name(),
         context=_dashboard_template_context(username, user_info),
+    )
+
+
+@app.get("/krc-shell", response_class=HTMLResponse)
+async def krc_shell_page(request: Request):
+    """Serve the additive KRC prototype-based shell behind an explicit flag."""
+    if not _is_krc_shell_enabled():
+        raise HTTPException(status_code=404, detail="Not found")
+
+    token = get_token_from_cookie(request)
+    user = validate_token(token)
+    if not user:
+        return RedirectResponse(url="/login", status_code=302)
+
+    username = user.get("username", "")
+    is_admin = username == os.getenv("ADMIN_USERNAME", "Pantronux")
+    is_dev_access = _is_krc_shell_dev_access_enabled()
+    if not is_admin and not is_dev_access:
+        raise HTTPException(status_code=403, detail="Forbidden: KRC shell access requires admin or dev mode.")
+
+    user_info = auth_db.get_user(username) or {}
+    return templates.TemplateResponse(
+        request=request,
+        name="krc_shell.html",
+        context=_krc_shell_template_context(
+            username,
+            user_info,
+            is_admin=is_admin,
+            is_dev_access=is_dev_access,
+        ),
     )
 
 

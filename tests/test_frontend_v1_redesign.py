@@ -9,6 +9,7 @@ STYLE = ROOT / "web_interface" / "static" / "css" / "style.css"
 REVAMP_STYLE = ROOT / "web_interface" / "static" / "css" / "index_revamp.css"
 APP_JS = ROOT / "web_interface" / "static" / "js" / "app.js"
 MAIN = ROOT / "main.py"
+KRC_SHELL = ROOT / "web_interface" / "templates" / "krc_shell.html"
 
 
 def test_v1_dashboard_uses_dark_gray_redesign_shell():
@@ -79,7 +80,7 @@ def test_v1_plus_menu_parity_with_composer_actions():
     assert (html.count('data-composer-action="playground_mode"') >= 2)
 
 
-def test_v1_dashboard_is_the_only_frontend_shell():
+def test_v1_dashboard_remains_primary_with_additive_krc_shell():
     html = INDEX.read_text(encoding="utf-8")
     main = MAIN.read_text(encoding="utf-8")
 
@@ -89,9 +90,14 @@ def test_v1_dashboard_is_the_only_frontend_shell():
     assert not (ROOT / "web_interface" / "prototypes").exists()
     assert not (ROOT / "docs" / "ui_v2_reference").exists()
     assert 'return "index.html"' in main
+    assert KRC_SHELL.exists()
+    assert "KURO_KRC_SHELL_ENABLED" in main
+    assert '@app.get("/krc-shell"' in main
     assert "KURO_FRONTEND_V2_ENABLED" not in main
     assert "index_v2" not in main
     assert "/static/css/v2.css" not in html
+    assert "/static/css/krc_shell.css" not in html
+    assert "/static/js/krc_shell.js" not in html
 
 
 def test_v1_redesign_preserves_existing_playground_runtime_hooks():
