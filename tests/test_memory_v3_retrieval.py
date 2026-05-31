@@ -263,7 +263,7 @@ def test_no_secret_leakage_in_context_pack(tmp_path):
     _, writer, reader = _writer_reader(tmp_path)
     writer.write(
         _request(
-            "Credentials note api_key=abc123 secret=def456 stored at /home/kuro/projects/kuro/kuro_memory_v3.db",
+            "Credentials note api_key=abc123 secret=def456 stored at /home/kuro/projects/kuro-command-center/kuro_memory_v3.db",
             source_id="secret-1",
         )
     )

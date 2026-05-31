@@ -221,7 +221,7 @@ class Settings:
     KURO_TELEGRAM_CRITICAL_INSTANT: bool = os.getenv(
         "KURO_TELEGRAM_CRITICAL_INSTANT", "true"
     ).strip().lower() in ("1", "true", "yes", "on")
-    WORKING_DIR: str = os.getenv("WORKING_DIR")
+    WORKING_DIR: str = os.getenv("WORKING_DIR", os.getcwd())
     TIMEZONE: str = os.getenv("TIMEZONE", "Asia/Jakarta")
     # Optional Gemini cached content resource (e.g. cachedContents/abc123) for repeated static prompts
     GEMINI_CACHED_CONTENT: str = os.getenv("GEMINI_CACHED_CONTENT", "").strip()

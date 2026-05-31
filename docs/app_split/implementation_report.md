@@ -3,7 +3,7 @@
 Tanggal: 2026-05-31
 Branch kerja: `krc-kcc-knowledge-split`
 Rollback tag: `before-krc-kcc-knowledge-split`
-Target repo: `/home/kuro/projects/kuro`
+Target repo: `/home/kuro/projects/kuro-command-center`
 
 ## Ringkasan
 

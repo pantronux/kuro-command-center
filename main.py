@@ -5565,7 +5565,7 @@ def cleanup_old_artifacts(days: int = 14):
                         logger.warning(f"Failed to delete {filename}: {e}")
 
         # Clean __pycache__ directories
-        for root, dirs, files in os.walk("/home/kuro/projects/kuro"):
+        for root, dirs, files in os.walk(settings.WORKING_DIR or os.getcwd()):
             if "__pycache__" in dirs:
                 cache_dir = os.path.join(root, "__pycache__")
                 try:

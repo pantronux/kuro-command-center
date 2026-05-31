@@ -2,7 +2,7 @@
 Kuro AI V1.0.0 — Chat Isolation & chat_id Hardening — Verification Tests.
 
 Usage:
-    cd /home/kuro/projects/kuro
+    cd /home/kuro/projects/kuro-command-center
     python -m pytest tests/test_chat_isolation.py -v
     # or run with python directly:
     python tests/test_chat_isolation.py

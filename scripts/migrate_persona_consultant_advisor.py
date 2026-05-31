@@ -18,7 +18,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Iterable, List, Tuple
 
-DB_PATH = Path("/home/kuro/projects/kuro/kuro_chat_history.db")
+DB_PATH = Path("/home/kuro/projects/kuro-command-center/kuro_chat_history.db")
 
 # Strong research/forensic indicators -> advisor
 ADVISOR_PATTERNS = [

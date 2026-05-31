@@ -165,7 +165,7 @@ def list_my_files(directory: str = None) -> str:
         return f"Master, error saat membaca folder {target_dir}: {e}"
 
 
-def list_project_files(directory: str = "/home/kuro/projects/kuro") -> str:
+def list_project_files(directory: str = "/home/kuro/projects/kuro-command-center") -> str:
     """
     List all project files in the Kuro project directory.
     Designed for IT Support persona to analyze code structure and detect issues.

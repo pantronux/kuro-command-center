@@ -53,7 +53,7 @@ def _debug_log(run_id: str, hypothesis_id: str, location: str, message: str, dat
             "data": data,
             "timestamp": int(time.time() * 1000),
         }
-        with open("/home/kuro/projects/kuro/.cursor/debug-f653ac.log", "a", encoding="utf-8") as f:
+        with open("/home/kuro/projects/kuro-command-center/.cursor/debug-f653ac.log", "a", encoding="utf-8") as f:
             f.write(json.dumps(payload, ensure_ascii=False) + "\n")
     except Exception:
         pass

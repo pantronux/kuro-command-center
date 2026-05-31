@@ -1617,7 +1617,7 @@ curl "https://192.168.18.84:8443/api/compliance/search?query=access+control+A.8"
 #### SSL/mkcert Setup
 - Installed `libnss3-tools` and `mkcert v1.4.4`
 - Generated trusted certificate for `192.168.18.84`, `localhost`, `127.0.0.1`
-- Certificates stored in `/home/kuro/projects/kuro/certs/`
+- Certificates stored in `/home/kuro/projects/kuro-command-center/certs/`
 - FastAPI configured for HTTPS on port 8443
 
 #### Dependency Fixes

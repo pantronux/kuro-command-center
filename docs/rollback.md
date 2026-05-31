@@ -11,7 +11,7 @@ sudo systemctl daemon-reload
 The monorepo fallback remains at:
 
 ```text
-/home/kuro/projects/kuro
+/home/kuro/projects/kuro-command-center
 ```
 
 KCC data is isolated under:

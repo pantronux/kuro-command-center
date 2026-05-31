@@ -3,9 +3,9 @@ Description=Kuro Research Center
 After=network.target
 
 [Service]
-WorkingDirectory=/home/kuro/projects/kuro
-EnvironmentFile=/home/kuro/projects/kuro/.env.krc
-ExecStart=/home/kuro/projects/kuro/venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8443
+WorkingDirectory=/home/kuro/projects/kuro-research-center
+EnvironmentFile=/home/kuro/projects/kuro-research-center/.env
+ExecStart=/usr/bin/python3 -m uvicorn main:app --host 0.0.0.0 --port 8443 --ssl-keyfile certs/key.pem --ssl-certfile certs/cert.pem
 Restart=on-failure
 RestartSec=5
 

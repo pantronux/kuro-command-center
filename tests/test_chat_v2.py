@@ -328,7 +328,7 @@ def test_chat_v2_attachment_refs_do_not_leak_raw_path(tmp_path):
                 "type": "file",
                 "original_filename": "report.pdf",
                 "stored_filename": "report.pdf",
-                "path": "/home/kuro/projects/kuro/uploaded_files/Pantronux/docs/report.pdf",
+                "path": "/home/kuro/projects/kuro-command-center/uploaded_files/Pantronux/docs/report.pdf",
             }
         ],
     )

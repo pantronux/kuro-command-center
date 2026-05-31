@@ -7,7 +7,7 @@ groups them by (username, persona), creates a "Default Chat" session,
 and re-assigns those rows to the Default Chat.
 
 Usage:
-    cd /home/kuro/projects/kuro
+    cd /home/kuro/projects/kuro-command-center
     python scripts/migrate_chat_id.py [--dry-run]
 """
 import os

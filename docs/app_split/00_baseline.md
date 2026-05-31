@@ -12,7 +12,7 @@ Captured before implementing the KRC/KCC/Kuro Knowledge logical split.
 
 ## Runtime
 
-- Repo root: `/home/kuro/projects/kuro`
+- Repo root: `/home/kuro/projects/kuro-command-center`
 - Python: `Python 3.10.12` via `python3`
 - `python` executable: not available in the shell PATH
 - Existing KRC route: `GET /krc-shell`

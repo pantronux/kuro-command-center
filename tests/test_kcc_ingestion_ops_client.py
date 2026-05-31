@@ -43,10 +43,9 @@ def test_kcc_ingestion_ops_route_proxies_to_knowledge_api(monkeypatch):
         _list_jobs,
     )
 
-    response = TestClient(main.app).get(
-        "/api/kcc/knowledge/ingest/jobs?limit=10",
-        cookies={main.COOKIE_NAME: "Bearer dummy"},
-    )
+    client = TestClient(main.app)
+    client.cookies.set(main.COOKIE_NAME, "Bearer dummy")
+    response = client.get("/api/kcc/knowledge/ingest/jobs?limit=10")
 
     assert response.status_code == 200
     body = response.json()

@@ -3,9 +3,9 @@ Description=Kuro Knowledge
 After=network.target
 
 [Service]
-WorkingDirectory=/home/kuro/projects/kuro
-EnvironmentFile=/home/kuro/projects/kuro/.env.knowledge
-ExecStart=/home/kuro/projects/kuro/venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8088
+WorkingDirectory=/home/kuro/projects/kuro-knowledge
+EnvironmentFile=/home/kuro/projects/kuro-knowledge/.env
+ExecStart=/usr/bin/python3 -m uvicorn knowledge_main:app --host 127.0.0.1 --port 8088
 Restart=on-failure
 RestartSec=5
 
