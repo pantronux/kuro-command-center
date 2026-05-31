@@ -5,7 +5,7 @@ Recommended roles:
 ```text
 KRC:       KURO_APP_ROLE=krc       port 8443
 KCC:       KURO_APP_ROLE=kcc       port 8444
-Knowledge: KURO_APP_ROLE=knowledge port 8550
+Knowledge: KURO_APP_ROLE=knowledge port 8088
 Stack:     owned by /home/kuro/projects/kuro-stack
 ```
 

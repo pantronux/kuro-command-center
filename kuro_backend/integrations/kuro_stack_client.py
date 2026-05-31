@@ -11,7 +11,7 @@ class KuroStackKnowledgeClient:
     """Small HTTP-only client; it never reads KRC/Kuro Knowledge DB files."""
 
     def __init__(self, base_url: str | None = None, api_key: str | None = None, timeout: float = 10.0) -> None:
-        self.base_url = (base_url or os.getenv("KURO_STACK_KNOWLEDGE_GATEWAY_URL") or "http://127.0.0.1:8550").rstrip("/")
+        self.base_url = (base_url or os.getenv("KURO_STACK_KNOWLEDGE_GATEWAY_URL") or "http://127.0.0.1:8088").rstrip("/")
         self.api_key = api_key or os.getenv("KURO_KNOWLEDGE_API_KEY", "")
         self.timeout = timeout
 
@@ -47,6 +47,51 @@ class KuroStackKnowledgeClient:
                 "limit": limit,
                 "max_chars": max_chars,
             },
+            headers=self._headers(),
+            timeout=self.timeout,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def submit_ingest(
+        self,
+        *,
+        source_app: str,
+        domain: str,
+        source_type: str,
+        title: str,
+        content: str = "",
+        metadata: Dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
+        response = requests.post(
+            f"{self.base_url}/api/knowledge/ingest",
+            json={
+                "source_app": source_app,
+                "domain": domain,
+                "source_type": source_type,
+                "title": title,
+                "content": content,
+                "metadata": metadata or {},
+            },
+            headers=self._headers(),
+            timeout=self.timeout,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def list_ingest_jobs(self, *, limit: int = 50) -> Dict[str, Any]:
+        response = requests.get(
+            f"{self.base_url}/api/knowledge/ingest/jobs",
+            params={"limit": limit},
+            headers=self._headers(),
+            timeout=self.timeout,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def retry_ingest_job(self, *, job_id: str) -> Dict[str, Any]:
+        response = requests.post(
+            f"{self.base_url}/api/knowledge/ingest/jobs/{job_id}/retry",
             headers=self._headers(),
             timeout=self.timeout,
         )

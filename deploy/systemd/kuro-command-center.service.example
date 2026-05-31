@@ -1,11 +1,13 @@
 [Unit]
 Description=Kuro Command Center
-After=network.target
+After=network.target kuro-knowledge.service
 
 [Service]
-WorkingDirectory=/home/kuro/projects/kuro
-EnvironmentFile=/home/kuro/projects/kuro/.env.kcc
-ExecStart=/home/kuro/projects/kuro/venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8444
+User=kuro
+WorkingDirectory=/home/kuro/projects/kuro-command-center
+EnvironmentFile=/home/kuro/projects/kuro-command-center/.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 -m uvicorn main:app --host 0.0.0.0 --port 8444
 Restart=on-failure
 RestartSec=5
 

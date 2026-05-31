@@ -1746,6 +1746,28 @@ async def get_admin_app_role(request: Request):
     return api_success(data=get_app_role_snapshot(public=False))
 
 
+@app.get("/api/kcc/knowledge/ingest/jobs")
+async def kcc_knowledge_ingest_jobs(request: Request, limit: int = Query(50, ge=1, le=200)):
+    """Proxy Knowledge ingest job inspection through the Knowledge HTTP API."""
+    if not (is_kcc_role() or is_dev_role()):
+        raise HTTPException(status_code=404, detail="Not found")
+    require_admin_user(request)
+    from kuro_backend.integrations.kuro_stack_client import KuroStackKnowledgeClient
+
+    return api_success(data=KuroStackKnowledgeClient().list_ingest_jobs(limit=limit))
+
+
+@app.post("/api/kcc/knowledge/ingest/jobs/{job_id}/retry")
+async def kcc_knowledge_ingest_job_retry(request: Request, job_id: str):
+    """Retry a Knowledge ingest job via the Knowledge HTTP API."""
+    if not (is_kcc_role() or is_dev_role()):
+        raise HTTPException(status_code=404, detail="Not found")
+    require_admin_user(request)
+    from kuro_backend.integrations.kuro_stack_client import KuroStackKnowledgeClient
+
+    return api_success(data=KuroStackKnowledgeClient().retry_ingest_job(job_id=job_id))
+
+
 @app.get("/api/proactive-events")
 async def get_proactive_events(limit: int = Query(5, ge=1, le=50)):
     """Return missed proactive events for dashboard reconnect sync.

@@ -102,7 +102,7 @@ Isi utama:
 
 - KRC memakai `KURO_APP_ROLE=krc`, port `8443`, persona lock `phd_advisor`, dan mematikan QA/market/Telegram/daily bloat secara default.
 - KCC memakai `KURO_APP_ROLE=kcc`, port `8444`, dan mengaktifkan fitur operational.
-- Knowledge memakai `KURO_APP_ROLE=knowledge`, port `8550`, dan candidate write default off.
+- Knowledge memakai `KURO_APP_ROLE=knowledge`, port `8088`, dan candidate write default off.
 
 ## KRC Officialization
 
@@ -396,7 +396,7 @@ Port target:
 ```text
 KRC       8443
 KCC       8444
-Knowledge 8550
+Knowledge 8088
 Stack     owned by /home/kuro/projects/kuro-stack
 ```
 

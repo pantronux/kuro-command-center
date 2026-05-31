@@ -24,7 +24,7 @@ server {
     }
 
     location /knowledge {
-        proxy_pass http://127.0.0.1:8550;
+        proxy_pass http://127.0.0.1:8088;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-Proto $scheme;
     }
