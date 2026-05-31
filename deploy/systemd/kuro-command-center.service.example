@@ -7,7 +7,7 @@ User=kuro
 WorkingDirectory=/home/kuro/projects/kuro-command-center
 EnvironmentFile=/home/kuro/projects/kuro-command-center/.env
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/usr/bin/python3 -m uvicorn main:app --host 0.0.0.0 --port 8444
+ExecStart=/usr/bin/python3 -m uvicorn main:app --host 0.0.0.0 --port 8444 --ssl-keyfile certs/key.pem --ssl-certfile certs/cert.pem
 Restart=on-failure
 RestartSec=5
 
