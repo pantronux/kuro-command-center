@@ -56,6 +56,15 @@ class CandidateDecisionRequest(BaseModel):
     confidence: float = Field(default=0.75, ge=0.0, le=1.0)
 
 
+class KnowledgeIngestRequest(BaseModel):
+    source_app: str = Field(..., min_length=1, max_length=80)
+    domain: str = Field(default="research.paper", max_length=80)
+    source_type: str = Field(default="document", max_length=80)
+    title: str = Field(..., min_length=1, max_length=500)
+    content: str = Field(default="", max_length=64000)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
 class KnowledgeCandidate(BaseModel):
     candidate_id: str
     source_app: str

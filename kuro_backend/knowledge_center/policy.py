@@ -25,12 +25,11 @@ def _api_key_from_request(request: Request) -> str:
 
 
 def candidate_writes_enabled() -> bool:
-    return os.getenv("KURO_KRC_KNOWLEDGE_CANDIDATES_ENABLED", "false").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
+    raw = os.getenv(
+        "KURO_KNOWLEDGE_CANDIDATES_ENABLED",
+        os.getenv("KURO_KRC_KNOWLEDGE_CANDIDATES_ENABLED", "false"),
+    )
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def resolve_knowledge_actor(

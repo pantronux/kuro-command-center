@@ -1,5 +1,5 @@
 /**
- * KRC prototype shell controller.
+ * KRC research shell controller.
  *
  * Purpose: Bind the additive /krc-shell template to existing Kuro APIs without
  * mutating destructive resources or reusing the legacy dashboard DOM.
@@ -236,7 +236,7 @@
         });
 
         $("#krcThemeToggle")?.addEventListener("click", () => {
-            showToast("KRC shell uses the prototype dark theme in this preview.", "info");
+            showToast("KRC shell theme is fixed for the research workspace.", "info");
         });
 
         $("#krcLogoutBtn")?.addEventListener("click", async () => {
@@ -441,7 +441,7 @@
 
         const form = new FormData();
         form.append("message", message || "");
-        form.append("persona", "advisor");
+        form.append("persona", "phd_advisor");
         form.append("chat_id", state.currentChatId || "");
         form.append("runtime_id", state.runtime.runtimeId || "sovereign");
         form.append("model_alias", state.runtime.modelAlias || "gemini_fast");
@@ -547,7 +547,7 @@
 
     async function loadSessions() {
         try {
-            const payload = await fetchJson("/api/chats?persona=advisor&limit=50");
+            const payload = await fetchJson("/api/chats?persona=phd_advisor&limit=50");
             const data = unwrapApiData(payload);
             state.sessions = Array.isArray(data) ? data : [];
             renderSessions();
@@ -602,7 +602,7 @@
         const payload = await fetchJson("/api/chats", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ persona: "advisor", title }),
+            body: JSON.stringify({ persona: "phd_advisor", title }),
         });
         const data = unwrapApiData(payload) || {};
         state.currentChatId = data.chat_id || data.id || state.currentChatId;
@@ -647,20 +647,28 @@
             <div class="krc-welcome-copy">
                 <span class="krc-eyebrow">Research Console</span>
                 <h1>Research Console</h1>
-                <p>Playground-first workspace for Advisor conversations and runtime probes.</p>
+                <p>PhD research workspace for literature, argumentation, source discipline, and advisor-guided research.</p>
             </div>
             <div class="krc-console-grid">
-                <button class="krc-action-card" type="button" data-krc-view-target="playground" id="krcKuroPlaygroundCardReset" data-prototype-marker="kuro-playground-card">
-                    <i data-lucide="square-terminal" aria-hidden="true"></i>
-                    <span><strong>Kuro Playground</strong><small>Open the prototype playground-first runtime workspace.</small></span>
+                <button class="krc-action-card" type="button">
+                    <i data-lucide="library" aria-hidden="true"></i>
+                    <span><strong>Literature Library</strong><small>Organize papers, source metadata, and research notes.</small></span>
+                </button>
+                <button class="krc-action-card" type="button">
+                    <i data-lucide="circle-help" aria-hidden="true"></i>
+                    <span><strong>Research Questions</strong><small>Track scope, contribution, and falsification criteria.</small></span>
+                </button>
+                <button class="krc-action-card" type="button">
+                    <i data-lucide="scan-search" aria-hidden="true"></i>
+                    <span><strong>Novelty Gap Board</strong><small>Separate contribution claims from unsupported speculation.</small></span>
                 </button>
                 <button class="krc-action-card" type="button" data-krc-view-target="playground">
                     <i data-lucide="terminal" aria-hidden="true"></i>
-                    <span><strong>Playground Runtime</strong><small>Run prompts through isolated Playground execution sessions.</small></span>
+                    <span><strong>Playground Runtime</strong><small>Run controlled prompts for research evidence and comparison.</small></span>
                 </button>
                 <button class="krc-action-card" type="button" id="krcOpenRuntimeDrawerCardReset">
                     <i data-lucide="sliders-horizontal" aria-hidden="true"></i>
-                    <span><strong>Runtime Drawer</strong><small>Adjust model, temperature, and runtime context.</small></span>
+                    <span><strong>Runtime Drawer</strong><small>Adjust model, temperature, and research context.</small></span>
                 </button>
             </div>`;
         messages.appendChild(welcome);

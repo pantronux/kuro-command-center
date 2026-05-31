@@ -125,6 +125,7 @@ MEMORY_KEYWORDS = ["ingat", "simpan", "jadwal", "info", "spesifikasi", "catat", 
 CANONICAL_PERSONAS = [
     "consultant",
     "advisor",
+    "phd_advisor",
     "chill",
     "tactical",
     "butler",
@@ -134,6 +135,9 @@ CANONICAL_PERSONAS = [
 PERSONA_ALIASES = {
     "support": "tactical",
     "adversarial_scholar": "advisor",
+    "phd": "phd_advisor",
+    "phd-advisor": "phd_advisor",
+    "research_advisor": "phd_advisor",
     "technical": "tactical",
     "casual": "chill",
     "qa": "auditor",

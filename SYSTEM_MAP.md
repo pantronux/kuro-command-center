@@ -15,6 +15,12 @@
 > sharing around Kuro Playground, approved knowledge, ingestion, and research
 > export/report support.
 
+> **APP SPLIT TAG (2026-05-31):** `KURO_APP_ROLE` is the product-level switch
+> for `legacy`, `krc`, `kcc`, `knowledge`, and `dev`. KRC is now a PhD Research
+> Center with one `phd_advisor` persona. Kuro Command Center (KCC) owns operations. Kuro Knowledge
+> owns approved/candidate knowledge and ingest-job APIs. Kuro Stack remains the
+> separate daily chat app.
+
 ## Executive Summary (User-Friendly Overview)
 
 **Note on Telegram**: Kuro AI uses Telegram for both *outbound* proactive notifications (e.g. Sentinel alerts, Dreaming cycle updates) and *inbound* two-way chat commands. Messages are processed via the same LangGraph reasoning core as the Web Dashboard.
@@ -53,11 +59,10 @@ Kuro AI is your **Intelligent Personal Sovereign**—a sophisticated digital com
   Market Sentinel V2, Telegram V2, API V2, and enterprise observability are
   present behind explicit flags. The separate Frontend V2 shell has been
   retired; `index.html` is the single dashboard shell.
-- **Kuro Research Center Refocus status**: Phases `0..10` have been executed
-  as an additive profile-mode refocus. Kuro Stack (KS) owns daily chat
-  separately; KRC owns canonical research knowledge and exposes only the
-  approved Knowledge API to KS/KKG callers. No KS database or daily history is
-  shared with KRC.
+- **Kuro App Split status**: KRC, KCC, and Kuro Knowledge are now separated by
+  additive app roles in the current repo. Kuro Stack (KS) remains the separate
+  daily chat app. The physical repository split is intentionally deferred until
+  role boundaries and route contracts are stable.
 - **Tech stack**:
   - Backend: FastAPI, LangGraph, `google-genai` (Gemini),
     APScheduler, SQLite, ChromaDB, Mem0 (via `perpetual_memory.py`),
@@ -129,33 +134,53 @@ Kuro AI is your **Intelligent Personal Sovereign**—a sophisticated digital com
   needs tenant isolation, SSO/OIDC, stronger RBAC, PostgreSQL/pgvector option,
   external telemetry collector, and formal secrets management.
 
-### Kuro Research Center Refocus (Phases 0..10 Complete)
+### Kuro App Split (KRC / KCC / Kuro Knowledge / Kuro Stack)
 
-- **Execution status**: Complete for the playground-first KRC refocus plan.
-- **Profile control**: `KURO_APP_PROFILE=legacy` remains the default.
-  `KURO_APP_PROFILE=krc` enables Kuro Research Center presentation and
-  scheduler narrowing. `KURO_APP_PROFILE=dev` exposes KRC features for local
-  debugging.
-- **Product split**: Kuro Stack (KS) is the daily chat surface. KRC is the
-  Kuro Playground research, ingestion, export/report, and canonical knowledge
-  authority. KS/KKG integration reads through approved-only Knowledge API
-  routes; KS chat history and databases are not shared with KRC.
-- **UI contract**: UI V1 (`web_interface/templates/index.html` +
-  `web_interface/static/js/app.js`) remains the production shell. Frontend V2
-  is not reintroduced. KRC mode adds the Kuro Playground landing surface as the
-  primary research action.
-- **Research Console persona contract**: `KURO_APP_PROFILE=krc` locks the
-  Research Console to the `advisor` persona. Persona switching remains
-  available in legacy/dev profiles, but KRC defaults every chat/session request
-  to Advisor without migrating old non-Advisor history.
-- **Knowledge contract**: `kuro_backend/knowledge_center/` owns approved
-  knowledge search/context, candidate review, redaction, policy, audit, and
-  its KRC-owned SQLite store. Candidate writes default off.
-- **Bloatware control**: daily chat affordances, market/ticker flows, agent
-  tools, tasks/reminders, proactive jobs, fitness, and daily briefings are
-  hidden or disabled by KRC flags instead of deleting working modules.
-  Telegram remains available as an ops command center for server status,
-  backup, queue/DLQ, and controlled actions.
+- **Execution status**: logical split implemented additively in the current
+  monorepo. Rollback is `KURO_APP_ROLE=legacy` plus the
+  `before-krc-kcc-knowledge-split` tag and `backups/pre-app-split/`.
+- **Role control**: `KURO_APP_ROLE=legacy|krc|kcc|knowledge|dev`.
+  `KURO_APP_PROFILE` remains a compatibility input; if both are set,
+  `KURO_APP_ROLE` wins. Admin-safe role state is available at
+  `/api/admin/app-role`.
+- **KRC**: `/krc-shell` remains the compatibility route and `/research` is the
+  future-facing alias. KRC is a PhD research cockpit with Research Console,
+  Literature Library, Research Questions, Novelty Gap Board, Argument Map,
+  source/citation discipline, research ingest, export/report, and approved
+  knowledge publication. KRC hides QA, Market Sentinel, Telegram, daily tasks,
+  proactive events, and generic ops by default.
+- **KRC persona**: KRC forces exactly one persona, `phd_advisor`, through
+  `kuro_backend/krc_advisor.py`. The prompt explicitly says it is not a real
+  person and must not impersonate any professor. Legacy/dev persona switching
+  remains available outside KRC.
+- **KRC research data**: `kuro_backend/research_center/` owns additive SQLite
+  tables for `research_projects`, `paper_sources`, `research_claims`,
+  `research_questions`, `novelty_gaps`, `argument_nodes`, `argument_edges`,
+  and `advisor_sessions`. Routes live under `/api/research/*` and require auth
+  with owner isolation.
+- **KCC**: `/command-center` is the admin-first operational shell for Market
+  Sentinel, Telegram Command Center, ingestion operations, provider/runtime
+  health, storage health, memory health, backup/restore, observability,
+  OpenClaw controls, and feature flags. It requires `KURO_APP_ROLE=kcc` or
+  `dev`, and non-admin users are forbidden.
+- **Kuro Knowledge**: `kuro_backend/knowledge_center/` owns approved search,
+  context assembly, candidates, audit, redaction, source metadata, and ingest
+  jobs. Routes include `/api/knowledge/search-approved`,
+  `/api/knowledge/context-approved`, `/api/knowledge/candidates`,
+  `/api/knowledge/sources/{source_id}`, `/api/knowledge/ingest`, and
+  `/api/knowledge/ingest/jobs`. Candidate writes default off and approved reads
+  do not expose raw chat history, DB paths, secrets, or raw content.
+- **Ingestion ownership**: Kuro Knowledge owns the ingest engine and job state.
+  KRC owns the research ingest workflow through `/api/research/ingest`. KCC
+  owns ingestion operations/admin views. Kuro Stack can submit candidates only
+  through Kuro Knowledge when enabled.
+- **Kuro Stack contract**: Kuro Stack remains the daily chat app and uses
+  HTTP-only integration via `docs/integrations/kuro_stack_contract.md` and
+  `kuro_backend/integrations/kuro_stack_client.py`. No KS database or daily
+  history is shared with KRC.
+- **Scheduler split**: KRC defaults to backup, memory decay, file retention,
+  and research ingest posture. KCC owns market and Telegram ops jobs. Knowledge
+  owns ingest/index/retention jobs. Legacy stays backward compatible.
 - **Legacy QA deactivation**: `/api/playground/qa/*` remains in the codebase
   for compatibility, but KRC hides and disables it by default through
   `KURO_KRC_QA_PLAYGROUND_ENABLED=false` and

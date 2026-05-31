@@ -122,6 +122,8 @@ def get_enterprise_flag_snapshot(admin: bool = False) -> Dict[str, Any]:
     return {
         "enterprise_refactor_enabled": flags["KURO_ENTERPRISE_REFACTOR_ENABLED"],
         "app_profile": krc_snapshot["app_profile"],
+        "app_role": krc_snapshot["app_role"],
+        "workspace_label": krc_snapshot["workspace_label"],
         "krc": krc_snapshot,
         "features": {
             "chat": {

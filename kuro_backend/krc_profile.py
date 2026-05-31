@@ -4,8 +4,17 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, Optional
 
+from kuro_backend.app_roles import (
+    APP_ROLES,
+    get_app_role,
+    get_app_role_snapshot,
+    is_dev_role,
+    is_kcc_role,
+    is_krc_role,
+    is_knowledge_role,
+)
 
-APP_PROFILES: tuple[str, ...] = ("legacy", "krc", "dev")
+APP_PROFILES: tuple[str, ...] = APP_ROLES
 
 KRC_FEATURE_DEFAULTS: dict[str, tuple[str, bool]] = {
     "research_console": ("KURO_KRC_RESEARCH_CONSOLE_ENABLED", True),
@@ -17,7 +26,7 @@ KRC_FEATURE_DEFAULTS: dict[str, tuple[str, bool]] = {
     "evaluation": ("KURO_KRC_EVALUATION_ENABLED", False),
     "export": ("KURO_KRC_EXPORT_ENABLED", True),
     "daily_chat_prominent": ("KURO_KRC_DAILY_CHAT_PROMINENT", False),
-    "telegram_center": ("KURO_KRC_TELEGRAM_CENTER_ENABLED", True),
+    "telegram_center": ("KURO_KRC_TELEGRAM_CENTER_ENABLED", False),
     "market": ("KURO_KRC_MARKET_ENABLED", False),
     "agent_tools": ("KURO_KRC_AGENT_TOOLS_ENABLED", False),
     "daily_tasks": ("KURO_KRC_DAILY_TASKS_ENABLED", False),
@@ -29,7 +38,7 @@ KRC_SCHEDULER_DEFAULTS: dict[str, tuple[str, bool]] = {
     "memory_decay": ("KURO_KRC_SCHEDULER_MEMORY_DECAY_ENABLED", True),
     "evaluation": ("KURO_KRC_SCHEDULER_EVALUATION_ENABLED", False),
     "market": ("KURO_KRC_SCHEDULER_MARKET_ENABLED", False),
-    "telegram": ("KURO_KRC_SCHEDULER_TELEGRAM_ENABLED", True),
+    "telegram": ("KURO_KRC_SCHEDULER_TELEGRAM_ENABLED", False),
     "proactive": ("KURO_KRC_SCHEDULER_PROACTIVE_ENABLED", False),
     "fitness": ("KURO_KRC_SCHEDULER_FITNESS_ENABLED", False),
     "daily_briefing": ("KURO_KRC_SCHEDULER_DAILY_BRIEFING_ENABLED", False),
@@ -74,24 +83,28 @@ def _env_bool(name: str, default: bool = False) -> bool:
 
 
 def normalize_app_profile(value: Optional[str]) -> str:
-    """Normalize profile names to legacy/krc/dev with legacy as fallback."""
+    """Normalize profile names with legacy as fallback."""
     normalized = str(value or "").strip().lower()
     return normalized if normalized in APP_PROFILES else "legacy"
 
 
 def get_app_profile() -> str:
-    """Return the active app profile, defaulting to legacy."""
-    return normalize_app_profile(os.getenv("KURO_APP_PROFILE", "legacy"))
+    """Return the active compatibility profile.
+
+    Existing callers still use "profile" terminology. The value is now backed
+    by `KURO_APP_ROLE` when present.
+    """
+    return get_app_role()
 
 
 def is_krc_profile() -> bool:
     """Return True only when KRC mode is explicitly active."""
-    return get_app_profile() == "krc"
+    return is_krc_role()
 
 
 def is_dev_profile() -> bool:
     """Return True for the all-features-visible debug profile."""
-    return get_app_profile() == "dev"
+    return is_dev_role()
 
 
 def _normalize_feature_name(name: str) -> Optional[str]:
@@ -120,10 +133,9 @@ def is_krc_feature_enabled(name: str) -> bool:
     normalized = _normalize_feature_name(name)
     if not normalized:
         return False
-    profile = get_app_profile()
-    if profile == "dev":
+    if is_dev_role():
         return True
-    if profile != "krc":
+    if not is_krc_role():
         return False
     return _raw_feature_flag(normalized)
 
@@ -149,14 +161,17 @@ def _normalize_scheduler_name(name: str) -> Optional[str]:
 
 
 def is_krc_scheduler_enabled(name: str) -> bool:
-    """Return scheduler availability with legacy behavior preserved."""
+    """Return scheduler availability with role-aware behavior."""
     normalized = _normalize_scheduler_name(name)
     if not normalized:
         return False
-    profile = get_app_profile()
-    if profile == "dev":
+    if is_dev_role():
         return True
-    if profile != "krc":
+    if is_kcc_role():
+        return normalized in {"backup", "market", "telegram"}
+    if is_knowledge_role():
+        return normalized in {"file_retention"}
+    if not is_krc_role():
         return True
     env_name, default = KRC_SCHEDULER_DEFAULTS[normalized]
     return _env_bool(env_name, default)
@@ -169,7 +184,8 @@ def get_krc_profile_snapshot(public: bool = False) -> Dict[str, Any]:
     raw flag defaults and environment variable names so operators can verify
     rollback and profile behavior without leaking secrets.
     """
-    profile = get_app_profile()
+    role_snapshot = get_app_role_snapshot(public=True)
+    profile = role_snapshot["app_role"]
     feature_names = _PUBLIC_FEATURES if public else tuple(KRC_FEATURE_DEFAULTS)
     effective_features = {
         feature: is_krc_feature_enabled(feature)
@@ -177,17 +193,17 @@ def get_krc_profile_snapshot(public: bool = False) -> Dict[str, Any]:
     }
     payload: Dict[str, Any] = {
         "app_profile": profile,
+        "app_role": profile,
         "is_krc": profile == "krc",
+        "is_kcc": profile == "kcc",
+        "is_knowledge": profile == "knowledge",
         "is_dev": profile == "dev",
-        "workspace_label": (
-            "Kuro Research Center"
-            if profile in {"krc", "dev"}
-            else "Kuro AI"
-        ),
+        "workspace_label": role_snapshot["workspace_label"],
         "features": effective_features,
     }
     if not public:
         payload["supported_profiles"] = list(APP_PROFILES)
+        payload["supported_roles"] = list(APP_ROLES)
         payload["raw_flags"] = {
             feature: {
                 "env": env_name,

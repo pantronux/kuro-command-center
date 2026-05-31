@@ -61,6 +61,7 @@ def test_kuro_app_profile_defaults_to_legacy(monkeypatch):
 def test_krc_profile_enables_core_features_and_hides_daily_defaults(monkeypatch):
     monkeypatch.setenv("KURO_APP_PROFILE", "krc")
     monkeypatch.delenv("KURO_KRC_MARKET_ENABLED", raising=False)
+    monkeypatch.delenv("KURO_KRC_TELEGRAM_CENTER_ENABLED", raising=False)
 
     snapshot = get_krc_profile_snapshot(public=True)
 
@@ -72,8 +73,8 @@ def test_krc_profile_enables_core_features_and_hides_daily_defaults(monkeypatch)
     assert snapshot["features"]["evaluation"] is False
     assert snapshot["features"]["export"] is True
     assert snapshot["features"]["market"] is False
-    assert snapshot["features"]["telegram_center"] is True
-    assert is_krc_feature_enabled("telegram") is True
+    assert snapshot["features"]["telegram_center"] is False
+    assert is_krc_feature_enabled("telegram") is False
 
 
 def test_krc_optional_feature_can_be_enabled_by_flag(monkeypatch):

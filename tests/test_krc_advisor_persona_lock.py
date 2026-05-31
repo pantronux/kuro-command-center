@@ -38,6 +38,7 @@ if "phoenix" not in sys.modules:
     sys.modules["phoenix"] = fake_phoenix
 
 import main
+from kuro_backend.krc_advisor import KRC_PERSONA_ID, PHD_ADVISOR_SYSTEM_PROMPT
 
 
 def _client(monkeypatch):
@@ -79,12 +80,13 @@ def test_krc_persona_api_is_locked_to_advisor(monkeypatch):
     assert get_response.status_code == 200
     assert get_response.json() == {
         "status": "success",
-        "persona": "advisor",
+        "persona": KRC_PERSONA_ID,
         "locked": True,
         "app_profile": "krc",
+        "app_role": "krc",
     }
     assert post_response.status_code == 200
-    assert post_response.json()["persona"] == "advisor"
+    assert post_response.json()["persona"] == KRC_PERSONA_ID
     assert post_response.json()["locked"] is True
     assert calls == []
 
@@ -125,7 +127,7 @@ def test_krc_chats_query_uses_advisor_even_when_request_asks_consultant(monkeypa
     response = client.get("/api/chats?persona=consultant", cookies=_cookies())
 
     assert response.status_code == 200
-    assert seen["persona"] == "advisor"
+    assert seen["persona"] == KRC_PERSONA_ID
 
 
 def test_krc_chat_endpoint_forces_advisor_persona(monkeypatch):
@@ -158,8 +160,8 @@ def test_krc_chat_endpoint_forces_advisor_persona(monkeypatch):
     )
 
     assert response.status_code == 200
-    assert captured["resolved_persona"] == "advisor"
-    assert captured["persona_override"] == "advisor"
+    assert captured["resolved_persona"] == KRC_PERSONA_ID
+    assert captured["persona_override"] == KRC_PERSONA_ID
 
 
 def test_krc_chat_stream_endpoint_forces_advisor_persona(monkeypatch):
@@ -196,5 +198,13 @@ def test_krc_chat_stream_endpoint_forces_advisor_persona(monkeypatch):
 
     assert response.status_code == 200
     assert "stream-ok" in response.text
-    assert captured["resolved_persona"] == "advisor"
-    assert captured["persona_override"] == "advisor"
+    assert captured["resolved_persona"] == KRC_PERSONA_ID
+    assert captured["persona_override"] == KRC_PERSONA_ID
+
+
+def test_phd_advisor_prompt_does_not_impersonate_real_professor():
+    prompt = PHD_ADVISOR_SYSTEM_PROMPT
+
+    assert "not a real person" in prompt
+    assert "must not claim to be one" in prompt
+    assert "Thomas" not in prompt

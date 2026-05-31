@@ -68,7 +68,7 @@ def _patch_scheduler(monkeypatch):
     monkeypatch.setattr(main, "_hardware_sentinel_scheduler", None)
 
 
-def test_krc_scheduler_disables_daily_market_and_proactive_but_keeps_telegram_ops(monkeypatch):
+def test_krc_scheduler_disables_daily_market_telegram_and_proactive(monkeypatch):
     _patch_scheduler(monkeypatch)
     monkeypatch.setenv("KURO_APP_PROFILE", "krc")
     monkeypatch.delenv("KURO_KRC_SCHEDULER_MARKET_ENABLED", raising=False)
@@ -86,11 +86,11 @@ def test_krc_scheduler_disables_daily_market_and_proactive_but_keeps_telegram_op
         "memory_decay_job",
         "file_retention_cycle",
         "weekly_research_ledger_prune",
-        "telegram_operational_digest",
-        "retry_failed_telegram_notifications",
-        "openclaw_circuit_open_alert",
     } <= jobs
     assert "daily_intelligence_briefing" not in jobs
+    assert "telegram_operational_digest" not in jobs
+    assert "retry_failed_telegram_notifications" not in jobs
+    assert "openclaw_circuit_open_alert" not in jobs
     assert "price_ticker_update" not in jobs
     assert "market_sentinel_scan" not in jobs
     assert "kuro_dreaming_cycle" not in jobs
@@ -102,6 +102,7 @@ def test_krc_scheduler_optional_jobs_can_be_enabled(monkeypatch):
     monkeypatch.setenv("KURO_APP_PROFILE", "krc")
     monkeypatch.setenv("KURO_KRC_SCHEDULER_MARKET_ENABLED", "true")
     monkeypatch.setenv("KURO_KRC_SCHEDULER_DAILY_BRIEFING_ENABLED", "true")
+    monkeypatch.setenv("KURO_KRC_SCHEDULER_TELEGRAM_ENABLED", "true")
 
     main.start_reminder_scheduler()
 

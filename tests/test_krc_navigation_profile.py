@@ -39,7 +39,7 @@ if "phoenix" not in sys.modules:
 import main
 
 
-def _dashboard(monkeypatch, username: str = "Pantronux", role: str = "Administrator"):
+def _client(monkeypatch, username: str = "Pantronux", role: str = "Administrator"):
     monkeypatch.setattr(main, "validate_token", lambda token: {"username": username})
     monkeypatch.setattr(
         main.auth_db,
@@ -50,7 +50,11 @@ def _dashboard(monkeypatch, username: str = "Pantronux", role: str = "Administra
             "master_name": f"Master {username}",
         },
     )
-    client = TestClient(main.app)
+    return TestClient(main.app)
+
+
+def _dashboard(monkeypatch, username: str = "Pantronux", role: str = "Administrator"):
+    client = _client(monkeypatch, username=username, role=role)
     return client.get("/", cookies={main.COOKIE_NAME: "Bearer dummy"})
 
 
@@ -73,48 +77,38 @@ def test_legacy_navigation_render_stays_unchanged(monkeypatch):
     assert "krcWorkspaceNav" not in html
 
 
-def test_krc_navigation_render_is_playground_first(monkeypatch):
+def test_krc_root_redirects_to_research_shell(monkeypatch):
     monkeypatch.setenv("KURO_APP_PROFILE", "krc")
-    monkeypatch.delenv("KURO_KRC_MARKET_ENABLED", raising=False)
-    monkeypatch.delenv("KURO_KRC_TELEGRAM_CENTER_ENABLED", raising=False)
 
-    response = _dashboard(monkeypatch)
+    client = _client(monkeypatch)
+    response = client.get(
+        "/",
+        cookies={main.COOKIE_NAME: "Bearer dummy"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "/research"
+
+
+def test_research_shell_is_phd_research_first(monkeypatch):
+    monkeypatch.setenv("KURO_APP_PROFILE", "krc")
+
+    client = _client(monkeypatch)
+    response = client.get("/research", cookies={main.COOKIE_NAME: "Bearer dummy"})
 
     assert response.status_code == 200
     html = response.text
-    assert 'data-app-profile="krc"' in html
     assert "Kuro Research Center" in html
     assert "New Research Console" in html
-    assert "id=\"krcWorkspaceNav\"" in html
-    assert "id=\"krcNavResearchConsole\"" in html
-    assert "id=\"krcNavKnowledge\"" in html
-    assert "id=\"krcNavIngestion\"" in html
-    assert "id=\"krcNavResearchPlayground\"" not in html
-    assert "id=\"krcNavQAPlayground\"" not in html
-    assert "id=\"krcNavEvaluation\"" not in html
-    assert "id=\"krcNavExport\"" not in html
-    assert html.count("id=\"krcWorkspaceNav\"") == 1
-    assert "Research Playground" in html
-    assert "Kuro Playground" in html
-    assert "Kuro Playground Runtime" not in html
-    assert "Workspace runtime for research prompts" not in html
-    assert 'data-krc-persona-locked="true"' in html
-    assert "Persona:" in html
-    assert "Advisor" in html
-    assert 'data-persona="consultant"' not in html
-    assert 'data-persona="tactical"' not in html
-    assert 'data-persona="advisor"' not in html
+    assert "PhD Advisor" in html
+    assert "Literature Library" in html
+    assert "Research Questions" in html
+    assert "Novelty Gap Board" in html
+    assert "Argument Map" in html
     assert "QA Playground" not in html
-    assert "id=\"qaRequirementInput\"" not in html
-    assert "Evaluation Summary" not in html
-    assert "id=\"krcPlaygroundLanding\"" in html
-    assert html.index("id=\"krcPlaygroundLanding\"") < html.index("class=\"pg-grid")
-    assert html.index("class=\"pg-grid") < html.index("id=\"playgroundOutput\"")
-    assert html.index("id=\"krcPlaygroundLanding\"") < html.index('href="/playground/tutorial"')
-    assert "id=\"krcLandingResearchBtn\"" not in html
     assert 'href="/market"' not in html
-    assert "data-admin-settings-tab=\"telegram\"" in html
-    assert "data-krc-feature=\"telegram_center\"" in html
+    assert "Legacy Chat" not in html
 
 
 def test_krc_optional_qa_and_evaluation_can_be_revealed_by_flags(monkeypatch):
@@ -122,15 +116,12 @@ def test_krc_optional_qa_and_evaluation_can_be_revealed_by_flags(monkeypatch):
     monkeypatch.setenv("KURO_KRC_QA_PLAYGROUND_ENABLED", "true")
     monkeypatch.setenv("KURO_KRC_EVALUATION_ENABLED", "true")
 
-    response = _dashboard(monkeypatch)
+    response = _client(monkeypatch).get("/api/capabilities")
 
     assert response.status_code == 200
-    html = response.text
-    assert "QA Playground" in html
-    assert "id=\"qaRequirementInput\"" in html
-    assert "id=\"krcNavEvaluation\"" not in html
-    assert "id=\"krcNavQAPlayground\"" not in html
-    assert "data-admin-settings-tab=\"evaluation\"" in html
+    krc = response.json()["data"]["krc"]
+    assert krc["features"]["qa_playground"] is True
+    assert krc["features"]["evaluation"] is True
 
 
 def test_krc_non_admin_does_not_render_admin_controls(monkeypatch):
@@ -139,11 +130,8 @@ def test_krc_non_admin_does_not_render_admin_controls(monkeypatch):
     response = _dashboard(monkeypatch, username="Faikhira", role="User")
 
     assert response.status_code == 200
-    html = response.text
-    assert "Kuro Research Center" in html
-    assert "Administration Settings" not in html
-    assert "id=\"krcNavIngestion\"" not in html
-    assert "id=\"krcNavEvaluation\"" not in html
+    assert "Kuro Research Center" in response.text
+    assert "Administration Settings" not in response.text
 
 
 def test_dashboard_template_has_legacy_krc_profile_fallback(monkeypatch):

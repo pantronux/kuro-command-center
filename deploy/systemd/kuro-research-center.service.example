@@ -1,0 +1,13 @@
+[Unit]
+Description=Kuro Research Center
+After=network.target
+
+[Service]
+WorkingDirectory=/home/kuro/projects/kuro
+EnvironmentFile=/home/kuro/projects/kuro/.env.krc
+ExecStart=/home/kuro/projects/kuro/venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8443
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

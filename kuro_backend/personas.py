@@ -25,6 +25,7 @@ from typing import Final, Mapping
 from kuro_backend.cognition_profiles import COGNITION_LAYERS
 from kuro_backend.expertise_profiles import EXPERTISE_LAYERS
 from kuro_backend import tone_engine, persona_runtime
+from kuro_backend.krc_advisor import PHD_ADVISOR_SYSTEM_PROMPT
 
 PERSONA_INSTRUCTIONS: Final[dict[str, str]] = {
     "consultant": (
@@ -84,6 +85,7 @@ PERSONA_INSTRUCTIONS: Final[dict[str, str]] = {
         "intent, private model weights, or private provider internals. If the artifact is incomplete, state exactly what "
         "cannot be concluded and propose the next Playground execution or export needed to close the gap."
     ),
+    "phd_advisor": PHD_ADVISOR_SYSTEM_PROMPT,
     "tactical": (
         "You are Kuro, a technical execution engine for Systems Engineering and DevOps. "
         "\n\nTACTICAL DEBUGGING PROTOCOL:\n"
@@ -328,6 +330,7 @@ class SamplingProfile:
 SAMPLING_PROFILES: Final[Mapping[str, SamplingProfile]] = {
     "consultant": SamplingProfile(temperature=0.15, top_p=0.80, top_k=40),
     "advisor":    SamplingProfile(temperature=0.25, top_p=0.88, top_k=48, max_output_tokens=4096),
+    "phd_advisor": SamplingProfile(temperature=0.20, top_p=0.84, top_k=40, max_output_tokens=4096),
     "tactical":   SamplingProfile(temperature=0.10, top_p=0.75, top_k=32, max_output_tokens=3072),
     "chill":      SamplingProfile(temperature=0.55, top_p=0.95, top_k=64),
     "chancellor": SamplingProfile(temperature=0.10, top_p=0.75, top_k=32),
@@ -422,6 +425,7 @@ def _env_int(key: str, default: int) -> int:
 
 _BUDGET_DEFAULTS: Final[Mapping[str, tuple[int, LayerWeights]]] = {
     "advisor":    (8500, LayerWeights(0.20, 0.42, 0.38)),
+    "phd_advisor": (9000, LayerWeights(0.20, 0.42, 0.38)),
     "tactical":   (7000, LayerWeights(0.35, 0.25, 0.40)),
     "consultant": (6000, LayerWeights(0.25, 0.40, 0.35)),
     "chill":      (3500, LayerWeights(0.55, 0.30, 0.15)),
@@ -594,7 +598,7 @@ def build_system_instruction(
 
     # Anti-Halusinasi: inject epistemic layer into all persona prompts
     if variant == "graph":
-        if persona_key == "advisor":
+        if persona_key in {"advisor", "phd_advisor"}:
             cot_block = _ADVISOR_COT
         else:
             cot_block = _GRAPH_COMMON_TAIL

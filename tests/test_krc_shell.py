@@ -126,13 +126,13 @@ def test_krc_shell_route_allows_dev_profile_without_admin_controls(monkeypatch):
     assert 'data-admin-only="true"' not in html
 
 
-def test_krc_shell_template_contains_prototype_markers():
+def test_krc_shell_template_is_official_research_shell():
     html = KRC_TEMPLATE.read_text(encoding="utf-8")
     css = KRC_CSS.read_text(encoding="utf-8")
     js = KRC_JS.read_text(encoding="utf-8")
 
-    assert 'data-krc-shell="prototype-structured"' in html
-    assert 'data-prototype-source="Kuro-UI-Prototype"' in html
+    assert 'data-krc-shell="official-research"' in html
+    assert 'data-prototype-source="Kuro-UI-Prototype"' not in html
     assert 'data-prototype-marker="sidebar-session-playground"' in html
     assert 'data-prototype-marker="prototype-header"' in html
     assert 'data-prototype-marker="research-console-playground-first"' in html
@@ -141,8 +141,14 @@ def test_krc_shell_template_contains_prototype_markers():
     assert 'data-prototype-marker="playground-runtime-view"' in html
     assert 'data-prototype-marker="playground-runtime-drawer"' in html
     assert 'data-prototype-marker="admin-settings-modal"' in html
-    assert 'data-prototype-marker="kuro-playground-card"' in html
-    assert "Kuro Playground" in html
+    assert 'data-prototype-marker="kuro-playground-card"' not in html
+    assert "PhD Research Workspace" in html
+    assert "PhD Advisor" in html
+    assert "Literature Library" in html
+    assert "Research Questions" in html
+    assert "Novelty Gap Board" in html
+    assert "Argument Map" in html
+    assert "Kuro Playground" not in html
     assert "Playground Runtime" in html
     assert "Session History" in html
     assert "Forensic Integrity Overview" in html

@@ -1,18 +1,18 @@
 <!DOCTYPE html>
 <!--
   Header Doc ---
-  Purpose: Additive KRC UI shell based on Kuro-UI-Prototype structure.
+  Purpose: Official KRC PhD research shell, promoted from the earlier shell structure.
   Caller: main.py GET "/krc-shell" behind KURO_KRC_SHELL_ENABLED.
   Dependencies: static/css/krc_shell.css, static/js/krc_shell.js, Lucide, marked.js.
-  Main Sections: prototype sidebar, header, Research Console, Playground Runtime,
+  Main Sections: research sidebar, header, Research Console, Playground Runtime,
                  profile menu, runtime drawer, admin settings modal.
   Side Effects: Uses existing chat/session/read-only admin APIs only.
 -->
-<html lang="en" class="dark krc-prototype-root" data-krc-shell="prototype-structured" data-prototype-source="Kuro-UI-Prototype">
+<html lang="en" class="dark krc-official-root" data-krc-shell="official-research">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Kuro Research Center Shell</title>
+    <title>Kuro Research Center</title>
     <link rel="icon" type="image/x-icon" href="/profile/favicon.ico">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -35,7 +35,7 @@
                     <span class="krc-monogram">K</span>
                     <span class="krc-brand-copy">
                         <span class="krc-brand-title">Kuro Research Center</span>
-                        <span class="krc-brand-subtitle">Kuro Playground</span>
+                        <span class="krc-brand-subtitle">PhD Research Workspace</span>
                     </span>
                 </a>
                 <button id="krcNewConsoleBtn" class="krc-primary-btn krc-full-btn" type="button" data-testid="button-new-research-console">
@@ -53,10 +53,12 @@
                     <i data-lucide="terminal" aria-hidden="true"></i>
                     <span>Playground Runtime</span>
                 </button>
+                {% if krc_shell.show_legacy_chat %}
                 <a class="krc-nav-item krc-link-item" href="/chat" id="krcShellNavLegacyChat">
                     <i data-lucide="message-square" aria-hidden="true"></i>
                     <span>Legacy Chat</span>
                 </a>
+                {% endif %}
                 {% if krc_shell.can_admin %}
                 <a class="krc-nav-item krc-link-item" href="/ingestion" id="krcShellNavIngestion" data-admin-only="true">
                     <i data-lucide="database-zap" aria-hidden="true"></i>
@@ -74,7 +76,7 @@
 
             <div class="krc-persona-lock" data-krc-persona-locked="true">
                 <i data-lucide="user-cog" aria-hidden="true"></i>
-                <span>Persona: <strong>Advisor</strong></span>
+                <span><strong>PhD Advisor</strong></span>
                 <span class="krc-lock-pill"><i data-lucide="lock" aria-hidden="true"></i> Locked</span>
             </div>
 
@@ -141,13 +143,13 @@
                         <i data-lucide="menu" aria-hidden="true"></i>
                     </button>
                     <nav class="krc-breadcrumb" aria-label="Breadcrumb">
-                        <span>Kuro AI</span>
+                        <span>Kuro Research Center</span>
                         <i data-lucide="chevron-right" aria-hidden="true"></i>
                         <strong id="krcBreadcrumbLeaf">Research Console</strong>
                     </nav>
                 </div>
                 <div class="krc-mode-toggle" role="tablist" aria-label="KRC mode">
-                    <button id="krcNormalModeBtn" class="is-active" type="button" data-krc-view-target="console">Normal</button>
+                    <button id="krcNormalModeBtn" class="is-active" type="button" data-krc-view-target="console">Research</button>
                     <button id="krcPlaygroundModeBtn" type="button" data-krc-view-target="playground">
                         Playground
                         <span id="krcPlaygroundPulse" class="krc-live-dot" hidden></span>
@@ -171,37 +173,51 @@
                             <div class="krc-welcome-copy">
                                 <span class="krc-eyebrow">Research Console</span>
                                 <h1>Research Console</h1>
-                                <p>Playground-first workspace for Advisor conversations and runtime probes.</p>
+                                <p>PhD research workspace for literature, argumentation, source discipline, and advisor-guided research.</p>
                             </div>
                             <div class="krc-console-grid">
-                                <button class="krc-action-card" type="button" data-krc-view-target="playground" id="krcKuroPlaygroundCard" data-prototype-marker="kuro-playground-card">
-                                    <i data-lucide="square-terminal" aria-hidden="true"></i>
+                                <button class="krc-action-card" type="button" id="krcLiteratureLibraryCard">
+                                    <i data-lucide="library" aria-hidden="true"></i>
                                     <span>
-                                        <strong>Kuro Playground</strong>
-                                        <small>Open the prototype playground-first runtime workspace.</small>
+                                        <strong>Literature Library</strong>
+                                        <small>Organize papers, source metadata, and research notes.</small>
+                                    </span>
+                                </button>
+                                <button class="krc-action-card" type="button" id="krcResearchQuestionsCard">
+                                    <i data-lucide="circle-help" aria-hidden="true"></i>
+                                    <span>
+                                        <strong>Research Questions</strong>
+                                        <small>Track scope, contribution, and falsification criteria.</small>
+                                    </span>
+                                </button>
+                                <button class="krc-action-card" type="button" id="krcNoveltyGapCard">
+                                    <i data-lucide="scan-search" aria-hidden="true"></i>
+                                    <span>
+                                        <strong>Novelty Gap Board</strong>
+                                        <small>Separate contribution claims from unsupported speculation.</small>
+                                    </span>
+                                </button>
+                                <button class="krc-action-card" type="button" id="krcArgumentMapCard">
+                                    <i data-lucide="git-branch" aria-hidden="true"></i>
+                                    <span>
+                                        <strong>Argument Map</strong>
+                                        <small>Connect claims, evidence, rebuttals, and open risks.</small>
                                     </span>
                                 </button>
                                 <button class="krc-action-card" type="button" data-krc-view-target="playground" id="krcRuntimeCard">
                                     <i data-lucide="terminal" aria-hidden="true"></i>
                                     <span>
                                         <strong>Playground Runtime</strong>
-                                        <small>Run prompts through isolated Playground execution sessions.</small>
+                                        <small>Run controlled prompts for research evidence and comparison.</small>
                                     </span>
                                 </button>
                                 <button class="krc-action-card" type="button" id="krcOpenRuntimeDrawerCard">
                                     <i data-lucide="sliders-horizontal" aria-hidden="true"></i>
                                     <span>
                                         <strong>Runtime Drawer</strong>
-                                        <small>Adjust model, temperature, and runtime context.</small>
+                                        <small>Adjust model, temperature, and research context.</small>
                                     </span>
                                 </button>
-                                <a class="krc-action-card" href="/api/runtimes" target="_blank" rel="noreferrer">
-                                    <i data-lucide="route" aria-hidden="true"></i>
-                                    <span>
-                                        <strong>Runtime Registry</strong>
-                                        <small>Inspect public runtime descriptors.</small>
-                                    </span>
-                                </a>
                             </div>
                         </div>
                     </div>
@@ -232,7 +248,7 @@
                                 </button>
                             </div>
                             <div class="krc-textarea-shell">
-                                <textarea id="krcMessageInput" rows="1" placeholder="Message Kuro..."></textarea>
+                                <textarea id="krcMessageInput" rows="1" placeholder="Message Kuro PhD Advisor..."></textarea>
                                 <div id="krcSelectedFiles" class="krc-selected-files" hidden></div>
                             </div>
                             <select id="krcModelSelect" class="krc-model-select" aria-label="Model alias">
@@ -246,7 +262,7 @@
                                 <i data-lucide="arrow-up" aria-hidden="true"></i>
                             </button>
                         </form>
-                        <p class="krc-composer-note">Kuro can make mistakes. Check important info.</p>
+                        <p class="krc-composer-note">Research answers require source checks before citation or publication.</p>
                     </div>
                 </section>
 
@@ -400,7 +416,7 @@
         <div class="krc-drawer-content">
             <label>
                 <span>System Prompt</span>
-                <textarea id="krcRuntimeSystemPrompt" rows="6">You are a senior research assistant. Be concise, explicit, and careful about uncertainty.</textarea>
+                <textarea id="krcRuntimeSystemPrompt" rows="6">You are Kuro PhD Advisor. Be rigorous, explicit about evidence, and careful about uncertainty. Separate claims, evidence, inference, and speculation.</textarea>
             </label>
             <label>
                 <span>Model</span>

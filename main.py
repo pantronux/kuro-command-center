@@ -92,6 +92,15 @@ from kuro_backend.enterprise_ops import (
     validate_startup_environment,
 )
 from kuro_backend.enterprise_flags import get_enterprise_flag_snapshot
+from kuro_backend.app_roles import (
+    get_app_role,
+    get_app_role_snapshot,
+    is_dev_role,
+    is_kcc_role,
+    is_knowledge_role,
+    is_krc_role,
+)
+from kuro_backend.krc_advisor import KRC_PERSONA_ID
 from kuro_backend.krc_profile import (
     get_app_profile,
     get_krc_profile_snapshot,
@@ -433,7 +442,7 @@ def _detect_export_suggestions(
             )
         )
 
-    if resolved_persona == "advisor":
+    if resolved_persona in {"advisor", "phd_advisor"}:
         if has_report_shape:
             suggestions.append(
                 _suggest(
@@ -577,12 +586,12 @@ def _as_env_bool(value: Optional[str], default: bool = False) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
-KRC_LOCKED_PERSONA = "advisor"
+KRC_LOCKED_PERSONA = KRC_PERSONA_ID
 
 
 def _is_krc_advisor_persona_locked() -> bool:
     """Return True when KRC should force Research Console to Advisor."""
-    return get_app_profile() == "krc"
+    return is_krc_role()
 
 
 def _resolve_effective_persona(
@@ -608,21 +617,20 @@ def _resolve_effective_persona(
 def _persona_api_payload(persona: str) -> Dict[str, Any]:
     payload: Dict[str, Any] = {"status": "success", "persona": persona}
     if _is_krc_advisor_persona_locked():
-        payload.update({"locked": True, "app_profile": "krc"})
+        payload.update({"locked": True, "app_profile": "krc", "app_role": "krc"})
     return payload
 
 
 def _is_qa_playground_enabled() -> bool:
     if not _as_env_bool(os.getenv("KURO_QA_PLAYGROUND_ENABLED"), True):
         return False
-    if get_app_profile() == "krc":
+    if is_krc_role():
         return is_krc_feature_enabled("qa_playground")
     return True
 
 
 def _is_qa_productization_enabled() -> bool:
-    profile = get_app_profile()
-    if profile not in {"krc", "dev"}:
+    if not (is_krc_role() or is_dev_role()):
         return False
     return _is_qa_playground_enabled() and is_krc_feature_enabled(
         "qa_productization"
@@ -646,7 +654,7 @@ def _build_playground_advisor_context_block(
     username: str,
     workflow_mode: str = "quick",
 ) -> str:
-    if memory_manager.normalize_persona(persona) != "advisor" or not chat_id:
+    if memory_manager.normalize_persona(persona) not in {"advisor", "phd_advisor"} or not chat_id:
         return ""
     session = chat_history.get_session(chat_id, username=username)
     linked_session_id = str((session or {}).get("linked_playground_session_id") or "").strip()
@@ -919,6 +927,21 @@ def _mount_knowledge_center_router(target_app: FastAPI) -> bool:
         return False
 
 
+def _mount_research_center_router(target_app: FastAPI) -> bool:
+    """Mount KRC research artifact routes."""
+    try:
+        from kuro_backend.research_center import create_research_router
+
+        target_app.include_router(
+            create_research_router(auth_dependency=validate_token_dependency)
+        )
+        logger.info("[KRC_RESEARCH] Router mounted")
+        return True
+    except Exception as exc:
+        logger.exception("[KRC_RESEARCH] Failed to mount router: %s", exc)
+        return False
+
+
 def _mount_kuro_stack_handoff_router(target_app: FastAPI) -> bool:
     """Mount KRC to Kuro Stack analysis handoff routes."""
     try:
@@ -946,6 +969,7 @@ _mount_telegram_v2_router(app)
 _mount_api_v2_controls(app)
 _mount_enterprise_observability_router(app)
 _mount_knowledge_center_router(app)
+_mount_research_center_router(app)
 _mount_kuro_stack_handoff_router(app)
 
 
@@ -1487,11 +1511,13 @@ def _dashboard_template_context(username: str, user_info: Dict[str, Any]) -> Dic
 
 
 def _is_krc_shell_enabled() -> bool:
-    return _as_env_bool(os.getenv("KURO_KRC_SHELL_ENABLED"), False)
+    if is_knowledge_role() or is_kcc_role():
+        return False
+    return is_krc_role() or _as_env_bool(os.getenv("KURO_KRC_SHELL_ENABLED"), False)
 
 
 def _is_krc_shell_dev_access_enabled() -> bool:
-    return get_app_profile() == "dev" or _as_env_bool(os.getenv("KURO_DEV_MODE"), False)
+    return is_dev_role() or _as_env_bool(os.getenv("KURO_DEV_MODE"), False)
 
 
 def _krc_shell_template_context(
@@ -1517,7 +1543,10 @@ def _krc_shell_template_context(
             "is_admin": is_admin,
             "is_dev_access": is_dev_access,
             "can_admin": is_admin,
+            "show_legacy_chat": _as_env_bool(os.getenv("KURO_KRC_LEGACY_CHAT_VISIBLE"), False),
+            "persona_label": "PhD Advisor Locked" if is_krc_role() else "Advisor Locked",
             "app_profile": get_app_profile(),
+            "app_role": get_app_role(),
             "krc_profile": krc_profile,
             "flags": {
                 "krc_shell_enabled": True,
@@ -1590,6 +1619,13 @@ async def index(request: Request):
         return RedirectResponse(url="/login", status_code=302)
 
     username = user.get("username")
+    if is_krc_role() and _is_krc_shell_enabled():
+        return RedirectResponse(url="/research", status_code=302)
+    if is_kcc_role():
+        return RedirectResponse(url="/command-center", status_code=302)
+    if is_knowledge_role():
+        raise HTTPException(status_code=404, detail="Knowledge service role does not serve a UI.")
+
     user_info = auth_db.get_user(username) or {}
 
     return templates.TemplateResponse(
@@ -1619,7 +1655,7 @@ async def chat_page(request: Request):
 
 @app.get("/krc-shell", response_class=HTMLResponse)
 async def krc_shell_page(request: Request):
-    """Serve the additive KRC prototype-based shell behind an explicit flag."""
+    """Serve the official KRC research shell while preserving the legacy path."""
     if not _is_krc_shell_enabled():
         raise HTTPException(status_code=404, detail="Not found")
 
@@ -1631,7 +1667,7 @@ async def krc_shell_page(request: Request):
     username = user.get("username", "")
     is_admin = username == os.getenv("ADMIN_USERNAME", "Pantronux")
     is_dev_access = _is_krc_shell_dev_access_enabled()
-    if not is_admin and not is_dev_access:
+    if not is_admin and not is_dev_access and not is_krc_role():
         raise HTTPException(status_code=403, detail="Forbidden: KRC shell access requires admin or dev mode.")
 
     user_info = auth_db.get_user(username) or {}
@@ -1644,6 +1680,42 @@ async def krc_shell_page(request: Request):
             is_admin=is_admin,
             is_dev_access=is_dev_access,
         ),
+    )
+
+
+@app.get("/research", response_class=HTMLResponse)
+async def research_shell_page(request: Request):
+    """Future-facing alias for the KRC shell in KRC/dev roles."""
+    if not (is_krc_role() or is_dev_role()):
+        raise HTTPException(status_code=404, detail="Not found")
+    return await krc_shell_page(request)
+
+
+@app.get("/command-center", response_class=HTMLResponse)
+async def command_center_page(request: Request):
+    """Serve the Kuro Command Center operational shell."""
+    if not (is_kcc_role() or is_dev_role()):
+        raise HTTPException(status_code=404, detail="Not found")
+    token = get_token_from_cookie(request)
+    user = validate_token(token)
+    if not user:
+        return RedirectResponse(url="/login", status_code=302)
+    username = user.get("username", "")
+    is_admin = username == os.getenv("ADMIN_USERNAME", "Pantronux")
+    if not is_admin and not is_dev_role():
+        raise HTTPException(status_code=403, detail="Forbidden: KCC requires admin access.")
+    user_info = auth_db.get_user(username) or {}
+    display_name = user_info.get("display_name", username)
+    return templates.TemplateResponse(
+        request=request,
+        name="command_center.html",
+        context={
+            "username": username,
+            "display_name": display_name,
+            "role": user_info.get("role") or ("Administrator" if is_admin else "User"),
+            "is_admin": is_admin,
+            "app_role": get_app_role_snapshot(public=True),
+        },
     )
 
 
@@ -1665,6 +1737,13 @@ async def get_current_user(request: Request):
 async def get_public_capabilities():
     """Return public-safe feature availability without internal topology."""
     return api_success(data=get_enterprise_flag_snapshot(admin=False))
+
+
+@app.get("/api/admin/app-role")
+async def get_admin_app_role(request: Request):
+    """Return admin-safe app role state."""
+    require_admin_user(request)
+    return api_success(data=get_app_role_snapshot(public=False))
 
 
 @app.get("/api/proactive-events")

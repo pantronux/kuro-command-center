@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 
 from kuro_backend.config import settings
 from kuro_backend.knowledge_center.redaction import redact_public_text
-from kuro_backend.knowledge_center.schemas import CandidateKnowledgeRequest
+from kuro_backend.knowledge_center.schemas import CandidateKnowledgeRequest, KnowledgeIngestRequest
 from kuro_backend.storage.connection import StorageConnectionManager
 
 
@@ -81,10 +81,28 @@ class KnowledgeStore:
                     created_at TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS knowledge_ingest_jobs (
+                    job_id TEXT PRIMARY KEY,
+                    source_app TEXT NOT NULL,
+                    domain TEXT NOT NULL,
+                    source_type TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    content_preview TEXT NOT NULL DEFAULT '',
+                    metadata_json TEXT NOT NULL DEFAULT '{}',
+                    status TEXT NOT NULL DEFAULT 'queued'
+                        CHECK (status IN ('queued','processing','completed','failed','retrying')),
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    error_message TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_approved_knowledge_search
                     ON approved_knowledge(status, domain, updated_at);
                 CREATE INDEX IF NOT EXISTS idx_knowledge_candidates_status
                     ON knowledge_candidates(status, created_at);
+                CREATE INDEX IF NOT EXISTS idx_knowledge_ingest_jobs_status
+                    ON knowledge_ingest_jobs(status, updated_at);
                 """
             )
 
@@ -339,6 +357,97 @@ class KnowledgeStore:
                 """,
                 (new_id("kaud"), actor, auth_type, action, trace_id, utc_now_iso()),
             )
+
+    def create_ingest_job(self, payload: KnowledgeIngestRequest) -> Dict[str, Any]:
+        self.init_db()
+        now = utc_now_iso()
+        job_id = new_id("king")
+        preview = redact_public_text(payload.content or payload.title, max_chars=1000)
+        metadata = dict(payload.metadata or {})
+        metadata.pop("content", None)
+        metadata.pop("raw_content", None)
+        with self.connection_manager.transaction() as conn:
+            conn.execute(
+                """
+                INSERT INTO knowledge_ingest_jobs (
+                    job_id, source_app, domain, source_type, title, content_preview,
+                    metadata_json, status, attempts, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?, ?)
+                """,
+                (
+                    job_id,
+                    redact_public_text(payload.source_app, max_chars=80),
+                    (payload.domain or "research.paper").strip().lower()[:80],
+                    redact_public_text(payload.source_type or "document", max_chars=80),
+                    redact_public_text(payload.title, max_chars=500),
+                    preview,
+                    json.dumps(metadata, ensure_ascii=False, sort_keys=True),
+                    now,
+                    now,
+                ),
+            )
+        return self.get_ingest_job(job_id) or {"job_id": job_id, "status": "queued"}
+
+    def list_ingest_jobs(self, *, limit: int = 50) -> List[Dict[str, Any]]:
+        self.init_db()
+        with self.connection_manager.transaction(read_only=True) as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM knowledge_ingest_jobs
+                ORDER BY updated_at DESC
+                LIMIT ?
+                """,
+                (max(1, min(200, int(limit))),),
+            ).fetchall()
+        return [self._ingest_job_row(dict(row)) for row in rows]
+
+    def get_ingest_job(self, job_id: str) -> Optional[Dict[str, Any]]:
+        self.init_db()
+        with self.connection_manager.transaction(read_only=True) as conn:
+            row = conn.execute(
+                "SELECT * FROM knowledge_ingest_jobs WHERE job_id = ?",
+                (job_id,),
+            ).fetchone()
+        return self._ingest_job_row(dict(row)) if row else None
+
+    def retry_ingest_job(self, job_id: str) -> Dict[str, Any]:
+        job = self.get_ingest_job(job_id)
+        if not job:
+            raise KeyError(job_id)
+        now = utc_now_iso()
+        with self.connection_manager.transaction() as conn:
+            conn.execute(
+                """
+                UPDATE knowledge_ingest_jobs
+                SET status = 'retrying', attempts = attempts + 1, updated_at = ?
+                WHERE job_id = ?
+                """,
+                (now, job_id),
+            )
+        return self.get_ingest_job(job_id) or {"job_id": job_id, "status": "retrying"}
+
+    @staticmethod
+    def _ingest_job_row(row: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            metadata = json.loads(row.get("metadata_json") or "{}")
+        except Exception:
+            metadata = {}
+        if not isinstance(metadata, dict):
+            metadata = {}
+        return {
+            "job_id": row.get("job_id", ""),
+            "source_app": redact_public_text(row.get("source_app") or "", max_chars=80),
+            "domain": row.get("domain") or "",
+            "source_type": redact_public_text(row.get("source_type") or "", max_chars=80),
+            "title": redact_public_text(row.get("title") or "", max_chars=500),
+            "content_preview": redact_public_text(row.get("content_preview") or "", max_chars=1000),
+            "metadata": metadata,
+            "status": row.get("status") or "queued",
+            "attempts": int(row.get("attempts") or 0),
+            "error_message": redact_public_text(row.get("error_message") or "", max_chars=1000),
+            "created_at": row.get("created_at") or "",
+            "updated_at": row.get("updated_at") or "",
+        }
 
     @staticmethod
     def _approved_row_to_result(row: Dict[str, Any]) -> Dict[str, Any]:
