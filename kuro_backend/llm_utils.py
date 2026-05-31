@@ -6,7 +6,16 @@ from google import genai
 from google.genai import types
 
 logger = logging.getLogger(__name__)
-genai_client = genai.Client(api_key=settings.GEMINI_API_KEY)
+_genai_client = None
+
+
+def _get_genai_client():
+    global _genai_client
+    if _genai_client is None:
+        if not settings.GEMINI_API_KEY:
+            raise RuntimeError("GEMINI_API_KEY is not configured")
+        _genai_client = genai.Client(api_key=settings.GEMINI_API_KEY)
+    return _genai_client
 
 def generate_chat_title(message_text: str) -> str:
     """Generate a short 3-5 word title for a chat session based on the first message."""
@@ -20,7 +29,7 @@ Ketentuan:
 - Jangan gunakan tanda kutip di awal/akhir.
 - Contoh: "Analisis Ekonomi Makro", "Riset Dissertation", "Diskusi Keamanan Sistem".
 """
-        response = genai_client.models.generate_content(
+        response = _get_genai_client().models.generate_content(
             model=settings.MODEL_NAME,
             contents=prompt,
             config=types.GenerateContentConfig(
@@ -67,7 +76,7 @@ def generate_chat_context_summary(conversation_text: str) -> str:
             "DILARANG menambah fakta yang tidak ada dalam percakapan.\n"
             f"Percakapan:\n{conversation_text}"
         )
-        response = genai_client.models.generate_content(
+        response = _get_genai_client().models.generate_content(
             model=model_name,
             contents=prompt,
             config=types.GenerateContentConfig(
@@ -104,7 +113,7 @@ async def generate_text(
             }
             if system_prompt:
                 config_kwargs["system_instruction"] = system_prompt
-            response = genai_client.models.generate_content(
+            response = _get_genai_client().models.generate_content(
                 model=settings.MODEL_NAME,
                 contents=prompt,
                 config=types.GenerateContentConfig(**config_kwargs),
