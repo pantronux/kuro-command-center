@@ -1,6 +1,7 @@
 import importlib
 import json
 import logging
+import os
 import sys
 import types
 from pathlib import Path
@@ -9,6 +10,8 @@ import pytest
 
 
 logger = logging.getLogger("conftest")
+
+os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key")
 
 # Test-only stub for optional phoenix dependency used by observability.
 if "phoenix" not in sys.modules:
