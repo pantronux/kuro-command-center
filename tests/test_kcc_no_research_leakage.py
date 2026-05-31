@@ -14,6 +14,7 @@ def test_kcc_does_not_serve_research_surfaces(monkeypatch):
 
     assert client.get("/research", cookies=cookies).status_code == 404
     assert client.get("/krc-shell", cookies=cookies).status_code == 404
+    assert client.get("/api/research/projects", cookies=cookies).status_code == 404
 
 
 def test_kcc_shell_does_not_expose_research_history(monkeypatch):

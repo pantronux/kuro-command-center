@@ -929,6 +929,9 @@ def _mount_knowledge_center_router(target_app: FastAPI) -> bool:
 
 def _mount_research_center_router(target_app: FastAPI) -> bool:
     """Mount KRC research artifact routes."""
+    if not (is_krc_role() or is_dev_role()):
+        logger.info("[KRC_RESEARCH] Router skipped for app role %s", get_app_role())
+        return False
     try:
         from kuro_backend.research_center import create_research_router
 
