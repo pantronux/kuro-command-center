@@ -100,7 +100,6 @@ from kuro_backend.app_roles import (
     is_knowledge_role,
     is_krc_role,
 )
-from kuro_backend.krc_advisor import KRC_PERSONA_ID
 from kuro_backend.krc_profile import (
     get_app_profile,
     get_krc_profile_snapshot,
@@ -586,7 +585,7 @@ def _as_env_bool(value: Optional[str], default: bool = False) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
-KRC_LOCKED_PERSONA = KRC_PERSONA_ID
+KRC_LOCKED_PERSONA = "phd_advisor"
 
 
 def _is_krc_advisor_persona_locked() -> bool:
@@ -928,21 +927,9 @@ def _mount_knowledge_center_router(target_app: FastAPI) -> bool:
 
 
 def _mount_research_center_router(target_app: FastAPI) -> bool:
-    """Mount KRC research artifact routes."""
-    if not (is_krc_role() or is_dev_role()):
-        logger.info("[KRC_RESEARCH] Router skipped for app role %s", get_app_role())
-        return False
-    try:
-        from kuro_backend.research_center import create_research_router
-
-        target_app.include_router(
-            create_research_router(auth_dependency=validate_token_dependency)
-        )
-        logger.info("[KRC_RESEARCH] Router mounted")
-        return True
-    except Exception as exc:
-        logger.exception("[KRC_RESEARCH] Failed to mount router: %s", exc)
-        return False
+    """Keep KRC research routes out of the physical Command Center."""
+    logger.info("[KRC_RESEARCH] Router quarantined for app role %s", get_app_role())
+    return False
 
 
 def _mount_kuro_stack_handoff_router(target_app: FastAPI) -> bool:
@@ -1641,6 +1628,9 @@ async def index(request: Request):
 @app.get("/chat", response_class=HTMLResponse)
 async def chat_page(request: Request):
     """Serve chat dashboard route that supports URL persona state."""
+    if is_krc_role() or is_kcc_role() or is_knowledge_role():
+        raise HTTPException(status_code=404, detail="Not found")
+
     token = get_token_from_cookie(request)
     user = validate_token(token)
     if not user:

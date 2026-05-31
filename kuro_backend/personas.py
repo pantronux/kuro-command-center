@@ -25,8 +25,6 @@ from typing import Final, Mapping
 from kuro_backend.cognition_profiles import COGNITION_LAYERS
 from kuro_backend.expertise_profiles import EXPERTISE_LAYERS
 from kuro_backend import tone_engine, persona_runtime
-from kuro_backend.krc_advisor import PHD_ADVISOR_SYSTEM_PROMPT
-
 PERSONA_INSTRUCTIONS: Final[dict[str, str]] = {
     "consultant": (
         "You are Kuro, a technical advisor specialized in IT Security, GRC (Governance, Risk, and Compliance), "
@@ -85,7 +83,6 @@ PERSONA_INSTRUCTIONS: Final[dict[str, str]] = {
         "intent, private model weights, or private provider internals. If the artifact is incomplete, state exactly what "
         "cannot be concluded and propose the next Playground execution or export needed to close the gap."
     ),
-    "phd_advisor": PHD_ADVISOR_SYSTEM_PROMPT,
     "tactical": (
         "You are Kuro, a technical execution engine for Systems Engineering and DevOps. "
         "\n\nTACTICAL DEBUGGING PROTOCOL:\n"
